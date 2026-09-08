@@ -1,0 +1,216 @@
+export type View = 'create' | 'ltx25' | 'zimage' | 'movie' | 'queue' | 'library' | 'editor' | 'settings'
+export type GenerationMode = 'text' | 'image' | 'frames' | 'reference'
+export type ModelKind = 'diffusion_models' | 'text_encoders' | 'vae' | 'loras' | 'vae_approx' | 'clip_vision'
+export type MediaKind = 'image' | 'video' | 'audio'
+export type UpscaleMode = 'off' | 'ltx' | 'rtx'
+
+export type GenerationDefaults = {
+  resolution: string
+  duration: number
+  turbo: 'off' | '4' | '8'
+  steps: number
+  sampler: string
+  scheduler: string
+  experimentalSampling: boolean
+  refImageSize: 'match' | 'max'
+  livePreview: boolean
+  sigmaShiftMode: 'model' | 'custom'
+  shiftVideo: number
+  shiftAudio: number
+  loraStrength: number
+}
+
+export type AppSettings = {
+  comfyUrl: string
+  ollamaUrl: string
+  ollamaModel: string
+  modelRoot: string
+  paths: Record<ModelKind, string>
+  outputDirectory: string
+  ffmpegPath: string
+  generationDefaults: GenerationDefaults
+}
+
+export type ClipItem = { id: string; name: string; source: string; createdAt: number; start?: number; end?: number; duration?: number }
+export type ClipProject = { id: string; name: string; createdAt: number; updatedAt: number; media: ClipItem[]; clips: ClipItem[] }
+
+export type MovieCharacter = { id: string; name: string; description: string; wardrobe: string; voiceNotes: string; referenceImages: MediaFile[] }
+export type MovieLocation = { id: string; name: string; description: string; referenceImages: MediaFile[] }
+export type MovieChatArea = 'setup' | 'bible' | 'shots' | 'preview'
+export type MovieChatMessage = { id: string; role: 'user' | 'assistant'; content: string; createdAt: number; appliedChanges?: string[]; areas?: MovieChatArea[] }
+export type MovieShot = {
+  id: string
+  title: string
+  duration: number
+  prompt: string
+  dialogue: string
+  mode: GenerationMode
+  characterIds: string[]
+  stage: 'planned' | 'ready' | 'rendered' | 'approved'
+  outputUrl?: string
+  renderedAt?: number
+}
+export type MovieScene = { id: string; title: string; summary: string; locationId: string; transition: 'connected' | 'cut'; shots: MovieShot[] }
+export type MovieProject = {
+  id: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  status: 'planning' | 'paused'
+  targetRuntime: number
+  computeBudgetMinutes: number
+  aspectRatio: '16:9' | '9:16' | '1:1'
+  genre: string
+  visualStyle: string
+  quality: 'preview' | 'balanced' | 'maximum'
+  reviewGate: 'shot' | 'scene' | 'batch'
+  story: string
+  visualRules: string
+  characters: MovieCharacter[]
+  locations: MovieLocation[]
+  scenes: MovieScene[]
+  chatMessages: MovieChatMessage[]
+}
+
+export type ModelFile = {
+  name: string
+  path: string
+  kind: ModelKind
+  bytes: number
+}
+
+export type MediaFile = {
+  path: string
+  name: string
+  kind: MediaKind
+  preview?: string
+  crop?: { x: number; y: number; zoom: number; fit: 'crop' | 'contain' }
+}
+
+export type ModelSelection = {
+  fl2va: string
+  ref2va: string
+  textEncoder: string
+  videoVae: string
+  audioVae: string
+  previewVae: string
+  fl2vLora: string
+  ref2vLora: string
+}
+
+export type Ltx25ModelSelection = {
+  diffusion: string
+  textEncoder: string
+  videoVae: string
+  audioVae: string
+  latentUpscaler: string
+}
+
+export type Ltx25GenerationOptions = {
+  mode: 'text' | 'image'
+  prompt: string
+  width: number
+  height: number
+  duration: number
+  seed: number
+  preset: 'quality' | 'turbo'
+  filenamePrefix: string
+}
+
+export type GenerationOptions = {
+  mode: GenerationMode
+  prompt: string
+  width: number
+  height: number
+  duration: number
+  seed: number
+  steps: number
+  turbo: 'off' | '4' | '8'
+  experimentalSampling?: boolean
+  loraStrength?: number
+  sampler: string
+  scheduler: string
+  refImageSize: 'match' | 'max'
+  sigmaShift?: { video: number; audio: number }
+  filenamePrefix: string
+  upscale?: { type: 'ltx'; model: string; vae: string } | { type: 'rtx'; model: string }
+  firstFrame?: string
+  lastFrame?: string
+  referenceImages: string[]
+  referenceVideos: string[]
+  referenceAudios: string[]
+}
+
+export type ComfyStatus = {
+  connected: boolean
+  latencyMs: number
+  stats?: {
+    system?: { os?: string; python_version?: string; comfyui_version?: string }
+    devices?: Array<{ name?: string; type?: string; vram_total?: number; vram_free?: number }>
+  }
+  error?: string
+}
+
+export type OllamaModel = {
+  name: string
+  size: number
+  family: string
+  parameterSize: string
+  local: boolean
+}
+
+export type LanStatus = {
+  running: boolean
+  url?: string
+  port?: number
+  error?: string
+}
+
+export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+
+export type GenerationJob = {
+  id: string
+  promptId?: string
+  mode: GenerationMode
+  prompt: string
+  createdAt: number
+  status: JobStatus
+  progress: number
+  outputUrl?: string
+  error?: string
+  width: number
+  height: number
+  duration: number
+  provider?: 'minimax' | 'ltx25'
+  movieLink?: { projectId: string; sceneId: string; shotId: string }
+}
+
+export type UploadedFile = { name: string; subfolder?: string; type?: string }
+
+export type DesktopApi = {
+  getObjectInfo(url: string): Promise<Record<string, { input: { required: Record<string, unknown[]> } }>>
+  uploadImageData(url: string, data: string): Promise<UploadedFile>
+  getOutputImage(url: string, file: { filename: string; subfolder?: string; type?: string }): Promise<string>
+  getSettings(): Promise<AppSettings>
+  saveSettings(settings: AppSettings): Promise<AppSettings>
+  chooseDirectory(initialPath?: string): Promise<string | null>
+  chooseMedia(type: MediaKind): Promise<{ path: string; name: string } | null>
+  scanModels(settings: AppSettings): Promise<ModelFile[]>
+  getComfyStatus(url: string): Promise<ComfyStatus>
+  submitPrompt(url: string, prompt: unknown, clientId?: string): Promise<{ prompt_id: string; number?: number; node_errors?: unknown }>
+  getQueue(url: string): Promise<unknown>
+  getHistory(url: string, promptId: string): Promise<Record<string, unknown>>
+  cancelPrompt(url: string, promptId: string): Promise<{ cancelled: boolean; state: 'running' | 'pending' | 'finished' | 'unknown' }>
+  uploadInput(url: string, filePath: string): Promise<UploadedFile>
+  fileDataUrl(filePath: string): Promise<string>
+  mediaUrl(filePath: string): Promise<string>
+  extractVideoFrame(source: string, position: number | 'last', outputDirectory: string, ffmpegPath: string): Promise<{ path: string; name: string }>
+  joinVideos(clips: Array<Pick<ClipItem, 'source' | 'start' | 'end'>>, outputDirectory: string, ffmpegPath: string): Promise<{ path: string; url: string }>
+  showOutput(path: string): Promise<void>
+  findLatestOutput(outputDirectory: string, since: number): Promise<string | null>
+  listOllamaModels(url: string): Promise<OllamaModel[]>
+  generateWithOllama(url: string, model: string, prompt: string): Promise<string>
+  generateStructuredWithOllama(url: string, model: string, prompt: string, schema: Record<string, unknown>): Promise<unknown>
+  getLanStatus(): Promise<LanStatus>
+  rotateLanToken(): Promise<LanStatus>
+}

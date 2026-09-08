@@ -1,0 +1,117 @@
+import { useEffect, useMemo, useState } from 'react'
+import { AlertCircle, Check, CircleStop, Film, Gauge, Image as ImageIcon, LoaderCircle, Play, RotateCcw, Sparkles, WandSparkles } from 'lucide-react'
+import { ImageCrop } from './ImageCrop'
+import type { AppSettings, GenerationJob, Ltx25GenerationOptions, Ltx25ModelSelection, MediaFile } from '../types'
+import { ltx25FrameCount } from '../lib/ltx25Workflow'
+
+type WorkspaceState = {
+  mode: 'text' | 'image'
+  prompt: string
+  duration: number
+  resolution: string
+  preset: 'quality' | 'turbo'
+  seed: number
+  liveEnabled: boolean
+  firstFrame: MediaFile | null
+}
+
+const defaults: WorkspaceState = {
+  mode: 'text', prompt: '', duration: 5, resolution: '1280x736', preset: 'quality',
+  seed: Math.floor(Math.random() * 1_000_000_000), liveEnabled: true, firstFrame: null,
+}
+
+const resolutions = {
+  landscape: ['608x352', '736x416', '864x480', '960x544', '1056x608', '1152x640', '1216x672', '1280x736', '1376x768'],
+  portrait: ['352x608', '416x736', '480x864', '544x960', '608x1056', '640x1152', '672x1216', '736x1280', '768x1376'],
+  square: ['512x512', '640x640', '768x768'],
+}
+
+function readWorkspace(): WorkspaceState {
+  try { return { ...defaults, ...JSON.parse(localStorage.getItem('ltx25.workspace') ?? '{}') } }
+  catch { return defaults }
+}
+
+function withoutPreview(file: MediaFile | null) {
+  if (!file) return null
+  const result = { ...file }
+  delete result.preview
+  return result
+}
+
+export function Ltx25Workspace({ settings, models, connected, liveConnected, livePreview, latestJob, submitting, cancelling, ollamaAvailable, onChooseImage, onGenerate, onCancel }: {
+  settings: AppSettings
+  models: Ltx25ModelSelection
+  connected: boolean
+  liveConnected: boolean
+  livePreview: { promptId: string; url: string } | null
+  latestJob?: GenerationJob
+  submitting: boolean
+  cancelling: boolean
+  ollamaAvailable: boolean
+  onChooseImage(): Promise<MediaFile | null>
+  onGenerate(options: Ltx25GenerationOptions, firstFrame: MediaFile | null, liveEnabled: boolean): void
+  onCancel(job: GenerationJob): void
+}) {
+  const initial = useMemo(readWorkspace, [])
+  const [state, setState] = useState(initial)
+  const [refining, setRefining] = useState(false)
+  const [suggestion, setSuggestion] = useState('')
+  const set = <K extends keyof WorkspaceState>(key: K, value: WorkspaceState[K]) => setState((current) => ({ ...current, [key]: value }))
+  const requiredNodes = ['LTXVConditioning', 'LTXVEmptyLatentAudio', 'LTXVDualCFGGuider', 'LTXVLatentUpsampler', 'LTXVAudioVAEDecode']
+  const modelReady = Boolean(models.diffusion && models.textEncoder && models.videoVae && models.audioVae && models.latentUpscaler)
+  const [width, height] = state.resolution.split('x').map(Number)
+  const orientation = width === height ? 'square' : width > height ? 'landscape' : 'portrait'
+
+  useEffect(() => {
+    localStorage.setItem('ltx25.workspace', JSON.stringify({ ...state, firstFrame: withoutPreview(state.firstFrame) }))
+  }, [state])
+
+  useEffect(() => {
+    const file = state.firstFrame
+    if (!file || file.preview || file.kind !== 'image') return
+    void window.minimax.fileDataUrl(file.path).then((preview) => set('firstFrame', { ...file, preview })).catch(() => undefined)
+  }, [state.firstFrame])
+
+  const refine = async () => {
+    if (!state.prompt.trim() || !settings.ollamaModel) return
+    setRefining(true); setSuggestion('')
+    try {
+      const result = await window.minimax.generateWithOllama(settings.ollamaUrl, settings.ollamaModel, `Rewrite this as one production-ready LTX-2.5 ${state.mode === 'image' ? 'image-to-video motion' : 'text-to-video'} prompt. Preserve intent. Specify subject action, camera, lighting, physical motion, pacing, and synchronized dialogue or sound. Return only the prompt.\n\nDRAFT:\n${state.prompt.trim()}`)
+      setSuggestion(result)
+    } finally { setRefining(false) }
+  }
+
+  return <div className="create-page ltx-workspace">
+    <div className="page-heading">
+      <div><p className="eyebrow">SEPARATE PROVIDER WORKSPACE</p><h1>Create with LTX‑2.5</h1><p>Native LTX text-to-video and image-to-video with synchronized audio.</p></div>
+      <div className="heading-state"><span className={modelReady ? 'ok' : 'warn'}>{modelReady ? <Check size={15} /> : <AlertCircle size={15} />}{modelReady ? 'LTX pipeline ready' : 'LTX models missing'}</span></div>
+    </div>
+    <div className="workspace-grid">
+      <section className="composer-panel">
+        <div className="provider-note"><Sparkles size={17} /><span><strong>Independent from MiniMax</strong><small>This workspace keeps separate prompts, media, resolution, seed, quality preset, live preview, and output.</small></span><button type="button" onClick={() => { setState({ ...defaults, seed: Math.floor(Math.random() * 1_000_000_000) }); setSuggestion('') }}><RotateCcw size={14} />Reset LTX</button></div>
+        <div className="mode-tabs ltx-mode-tabs" role="tablist" aria-label="LTX generation mode">
+          <button role="tab" aria-selected={state.mode === 'text'} className={state.mode === 'text' ? 'selected' : ''} onClick={() => set('mode', 'text')}><WandSparkles size={18} /><span><strong>Text</strong><small>Prompt to video</small></span></button>
+          <button role="tab" aria-selected={state.mode === 'image'} className={state.mode === 'image' ? 'selected' : ''} onClick={() => set('mode', 'image')}><ImageIcon size={18} /><span><strong>Image</strong><small>Animate a first frame</small></span></button>
+        </div>
+        <div className="field-group prompt-field">
+          <div className="field-label"><label htmlFor="ltx-prompt">Prompt</label><span>{state.prompt.length.toLocaleString()} characters</span></div>
+          <textarea id="ltx-prompt" value={state.prompt} onChange={(event) => set('prompt', event.target.value)} placeholder={state.mode === 'image' ? 'Describe how the first frame moves, camera direction, dialogue, and sound…' : 'Describe the scene, action, camera, lighting, dialogue, and sound…'} />
+          <div className="prompt-tools"><div className="prompt-tool-buttons"><button type="button" onClick={() => void refine()} disabled={!ollamaAvailable || refining || !state.prompt.trim()}>{refining ? <LoaderCircle size={14} className="spin" /> : <Sparkles size={14} />}Refine for LTX</button></div><span className={`local-model-chip ${ollamaAvailable ? 'online' : ''}`}><span />{ollamaAvailable ? settings.ollamaModel : 'Ollama offline'}</span></div>
+          {suggestion && <div className="assistant-result"><div className="assistant-result-heading"><span><Sparkles size={14} />Local suggestion</span><small>Review before applying</small></div><textarea aria-label="LTX prompt suggestion" value={suggestion} readOnly /><div className="assistant-actions"><button className="secondary-button" onClick={() => setSuggestion('')}>Dismiss</button><button className="primary-button" onClick={() => { set('prompt', suggestion); setSuggestion('') }}><Check size={14} />Use suggestion</button></div></div>}
+        </div>
+        {state.mode === 'image' && <div className="ltx-image-input"><div className={`media-drop ${state.firstFrame ? 'has-file' : ''}`}>{state.firstFrame?.preview && <img src={state.firstFrame.preview} alt="Selected LTX first frame" />}<div className="media-drop-content"><span className="upload-icon"><ImageIcon size={19} /></span><strong>{state.firstFrame?.name ?? 'First frame'}</strong><small>{state.firstFrame ? 'Ready for LTX I2V' : 'PNG, JPG, or WebP'}</small><button onClick={async () => { const file = await onChooseImage(); if (file) set('firstFrame', file) }}>{state.firstFrame ? 'Replace' : 'Choose image'}</button></div>{state.firstFrame && <button className="remove-media" onClick={() => set('firstFrame', null)} aria-label="Remove first frame">×</button>}</div>{state.firstFrame && <ImageCrop label="LTX first frame" file={state.firstFrame} resolution={state.resolution} onChange={(file) => set('firstFrame', file)} />}</div>}
+        <fieldset className="render-size"><legend>Output size</legend><label>Orientation<select value={orientation} onChange={(event) => { const next = event.target.value as keyof typeof resolutions; set('resolution', next === 'square' ? '768x768' : resolutions[next][7] ?? resolutions[next][0]) }}><option value="landscape">Landscape</option><option value="portrait">Portrait</option><option value="square">Square</option></select></label><label>Resolution<select value={state.resolution} onChange={(event) => set('resolution', event.target.value)}>{resolutions[orientation].map((size) => <option key={size}>{size}</option>)}</select></label><p className="field-help">32-pixel aligned for LTX‑2.5. Quality renders stage one at half size, then use the official latent 2× refinement pipeline.</p></fieldset>
+        <div className="render-controls"><div className="field-group"><label htmlFor="ltx-duration">Duration</label><div className="range-line"><input id="ltx-duration" type="range" min="2" max="10" step="1" value={state.duration} onChange={(event) => set('duration', Number(event.target.value))} /><output>{state.duration}s</output></div></div><div className="field-group"><label htmlFor="ltx-preset">Render preset</label><select id="ltx-preset" value={state.preset} onChange={(event) => set('preset', event.target.value as 'quality' | 'turbo')}><option value="quality">Quality · official two-stage 8 + 3</option><option value="turbo">Turbo · distilled single-stage 8</option></select></div></div>
+        <div className="render-extras"><label><input type="checkbox" checked={state.liveEnabled} onChange={(event) => set('liveEnabled', event.target.checked)} />Live preview <small>{state.liveEnabled ? liveConnected ? 'Connected · waiting for LTX frames' : 'Connecting to ComfyUI…' : 'Off'}</small></label><p className="field-help">A decoded first frame is always published; ComfyUI sampling previews are shown when its preview method is enabled.</p></div>
+        <details className="ltx-advanced"><summary>Advanced</summary><div className="advanced-grid"><div className="field-group"><label htmlFor="ltx-seed">Seed</label><input id="ltx-seed" className="number-input" type="number" min="0" max="999999999999" value={state.seed} onChange={(event) => set('seed', Number(event.target.value))} /></div><div className="readonly-value">Euler ancestral · CFG 1</div><div className="readonly-value">{state.preset === 'quality' ? 'Official 8 + 3 sigmas' : 'Official distilled 8 sigmas'}</div></div></details>
+        <p className="field-help render-duration">{ltx25FrameCount(state.duration)} frames · 24 fps · native synchronized audio. {requiredNodes.length} LTX core node families required.</p>
+        <div className="generate-bar"><div className="generation-summary"><Gauge size={17} /><span><strong>{state.resolution.replace('x', ' × ')}</strong><small>{state.duration}s · {state.preset === 'quality' ? 'two-stage quality' : '8-step turbo'}</small></span></div><div className="generate-actions">{latestJob && ['queued', 'running'].includes(latestJob.status) && <button className="danger-button" onClick={() => onCancel(latestJob)} disabled={cancelling}><CircleStop size={16} />{cancelling ? 'Stopping…' : 'Cancel'}</button>}<button className="primary-button" disabled={submitting || !connected || !modelReady || !state.prompt.trim() || (state.mode === 'image' && !state.firstFrame)} onClick={() => onGenerate({ mode: state.mode, prompt: state.prompt.trim(), width, height, duration: state.duration, seed: state.seed, preset: state.preset, filenamePrefix: `video/LTX_2.5_${Date.now()}` }, state.firstFrame, state.liveEnabled)}>{submitting ? <LoaderCircle size={18} className="spin" /> : <Play size={18} fill="currentColor" />}{submitting ? 'Submitting…' : 'Generate with LTX'}</button></div></div>
+      </section>
+      <aside className="preview-panel"><div className="panel-heading"><div><span>LTX OUTPUT</span><strong>Current LTX workspace</strong></div>{latestJob && <span className={`status-badge ${latestJob.status}`}>{latestJob.status}</span>}</div>{state.liveEnabled && livePreview?.promptId === latestJob?.promptId && latestJob && ['queued', 'running'].includes(latestJob.status) && <figure className="live-preview"><img src={livePreview?.url ?? ''} alt="Live LTX generation preview" /><figcaption>LTX live preview · intermediate frame</figcaption></figure>}<div className="preview-stage">{latestJob?.outputUrl ? <video src={latestJob.outputUrl} controls autoPlay loop playsInline /> : latestJob && ['queued', 'running'].includes(latestJob.status) ? <div className="render-state"><div className="render-orbit"><LoaderCircle className="spin" /></div><strong>{latestJob.status === 'queued' ? 'Waiting in queue' : 'Rendering with LTX‑2.5'}</strong><span>{latestJob.width} × {latestJob.height} · {latestJob.duration}s</span><div className="progress"><i style={{ width: `${latestJob.progress}%` }} /></div></div> : <div className="empty-preview"><div className="preview-icon"><Film size={28} /></div><strong>Your LTX video will appear here</strong><span>Choose Text or Image, then send the shot to ComfyUI.</span></div>}</div><div className="pipeline-summary"><Pipeline ready={Boolean(models.diffusion)} label="LTX diffusion" value={models.diffusion} /><Pipeline ready={Boolean(models.textEncoder)} label="Gemma encoder" value={models.textEncoder} /><Pipeline ready={Boolean(models.videoVae && models.audioVae && models.latentUpscaler)} label="Video pipeline" value={models.videoVae && models.audioVae && models.latentUpscaler ? 'Video/audio VAEs + latent 2×' : 'Missing component'} /></div></aside>
+    </div>
+  </div>
+}
+
+function Pipeline({ ready, label, value }: { ready: boolean; label: string; value: string }) {
+  return <div className="pipeline-item"><span className={ready ? 'ready' : ''}>{ready ? <Check size={13} /> : <AlertCircle size={13} />}</span><div><strong>{label}</strong><small title={value}>{value || 'Not detected'}</small></div></div>
+}
