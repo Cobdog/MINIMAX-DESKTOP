@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, CircleStop, Download, Film, Image as ImageIcon, Images, LoaderCircle, Music2, Play, Plus, RefreshCw, Smartphone, Sparkles, Users, Video, WandSparkles, X } from 'lucide-react'
+import { Check, CircleStop, Download, Film, Image as ImageIcon, Images, LayoutGrid, LoaderCircle, Menu, Music2, Play, Plus, RefreshCw, Smartphone, Sparkles, Users, Video, WandSparkles, X } from 'lucide-react'
 import { ImageCrop } from './components/ImageCrop'
 import { RenderSize } from './components/RenderSize'
 import { RenderConstruction } from './components/RenderConstruction'
@@ -18,7 +18,7 @@ type MobileUpscale = 'off' | 'ltx' | 'rtx'
 type MobileProvider = 'minimax' | 'ltx25'
 type InstallPrompt = Event & { prompt(): Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> }
 type MobileView = 'video' | 'image' | 'characters'
-type MobileCharacter = { id: string; name: string; description: string; wardrobe: string; voiceNotes: string; visualStyle: string; references: Array<{ name: string; preview: string }> }
+type MobileCharacter = { id: string; name: string; description: string; wardrobe: string; voiceNotes: string; visualStyle: string; referenceInstructions?: string[]; references: Array<{ name: string; preview: string; purpose?: string; label?: string }> }
 
 type MobileMode = 'text' | 'image' | 'reference'
 type MobileReference = MediaFile & { source?: File }
@@ -52,6 +52,7 @@ export default function MobileApp() {
   const stored = useMemo(() => readMobileWorkspace(initialProvider), [initialProvider])
   const [provider, setProvider] = useState<MobileProvider>(initialProvider)
   const [mobileView, setMobileView] = useState<MobileView>('video')
+  const [menuOpen, setMenuOpen] = useState(false)
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null)
   const [refreshing, setRefreshing] = useState(true)
   const [characters, setCharacters] = useState<MobileCharacter[]>([])
@@ -176,10 +177,10 @@ export default function MobileApp() {
   }
 
   const applyCharacter = (character: MobileCharacter) => {
-    const identity = `Character: ${character.name} — preserve this saved identity. ${character.description}${character.wardrobe ? ` Wardrobe: ${character.wardrobe}.` : ''}${character.voiceNotes ? ` Performance: ${character.voiceNotes}.` : ''}`
+    const identity = character.referenceInstructions?.length ? character.referenceInstructions.join(' ') : `Character: ${character.name} — preserve this saved identity. ${character.description}${character.wardrobe ? ` Wardrobe: ${character.wardrobe}.` : ''}${character.voiceNotes ? ` Performance: ${character.voiceNotes}.` : ''}`
     setSelectedCharacterId(character.id)
     setPrompt((current) => current.includes(`Character: ${character.name}`) ? current : `${identity}\n\n${current}`.trim())
-    const approved = character.references.slice(0, 4).map((reference) => ({ path: reference.name, name: reference.name, kind: 'image' as const, preview: reference.preview }))
+    const approved = character.references.slice(0, 9).map((reference) => ({ path: reference.name, name: reference.name, kind: 'image' as const, preview: reference.preview }))
     if (approved.length) setReferenceImages(approved)
     setMobileView('video'); setVideoMode(approved.length ? 'reference' : 'text'); setMessage(`${character.name} added to the shot${approved.length ? ` with ${approved.length} approved identity reference${approved.length === 1 ? '' : 's'}` : ''}.`)
   }
@@ -314,9 +315,12 @@ export default function MobileApp() {
     catch (error) { setStatus('error'); setMessage(error instanceof Error ? error.message : String(error)) }
   }
 
+  const showMobileWorkspace = (next: MobileView, nextMode?: MobileMode) => { setMobileView(next); if (nextMode) setVideoMode(nextMode); setMenuOpen(false) }
+  const fullStudioUrl = `/?desktop=1&token=${encodeURIComponent(token)}`
   return <main className="mobile-app">
-    <header className="mobile-header"><span className="brand-mark"><Film size={18} /></span><span><strong>MiniMax Studio</strong><small>{refreshing ? 'Connecting to desktop…' : bootstrap?.connected ? 'LAN companion · connected' : 'LAN companion · offline'}</small></span><button aria-label="Refresh desktop connection" disabled={refreshing} onClick={() => void refresh()}>{refreshing ? <LoaderCircle className="spin" size={17} /> : <RefreshCw size={17} />}</button></header>
-    <nav className="mobile-primary-nav" aria-label="Mobile workspace"><button className={mobileView === 'video' ? 'active' : ''} onClick={() => setMobileView('video')}><Film size={18} /><span>Video</span></button><button className={mobileView === 'image' ? 'active image' : 'image'} onClick={() => setMobileView('image')}><ImageIcon size={18} /><span>Create Image</span></button><button className={mobileView === 'characters' ? 'active character' : 'character'} onClick={() => setMobileView('characters')}><Users size={18} /><span>Characters</span></button></nav>
+    <header className="mobile-header"><button className="mobile-menu-trigger" aria-label="Open workspace menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}><Menu size={18} /></button><span className="brand-mark"><Film size={18} /></span><span><strong>MiniMax Studio</strong><small>{refreshing ? 'Connecting to desktop…' : bootstrap?.connected ? 'LAN companion · connected' : 'LAN companion · offline'}</small></span><button aria-label="Refresh desktop connection" disabled={refreshing} onClick={() => void refresh()}>{refreshing ? <LoaderCircle className="spin" size={17} /> : <RefreshCw size={17} />}</button></header>
+    <nav className="mobile-primary-nav" aria-label="Quick workspace"><button className={mobileView === 'video' ? 'active' : ''} onClick={() => showMobileWorkspace('video')}><Film size={18} /><span>Video</span></button><button className={mobileView === 'image' ? 'active image' : 'image'} onClick={() => showMobileWorkspace('image')}><ImageIcon size={18} /><span>Image</span></button><button className={mobileView === 'characters' ? 'active character' : 'character'} onClick={() => showMobileWorkspace('characters')}><Users size={18} /><span>Cast</span></button></nav>
+    {menuOpen && <div className="mobile-menu-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setMenuOpen(false) }}><aside className="mobile-menu" role="dialog" aria-modal="true" aria-label="MiniMax workspaces"><header><span><strong>Workspaces</strong><small>Quick creation on this phone</small></span><button aria-label="Close workspace menu" onClick={() => setMenuOpen(false)}><X size={18} /></button></header><nav><button onClick={() => showMobileWorkspace('video', 'text')}><Film size={18} /><span><strong>Create video</strong><small>MiniMax H3 or LTX 2.5</small></span></button><button onClick={() => showMobileWorkspace('video', 'reference')}><Sparkles size={18} /><span><strong>Reference workspace</strong><small>Cast, wardrobe, hair, images, motion, and audio</small></span></button><button onClick={() => showMobileWorkspace('image')}><ImageIcon size={18} /><span><strong>Create image</strong><small>Z-Image on the desktop GPU</small></span></button><button onClick={() => showMobileWorkspace('characters')}><Users size={18} /><span><strong>Character library</strong><small>Use approved people and their connected assets</small></span></button></nav><a href={fullStudioUrl}><LayoutGrid size={18} /><span><strong>Open complete Studio</strong><small>Movie, Hair, Wardrobe, Locations, Queue, Library, Editor, and Settings</small></span></a></aside></div>}
     <section className="mobile-hero"><div><p>LOCAL {mobileView === 'characters' ? 'LIBRARY' : 'CREATE'}</p><h1>{mobileView === 'video' ? 'Create video' : mobileView === 'image' ? 'Create Image' : 'Character library'}</h1><span>{mobileView === 'video' ? 'MiniMax H3 and LTX‑2.5 run on the desktop GPU.' : mobileView === 'image' ? 'Design high-resolution Z-Image stills from your phone.' : 'Browse approved identities and add them directly to a shot.'}</span></div><i className={bootstrap?.connected ? 'online' : ''}>{bootstrap?.connected ? `Connected · ${bootstrap.latencyMs} ms` : 'Offline'}</i></section>
     {mobileView === 'video' && <section className="mobile-create-panel">
       <div className="mobile-provider" role="tablist" aria-label="Video provider"><button role="tab" aria-selected={provider === 'minimax'} disabled={busy} onClick={() => changeProvider('minimax')}><strong>MiniMax H3</strong><small>Flexible video + references</small></button><button role="tab" aria-selected={provider === 'ltx25'} disabled={busy} onClick={() => changeProvider('ltx25')}><strong>LTX‑2.5</strong><small>Native T2V and I2V</small></button></div>

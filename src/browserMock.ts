@@ -38,6 +38,10 @@ const examples: Array<[ModelFile['kind'], string, number]> = [
   ['text_encoders', 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors', 12_000_000_000],
   ['vae', 'ltx-2.5-video-vae-bf16.safetensors', 2_000_000_000],
   ['vae', 'ltx-2.5-audio-vae-bf16.safetensors', 800_000_000],
+  ['diffusion_models', 'z_image_turbo_bf16.safetensors', 12_000_000_000],
+  ['diffusion_models', 'z_image_bf16.safetensors', 12_000_000_000],
+  ['text_encoders', 'qwen_3_4b.safetensors', 8_000_000_000],
+  ['vae', 'ae.safetensors', 350_000_000],
 ]
 
 const ltxNodes = ['LTXVConditioning', 'LTXVEmptyLatentAudio', 'EmptyLTXVLatentVideo', 'LTXVDualCFGGuider', 'LTXVSeparateAVLatent', 'LTXVConcatAVLatent', 'LTXVLatentUpsampler', 'LTXVAudioVAEDecode', 'ManualSigmas', 'VAEEncodeTiled', 'VAEDecodeTiled', 'CLIPTextEncode', 'KSamplerSelect', 'SamplerCustomAdvanced', 'ImageFromBatch', 'RepeatImageBatch', 'ImageBatch']
@@ -49,7 +53,9 @@ export function installBrowserMock() {
     getObjectInfo: async () => Object.fromEntries([
       ...ltxNodes.map((name) => [name, { input: { required: {} } }]),
       ['LatentUpscaleModelLoader', { input: { required: { model_name: ['COMBO', { options: ['ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors'] }] } } }],
-      ['VAELoader', { input: { required: { vae_name: ['COMBO', { options: ['ltx-2.5-video-vae-bf16.safetensors'] }] } } }],
+      ['UNETLoader', { input: { required: { unet_name: ['COMBO', { options: ['z_image_turbo_bf16.safetensors', 'z_image_bf16.safetensors'] }] } } }],
+      ['CLIPLoader', { input: { required: { clip_name: ['COMBO', { options: ['qwen_3_4b.safetensors'] }] } } }],
+      ['VAELoader', { input: { required: { vae_name: ['COMBO', { options: ['ltx-2.5-video-vae-bf16.safetensors', 'ae.safetensors'] }] } } }],
       ['UpscaleModelLoader', { input: { required: { model_name: ['COMBO', { options: ['4x-UltraSharp.pth'] }] } } }],
     ]),
     uploadImageData: async () => { throw new Error('Open the desktop app to upload images.') },
@@ -82,22 +88,25 @@ export function installBrowserMock() {
     generateStructuredWithOllama: async (_url, _model, prompt, schema) => {
       const properties = schema.properties as Record<string, unknown> | undefined
       if (properties?.reply) {
-        const buildAssets = /Create the recurring characters/i.test(prompt)
-        const buildStory = /Build a complete story treatment/i.test(prompt)
-        const buildShots = /Turn the story into connected scenes/i.test(prompt)
+        const filmmakerRequest = prompt.match(/FILMMAKER: ([\s\S]*)$/)?.[1] ?? prompt
+        const buildAssets = /Create the recurring characters/i.test(filmmakerRequest)
+        const buildStory = /Build a complete story treatment/i.test(filmmakerRequest)
+        const buildShots = /Turn the story into connected scenes/i.test(filmmakerRequest)
+        const removeFirstCharacter = /(?:remove|delete) (?:the )?(?:first )?character/i.test(filmmakerRequest)
         const contextMatch = prompt.match(/PROJECT CONTEXT: (.+)\n\nFILMMAKER:/)
-        const currentContext = contextMatch ? JSON.parse(contextMatch[1]) as { project: Record<string, unknown>; characters?: Array<{ id: string }> } : { project: {} }
+        const currentContext = contextMatch ? JSON.parse(contextMatch[1]) as { project: Record<string, unknown>; characters?: Array<{ id: string; name?: string }> } : { project: {} }
         const currentProject = currentContext.project
+        const removedCharacter = removeFirstCharacter ? currentContext.characters?.[0] : undefined
         return {
-          reply: buildAssets ? '## Production bible created\n- Added **Mara Vale** as the continuity anchor.\n- Added `North Relay Station` as the recurring set.\n\nReview the new cards before adding reference images.' : buildStory ? '## Story treatment created\nA courier crosses a flooded city before sunrise, carrying the final radio capable of reconnecting the evacuation fleet.' : buildShots ? '## Shot plan created\n- Added an opening scene and a production-ready MiniMax establishing shot.\n- Later connected scenes can inherit its final frame.' : '## Continuity approach\n- Carry the prior scene’s **last frame** into the connected shot.\n- Preserve wardrobe, screen direction, lighting, and motion momentum.',
-          changes: buildAssets ? ['Created character Mara Vale.', 'Created location North Relay Station.'] : buildStory ? ['Created a complete story treatment.'] : buildShots ? ['Created the opening scene.', 'Created its establishing shot.'] : [], focusAreas: buildAssets ? ['bible'] : buildStory ? ['setup'] : ['shots'],
+          reply: removedCharacter ? `## Character removal prepared\nReview the removal of **${removedCharacter.name ?? 'the selected character'}** before applying it.` : buildAssets ? '## Production bible created\n- Added **Mara Vale** as the continuity anchor.\n- Added `North Relay Station` as the recurring set.\n\nReview the new cards before adding reference images.' : buildStory ? '## Story treatment created\nA courier crosses a flooded city before sunrise, carrying the final radio capable of reconnecting the evacuation fleet.' : buildShots ? '## Shot plan created\n- Added an opening scene and a production-ready MiniMax establishing shot.\n- Later connected scenes can inherit its final frame.' : '## Continuity approach\n- Carry the prior scene’s **last frame** into the connected shot.\n- Preserve wardrobe, screen direction, lighting, and motion momentum.',
+          changes: removedCharacter ? [`Removed character ${removedCharacter.name ?? removedCharacter.id}.`] : buildAssets ? ['Created character Mara Vale.', 'Created location North Relay Station.'] : buildStory ? ['Created a complete story treatment.'] : buildShots ? ['Created the opening scene.', 'Created its establishing shot.'] : [], focusAreas: buildAssets || removedCharacter ? ['bible'] : buildStory ? ['setup'] : ['shots'],
           projectPatch: {
             title: currentProject.title ?? 'Untitled movie', targetRuntime: currentProject.targetRuntime ?? 60,
             computeBudgetMinutes: currentProject.computeBudgetMinutes ?? 120, aspectRatio: currentProject.aspectRatio ?? '16:9',
             genre: currentProject.genre ?? '', visualStyle: currentProject.visualStyle ?? '', quality: currentProject.quality ?? 'balanced',
             reviewGate: currentProject.reviewGate ?? 'scene', story: buildStory ? 'A courier crosses a flooded city before sunrise, carrying the final radio capable of reconnecting the evacuation fleet. Pursued across collapsing rooftops, she reaches the harbor tower and transmits just as dawn breaks.' : currentProject.story ?? '', visualRules: currentProject.visualRules ?? '',
           },
-          characterUpserts: buildAssets ? [{ id: 'new-mara', name: 'Mara Vale', description: 'A weathered pilot in her late thirties with cropped black hair and a narrow scar above her left eyebrow.', wardrobe: 'Faded charcoal flight jacket, rust-red scarf, utility belt, brass compass.', voiceNotes: 'Low warm alto with a measured pace.' }] : [], characterDeletes: [],
+          characterUpserts: buildAssets ? [{ id: 'new-mara', name: 'Mara Vale', description: 'A weathered pilot in her late thirties with cropped black hair and a narrow scar above her left eyebrow.', wardrobe: 'Faded charcoal flight jacket, rust-red scarf, utility belt, brass compass.', voiceNotes: 'Low warm alto with a measured pace.' }] : [], characterDeletes: removedCharacter ? [removedCharacter.id] : [],
           locationUpserts: buildAssets ? [{ id: 'new-relay', name: 'North Relay Station', description: 'An isolated concrete relay station with oxidized antenna ribs, amber work lights, and a cracked blue orientation stripe.' }] : [], locationDeletes: [],
           sceneUpserts: buildShots ? [{ id: 'new-opening', title: 'Flooded crossing', summary: 'The courier enters the drowned city and commits to the dangerous route.', locationId: '', transition: 'cut' }] : [], sceneDeletes: [],
           shotUpserts: buildShots ? [{ id: 'new-establishing', sceneId: 'new-opening', title: 'City at first light', prompt: 'Wide cinematic view of a lone courier crossing a flooded avenue before sunrise, skiffs drifting between dark towers, slow crane movement forward, cold blue ambient light with distant amber windows, wind and water synchronized.', dialogue: '', duration: 6, mode: currentContext.characters?.[0] ? 'reference' : 'text', characterIds: currentContext.characters?.[0] ? [currentContext.characters[0].id] : [] }] : [], shotDeletes: [],

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BookOpen, Check, ChevronDown, ChevronRight, CirclePause, CirclePlay, Clapperboard, Clock3, Film, ImagePlus, LoaderCircle, MapPin, MessageSquare, Pencil, Plus, RefreshCw, Send, SkipBack, SkipForward, Sparkles, Trash2, Users, X } from 'lucide-react'
+import { AlertTriangle, ArrowRight, BookOpen, Check, ChevronDown, ChevronRight, CirclePause, CirclePlay, Clapperboard, Clock3, Film, ImagePlus, LoaderCircle, MapPin, MessageSquare, Pencil, Plus, RefreshCw, RotateCcw, Send, SkipBack, SkipForward, Sparkles, Trash2, Users, X } from 'lucide-react'
 import { CHARACTER_LIBRARY_EVENT, characterReferences, loadCharacterProjects } from '../lib/characterLibrary'
 import { LOCATION_LIBRARY_EVENT, loadLocationProjects, locationReferences } from '../lib/locationLibrary'
 import { composeReferenceInstructions, resolveMovieShot } from '../lib/promptComposer'
@@ -25,6 +25,9 @@ const characterSchema: Record<string, unknown> = { type: 'object', properties: {
 const locationSchema: Record<string, unknown> = { type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' } }, required: ['name', 'description'] }
 const IMPORT_CHARACTER_EVENT = 'minimax-import-library-character'
 const IMPORT_LOCATION_EVENT = 'minimax-import-library-location'
+const MOVIE_UNDO_HISTORY_KEY = 'minimax.movie-undo-history'
+const MOVIE_UNDO_LIMIT = 10
+const LARGE_SHOT_DELETE_THRESHOLD = 3
 const movieChatSchema: Record<string, unknown> = {
   type: 'object', properties: {
     reply: { type: 'string' }, changes: { type: 'array', items: { type: 'string' } },
@@ -40,6 +43,31 @@ const movieChatSchema: Record<string, unknown> = {
     shotDeletes: { type: 'array', items: { type: 'string' } },
   }, required: ['reply', 'changes', 'focusAreas', 'projectPatch', 'characterUpserts', 'characterDeletes', 'locationUpserts', 'locationDeletes', 'sceneUpserts', 'sceneDeletes', 'shotUpserts', 'shotDeletes'],
 }
+
+type MovieRevisionDiff = {
+  id: string
+  area: MovieChatArea
+  kind: 'add' | 'change' | 'remove'
+  label: string
+  before?: string
+  after?: string
+  destructive?: boolean
+}
+
+type PendingMovieRevision = {
+  projectId: string
+  baseUpdatedAt: number
+  question: string
+  reply: string
+  changes: string[]
+  areas: MovieChatArea[]
+  raw: MovieChatResult
+  preview: MovieProject
+  diffs: MovieRevisionDiff[]
+}
+
+type MovieUndoEntry = { id: string; createdAt: number; label: string; snapshot: MovieProject }
+type MovieUndoHistory = Record<string, MovieUndoEntry[]>
 
 function makeProject(index = 1): MovieProject {
   const now = Date.now()
@@ -60,6 +88,13 @@ function loadProjects(): MovieProject[] {
   } catch { return [makeProject()] }
 }
 
+function loadMovieUndoHistory(): MovieUndoHistory {
+  try {
+    const stored = JSON.parse(localStorage.getItem(MOVIE_UNDO_HISTORY_KEY) ?? '{}') as MovieUndoHistory
+    return stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {}
+  } catch { return {} }
+}
+
 export function MoviePlanner({ settings, ollamaAvailable, ollamaModel, onOpenShot, onNotice }: {
   settings: AppSettings; ollamaAvailable: boolean; ollamaModel: string
   onOpenShot(shot: MovieShot, aspectRatio: MovieProject['aspectRatio'], resolved: ResolvedMovieShot, context: { projectId: string; sceneId: string; continuationSource?: string }): void
@@ -72,6 +107,8 @@ export function MoviePlanner({ settings, ollamaAvailable, ollamaModel, onOpenSho
   const [assisting, setAssisting] = useState<string | null>(null)
   const [chatInput, setChatInput] = useState('')
   const [chatting, setChatting] = useState(false)
+  const [pendingChatRevision, setPendingChatRevision] = useState<PendingMovieRevision | null>(null)
+  const [undoHistory, setUndoHistory] = useState<MovieUndoHistory>(loadMovieUndoHistory)
   const [previewIndex, setPreviewIndex] = useState(0)
   const [characterDraft, setCharacterDraft] = useState<MovieCharacter | null>(null)
   const [characterLibrary, setCharacterLibrary] = useState<CharacterProject[]>(loadCharacterProjects)
@@ -106,7 +143,14 @@ export function MoviePlanner({ settings, ollamaAvailable, ollamaModel, onOpenSho
     setPreviewIndex((value) => Math.min(value, Math.max(0, renderedClips.length - 1)))
   }, [project.id, renderedClips.length])
 
+  useEffect(() => { setPendingChatRevision(null) }, [project.id])
+
   const commit = (all: MovieProject[]) => { setProjects(all); localStorage.setItem('minimax.movie-projects', JSON.stringify(all)) }
+  const commitUndoHistory = (next: MovieUndoHistory) => {
+    setUndoHistory(next)
+    try { localStorage.setItem(MOVIE_UNDO_HISTORY_KEY, JSON.stringify(next)) }
+    catch { onNotice('neutral', 'Undo is available for this session, but its snapshot was too large to keep after restart.') }
+  }
   const update = (change: (current: MovieProject) => MovieProject) => commit(projects.map((item) => item.id === project.id ? { ...change(item), updatedAt: Date.now() } : item))
   const updateScene = (id: string, change: Partial<MovieScene>) => update((value) => ({ ...value, scenes: value.scenes.map((item) => item.id === id ? { ...item, ...change } : item) }))
   const updateShot = (sceneId: string, shotId: string, change: Partial<MovieShot>) => update((value) => ({ ...value, scenes: value.scenes.map((scene) => scene.id === sceneId ? { ...scene, shots: scene.shots.map((shot) => shot.id === shotId ? { ...shot, ...change } : shot) } : scene) }))
@@ -223,7 +267,7 @@ export function MoviePlanner({ settings, ollamaAvailable, ollamaModel, onOpenSho
 
   const sendMovieChat = async (suggestedQuestion?: string) => {
     const question = (suggestedQuestion ?? chatInput).trim()
-    if (!question || chatting || !requireOllama()) return
+    if (!question || chatting || pendingChatRevision || !requireOllama()) return
     setChatting(true)
     try {
       const context = {
@@ -240,16 +284,57 @@ export function MoviePlanner({ settings, ollamaAvailable, ollamaModel, onOpenSho
         `PROJECT CONTEXT: ${JSON.stringify(context)}`, `FILMMAKER: ${question}`,
       ].join('\n\n'), movieChatSchema) as MovieChatResult
       const changes = Array.isArray(raw.changes) ? raw.changes.map(text).filter(Boolean) : []
-      const hasOperations = hasMovieChatOperations(raw)
-      const appliedChanges = changes.length ? changes : hasOperations ? ['Updated the requested movie project areas.'] : []
       const areas = normalizeChatAreas(raw.focusAreas, raw)
-      update((value) => {
-        const changed = changes.length || hasOperations ? applyMovieChatOperations(value, raw) : value
-        return { ...changed, chatMessages: [...value.chatMessages, { id: createId(), role: 'user' as const, content: question, createdAt: Date.now() }, { id: createId(), role: 'assistant' as const, content: text(raw.reply) || 'I reviewed the project.', createdAt: Date.now() + 1, appliedChanges, areas }].slice(-100) }
-      })
+      const preview = applyMovieChatOperations(project, raw)
+      const diffs = buildMovieRevisionDiffs(project, preview)
+      if (diffs.length) {
+        setPendingChatRevision({ projectId: project.id, baseUpdatedAt: project.updatedAt, question, reply: text(raw.reply) || 'I prepared a set of changes for review.', changes, areas, raw, preview, diffs })
+      } else {
+        update((value) => ({ ...value, chatMessages: appendMovieChat(value, question, text(raw.reply) || 'I reviewed the project.', [], areas) }))
+      }
       setChatInput('')
     } catch (error) { onNotice('error', `Movie copilot: ${error instanceof Error ? error.message : String(error)}`) }
     finally { setChatting(false) }
+  }
+
+  const applyPendingChatRevision = () => {
+    if (!pendingChatRevision || pendingChatRevision.projectId !== project.id) return
+    if (project.updatedAt !== pendingChatRevision.baseUpdatedAt) {
+      const preview = applyMovieChatOperations(project, pendingChatRevision.raw)
+      setPendingChatRevision({ ...pendingChatRevision, baseUpdatedAt: project.updatedAt, preview, diffs: buildMovieRevisionDiffs(project, preview) })
+      onNotice('neutral', 'The movie changed while this proposal was open. Review the refreshed comparison before applying it.')
+      return
+    }
+    const label = pendingChatRevision.changes[0] || `${pendingChatRevision.diffs.length} copilot changes`
+    const entry: MovieUndoEntry = { id: createId(), createdAt: Date.now(), label, snapshot: structuredClone(project) }
+    commitUndoHistory({ ...undoHistory, [project.id]: [entry, ...(undoHistory[project.id] ?? [])].slice(0, MOVIE_UNDO_LIMIT) })
+    const next: MovieProject = {
+      ...pendingChatRevision.preview,
+      updatedAt: Date.now(),
+      chatMessages: appendMovieChat(project, pendingChatRevision.question, pendingChatRevision.reply, pendingChatRevision.changes.length ? pendingChatRevision.changes : pendingChatRevision.diffs.map((diff) => diff.label), pendingChatRevision.areas),
+    }
+    commit(projects.map((item) => item.id === project.id ? next : item))
+    setPendingChatRevision(null)
+    onNotice('success', `${pendingChatRevision.diffs.length} reviewed change${pendingChatRevision.diffs.length === 1 ? '' : 's'} applied. Undo is available in Movie copilot.`)
+  }
+
+  const discardPendingChatRevision = () => {
+    if (!pendingChatRevision || pendingChatRevision.projectId !== project.id) return
+    update((value) => ({ ...value, chatMessages: appendMovieChat(value, pendingChatRevision.question, `${pendingChatRevision.reply}\n\n*Proposal discarded — the movie was not changed.*`, [], pendingChatRevision.areas) }))
+    setPendingChatRevision(null)
+  }
+
+  const undoLastChatRevision = () => {
+    const [entry, ...remaining] = undoHistory[project.id] ?? []
+    if (!entry || pendingChatRevision) return
+    const restored: MovieProject = {
+      ...structuredClone(entry.snapshot),
+      updatedAt: Date.now(),
+      chatMessages: [...project.chatMessages, { id: createId(), role: 'assistant' as const, content: `Undid the last reviewed AI revision: ${entry.label}`, createdAt: Date.now() }].slice(-100),
+    }
+    commit(projects.map((item) => item.id === project.id ? restored : item))
+    commitUndoHistory({ ...undoHistory, [project.id]: remaining })
+    onNotice('success', 'The movie was restored to its state before the last AI revision.')
   }
 
   const buildPlan = async () => {
@@ -301,7 +386,7 @@ export function MoviePlanner({ settings, ollamaAvailable, ollamaModel, onOpenSho
   return <div className="standard-page movie-page">
     <div className="movie-planner-shell"><div className="movie-planner-main">
     <div className="page-heading"><div><p className="eyebrow">GUIDED PRODUCTION</p><h1>Movie planner</h1><p>Shape the story, lock continuity, then hand off one reviewed shot at a time.</p></div><div className="movie-heading-actions"><span className={`movie-save-state ${project.status}`}><Check size={13} />Saved locally</span><button className="secondary-button" onClick={() => update((value) => ({ ...value, status: value.status === 'paused' ? 'planning' : 'paused' }))}>{project.status === 'paused' ? <CirclePlay size={15} /> : <CirclePause size={15} />}{project.status === 'paused' ? 'Resume project' : 'Pause project'}</button></div></div>
-    <div className="movie-project-bar"><label>Movie project<select value={project.id} onChange={(event) => { const next = projects.find((item) => item.id === event.target.value); setProjectId(event.target.value); setExpandedScenes(next?.scenes[0] ? [next.scenes[0].id] : []); setExpandedShots([]); setStep('setup') }}>{projects.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label><button className="secondary-button" onClick={() => { const next = makeProject(projects.length + 1); commit([...projects, next]); setProjectId(next.id); setExpandedScenes([]); setExpandedShots([]); setStep('setup') }}><Plus size={15} />New movie</button><label className="movie-title-field">Project title<input value={project.title} onChange={(event) => update((value) => ({ ...value, title: event.target.value }))} /></label></div>
+    <div className="movie-project-bar"><label>Movie project<select value={project.id} onChange={(event) => { const next = projects.find((item) => item.id === event.target.value); setPendingChatRevision(null); setProjectId(event.target.value); setExpandedScenes(next?.scenes[0] ? [next.scenes[0].id] : []); setExpandedShots([]); setStep('setup') }}>{projects.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label><button className="secondary-button" onClick={() => { const next = makeProject(projects.length + 1); commit([...projects, next]); setPendingChatRevision(null); setProjectId(next.id); setExpandedScenes([]); setExpandedShots([]); setStep('setup') }}><Plus size={15} />New movie</button><label className="movie-title-field">Project title<input value={project.title} onChange={(event) => update((value) => ({ ...value, title: event.target.value }))} /></label></div>
     <div className="movie-summary-strip"><div><Clock3 size={16} /><span><strong>{formatDuration(plannedSeconds)} / {formatDuration(project.targetRuntime)}</strong><small>planned runtime</small></span></div><div><Clapperboard size={16} /><span><strong>{project.scenes.length} scenes · {shotCount} shots</strong><small>editable plan</small></span></div><div><Sparkles size={16} /><span><strong>{project.computeBudgetMinutes} minute budget</strong><small>{ollamaAvailable ? `${ollamaModel} ready` : 'manual planning available'}</small></span></div><div className="runtime-meter"><i style={{ width: `${Math.min(100, project.targetRuntime ? plannedSeconds / project.targetRuntime * 100 : 0)}%` }} /></div></div>
     {project.status === 'paused' && <div className="movie-paused"><CirclePause size={16} /><span><strong>Project paused</strong><small>Your plan remains editable, but future automated production passes will not queue work.</small></span></div>}
     <nav className="movie-steps" aria-label="Movie planning stages"><button className={step === 'setup' ? 'active' : ''} onClick={() => setStep('setup')}><span>1</span><div><strong>Story setup</strong><small>Creative brief</small></div></button><button className={step === 'bible' ? 'active' : ''} onClick={() => setStep('bible')}><span>2</span><div><strong>Production bible</strong><small>People and places</small></div></button><button className={step === 'shots' ? 'active' : ''} onClick={() => setStep('shots')}><span>3</span><div><strong>Shot plan</strong><small>Scenes and handoff</small></div></button><button className={step === 'preview' ? 'active' : ''} onClick={() => setStep('preview')}><span>4</span><div><strong>Movie preview</strong><small>{renderedClips.length} finished clips</small></div></button></nav>
@@ -330,7 +415,7 @@ export function MoviePlanner({ settings, ollamaAvailable, ollamaModel, onOpenSho
         })}</div><button className="add-shot-button" onClick={() => addShot(scene.id)}><Plus size={14} />Add shot</button></div>}</article>
       })}</div>}</section>}
     {step === 'preview' && <MoviePreview clips={renderedClips} activeIndex={previewIndex} setActiveIndex={setPreviewIndex} />}
-    </div><MovieCopilot project={project} input={chatInput} setInput={setChatInput} chatting={chatting} ollamaAvailable={ollamaAvailable} onSend={(question) => void sendMovieChat(question)} onNavigate={setStep} /></div>
+    </div><MovieCopilot project={project} input={chatInput} setInput={setChatInput} chatting={chatting} ollamaAvailable={ollamaAvailable} pendingRevision={pendingChatRevision?.projectId === project.id ? pendingChatRevision : null} undoEntry={undoHistory[project.id]?.[0]} onSend={(question) => void sendMovieChat(question)} onNavigate={setStep} onApplyRevision={applyPendingChatRevision} onDiscardRevision={discardPendingChatRevision} onUndo={undoLastChatRevision} /></div>
 
     {characterDraft && <AssetModal title={project.characters.some((item) => item.id === characterDraft.id) ? 'Edit character' : 'Create character'} subtitle="Build a repeatable cast member for this movie." onClose={() => setCharacterDraft(null)} onSave={saveCharacter} saveDisabled={!characterDraft.name.trim()}><div className="asset-assistant-callout"><span><Sparkles size={15} /><span><strong>Ollama character assistant</strong><small>Uses your story and visual direction. Nothing leaves your computer.</small></span></span>{assistantButton('character', 'Create with Ollama', () => void assistCharacter())}</div><div className="asset-modal-form"><label>Character name<input autoFocus value={characterDraft.name} onChange={(event) => setCharacterDraft({ ...characterDraft, name: event.target.value })} placeholder="Name or production label" /></label><label>Repeatable appearance<textarea value={characterDraft.description} onChange={(event) => setCharacterDraft({ ...characterDraft, description: event.target.value })} placeholder="Age range, face, hair, build, distinctive features…" /></label><label>Wardrobe and props<textarea value={characterDraft.wardrobe} onChange={(event) => setCharacterDraft({ ...characterDraft, wardrobe: event.target.value })} placeholder="Default clothing, colors, wear, recurring objects…" /></label><label>Voice and performance<textarea value={characterDraft.voiceNotes} onChange={(event) => setCharacterDraft({ ...characterDraft, voiceNotes: event.target.value })} placeholder="Tone, accent, cadence, emotional baseline…" /></label></div><ReferencePicker files={characterDraft.referenceImages} onAdd={() => void addDraftReference('character')} onRemove={(index) => setCharacterDraft({ ...characterDraft, referenceImages: characterDraft.referenceImages.filter((_, itemIndex) => itemIndex !== index) })} /></AssetModal>}
     {locationDraft && <AssetModal title={project.locations.some((item) => item.id === locationDraft.id) ? 'Edit location' : 'Create location'} subtitle="Define a reusable set for this movie." onClose={() => setLocationDraft(null)} onSave={saveLocation} saveDisabled={!locationDraft.name.trim()}><div className="asset-assistant-callout"><span><Sparkles size={15} /><span><strong>Ollama location assistant</strong><small>Turns a rough idea into repeatable production details.</small></span></span>{assistantButton('location', 'Create with Ollama', () => void assistLocation())}</div><div className="asset-modal-form"><label>Location name<input autoFocus value={locationDraft.name} onChange={(event) => setLocationDraft({ ...locationDraft, name: event.target.value })} placeholder="Set or place name" /></label><label>Set, lighting, and atmosphere<textarea value={locationDraft.description} onChange={(event) => setLocationDraft({ ...locationDraft, description: event.target.value })} placeholder="Architecture, layout, materials, landmarks, light sources, time of day…" /></label></div><ReferencePicker files={locationDraft.referenceImages} onAdd={() => void addDraftReference('location')} onRemove={(index) => setLocationDraft({ ...locationDraft, referenceImages: locationDraft.referenceImages.filter((_, itemIndex) => itemIndex !== index) })} /></AssetModal>}
@@ -352,9 +437,41 @@ type MovieChatResult = {
   shotDeletes?: unknown[]
 }
 
-function MovieCopilot({ project, input, setInput, chatting, ollamaAvailable, onSend, onNavigate }: { project: MovieProject; input: string; setInput(value: string): void; chatting: boolean; ollamaAvailable: boolean; onSend(question?: string): void; onNavigate(area: PlannerStep): void }) {
+function MovieCopilot({ project, input, setInput, chatting, ollamaAvailable, pendingRevision, undoEntry, onSend, onNavigate, onApplyRevision, onDiscardRevision, onUndo }: {
+  project: MovieProject
+  input: string
+  setInput(value: string): void
+  chatting: boolean
+  ollamaAvailable: boolean
+  pendingRevision: PendingMovieRevision | null
+  undoEntry?: MovieUndoEntry
+  onSend(question?: string): void
+  onNavigate(area: PlannerStep): void
+  onApplyRevision(): void
+  onDiscardRevision(): void
+  onUndo(): void
+}) {
   const starters = ['Build a complete story treatment from my current idea.', 'Create the recurring characters and locations this movie needs.', 'Turn the story into connected scenes and production-ready MiniMax shots.']
-  return <aside className="movie-copilot" aria-label="Movie copilot"><header><span><MessageSquare size={16} /><span><strong>Movie copilot</strong><small>Whole-project builder · local Ollama</small></span></span><i className={ollamaAvailable ? 'online' : ''}>{ollamaAvailable ? 'Ready' : 'Offline'}</i></header><div className="movie-chat-log" aria-live="polite">{project.chatMessages.length === 0 ? <div className="movie-chat-empty"><Sparkles size={22} /><strong>Build the movie from here</strong><span>Chat can create and revise your brief, production bible, cast, locations, scenes, dialogue, and shot prompts.</span><div>{starters.map((starter) => <button key={starter} disabled={!ollamaAvailable || chatting} onClick={() => onSend(starter)}>{starter}</button>)}</div></div> : project.chatMessages.map((message) => <article className={`movie-chat-message ${message.role}`} key={message.id}><span>{message.role === 'user' ? 'You' : 'Copilot'}</span><SmartMarkup value={message.content} />{message.areas && message.areas.length > 0 && <nav className="chat-area-links" aria-label="Review updated movie areas">{message.areas.map((area) => <button key={area} onClick={() => onNavigate(area)}>{areaLabel(area)}<ChevronRight size={12} /></button>)}</nav>}{message.appliedChanges && message.appliedChanges.length > 0 && <details open><summary>{message.appliedChanges.length} change{message.appliedChanges.length === 1 ? '' : 's'} applied</summary><ul>{message.appliedChanges.map((change, index) => <li key={`${change}-${index}`}>{change}</li>)}</ul></details>}</article>)}</div><form onSubmit={(event) => { event.preventDefault(); onSend() }}><label htmlFor="movie-chat-input">Build or revise this movie</label><textarea id="movie-chat-input" value={input} onChange={(event) => setInput(event.target.value)} disabled={chatting} placeholder="Create two characters, three connected scenes, and detailed MiniMax prompts…" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); onSend() } }} /><div><small>Enter to send · Shift+Enter for a new line</small><button className="primary-button" disabled={!input.trim() || chatting || !ollamaAvailable} type="submit">{chatting ? <LoaderCircle className="spin" size={15} /> : <Send size={15} />}{chatting ? 'Building…' : 'Send'}</button></div></form></aside>
+  return <aside className="movie-copilot" aria-label="Movie copilot">
+    <header><span><MessageSquare size={16} /><span><strong>Movie copilot</strong><small>Whole-project builder · local Ollama</small></span></span><div className="movie-copilot-status"><button disabled={!undoEntry || Boolean(pendingRevision)} title={undoEntry ? `Restore the project to before: ${undoEntry.label}` : 'No AI revision to undo'} onClick={onUndo}><RotateCcw size={12} />Undo</button><i className={ollamaAvailable ? 'online' : ''}>{ollamaAvailable ? 'Ready' : 'Offline'}</i></div></header>
+    {pendingRevision ? <MovieRevisionReview revision={pendingRevision} onApply={onApplyRevision} onDiscard={onDiscardRevision} /> : <>
+      <div className="movie-chat-log" aria-live="polite">{project.chatMessages.length === 0 ? <div className="movie-chat-empty"><Sparkles size={22} /><strong>Build the movie from here</strong><span>Chat can create and revise your brief, production bible, cast, locations, scenes, dialogue, and shot prompts.</span><div>{starters.map((starter) => <button key={starter} disabled={!ollamaAvailable || chatting} onClick={() => onSend(starter)}>{starter}</button>)}</div></div> : project.chatMessages.map((message) => <article className={`movie-chat-message ${message.role}`} key={message.id}><span>{message.role === 'user' ? 'You' : 'Copilot'}</span><SmartMarkup value={message.content} />{message.areas && message.areas.length > 0 && <nav className="chat-area-links" aria-label="Review updated movie areas">{message.areas.map((area) => <button key={area} onClick={() => onNavigate(area)}>{areaLabel(area)}<ChevronRight size={12} /></button>)}</nav>}{message.appliedChanges && message.appliedChanges.length > 0 && <details open><summary>{message.appliedChanges.length} change{message.appliedChanges.length === 1 ? '' : 's'} applied</summary><ul>{message.appliedChanges.map((change, index) => <li key={`${change}-${index}`}>{change}</li>)}</ul></details>}</article>)}</div>
+      <form onSubmit={(event) => { event.preventDefault(); onSend() }}><label htmlFor="movie-chat-input">Build or revise this movie</label><textarea id="movie-chat-input" value={input} onChange={(event) => setInput(event.target.value)} disabled={chatting} placeholder="Create two characters, three connected scenes, and detailed MiniMax prompts…" onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); onSend() } }} /><div><small>Enter to send · Shift+Enter for a new line</small><button className="primary-button" disabled={!input.trim() || chatting || !ollamaAvailable} type="submit">{chatting ? <LoaderCircle className="spin" size={15} /> : <Send size={15} />}{chatting ? 'Building…' : 'Send'}</button></div></form>
+    </>}
+  </aside>
+}
+
+function MovieRevisionReview({ revision, onApply, onDiscard }: { revision: PendingMovieRevision; onApply(): void; onDiscard(): void }) {
+  const destructive = revision.diffs.filter((diff) => diff.destructive)
+  const shotRemovals = revision.diffs.filter((diff) => diff.kind === 'remove' && diff.label.startsWith('Shot ')).length
+  const [confirmed, setConfirmed] = useState(false)
+  useEffect(() => { setConfirmed(false) }, [revision])
+  return <section className="movie-revision-review" aria-labelledby="movie-revision-title">
+    <div className="movie-revision-summary"><span><Sparkles size={16} /><span><strong id="movie-revision-title">Review proposed changes</strong><small>Nothing has changed yet · {revision.diffs.length} field-level update{revision.diffs.length === 1 ? '' : 's'}</small></span></span><SmartMarkup value={revision.reply} /></div>
+    {destructive.length > 0 && <div className="movie-revision-warning" role="alert"><AlertTriangle size={16} /><span><strong>Destructive changes need confirmation</strong><small>{destructive.length} removal{destructive.length === 1 ? '' : 's'} may detach assets, scenes, shots, or rendered outputs from this movie.{shotRemovals > LARGE_SHOT_DELETE_THRESHOLD ? ` This exceeds the ${LARGE_SHOT_DELETE_THRESHOLD}-shot safety threshold.` : ''}</small></span></div>}
+    <div className="movie-revision-diffs" role="list" aria-label="Proposed field changes">{revision.diffs.map((diff) => <article key={diff.id} className={`movie-revision-diff ${diff.kind}`} role="listitem"><span>{diff.kind}</span><div><strong>{diff.label}</strong>{diff.kind === 'change' ? <p><del>{diff.before || 'Empty'}</del><ArrowRight size={11} /><ins>{diff.after || 'Empty'}</ins></p> : <small>{diff.after || diff.before}</small>}</div></article>)}</div>
+    <footer>{destructive.length > 0 && <label className="movie-revision-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><span>I understand these removals will be applied to the movie. A local undo snapshot will be kept.</span></label>}<div><button className="secondary-button" onClick={onDiscard}>Discard proposal</button><button className="primary-button" disabled={destructive.length > 0 && !confirmed} onClick={onApply}><Check size={14} />Apply reviewed changes</button></div></footer>
+  </section>
 }
 
 function MoviePreview({ clips, activeIndex, setActiveIndex }: { clips: RenderedMovieClip[]; activeIndex: number; setActiveIndex(value: number): void }) {
@@ -465,6 +582,98 @@ function applyMovieChatOperations(current: MovieProject, raw: MovieChatResult): 
   return next
 }
 
+function appendMovieChat(project: MovieProject, question: string, reply: string, appliedChanges: string[], areas: MovieChatArea[]) {
+  const now = Date.now()
+  return [...project.chatMessages,
+    { id: createId(), role: 'user' as const, content: question, createdAt: now },
+    { id: createId(), role: 'assistant' as const, content: reply, createdAt: now + 1, appliedChanges, areas },
+  ].slice(-100)
+}
+
+function buildMovieRevisionDiffs(before: MovieProject, after: MovieProject): MovieRevisionDiff[] {
+  const diffs: MovieRevisionDiff[] = []
+  const addChange = (area: MovieChatArea, label: string, previous: unknown, next: unknown) => {
+    const left = displayRevisionValue(previous)
+    const right = displayRevisionValue(next)
+    if (left === right) return
+    diffs.push({ id: `${area}-${label}-${diffs.length}`, area, kind: 'change', label, before: left, after: right })
+  }
+  const projectFields: Array<[keyof MovieProject, string]> = [
+    ['title', 'Project title'], ['targetRuntime', 'Target runtime'], ['computeBudgetMinutes', 'Compute budget'], ['aspectRatio', 'Aspect ratio'], ['genre', 'Genre'], ['visualStyle', 'Visual direction'], ['quality', 'Quality target'], ['reviewGate', 'Review gate'], ['story', 'Story treatment'], ['visualRules', 'Continuity rules'],
+  ]
+  projectFields.forEach(([field, label]) => addChange(field === 'visualRules' ? 'bible' : 'setup', label, before[field], after[field]))
+
+  diffNamedCollection(before.characters, after.characters, 'bible', 'Character', ['name', 'description', 'wardrobe', 'voiceNotes'], { name: 'name', description: 'appearance', wardrobe: 'wardrobe', voiceNotes: 'voice' }, diffs)
+  diffNamedCollection(before.locations, after.locations, 'bible', 'Location', ['name', 'description'], { name: 'name', description: 'description' }, diffs)
+
+  const beforeScenes = new Map(before.scenes.map((scene) => [scene.id, scene]))
+  const afterScenes = new Map(after.scenes.map((scene) => [scene.id, scene]))
+  for (const scene of before.scenes) {
+    if (afterScenes.has(scene.id)) continue
+    const rendered = scene.shots.filter((shot) => shot.outputUrl).length
+    diffs.push({ id: `scene-remove-${scene.id}`, area: 'shots', kind: 'remove', label: `Scene “${scene.title}”`, before: `${scene.shots.length} shot${scene.shots.length === 1 ? '' : 's'}${rendered ? ` · ${rendered} rendered` : ''}`, destructive: true })
+  }
+  for (const scene of after.scenes) {
+    const previous = beforeScenes.get(scene.id)
+    if (!previous) {
+      diffs.push({ id: `scene-add-${scene.id}`, area: 'shots', kind: 'add', label: `Scene “${scene.title}”`, after: `${scene.shots.length} shot${scene.shots.length === 1 ? '' : 's'}` })
+      continue
+    }
+    addChange('shots', `Scene “${scene.title}” · title`, previous.title, scene.title)
+    addChange('shots', `Scene “${scene.title}” · summary`, previous.summary, scene.summary)
+    addChange('shots', `Scene “${scene.title}” · location`, movieLocationName(before, previous.locationId), movieLocationName(after, scene.locationId))
+    addChange('shots', `Scene “${scene.title}” · transition`, previous.transition, scene.transition)
+  }
+
+  const beforeShots = flattenMovieShots(before).filter((entry) => afterScenes.has(entry.scene.id))
+  const afterShots = flattenMovieShots(after)
+  const beforeShotMap = new Map(beforeShots.map((entry) => [entry.shot.id, entry]))
+  const afterShotMap = new Map(afterShots.map((entry) => [entry.shot.id, entry]))
+  for (const entry of beforeShots) {
+    if (afterShotMap.has(entry.shot.id)) continue
+    diffs.push({ id: `shot-remove-${entry.shot.id}`, area: 'shots', kind: 'remove', label: `Shot “${entry.shot.title}”`, before: `${entry.scene.title}${entry.shot.outputUrl ? ' · rendered output attached' : ''}`, destructive: true })
+  }
+  for (const entry of afterShots) {
+    const previous = beforeShotMap.get(entry.shot.id)
+    if (!previous) {
+      diffs.push({ id: `shot-add-${entry.shot.id}`, area: 'shots', kind: 'add', label: `Shot “${entry.shot.title}”`, after: `${entry.scene.title} · ${entry.shot.duration}s · ${routeName(entry.shot.mode)}` })
+      continue
+    }
+    const prefix = `Shot “${entry.shot.title}”`
+    addChange('shots', `${prefix} · scene`, previous.scene.title, entry.scene.title)
+    addChange('shots', `${prefix} · title`, previous.shot.title, entry.shot.title)
+    addChange('shots', `${prefix} · prompt`, previous.shot.prompt, entry.shot.prompt)
+    addChange('shots', `${prefix} · dialogue`, previous.shot.dialogue, entry.shot.dialogue)
+    addChange('shots', `${prefix} · duration`, `${previous.shot.duration}s`, `${entry.shot.duration}s`)
+    addChange('shots', `${prefix} · route`, routeName(previous.shot.mode), routeName(entry.shot.mode))
+    addChange('shots', `${prefix} · cast`, movieCharacterNames(before, previous.shot.characterIds), movieCharacterNames(after, entry.shot.characterIds))
+  }
+  return diffs
+}
+
+function diffNamedCollection<T extends { id: string; name: string }>(before: T[], after: T[], area: MovieChatArea, noun: string, fields: Array<keyof T>, labels: Partial<Record<keyof T, string>>, diffs: MovieRevisionDiff[]) {
+  const beforeMap = new Map(before.map((item) => [item.id, item]))
+  const afterMap = new Map(after.map((item) => [item.id, item]))
+  for (const item of before) if (!afterMap.has(item.id)) diffs.push({ id: `${noun}-remove-${item.id}`, area, kind: 'remove', label: `${noun} “${item.name}”`, before: 'Removed from the movie and unassigned from linked shots', destructive: true })
+  for (const item of after) {
+    const previous = beforeMap.get(item.id)
+    if (!previous) { diffs.push({ id: `${noun}-add-${item.id}`, area, kind: 'add', label: `${noun} “${item.name}”`, after: displayRevisionValue(fields.map((field) => item[field]).filter(Boolean).join(' · ')) }); continue }
+    for (const field of fields) {
+      const left = displayRevisionValue(previous[field]); const right = displayRevisionValue(item[field])
+      if (left !== right) diffs.push({ id: `${noun}-${item.id}-${String(field)}`, area, kind: 'change', label: `${noun} “${item.name}” · ${labels[field] ?? String(field)}`, before: left, after: right })
+    }
+  }
+}
+
+function flattenMovieShots(project: MovieProject) { return project.scenes.flatMap((scene) => scene.shots.map((shot) => ({ scene, shot }))) }
+function movieLocationName(project: MovieProject, id: string) { return project.locations.find((location) => location.id === id)?.name || 'Unspecified' }
+function movieCharacterNames(project: MovieProject, ids: string[]) { return ids.map((id) => project.characters.find((character) => character.id === id)?.name).filter(Boolean).join(', ') || 'No cast' }
+function displayRevisionValue(value: unknown) {
+  const normalized = String(value ?? '').trim().replace(/\s+/g, ' ')
+  if (!normalized) return ''
+  return normalized.length > 180 ? `${normalized.slice(0, 177)}…` : normalized
+}
+
 function SmartMarkup({ value }: { value: string }) {
   return <div className="chat-markup">{value.split(/\r?\n/).map((line, index) => {
     const heading = line.match(/^#{1,3}\s+(.+)/)
@@ -491,6 +700,7 @@ function AssetCollection({ title, subtitle, empty, onAdd, library, children }: {
   const libraryStrip = title === 'Characters' && characters.length > 0 ? <div className="bible-library-strip"><span>Add from Character Studio</span>{characters.map((character) => { const references = characterReferences(character); return <button key={character.id} disabled={!references.length} onClick={() => window.dispatchEvent(new CustomEvent(IMPORT_CHARACTER_EVENT, { detail: character.id }))}>{character.baseImage?.preview ? <img src={character.baseImage.preview} alt="" /> : <Users size={14} />}<span>{character.name}</span><Plus size={12} /></button> })}</div> : title === 'Locations' && locations.length > 0 ? <div className="bible-library-strip"><span>Add from Location Studio</span>{locations.map((location) => { const references = locationReferences(location); return <button key={location.id} disabled={!references.length} onClick={() => window.dispatchEvent(new CustomEvent(IMPORT_LOCATION_EVENT, { detail: location.id }))}>{references[0]?.preview ? <img src={references[0].preview} alt="" /> : <MapPin size={14} />}<span>{location.name}</span><Plus size={12} /></button> })}</div> : null
   return <section className="bible-column"><div className="bible-column-heading"><div><strong>{title}</strong><small>{subtitle}</small></div><button onClick={onAdd}><Plus size={14} />Create</button></div>{library ?? libraryStrip}{hasChildren ? <div className="asset-card-grid">{children}</div> : <div className="bible-empty">{empty}</div>}</section>
 }
+
 function AssetCard({ icon, name, description, references, linked, refreshAvailable, onRefresh, onEdit, onRemove }: { icon: 'character' | 'location'; name: string; description: string; references: MediaFile[]; linked?: boolean; refreshAvailable?: boolean; onRefresh?(): void; onEdit(): void; onRemove(): void }) {
   return <article className="movie-asset-card"><button className="asset-card-main" onClick={onEdit}>{references[0]?.preview ? <img src={references[0].preview} alt="" /> : <span className="asset-placeholder">{icon === 'character' ? <Users size={20} /> : <MapPin size={20} />}</span>}<span className="asset-card-copy"><strong>{name}{linked && <em>Character Studio</em>}</strong><span>{description || `Add ${icon === 'character' ? 'appearance and performance' : 'set and atmosphere'} details`}</span><small>{references.length} approved reference image{references.length === 1 ? '' : 's'}{!linked && icon === 'character' ? ' · movie only' : ''}</small>{refreshAvailable && <small className="asset-refresh-state">Character Studio has newer references</small>}</span></button><div className="asset-card-actions">{refreshAvailable && onRefresh && <button className="refresh" onClick={onRefresh}><RefreshCw size={13} />Refresh</button>}<button onClick={onEdit}><Pencil size={13} />Edit</button><button aria-label={`Remove ${name}`} onClick={onRemove}><Trash2 size={13} /></button></div></article>
 }

@@ -70,6 +70,12 @@ assert.equal(fullQuality['13'].inputs.sampler_name, OFFICIAL_H3_SAMPLER)
 assert.equal(fullQuality['14'].inputs.scheduler, OFFICIAL_H3_SCHEDULER)
 assert.equal(fullQuality['14'].inputs.steps, 20)
 
+const previewGraph = buildMiniMaxWorkflow({ mode: 'reference', width: 1344, height: 768, prompt: 'test', duration: 5, seed: 1, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', filenamePrefix: 'test', refImageSize: 'match', previewOverride: { frames: 50, fps: 12, nodeType: 'MiniMaxH3PreviewOverride', vaeName: 'taeh3_decoder.safetensors', jpegQuality: 85 } }, models, { images: [{ name: 'ref.png' }], videos: [], audios: [] })
+assert.equal(previewGraph['7'].class_type, 'MiniMaxH3PreviewOverride')
+assert.equal(previewGraph['7'].inputs.vae_name, 'taeh3_decoder.safetensors')
+assert.equal(previewGraph['7'].inputs.jpeg_quality, 85)
+assert.equal(previewGraph['12'].inputs.model[0], '7')
+
 const compatibilityTurbo = buildMiniMaxWorkflow({ mode: 'text', width: 1344, height: 768, prompt: 'test', duration: 5, seed: 1, steps: 20, turbo: '8', experimentalSampling: true, loraStrength: 0.9, sampler: 'euler', scheduler: 'beta', sigmaShift: { video: 12, audio: 4 }, filenamePrefix: 'test', refImageSize: 'match' }, models, { images: [], videos: [], audios: [] })
 assert.equal(compatibilityTurbo['5'].inputs.strength_model, 0.9)
 assert.equal(compatibilityTurbo['6'].class_type, 'MiniMaxH3SigmaShift')

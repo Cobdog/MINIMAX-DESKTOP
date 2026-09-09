@@ -302,16 +302,19 @@ Next test gate: render several movie-linked clips out of order and confirm the p
 
 Next test gate: use several different installed Ollama model families against the expanded schema, measure response reliability on large projects, and add an undoable review step for destructive or broad multi-scene revisions.
 
-### Feature Pass 6 — Storyboard and conversational revision safety (next)
+### Feature Pass 6 — Storyboard and conversational revision safety (in progress)
 
-- Add a pending-change preview showing field-level diffs before broad chat revisions are committed.
-- Keep an undo history for AI-applied story, bible, scene, and shot edits.
+- Implemented a pending-change review inside Movie copilot. AI proposals now show field-level additions, edits, and removals before any project data is committed.
+- Implemented a capped per-project undo history for reviewed AI changes. The latest ten pre-change movie snapshots are stored locally, with a session-only fallback when browser storage cannot accommodate a large snapshot.
+- Implemented stale-proposal protection: if the filmmaker manually edits the movie while a proposal is open, Apply refreshes the comparison against the current project instead of overwriting newer work.
+- Implemented explicit destructive-change confirmation for character, location, scene, and shot removals, including rendered-output warnings and a highlighted threshold when more than three shots are removed.
 - Summarize older conversation and completed scenes into compact project memory when the local model context window becomes crowded.
 - Generate Z-Image storyboard candidates per shot and show approved thumbnails on scene cards.
 - Add an animatic player using approved storyboards, dialogue placeholders, shot durations, and temporary audio.
 - Surface continuity warnings in chat and scene cards when wardrobe, location anchors, screen direction, duration, or generation route drift from the production bible.
 - Let chat select a specific character, location, scene, or shot as its focused editing scope while retaining awareness of the full project.
-- Require explicit confirmation before chat removes assets, scenes, rendered outputs, or more than a configurable number of shots.
+
+Next test gate: exercise the review schema with several installed Ollama model families on large movie projects, verify retained undo snapshots after an app restart, and confirm stale proposals rebase cleanly after simultaneous manual story, bible, and shot edits.
 
 ### Feature Pass 7 — LAN mobile companion (implemented foundation)
 
@@ -430,6 +433,33 @@ Next test gate: render one Native Quality MiniMax clip with upscale Off, then ru
 - Surface library characters in Movie Creator’s Production Bible, where approved references can be imported as normal editable movie cast cards and used by existing shot/reference routing.
 
 Next test gate: make one Z-Image master, generate a six-second turntable, verify its automatic link after completion, split five frames, import the set into a movie, assign it to a shot, and confirm Ref2V sees all selected references.
+
+### Feature Pass 17 — Reference workspace continuity and asset assembly (implemented)
+
+- Expand Source Media into a viewport-safe 1120px workspace with calmer section spacing, larger standalone-file previews, and large identity/location thumbnails.
+- Import the selected character's approved identity, assigned Hair Studio design, Wardrobe Studio outfit, and accessories through one current library allocation instead of preserving an identity-only snapshot.
+- Show the exact connected hair and wardrobe on each character row, and explicitly flag linked assets that still need an approved image.
+- Generate one automatic per-character assembly instruction that pairs numbered identity, hair, clothing, and accessory pictures before the detailed preservation rules.
+- Expose the synchronized automatic reference direction inside Source Media so picture numbering and missing assignments can be audited before rendering.
+- Add a Character Studio action that renders an assigned hairstyle into a fresh character master for the most reliable downstream identity reference.
+- Add completed-Reference-video continuation controls: extract the exact final frame or a user-selected timestamp, load it as the next I2V first frame, and leave the already-rendered clip untouched.
+- Store the completed local video path for deterministic continuation-frame extraction.
+- Supply current MiniMax H3 Preview Override inputs (`vae_name` and `jpeg_quality`) and cover them with workflow regression assertions.
+- Select the newest linked Location Studio automation job, return submission failures to its guided builder, and report automatic frame-extraction failures instead of silently hiding them.
+
+Next test gate: select a character with approved hair and wardrobe and confirm every numbered picture and assembly line appears; render a short Reference clip with animated preview; continue once from the last frame and once from a middle timestamp; then verify character turntable and location walkthrough auto-import five stills.
+
+### Feature Pass 18 — Mobile and LAN workspace access (implemented)
+
+- Simplify the phone companion to three quick destinations—Video, Image, and Cast—with a separate touch-sized workspace drawer.
+- Put Reference Workspace directly in the mobile menu and keep identity, hair, wardrobe, standalone images, motion references, audio, clothing intent, and fidelity controls reachable at phone widths.
+- Add a complete-Studio entry for Movie, Hair, Wardrobe, Locations, Queue, Library, Editor, and Settings.
+- Replace the complete Studio's narrow horizontal mobile icon strip with an accessible overlay drawer so every workspace remains reachable without sideways scrolling.
+- Synchronize mobile cast entries with the same numbered desktop reference allocation and automatic prompt instructions, including approved hair and wardrobe instead of sending an empty wardrobe field.
+- Convert local reference files to phone-safe data URLs before LAN synchronization so the phone can preview and upload connected assets through the authenticated LAN API.
+- Preserve token authorization, invalid-token rejection, ComfyUI bootstrap, media proxying, queue cancellation, and local Ollama routing.
+
+Next test gate: open the QR link on a real phone, import one character with approved hair and wardrobe into Reference mode, submit/cancel a short render, preview and download the result, then open the complete Studio drawer at portrait and landscape sizes.
 
 Research basis: current work finds a real identity-versus-motion tradeoff, while multi-shot systems improve consistency through shared references/features, approved anchor frames, and separate shot/temporal memory. Relevant sources: https://arxiv.org/abs/2412.07750, https://arxiv.org/abs/2512.11274, and https://openaccess.thecvf.com/content/CVPR2025/html/Kara_ShotAdapter_Text-to-Multi-Shot_Video_Generation_with_Diffusion_Models_CVPR_2025_paper.html
 

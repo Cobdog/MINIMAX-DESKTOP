@@ -66,7 +66,7 @@ export function buildMiniMaxWorkflow(
   }
   if (options.previewOverride) {
     prompt['7'] = {
-      class_type: 'MiniMaxH3PreviewOverrideCS',
+      class_type: options.previewOverride.nodeType ?? 'MiniMaxH3PreviewOverrideCS',
       inputs: {
         model: modelLink,
         decode: 'latent2rgb (fast)',
@@ -74,6 +74,10 @@ export function buildMiniMaxWorkflow(
         max_resolution: 512,
         preview_frames: options.previewOverride.frames,
         preview_fps: options.previewOverride.fps,
+        // This is the tiny per-step RGB decoder from models/vae_approx, not the
+        // full MiniMax video VAE used by the final decode branch.
+        vae_name: options.previewOverride.vaeName ?? models.previewVae,
+        jpeg_quality: options.previewOverride.jpegQuality ?? 85,
         webp_quality: 80,
         every_n_steps: 1,
         max_preview_overhead: 25,

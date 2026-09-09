@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertCircle, Check, CircleStop, Dices, ImagePlus, LoaderCircle, Sparkles, WandSparkles } from 'lucide-react'
-import { buildZImage } from '../lib/zimage'
+import { AlertCircle, Check, CircleStop, Dices, Gauge, ImagePlus, LoaderCircle, Sparkles, WandSparkles } from 'lucide-react'
+import { buildZImage, type ZImageVariant } from '../lib/zimage'
 import { choices, type ObjectInfo } from '../lib/comfyInfo'
 import { RenderSize } from './RenderSize'
 import type { MediaFile } from '../types'
 
 type StoredWorkspace = {
   prompt: string
+  negativePrompt: string
   resolution: string
+  variant: ZImageVariant
   model: string
   encoder: string
   vae: string
@@ -18,7 +20,9 @@ type StoredWorkspace = {
 
 const defaults: StoredWorkspace = {
   prompt: '',
+  negativePrompt: '',
   resolution: '1344x768',
+  variant: 'turbo',
   model: 'z_image_turbo_bf16.safetensors',
   encoder: 'qwen_3_4b.safetensors',
   vae: 'ae.safetensors',
@@ -28,9 +32,18 @@ const defaults: StoredWorkspace = {
 }
 
 function readWorkspace(): StoredWorkspace {
-  try { return { ...defaults, ...JSON.parse(localStorage.getItem('minimax.zimage-workspace') ?? '{}') } }
+  try {
+    const saved = JSON.parse(localStorage.getItem('minimax.zimage-workspace') ?? '{}') as Partial<StoredWorkspace>
+    return { ...defaults, ...saved, variant: saved.variant === 'base' ? 'base' : 'turbo' }
+  }
   catch { return defaults }
 }
+
+const isZImageModel = (name: string) => /z[_\s-]?image/i.test(name)
+const isTurboModel = (name: string) => isZImageModel(name) && /turbo/i.test(name)
+const isBaseModel = (name: string) => isZImageModel(name) && !/turbo/i.test(name)
+const preferredModel = (models: string[], variant: ZImageVariant) => models.find(variant === 'turbo' ? isTurboModel : isBaseModel)
+  ?? (variant === 'turbo' ? 'z_image_turbo_bf16.safetensors' : 'z_image_bf16.safetensors')
 
 export function ZImageWorkspace({
   url, info, connected, ollamaAvailable, ollamaUrl, ollamaModel, outputDirectory, onUse,
@@ -46,7 +59,9 @@ export function ZImageWorkspace({
 }) {
   const initial = useMemo(readWorkspace, [])
   const [prompt, setPrompt] = useState(initial.prompt)
+  const [negativePrompt, setNegativePrompt] = useState(initial.negativePrompt)
   const [resolution, setResolution] = useState(initial.resolution)
+  const [variant, setVariant] = useState<ZImageVariant>(initial.variant)
   const [model, setModel] = useState(initial.model)
   const [encoder, setEncoder] = useState(initial.encoder)
   const [vae, setVae] = useState(initial.vae)
@@ -70,8 +85,8 @@ export function ZImageWorkspace({
   }, [])
 
   useEffect(() => {
-    localStorage.setItem('minimax.zimage-workspace', JSON.stringify({ prompt, resolution, model, encoder, vae, seed, steps, guidance }))
-  }, [encoder, guidance, model, prompt, resolution, seed, steps, vae])
+    localStorage.setItem('minimax.zimage-workspace', JSON.stringify({ prompt, negativePrompt, resolution, variant, model, encoder, vae, seed, steps, guidance }))
+  }, [encoder, guidance, model, negativePrompt, prompt, resolution, seed, steps, vae, variant])
 
   useEffect(() => {
     if (!job) return
@@ -103,9 +118,22 @@ export function ZImageWorkspace({
     return () => { disposed = true; clearTimeout(timer) }
   }, [job, outputDirectory])
 
-  const available = choices(info, 'UNETLoader', 'unet_name').includes(model)
+  const installedModels = choices(info, 'UNETLoader', 'unet_name')
+  const turboInstalled = installedModels.some(isTurboModel)
+  const baseInstalled = installedModels.some(isBaseModel)
+  const modelMatchesVariant = variant === 'turbo' ? isTurboModel(model) : isBaseModel(model)
+  const available = installedModels.includes(model) && modelMatchesVariant
     && choices(info, 'CLIPLoader', 'clip_name').includes(encoder)
     && choices(info, 'VAELoader', 'vae_name').includes(vae)
+  const switchVariant = (next: ZImageVariant) => {
+    if (busy || next === variant) return
+    setVariant(next)
+    setModel(preferredModel(installedModels, next))
+    setSteps(next === 'turbo' ? 8 : 40)
+    setGuidance(next === 'turbo' ? 1 : 4)
+    setMessage(next === 'turbo' ? 'Turbo mode selected: fast 8-step generation.' : 'Original Z-Image selected: 40-step detail mode with CFG and negative prompting.')
+    setError(false)
+  }
   const fields = [
     { label: 'Z-Image model', value: model, set: setModel, node: 'UNETLoader', field: 'unet_name' },
     { label: 'Text encoder', value: encoder, set: setEncoder, node: 'CLIPLoader', field: 'clip_name' },
@@ -114,10 +142,10 @@ export function ZImageWorkspace({
 
   const create = async () => {
     if (!connected || !available || !prompt.trim()) return
-    setBusy(true); setResult(null); setError(false); setMessage('Submitting Z-Image Turbo workflow…')
+    setBusy(true); setResult(null); setError(false); setMessage(`Submitting ${variant === 'turbo' ? 'Z-Image Turbo' : 'Original Z-Image'} workflow…`)
     try {
       const [width, height] = resolution.split('x').map(Number)
-      const response = await window.minimax.submitPrompt(url, buildZImage(prompt.trim(), width, height, seed, model, encoder, vae, steps, guidance))
+      const response = await window.minimax.submitPrompt(url, buildZImage(prompt.trim(), width, height, seed, model, encoder, vae, steps, guidance, variant, variant === 'base' ? negativePrompt.trim() : ''))
       setJob({ id: response.prompt_id, url })
     } catch (caught) {
       setMessage(caught instanceof Error ? caught.message : String(caught)); setError(true); setBusy(false)
@@ -138,7 +166,7 @@ export function ZImageWorkspace({
     if (!ollamaAvailable || !prompt.trim() || assisting) return
     setAssisting(true); setError(false); setMessage('Asking the local prompt assistant…')
     try {
-      const instruction = `Rewrite this as one polished still-image prompt for Z-Image Turbo. Preserve the subject and intent while improving composition, lens, lighting, environment, texture, color, and clarity. Do not describe motion, sound, timelines, or multiple shots. Return only the finished prompt.\n\nDRAFT:\n${prompt.trim()}`
+      const instruction = `Rewrite this as one polished still-image prompt for ${variant === 'turbo' ? 'Z-Image Turbo' : 'the original Z-Image base model'}. Preserve the subject and intent while improving composition, lens, lighting, environment, texture, color, and clarity. Do not describe motion, sound, timelines, or multiple shots. Return only the finished prompt.\n\nDRAFT:\n${prompt.trim()}`
       setPrompt(await window.minimax.generateWithOllama(ollamaUrl, ollamaModel, instruction))
       setMessage('Prompt enhanced locally. Review it before generating.')
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : String(caught)); setError(true) }
@@ -147,27 +175,34 @@ export function ZImageWorkspace({
 
   return <div className="standard-page zimage-workspace">
     <div className="page-heading">
-      <div><p className="eyebrow">LOCAL IMAGE WORKSPACE</p><h1>Create Image</h1><p>Create a production still with Z-Image Turbo, then use it as a reference or send it to MiniMax I2V.</p></div>
-      <div className="heading-state"><span className={connected && available ? 'ok' : 'warn'}>{connected && available ? <Check size={15} /> : <AlertCircle size={15} />}{connected ? available ? 'Z-Image ready' : 'Select installed models' : 'Engine offline'}</span></div>
+      <div><p className="eyebrow">LOCAL IMAGE WORKSPACE</p><h1>Create Image</h1><p>Choose fast Z-Image Turbo or the original full-capacity model for detailed production stills.</p></div>
+      <div className="heading-state"><span className={connected && available ? 'ok' : 'warn'}>{connected && available ? <Check size={15} /> : <AlertCircle size={15} />}{connected ? available ? variant === 'turbo' ? 'Turbo ready' : 'Original ready' : `${variant === 'turbo' ? 'Turbo' : 'Original'} model needed` : 'Engine offline'}</span></div>
     </div>
 
     <div className="zimage-workspace-grid">
       <section className="zimage-composer">
+        <fieldset className="zimage-mode-picker" disabled={busy}>
+          <legend>Generation mode</legend>
+          <label className={variant === 'turbo' ? 'selected' : ''}><input type="radio" name="zimage-variant" checked={variant === 'turbo'} onChange={() => switchVariant('turbo')} /><Gauge size={18} /><span><strong>Z-Image Turbo</strong><small>Fast preview and everyday creation · 8 steps</small></span><em className={turboInstalled ? 'installed' : ''}>{turboInstalled ? 'Installed' : 'Model needed'}</em></label>
+          <label className={variant === 'base' ? 'selected' : ''}><input type="radio" name="zimage-variant" checked={variant === 'base'} onChange={() => switchVariant('base')} /><Sparkles size={18} /><span><strong>Original Z-Image</strong><small>Full-capacity detail and stronger prompt control · 40 steps</small></span><em className={baseInstalled ? 'installed' : ''}>{baseInstalled ? 'Installed' : 'Model needed'}</em></label>
+        </fieldset>
         <div className="field-group">
           <div className="field-label"><label htmlFor="zimage-prompt">Image prompt</label><span>{prompt.length.toLocaleString()} characters</span></div>
           <textarea id="zimage-prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Describe the subject, environment, composition, lens, lighting, color, and opening-frame details…" disabled={busy} />
           <div className="zimage-prompt-actions"><button className="secondary-button" onClick={() => void enhance()} disabled={busy || assisting || !ollamaAvailable || !prompt.trim()} title={ollamaAvailable ? `Enhance with ${ollamaModel}` : 'Configure Ollama in Settings'}>{assisting ? <LoaderCircle size={15} className="spin" /> : <WandSparkles size={15} />}Enhance with Ollama</button><small>{ollamaAvailable ? `${ollamaModel} · local` : 'Ollama unavailable'}</small></div>
         </div>
 
+        {variant === 'base' && <div className="field-group zimage-negative-prompt"><div className="field-label"><label htmlFor="zimage-negative-prompt">Negative prompt <small>Optional</small></label><span>{negativePrompt.length.toLocaleString()} characters</span></div><textarea id="zimage-negative-prompt" value={negativePrompt} onChange={(event) => setNegativePrompt(event.target.value)} placeholder="Describe artifacts or unwanted elements to suppress…" disabled={busy} /></div>}
+
         <RenderSize value={resolution} onChange={setResolution} provider="zimage" />
         <div className="zimage-seed-row"><label>Seed<input type="number" min="0" max="999999999999" value={seed} disabled={busy} onChange={(event) => setSeed(Number(event.target.value))} /></label><button className="secondary-button" disabled={busy} onClick={() => setSeed(Math.floor(Math.random() * 1_000_000_000))}><Dices size={15} />Randomize</button></div>
 
         <details className="zimage-model-settings">
           <summary>Model components <small>Advanced</small></summary>
-          <div className="zimage-quality-controls"><label>Sampling steps<input type="number" min="4" max="20" value={steps} disabled={busy} onChange={(event) => setSteps(Math.max(4, Math.min(20, Number(event.target.value))))} /></label><label>Guidance<input type="number" min="1" max="3" step="0.1" value={guidance} disabled={busy} onChange={(event) => setGuidance(Math.max(1, Math.min(3, Number(event.target.value))))} /></label></div>
-          <p className="field-help">Turbo defaults are 8 steps and guidance 1. Increase gently for difficult compositions.</p>
+          <div className="zimage-quality-controls"><label>Sampling steps<input type="number" min={variant === 'turbo' ? 4 : 28} max={variant === 'turbo' ? 20 : 50} value={steps} disabled={busy} onChange={(event) => { const min = variant === 'turbo' ? 4 : 28; const max = variant === 'turbo' ? 20 : 50; setSteps(Math.max(min, Math.min(max, Number(event.target.value)))) }} /></label><label>Guidance<input type="number" min={variant === 'turbo' ? 1 : 3} max={variant === 'turbo' ? 3 : 5} step="0.1" value={guidance} disabled={busy} onChange={(event) => { const min = variant === 'turbo' ? 1 : 3; const max = variant === 'turbo' ? 3 : 5; setGuidance(Math.max(min, Math.min(max, Number(event.target.value)))) }} /></label></div>
+          <p className="field-help">{variant === 'turbo' ? 'Turbo uses 8 steps and guidance 1. It is optimized for speed and does not use negative prompting.' : 'Original Z-Image is undistilled. The official range is 28–50 steps and guidance 3–5; 40 steps and guidance 4 balance detail and render time.'}</p>
           <div className="zimage-models">{fields.map((field) => <label key={field.label}>{field.label}<select value={field.value} disabled={busy} onChange={(event) => field.set(event.target.value)}>{!choices(info, field.node, field.field).includes(field.value) && <option value={field.value}>{field.value} · unavailable</option>}{choices(info, field.node, field.field).map((name) => <option key={name}>{name}</option>)}</select></label>)}</div>
-          {!available && <p className="field-help">Choose Z-Image components registered with ComfyUI. Their safetensor folders remain controlled from Settings.</p>}
+          {!available && <p className="field-help">Choose a matching {variant === 'turbo' ? 'Z-Image Turbo' : 'original Z-Image'} model registered with ComfyUI. The expected diffusion model is {variant === 'turbo' ? 'z_image_turbo_bf16.safetensors' : 'z_image_bf16.safetensors'}.</p>}
         </details>
 
         {message && <div className={`zimage-message ${error ? 'error' : ''}`} role={error ? 'alert' : 'status'}>{busy && <LoaderCircle size={16} className="spin" />}<span>{message}</span></div>}

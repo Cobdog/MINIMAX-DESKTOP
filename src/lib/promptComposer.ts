@@ -2,6 +2,7 @@ import { characterReferences } from './characterLibrary'
 import { fitWholeCharacter } from './imageCrop'
 import { loadWardrobeProjects, wardrobeReferences } from './wardrobeLibrary'
 import { loadAccessoryProjects } from './accessoryLibrary'
+import { loadHairStyleProjects } from './hairLibrary'
 import type { CharacterProject, GenerationMode, MediaFile, MovieProject, MovieReferenceBinding, MovieScene, MovieShot, ResolvedMovieShot, WardrobeProject } from '../types'
 
 export type PromptAssistantTool = 'enhance' | 'timeline' | 'audio'
@@ -9,34 +10,39 @@ export type PromptAssistantTool = 'enhance' | 'timeline' | 'audio'
 const uniqueBindings = (bindings: MovieReferenceBinding[]) => bindings.filter((binding, index) => bindings.findIndex((item) => item.file.path === binding.file.path && item.characterId === binding.characterId && item.purpose === binding.purpose) === index)
 const sentenceKey = (value: string) => value.toLowerCase().replace(/[^a-z0-9<>]+/g, ' ').trim()
 
-export function allocateCharacterReferences(characters: Array<{ id: string; name: string; identity: MediaFile[]; wardrobeIds: string[]; accessoryIds?: string[] }>, wardrobes: WardrobeProject[], limit = 9): MovieReferenceBinding[] {
+export function allocateCharacterReferences(characters: Array<{ id: string; name: string; identity: MediaFile[]; hairStyleIds?: string[]; wardrobeIds: string[]; accessoryIds?: string[] }>, wardrobes: WardrobeProject[], limit = 9): MovieReferenceBinding[] {
   const accessories = loadAccessoryProjects()
+  const hairStyles = loadHairStyleProjects()
   const queues = characters.map((character) => ({
     character,
     identity: character.identity.map((file, index) => ({ file: fitWholeCharacter(file), purpose: (index === 0 ? 'character' : 'character-angle') as MovieReferenceBinding['purpose'], label: `Character: ${character.name} / ${index === 0 ? 'master' : `angle ${index + 1}`}`, characterId: character.id, source: 'character-studio' as const })),
+    hair: (character.hairStyleIds ?? []).slice(0, 1).flatMap((hairStyleId) => { const hair = hairStyles.find((item) => item.id === hairStyleId); return hair?.referenceImage ? [{ file: hair.referenceImage, purpose: 'hair' as const, label: `Hair: ${hair.name} for ${character.name}`, characterId: character.id, hairStyleId: hair.id, source: 'hair-studio' as const }] : [] }),
     // One outfit per character and render. Combining several assigned wardrobes
     // creates an ambiguous clothing target and causes the model to blend them.
     wardrobe: character.wardrobeIds.slice(0, 1).flatMap((wardrobeId) => { const wardrobe = wardrobes.find((item) => item.id === wardrobeId); return wardrobe ? wardrobeReferences(wardrobe).map((file) => ({ file: fitWholeCharacter(file), purpose: 'wardrobe' as const, label: `Wardrobe: ${wardrobe.name} for ${character.name}`, characterId: character.id, wardrobeId: wardrobe.id, source: 'wardrobe-studio' as const })) : [] }),
     accessories: (character.accessoryIds ?? []).flatMap((accessoryId) => { const accessory = accessories.find((item) => item.id === accessoryId); return accessory?.referenceImage ? [{ file: accessory.referenceImage, purpose: 'accessory' as const, label: `Accessory: ${accessory.name} for ${character.name}`, characterId: character.id, accessoryId: accessory.id, source: 'accessory-studio' as const }] : [] }),
   }))
   const result: MovieReferenceBinding[] = []
-  const takeRound = (key: 'identity' | 'wardrobe' | 'accessories') => { for (const queue of queues) { const next = queue[key].shift(); if (next && result.length < limit) result.push(next) } }
+  const takeRound = (key: 'identity' | 'hair' | 'wardrobe' | 'accessories') => { for (const queue of queues) { const next = queue[key].shift(); if (next && result.length < limit) result.push(next) } }
   takeRound('identity')
+  takeRound('hair')
   takeRound('wardrobe')
   takeRound('accessories')
-  while (result.length < limit && queues.some((queue) => queue.identity.length || queue.wardrobe.length || queue.accessories.length)) { takeRound('identity'); takeRound('wardrobe'); takeRound('accessories') }
+  while (result.length < limit && queues.some((queue) => queue.identity.length || queue.hair.length || queue.wardrobe.length || queue.accessories.length)) { takeRound('identity'); takeRound('hair'); takeRound('wardrobe'); takeRound('accessories') }
   return uniqueBindings(result).slice(0, limit)
 }
 
 export function allocateWorkspaceReferences(
-  characters: Array<{ id: string; name: string; identity: MediaFile[]; wardrobeIds: string[]; accessoryIds?: string[] }>,
+  characters: Array<{ id: string; name: string; identity: MediaFile[]; hairStyleIds?: string[]; wardrobeIds: string[]; accessoryIds?: string[] }>,
   wardrobes: WardrobeProject[],
   locations: Array<{ id: string; name: string; images: MediaFile[]; environmentMode?: 'mixed' | 'nature' | 'built' }>,
   limit = 9,
 ): MovieReferenceBinding[] {
   const accessories = loadAccessoryProjects()
+  const hairStyles = loadHairStyleProjects()
   const characterQueues = characters.map((character) => ({
     identity: character.identity.map((file, index) => ({ file: fitWholeCharacter(file), purpose: (index === 0 ? 'character' : 'character-angle') as MovieReferenceBinding['purpose'], label: `Character: ${character.name} / ${index === 0 ? 'master' : `angle ${index + 1}`}`, characterId: character.id, source: 'character-studio' as const })),
+    hair: (character.hairStyleIds ?? []).slice(0, 1).flatMap((hairStyleId) => { const hair = hairStyles.find((item) => item.id === hairStyleId); return hair?.referenceImage ? [{ file: hair.referenceImage, purpose: 'hair' as const, label: `Hair: ${hair.name} for ${character.name}`, characterId: character.id, hairStyleId: hair.id, source: 'hair-studio' as const }] : [] }),
     wardrobe: character.wardrobeIds.slice(0, 1).flatMap((wardrobeId) => { const wardrobe = wardrobes.find((item) => item.id === wardrobeId); return wardrobe ? wardrobeReferences(wardrobe).map((file) => ({ file: fitWholeCharacter(file), purpose: 'wardrobe' as const, label: `Wardrobe: ${wardrobe.name} for ${character.name}`, characterId: character.id, wardrobeId: wardrobe.id, source: 'wardrobe-studio' as const })) : [] }),
     accessories: (character.accessoryIds ?? []).flatMap((accessoryId) => { const accessory = accessories.find((item) => item.id === accessoryId); return accessory?.referenceImage ? [{ file: accessory.referenceImage, purpose: 'accessory' as const, label: `Accessory: ${accessory.name} for ${character.name}`, characterId: character.id, accessoryId: accessory.id, source: 'accessory-studio' as const }] : [] }),
   }))
@@ -47,11 +53,13 @@ export function allocateWorkspaceReferences(
   // Give every selected subject, assigned outfit, and location one authoritative
   // picture before distributing the remaining slots across their extra views.
   characterQueues.forEach((queue) => take(queue.identity))
+  characterQueues.forEach((queue) => take(queue.hair))
   characterQueues.forEach((queue) => take(queue.wardrobe))
   characterQueues.forEach((queue) => take(queue.accessories))
   locationQueues.forEach(take)
-  while (result.length < limit && (characterQueues.some((queue) => queue.identity.length || queue.wardrobe.length || queue.accessories.length) || locationQueues.some((queue) => queue.length))) {
+  while (result.length < limit && (characterQueues.some((queue) => queue.identity.length || queue.hair.length || queue.wardrobe.length || queue.accessories.length) || locationQueues.some((queue) => queue.length))) {
     characterQueues.forEach((queue) => take(queue.identity))
+    characterQueues.forEach((queue) => take(queue.hair))
     characterQueues.forEach((queue) => take(queue.wardrobe))
     characterQueues.forEach((queue) => take(queue.accessories))
     locationQueues.forEach(take)
@@ -63,7 +71,7 @@ export function resolveMovieShotReferences(project: MovieProject, scene: MovieSc
   const bindings: MovieReferenceBinding[] = []
   const wardrobes = loadWardrobeProjects()
   const cast = project.characters.filter((item) => shot.characterIds.includes(item.id))
-  const characterInputs = cast.map((character) => { const source = character.libraryCharacterId ? library.find((item) => item.id === character.libraryCharacterId) : undefined; return { id: character.id, name: character.name, identity: source ? characterReferences(source) : character.referenceImages, wardrobeIds: source?.wardrobeIds ?? [], accessoryIds: source?.accessoryIds ?? [] } })
+  const characterInputs = cast.map((character) => { const source = character.libraryCharacterId ? library.find((item) => item.id === character.libraryCharacterId) : undefined; return { id: character.id, name: character.name, identity: source ? characterReferences(source) : character.referenceImages, hairStyleIds: source?.hairStyleIds ?? [], wardrobeIds: source?.wardrobeIds ?? [], accessoryIds: source?.accessoryIds ?? [] } })
   const location = project.locations.find((item) => item.id === scene.locationId)
   const nonCharacterCount = (location?.referenceImages.length ?? 0) + (shot.referenceImages?.length ?? 0) + Number(Boolean(continuityFrame))
   bindings.push(...allocateCharacterReferences(characterInputs, wardrobes, Math.max(0, 9 - nonCharacterCount)))
@@ -83,12 +91,26 @@ export function resolveMovieShotGenerationMode(shot: MovieShot, references: Movi
 export function composeReferenceInstructions(bindings: MovieReferenceBinding[]) {
   const numbered = bindings.map((binding, index) => ({ ...binding, number: index + 1 }))
   const groups = new Map<string, typeof numbered>()
-  for (const binding of numbered.filter((item) => item.characterId && item.purpose !== 'wardrobe' && item.purpose !== 'accessory')) groups.set(binding.characterId!, [...(groups.get(binding.characterId!) ?? []), binding])
+  for (const binding of numbered.filter((item) => item.characterId && (item.purpose === 'character' || item.purpose === 'character-angle'))) groups.set(binding.characterId!, [...(groups.get(binding.characterId!) ?? []), binding])
   const lines: string[] = []
   for (const group of groups.values()) {
     const name = group[0].label.replace(/^Character:\s*/, '').split(' / ')[0]
     const tags = group.map((item) => `<Picture ${item.number}>`).join(', ').replace(/, ([^,]+)$/, ' and $1')
-    lines.push(`${tags} depict ${name}. Use these pictures only for ${name}'s identity, face, skin, hair, and body proportions. Ignore and replace every garment, color, accessory, and styling detail visible in these identity pictures.`)
+    const characterId = group[0].characterId
+    const hair = numbered.find((item) => item.characterId === characterId && item.purpose === 'hair')
+    const assignedWardrobe = numbered.filter((item) => item.characterId === characterId && item.purpose === 'wardrobe')
+    const accessories = numbered.filter((item) => item.characterId === characterId && item.purpose === 'accessory')
+    const mapping = [`identity and body from ${tags}`, hair && `hairstyle from <Picture ${hair.number}>`, assignedWardrobe.length && `complete clothing from ${assignedWardrobe.map((item) => `<Picture ${item.number}>`).join(' and ')}`, accessories.length && `accessories from ${accessories.map((item) => `<Picture ${item.number}>`).join(' and ')}`].filter(Boolean).join('; ')
+    lines.push(`CHARACTER ASSEMBLY — ${name}: create one unified person using ${mapping}. Apply every source to ${name} only; do not show the source sheets, mannequins, panels, or reference backgrounds in the scene.`)
+    const assignedHair = Boolean(hair)
+    lines.push(`${tags} depict ${name}. Use these pictures only for ${name}'s identity, face, skin, ${assignedHair ? 'natural hairline,' : 'hair,'} and body proportions. ${assignedHair ? `Ignore and replace the hairstyle, hair length, texture, styling, and color visible in these identity pictures with ${name}'s assigned hair reference.` : ''} Ignore and replace every garment, accessory, and styling detail visible in these identity pictures.`)
+  }
+  const hairGroups = new Map<string, typeof numbered>()
+  for (const binding of numbered.filter((item) => item.purpose === 'hair' && item.characterId)) hairGroups.set(binding.characterId!, [...(hairGroups.get(binding.characterId!) ?? []), binding])
+  for (const group of hairGroups.values()) {
+    const [hairName, characterName] = group[0].label.replace(/^Hair:\s*/, '').split(' for ')
+    const tag = `<Picture ${group[0].number}>`
+    lines.push(`${characterName} must have the approved ${hairName} hairstyle shown in ${tag}. Transfer only its exact silhouette, hairline and part, texture or braid pattern, length, layers, volume, edges, finish, and color to ${characterName}; preserve ${characterName}'s face, skin, head shape, and body identity from their character pictures. Do not copy the mannequin or any facial identity from the hair reference.`)
   }
   const wardrobeGroups = new Map<string, typeof numbered>()
   for (const binding of numbered.filter((item) => item.purpose === 'wardrobe' && item.wardrobeId)) wardrobeGroups.set(`${binding.characterId}:${binding.wardrobeId}`, [...(wardrobeGroups.get(`${binding.characterId}:${binding.wardrobeId}`) ?? []), binding])
@@ -142,7 +164,7 @@ export function resolveMovieShot(project: MovieProject, scene: MovieScene, shot:
   const all = resolveMovieShotReferences(project, scene, shot, library, continuityFrame)
   const references = all.slice(0, 9)
   const route = resolveMovieShotGenerationMode(shot, references)
-  const characterNames = [...new Set(references.filter((item) => item.characterId && item.purpose !== 'wardrobe' && item.purpose !== 'accessory').map((item) => item.label.replace(/^Character:\s*/, '').split(' / ')[0]))]
+  const characterNames = [...new Set(references.filter((item) => item.characterId && (item.purpose === 'character' || item.purpose === 'character-angle')).map((item) => item.label.replace(/^Character:\s*/, '').split(' / ')[0]))]
   const routeReason = route.effectiveMode === 'reference' && characterNames.length ? `Reference mode selected automatically because ${characterNames.join(' and ')} ${characterNames.length === 1 ? 'has' : 'have'} approved references.` : route.effectiveMode === 'reference' ? 'Reference mode selected because this shot has reusable reference media.' : `Using the preferred ${route.effectiveMode} route.`
   const compiledBindings = route.effectiveMode === 'reference' ? references : references.filter((item) => item.purpose !== 'continuity')
   const continuationDirection = route.effectiveMode === 'image' && references.some((item) => item.purpose === 'continuity') ? ' Continue directly from the supplied first frame, preserving its framing, lighting, pose, screen direction, and motion state.' : ''
