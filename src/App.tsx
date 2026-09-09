@@ -38,6 +38,7 @@ import {
   Users,
   Volume2,
   WandSparkles,
+  Watch,
   X,
 } from 'lucide-react'
 import { buildMiniMaxWorkflow, extractOutputUrl, frameCount } from './lib/workflow'
@@ -56,6 +57,7 @@ import { VideoReferenceClipper } from './components/VideoReferenceClipper'
 import { CharacterStudio } from './components/CharacterStudio'
 import { WardrobeStudio } from './components/WardrobeStudio'
 import { LocationStudio } from './components/LocationStudio'
+import { AccessoryStudio } from './components/AccessoryStudio'
 import { AiChatHead } from './components/AiChatHead'
 import { SmartPromptEditor, type SmartPromptEditorHandle } from './components/SmartPromptEditor'
 import { RenderConstruction } from './components/RenderConstruction'
@@ -109,6 +111,7 @@ type PersistedWorkspace = {
   seed: number
   advanced: boolean
   liveEnabled: boolean
+  livePreviewMode: 'standard' | 'h3-override'
   upscaleMode: UpscaleMode
   rtxModel: string
   firstFrame: MediaFile | null
@@ -128,7 +131,7 @@ const workspaceDefaults: PersistedWorkspace = {
   mode: 'text', prompt: '', duration: 5, resolution: '1344x768', turbo: 'off', steps: 20,
   sampler: 'res_multistep', scheduler: 'simple', experimentalSampling: false, refImageSize: 'match', noDialogue: true, clothingPolicy: 'wardrobe',
   sigmaShiftMode: 'model', shiftVideo: 12, shiftAudio: 3, loraStrength: 1, seed: Math.floor(Math.random() * 1_000_000_000),
-  advanced: false, liveEnabled: true, upscaleMode: 'off', rtxModel: '', firstFrame: null,
+  advanced: false, liveEnabled: true, livePreviewMode: 'standard', upscaleMode: 'off', rtxModel: '', firstFrame: null,
   lastFrame: null, referenceImages: [], referenceVideos: [], referenceAudios: [], selectedReferenceCharacterIds: [], selectedReferenceLocationIds: [], activeJobId: null, movieHandoff: null,
 }
 
@@ -307,6 +310,7 @@ function App() {
   const [loraStrength, setLoraStrength] = useState(persisted.loraStrength)
   const [info, setInfo] = useState<ObjectInfo>({})
   const [liveEnabled, setLiveEnabled] = useState(persisted.liveEnabled)
+  const [livePreviewMode, setLivePreviewMode] = useState<'standard' | 'h3-override'>(persisted.livePreviewMode)
   const [upscaleMode, setUpscaleMode] = useState<UpscaleMode>(persisted.upscaleMode)
   const upscaleModel = choices(info, 'LatentUpscaleModelLoader', 'model_name').find((n) => /ltx-2\.5.*spatial.*x2/i.test(n)) ?? ''
   const upscaleVae = choices(info, 'VAELoader', 'vae_name').find((n) => /ltx-2\.5.*video.*vae/i.test(n)) ?? ''
@@ -344,6 +348,10 @@ function App() {
   const [lanStatus, setLanStatus] = useState<LanStatus>({ running: false })
   const [lanQr, setLanQr] = useState('')
   const [videoClipDraft, setVideoClipDraft] = useState<{ source: MediaFile; replaceIndex?: number } | null>(null)
+  const [createResetKey, setCreateResetKey] = useState(0)
+  const [ltxResetKey, setLtxResetKey] = useState(0)
+  const [zImageResetKey, setZImageResetKey] = useState(0)
+  const [ltxResetAt, setLtxResetAt] = useState(0)
   const onLiveProgress = useCallback((id: string, update: LiveProgress) => {
     if (!id) return
     setJobs((current) => current.map((j) => j.promptId === id && ['running', 'queued'].includes(j.status) ? { ...j, ...update, progress: update.progress ?? j.progress, status: 'running' } : j))
@@ -471,14 +479,14 @@ function App() {
   useEffect(() => {
     const workspace: PersistedWorkspace = {
       mode, prompt, duration, resolution, turbo, steps, sampler, scheduler, experimentalSampling, refImageSize, noDialogue, clothingPolicy,
-      sigmaShiftMode, shiftVideo, shiftAudio, loraStrength, seed, advanced, liveEnabled,
+      sigmaShiftMode, shiftVideo, shiftAudio, loraStrength, seed, advanced, liveEnabled, livePreviewMode,
       upscaleMode, rtxModel, firstFrame: withoutPreview(firstFrame), lastFrame: withoutPreview(lastFrame),
       referenceImages: referenceImages.map((file) => withoutPreview(file)!),
       referenceVideos: referenceVideos.map((file) => withoutPreview(file)!),
       referenceAudios: referenceAudios.map((file) => withoutPreview(file)!), selectedReferenceCharacterIds, selectedReferenceLocationIds, activeJobId, movieHandoff,
     }
     localStorage.setItem('minimax.workspace', JSON.stringify(workspace))
-  }, [activeJobId, advanced, clothingPolicy, duration, experimentalSampling, firstFrame, lastFrame, liveEnabled, loraStrength, mode, movieHandoff, noDialogue, prompt, refImageSize, referenceAudios, referenceImages, referenceVideos, resolution, rtxModel, sampler, scheduler, seed, selectedReferenceCharacterIds, selectedReferenceLocationIds, shiftAudio, shiftVideo, sigmaShiftMode, steps, turbo, upscaleMode])
+  }, [activeJobId, advanced, clothingPolicy, duration, experimentalSampling, firstFrame, lastFrame, liveEnabled, livePreviewMode, loraStrength, mode, movieHandoff, noDialogue, prompt, refImageSize, referenceAudios, referenceImages, referenceVideos, resolution, rtxModel, sampler, scheduler, seed, selectedReferenceCharacterIds, selectedReferenceLocationIds, shiftAudio, shiftVideo, sigmaShiftMode, steps, turbo, upscaleMode])
 
   useEffect(() => {
     if (!settings || mediaHydrated.current) return
@@ -565,9 +573,9 @@ function App() {
     const selectedCharacters = characterIds.map((id) => characterProjects.find((project) => project.id === id)).filter(Boolean) as CharacterProject[]
     const selectedLocations = locationIds.map((id) => locationProjects.find((project) => project.id === id)).filter(Boolean) as LocationProject[]
     return allocateWorkspaceReferences(
-      selectedCharacters.map((character) => ({ id: character.id, name: character.name, identity: characterReferences(character), wardrobeIds: character.wardrobeIds })),
+      selectedCharacters.map((character) => ({ id: character.id, name: character.name, identity: characterReferences(character), wardrobeIds: character.wardrobeIds, accessoryIds: character.accessoryIds })),
       wardrobeProjects,
-      selectedLocations.map((location) => ({ id: location.id, name: location.name, images: locationReferences(location) })),
+      selectedLocations.map((location) => ({ id: location.id, name: location.name, images: locationReferences(location), environmentMode: location.environmentMode })),
     )
   }
 
@@ -708,19 +716,64 @@ function App() {
     }
   }
 
-  const resetWorkspace = () => {
+  const resetCreateWorkspace = () => {
+    const defaults = settings?.generationDefaults
+    setMode('text')
     setPrompt('')
     setPromptSuggestion('')
+    setPromptingTool(null)
+    setDuration(defaults?.duration ?? workspaceDefaults.duration)
+    setResolution(defaults?.resolution ?? workspaceDefaults.resolution)
+    setTurbo(defaults?.turbo ?? workspaceDefaults.turbo)
+    setSteps(defaults?.steps ?? workspaceDefaults.steps)
+    setSampler(defaults?.sampler ?? workspaceDefaults.sampler)
+    setScheduler(defaults?.scheduler ?? workspaceDefaults.scheduler)
+    setExperimentalSampling(defaults?.experimentalSampling ?? workspaceDefaults.experimentalSampling)
+    setRefImageSize(defaults?.refImageSize ?? workspaceDefaults.refImageSize)
+    setNoDialogue(true)
+    setClothingPolicy('wardrobe')
+    setSigmaShiftMode(defaults?.sigmaShiftMode ?? workspaceDefaults.sigmaShiftMode)
+    setShiftVideo(defaults?.shiftVideo ?? workspaceDefaults.shiftVideo)
+    setShiftAudio(defaults?.shiftAudio ?? workspaceDefaults.shiftAudio)
+    setLoraStrength(defaults?.loraStrength ?? workspaceDefaults.loraStrength)
+    setLiveEnabled(defaults?.livePreview ?? workspaceDefaults.liveEnabled)
+    setLivePreviewMode('standard')
+    setUpscaleMode(defaults?.upscaleMode ?? workspaceDefaults.upscaleMode)
+    setRtxModel('')
+    setSeed(Math.floor(Math.random() * 1_000_000_000))
+    setAdvanced(false)
     setFirstFrame(null)
     setLastFrame(null)
     setReferenceImages([])
     setReferenceVideos([])
     setReferenceAudios([])
+    setVideoClipDraft(null)
     setActiveJobId(null)
     setMovieHandoff(null)
+    setCharacterHandoff(null)
     setSelectedReferenceCharacterIds([])
     setSelectedReferenceLocationIds([])
-    setNotice({ tone: 'success', text: 'Workspace cleared. Saved videos and queue history were not deleted.' })
+    setCreateResetKey((value) => value + 1)
+    setNotice({ tone: 'success', text: 'MiniMax Create reset. Saved libraries, rendered files, and queue history were not deleted.' })
+  }
+
+  const resetCurrentWorkspace = () => {
+    if (view === 'create') {
+      resetCreateWorkspace()
+      return
+    }
+    if (view === 'ltx25') {
+      localStorage.removeItem('ltx25.workspace')
+      setLtxResetAt(Date.now())
+      setLtxResetKey((value) => value + 1)
+      setNotice({ tone: 'success', text: 'LTX 2.5 reset. Its prompt, first frame, options, and current preview were cleared.' })
+      return
+    }
+    if (view === 'zimage') {
+      localStorage.removeItem('minimax.zimage-workspace')
+      setZImageResetKey((value) => value + 1)
+      setNotice({ tone: 'success', text: 'Create Image reset. Its prompt, options, selection, and current preview were cleared.' })
+    }
   }
 
   const cancelJob = async (job: GenerationJob) => {
@@ -756,27 +809,32 @@ function App() {
   }
 
   const generateLtx = async (options: Ltx25GenerationOptions, input: MediaFile | null, handoff?: { characterProjectId?: string; locationProjectId?: string }) => {
-    if (!settings) return
+    if (!settings) return 'Studio settings are still loading.'
     if (!status.connected) {
-      setNotice({ tone: 'error', text: 'Start ComfyUI and verify the server connection in Settings.' })
-      return
+      const message = 'Start ComfyUI and verify the server connection in Settings.'
+      setNotice({ tone: 'error', text: message })
+      return message
     }
     if (!options.prompt) {
-      setNotice({ tone: 'error', text: 'Add an LTX prompt before generating.' })
-      return
+      const message = 'Add an LTX prompt before generating.'
+      setNotice({ tone: 'error', text: message })
+      return message
     }
     if (options.mode === 'image' && !input) {
-      setNotice({ tone: 'error', text: 'Choose a first frame for LTX image-to-video.' })
-      return
+      const message = 'Choose a first frame for LTX image-to-video.'
+      setNotice({ tone: 'error', text: message })
+      return message
     }
     if (!ltxSelection.diffusion || !ltxSelection.textEncoder || !ltxSelection.videoVae || !ltxSelection.audioVae || !ltxSelection.latentUpscaler) {
-      setNotice({ tone: 'error', text: 'The LTX‑2.5 distilled transformer, Gemma encoder, video/audio VAEs, or latent spatial upscaler is missing.' })
-      return
+      const message = 'The LTX‑2.5 distilled transformer, Gemma encoder, video/audio VAEs, or latent spatial upscaler is missing.'
+      setNotice({ tone: 'error', text: message })
+      return message
     }
     const missingNodes = LTX_NATIVE_REQUIRED_NODES.filter((node) => !info[node])
     if (missingNodes.length) {
-      setNotice({ tone: 'error', text: `Update ComfyUI before using LTX‑2.5. Missing core nodes: ${missingNodes.join(', ')}.` })
-      return
+      const message = `Update ComfyUI before using LTX‑2.5. Missing core nodes: ${missingNodes.join(', ')}.`
+      setNotice({ tone: 'error', text: message })
+      return message
     }
 
     const localId = createId()
@@ -793,15 +851,19 @@ function App() {
       if (cancellationRequests.current.has(localId)) {
         await window.minimax.cancelPrompt(settings.comfyUrl, response.prompt_id)
         setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'cancelled' } : item))
+        return 'The LTX 2.5 survey was cancelled before it started.'
       } else {
         setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: 'Waiting for ComfyUI to start' } : item))
         setNotice({ tone: 'success', text: `${options.preset === 'quality' ? 'Two-stage quality' : 'Single-stage Turbo'} LTX‑2.5 generation added to ComfyUI.` })
         if (!handoff) setCharacterHandoff(null)
+        return null
       }
     } catch (error) {
       const cancelled = cancellationRequests.current.has(localId)
+      const message = cancelled ? 'LTX generation cancelled.' : error instanceof Error ? error.message : String(error)
       setJobs((current) => current.map((item) => item.id === localId ? { ...item, status: cancelled ? 'cancelled' : 'failed', error: cancelled ? undefined : error instanceof Error ? error.message : String(error) } : item))
-      setNotice(cancelled ? { tone: 'success', text: 'LTX generation cancelled.' } : { tone: 'error', text: error instanceof Error ? error.message : String(error) })
+      setNotice(cancelled ? { tone: 'success', text: message } : { tone: 'error', text: message })
+      return message
     } finally {
       cancellationRequests.current.delete(localId)
       setLtxSubmitting(false)
@@ -912,6 +974,7 @@ function App() {
         upscale: upscaleMode === 'ltx' ? { type: 'ltx', model: upscaleModel, vae: upscaleVae } : upscaleMode === 'rtx' ? { type: 'rtx', model: rtxModel } : undefined,
         refImageSize,
         sigmaShift: sigmaShiftMode === 'custom' ? { video: shiftVideo, audio: shiftAudio } : undefined,
+        previewOverride: liveEnabled && livePreviewMode === 'h3-override' && Boolean(info.MiniMaxH3PreviewOverrideCS) ? { frames: 50, fps: 12 } : undefined,
         filenamePrefix: `video/MiniMax_H3_${Date.now()}`,
         firstFrame: firstFrame?.path,
         lastFrame: lastFrame?.path,
@@ -987,8 +1050,8 @@ function App() {
       <header className="titlebar" aria-label="Application title bar">
         <div className="titlebar-brand"><span className="brand-mark"><Film size={16} /></span><span>MiniMax Studio</span></div>
         <div className="titlebar-drag" />
+        {(view === 'create' || view === 'ltx25' || view === 'zimage') && <button className="titlebar-action titlebar-reset" onClick={resetCurrentWorkspace} title="Reset prompts, options, media, selections, and the current preview in this workspace"><RotateCcw size={14} />Reset workspace</button>}
         <GpuMeter value={gpu} />
-        {view === 'create' && <button className="titlebar-action" onClick={resetWorkspace} title="Clear the prompt, loaded media, and current output"><RotateCcw size={14} />Reset workspace</button>}
         <button className="titlebar-action" onClick={() => { setLanOpen(true); void window.minimax.getLanStatus().then(setLanStatus) }} title="Share MiniMax Studio over your local network"><QrCode size={14} />LAN</button>
         <button className={`connection-chip ${status.connected ? 'online' : ''}`} onClick={() => void checkConnection(settings.comfyUrl)} title="Check ComfyUI connection">
           {checking ? <LoaderCircle size={14} className="spin" /> : <span className="status-dot" />}
@@ -1009,6 +1072,7 @@ function App() {
             <NavButton active={view === 'zimage'} icon={ImageIcon} label="Create Image" onClick={() => setView('zimage')} />
             <NavButton active={view === 'characters'} icon={Users} label="Characters" itemType="character" onClick={() => setView('characters')} />
             <NavButton active={view === 'wardrobes'} icon={Shirt} label="Wardrobe" itemType="wardrobe" onClick={() => setView('wardrobes')} />
+            <NavButton active={view === 'accessories'} icon={Watch} label="Accessories" onClick={() => setView('accessories')} />
             <NavButton active={view === 'locations'} icon={MapPin} label="Locations" itemType="location" onClick={() => setView('locations')} />
           </div>
           <div className="nav-group"><span className="nav-section-label">Review</span>
@@ -1029,7 +1093,7 @@ function App() {
       <main className="main-area">
         {notice && <Notice tone={notice.tone} text={notice.text} onClose={() => setNotice(null)} />}
         <div hidden={view !== 'create'}>
-          <CreateView
+          <CreateView key={`create-${createResetKey}`}
             info={info}
             sampler={sampler} setSampler={setSampler} scheduler={scheduler} setScheduler={setScheduler}
             experimentalSampling={experimentalSampling} setExperimentalSampling={setExperimentalSampling}
@@ -1039,7 +1103,7 @@ function App() {
             sigmaShiftMode={sigmaShiftMode} setSigmaShiftMode={setSigmaShiftMode}
             shiftVideo={shiftVideo} setShiftVideo={setShiftVideo} shiftAudio={shiftAudio} setShiftAudio={setShiftAudio}
             loraStrength={loraStrength} setLoraStrength={setLoraStrength}
-            liveEnabled={liveEnabled} setLiveEnabled={setLiveEnabled} liveConnected={live.connected} livePreview={live.preview}
+            liveEnabled={liveEnabled} setLiveEnabled={setLiveEnabled} livePreviewMode={livePreviewMode} setLivePreviewMode={setLivePreviewMode} liveConnected={live.connected} livePreview={live.preview}
             upscaleMode={upscaleMode} setUpscaleMode={setUpscaleMode} ltxAvailable={ltxUpscaleReady} ltxMissingNodes={missingLtxUpscaleNodes}
             rtxModels={rtxModels} rtxModel={rtxModel} setRtxModel={setRtxModel}
             updateReference={(index, file) => setReferenceImages((items) => items.map((item, i) => i === index ? file : item))}
@@ -1100,7 +1164,7 @@ function App() {
             onDismissSuggestion={() => setPromptSuggestion('')}
           />
         </div>
-        {view === 'ltx25' && <Ltx25Workspace
+        {view === 'ltx25' && <Ltx25Workspace key={`ltx-${ltxResetKey}`}
           settings={settings}
           models={ltxSelection}
           pipelineReady={LTX_NATIVE_REQUIRED_NODES.every((node) => Boolean(info[node]))}
@@ -1108,7 +1172,7 @@ function App() {
           connected={status.connected}
           liveConnected={live.connected}
           livePreview={live.preview}
-          latestJob={jobs.find((job) => job.provider === 'ltx25')}
+          latestJob={jobs.find((job) => job.provider === 'ltx25' && job.createdAt > ltxResetAt)}
           submitting={ltxSubmitting}
           cancelling={Boolean(jobs.find((job) => job.provider === 'ltx25' && ['queued', 'running'].includes(job.status)) && cancellingIds.has(jobs.find((job) => job.provider === 'ltx25' && ['queued', 'running'].includes(job.status))!.id))}
           ollamaAvailable={ollamaModels.length > 0}
@@ -1116,19 +1180,26 @@ function App() {
           onGenerate={(options, file) => void generateLtx(options, file)}
           onCancel={(job) => void cancelJob(job)}
         />}
-        <div hidden={view !== 'zimage'}><ZImageWorkspace key="first-frame" url={settings.comfyUrl} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} ollamaUrl={settings.ollamaUrl} ollamaModel={settings.ollamaModel} outputDirectory={settings.outputDirectory} onUse={(file, frameResolution) => {
+        <div hidden={view !== 'zimage'}><ZImageWorkspace key={`first-frame-${zImageResetKey}`} url={settings.comfyUrl} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} ollamaUrl={settings.ollamaUrl} ollamaModel={settings.ollamaModel} outputDirectory={settings.outputDirectory} onUse={(file, frameResolution) => {
           setFirstFrame(file); setResolution(frameResolution); setMode('image'); setActiveJobId(null); setView('create'); setNotice({ tone: 'success', text: 'Z-Image frame loaded into the MiniMax I2V workspace.' })
         }} /></div>
         {view === 'characters' && <CharacterStudio settings={settings} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} automationJob={jobs.find((job) => job.characterProjectId)} onNotice={(tone, text) => setNotice({ tone, text })} onCreateTurntable={(project) => {
-          if (!project.baseImage) return
+          if (!project.baseImage) return Promise.resolve('Approve a character identity image before rendering the survey.')
           const firstFrame = fitWholeCharacter({ ...project.baseImage }); delete firstFrame.preview
-          void generateLtx({ mode: 'image', prompt: `Character identity turntable reference video of ${project.name}. The character remains completely still in a neutral full-body pose while the camera performs one smooth complete 360-degree orbit at constant speed. Even neutral studio lighting, plain background, stable face and body proportions, no cuts, no pose changes, no expression changes, no clothing changes, no added objects, no text, no dialogue.`, width: 768, height: 768, duration: 6, preset: 'quality', seed: Math.floor(Math.random() * 1_000_000_000), filenamePrefix: 'MiniMax_character_turntable' }, firstFrame, { characterProjectId: project.id })
+          return generateLtx({ mode: 'image', prompt: `Ten-second character identity coverage survey of ${project.name} in one continuous stabilized take. Preserve the exact identity, facial geometry, skin, hair, body proportions, clothing, and neutral studio background from the first frame. From 0 to 2 seconds hold a sharp neutral full-body front view with the entire head, hands, and feet visible. From 2 to 5 seconds make a slow stabilized camera push to a sharp head-and-shoulders close-up. From 5 to 7 seconds hold the face clearly while moving through frontal and gentle three-quarter facial angles so the eyes, nose, mouth, jawline, ears, hairline, and distinguishing marks remain readable. From 7 to 10 seconds pull back smoothly to a complete full-body view and continue a restrained orbit through three-quarter, side, and rear body angles. The character stays still with a neutral expression and unchanged pose. Even soft studio lighting, accurate anatomy, crisp individual frames, fast shutter. No cuts, no identity drift, no morphing, no pose changes, no expression changes, no clothing changes, no added objects, no motion blur, no smearing, no ghosting, no whip pans, no text, no dialogue.`, width: 768, height: 1024, duration: 10, preset: 'quality', seed: Math.floor(Math.random() * 1_000_000_000), filenamePrefix: 'MiniMax_character_identity_survey' }, firstFrame, { characterProjectId: project.id })
         }} />}
         {view === 'wardrobes' && <WardrobeStudio settings={settings} info={info} connected={status.connected} onNotice={(tone, text) => setNotice({ tone, text })} />}
-        {view === 'locations' && <LocationStudio settings={settings} info={info} connected={status.connected} automationJob={jobs.find((job) => job.locationProjectId)} onNotice={(tone, text) => setNotice({ tone, text })} onCreateWalkthrough={(project: LocationProject) => {
+        {view === 'accessories' && <AccessoryStudio settings={settings} info={info} connected={status.connected} onNotice={(tone, text) => setNotice({ tone, text })} />}
+        {view === 'locations' && <LocationStudio settings={settings} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} automationJob={[...jobs].reverse().find((job) => job.locationProjectId)} onNotice={(tone, text) => setNotice({ tone, text })} onCreateWalkthrough={(project: LocationProject, options?: { duration: number; cameraLanguage: string }) => {
           if (!project.baseImage) return
           const firstFrame = { ...project.baseImage }; delete firstFrame.preview
-          void generateLtx({ mode: 'image', prompt: `Comprehensive cinematic location walkthrough reference video of ${project.name}. Begin with a wide establishing view, then move slowly along the perimeter in one continuous stabilized path. Deliberately pan through every corner and each wall in sequence, revealing entrances, windows, floor, ceiling, furniture, fixtures, landmarks, and the spatial relationship between them. Use a wide-angle lens and smooth measured turns so no corner remains hidden. Preserve exactly the same architecture, room dimensions, object placement, materials, lighting, weather, and geography from the first frame. No cuts, no teleporting, no layout changes, no duplicated objects, no people as focal subjects, no dialogue, no text, no logos.`, width: 1344, height: 768, duration: 10, preset: 'quality', seed: Math.floor(Math.random() * 1_000_000_000), filenamePrefix: 'MiniMax_location_walkthrough' }, firstFrame, { locationProjectId: project.id })
+          const walkthroughDirection = project.environmentMode === 'nature'
+            ? `Comprehensive cinematic natural-landscape survey of ${project.name}. Begin with a wide establishing view, then move slowly through the terrain in one continuous stabilized path. Deliberately reveal landforms, vegetation zones, water features, rock formations, horizon lines, and their spatial relationships. Preserve the exact terrain, ecology, vegetation placement, lighting, weather, and geography from the first frame. Untouched nature only: no buildings, cabins, houses, ruins, roads, streets, bridges, fences, signs, vehicles, power lines, utility poles, constructed paths, or other human-made objects.`
+            : `Comprehensive cinematic location walkthrough reference video of ${project.name}. Begin with a wide establishing view, then move slowly along the perimeter in one continuous stabilized path. Deliberately pan through every important zone and spatial connection, revealing entrances, landmarks, surfaces, fixtures, terrain, and object placement. Preserve exactly the same architecture, dimensions, materials, lighting, weather, and geography from the first frame.`
+          const locationProfile = [project.description, project.atmosphere && `Atmosphere and lighting: ${project.atmosphere}.`, project.timeOfDay && `Time and weather: ${project.timeOfDay}.`, project.continuityAnchors && `Fixed continuity anchors: ${project.continuityAnchors}.`, project.visualStyle && `Visual treatment: ${project.visualStyle}.`].filter(Boolean).join(' ')
+          const cameraLanguage = options?.cameraLanguage ?? 'Use only wide and extra-wide shots with an 18–24mm lens. Begin with a complete establishing view, then move slowly and smoothly to reveal the environment’s spatial relationships. Never use close-ups.'
+          const clarityDirection = 'Maintain crisp, sharp frames with a fast shutter and slow stabilized camera movement. No motion blur, temporal smearing, ghosting, rolling-shutter distortion, speed ramps, whip pans, or rapid camera movement.'
+          void generateLtx({ mode: 'image', prompt: `${walkthroughDirection} Location description: ${locationProfile} Camera language: ${cameraLanguage} Image clarity: ${clarityDirection} No cuts, no teleporting, no layout changes, no duplicated objects, no people as focal subjects, no dialogue, no text, no logos.`, width: 1344, height: 768, duration: Math.max(5, Math.min(20, options?.duration ?? 10)), preset: 'quality', seed: Math.floor(Math.random() * 1_000_000_000), filenamePrefix: 'MiniMax_location_walkthrough' }, firstFrame, { locationProjectId: project.id })
         }} />}
         {view === 'movie' && <MoviePlanner settings={settings} ollamaAvailable={ollamaModels.length > 0} ollamaModel={settings.ollamaModel} onNotice={(tone, text) => setNotice({ tone, text })} onOpenShot={async (shot: MovieShot, aspectRatio: MovieProject['aspectRatio'], resolved: ResolvedMovieShot, context: { projectId: string; sceneId: string; continuationSource?: string }) => {
           setCharacterHandoff(null)
@@ -1219,7 +1290,7 @@ type CreateViewProps = {
   sigmaShiftMode: 'model' | 'custom'; setSigmaShiftMode(value: 'model' | 'custom'): void
   shiftVideo: number; setShiftVideo(value: number): void; shiftAudio: number; setShiftAudio(value: number): void
   loraStrength: number; setLoraStrength(value: number): void
-  liveEnabled: boolean; setLiveEnabled(value: boolean): void; liveConnected: boolean; livePreview: { promptId: string; url: string } | null
+  liveEnabled: boolean; setLiveEnabled(value: boolean): void; livePreviewMode: 'standard' | 'h3-override'; setLivePreviewMode(value: 'standard' | 'h3-override'): void; liveConnected: boolean; livePreview: { promptId: string; url: string } | null
   upscaleMode: UpscaleMode; setUpscaleMode(value: UpscaleMode): void; ltxAvailable: boolean; ltxMissingNodes: readonly string[]
   noDialogue: boolean; setNoDialogue(value: boolean): void
   clothingPolicy: 'wardrobe' | 'underwear' | 'unrestricted'; setClothingPolicy(value: 'wardrobe' | 'underwear' | 'unrestricted'): void
@@ -1253,7 +1324,7 @@ type CreateViewProps = {
 function CreateView(props: CreateViewProps) {
   const {
     info, sampler, setSampler, scheduler, setScheduler, experimentalSampling, setExperimentalSampling, refImageSize, setRefImageSize,
-    sigmaShiftMode, setSigmaShiftMode, shiftVideo, setShiftVideo, shiftAudio, setShiftAudio, loraStrength, setLoraStrength, liveEnabled, setLiveEnabled, liveConnected, livePreview,
+    sigmaShiftMode, setSigmaShiftMode, shiftVideo, setShiftVideo, shiftAudio, setShiftAudio, loraStrength, setLoraStrength, liveEnabled, setLiveEnabled, livePreviewMode, setLivePreviewMode, liveConnected, livePreview,
     upscaleMode, setUpscaleMode, ltxAvailable, ltxMissingNodes, noDialogue, setNoDialogue, clothingPolicy, setClothingPolicy, rtxModels, rtxModel, setRtxModel, updateReference,
     mode, setMode, prompt, setPrompt, duration, setDuration, resolution, setResolution, turbo, setTurbo, steps, setSteps,
     seed, setSeed, advanced, setAdvanced, firstFrame, lastFrame, setFirstFrame, setLastFrame, chooseMedia,
@@ -1265,10 +1336,11 @@ function CreateView(props: CreateViewProps) {
   const sourceMediaTriggerRef = useRef<HTMLButtonElement>(null)
   const sourceMediaCloseRef = useRef<HTMLButtonElement>(null)
   const [sourceMediaOpen, setSourceMediaOpen] = useState(false)
+  const h3PreviewOverrideAvailable = Boolean(info.MiniMaxH3PreviewOverrideCS)
   const selectedCharacters = selectedCharacterIds.map((id) => characters.find((character) => character.id === id)).filter(Boolean) as CharacterProject[]
   const selectedLocations = selectedLocationIds.map((id) => locations.find((location) => location.id === id)).filter(Boolean) as LocationProject[]
   const selectedWardrobes = [...new Set(selectedCharacters.flatMap((character) => character.wardrobeIds.slice(0, 1)))].map((id) => wardrobes.find((wardrobe) => wardrobe.id === id)).filter(Boolean) as WardrobeProject[]
-  const selectedBindings = allocateWorkspaceReferences(selectedCharacters.map((character) => ({ id: character.id, name: character.name, identity: characterReferences(character), wardrobeIds: character.wardrobeIds })), wardrobes, selectedLocations.map((location) => ({ id: location.id, name: location.name, images: locationReferences(location) })))
+  const selectedBindings = allocateWorkspaceReferences(selectedCharacters.map((character) => ({ id: character.id, name: character.name, identity: characterReferences(character), wardrobeIds: character.wardrobeIds, accessoryIds: character.accessoryIds })), wardrobes, selectedLocations.map((location) => ({ id: location.id, name: location.name, images: locationReferences(location), environmentMode: location.environmentMode })))
   const sourceMediaCount = referenceImages.length + referenceVideos.length + referenceAudios.length
   const closeSourceMedia = useCallback(() => {
     setSourceMediaOpen(false)
@@ -1295,15 +1367,18 @@ function CreateView(props: CreateViewProps) {
   useEffect(() => {
     if (mode !== 'reference' && sourceMediaOpen) setSourceMediaOpen(false)
   }, [mode, sourceMediaOpen])
+  useEffect(() => {
+    if (!h3PreviewOverrideAvailable && livePreviewMode === 'h3-override') setLivePreviewMode('standard')
+  }, [h3PreviewOverrideAvailable, livePreviewMode, setLivePreviewMode])
   const insertPromptText = (text: string) => promptRef.current?.insert(text)
   const smartCharacterOptions = characters.filter((character) => characterReferences(character).length > 0).map((character) => {
     const projected = selectedCharacterIds.includes(character.id) ? selectedCharacters : [...selectedCharacters, character]
-    const projectedBindings = allocateWorkspaceReferences(projected.map((item) => ({ id: item.id, name: item.name, identity: characterReferences(item), wardrobeIds: item.wardrobeIds })), wardrobes, selectedLocations.map((location) => ({ id: location.id, name: location.name, images: locationReferences(location) })))
+    const projectedBindings = allocateWorkspaceReferences(projected.map((item) => ({ id: item.id, name: item.name, identity: characterReferences(item), wardrobeIds: item.wardrobeIds, accessoryIds: item.accessoryIds })), wardrobes, selectedLocations.map((location) => ({ id: location.id, name: location.name, images: locationReferences(location), environmentMode: location.environmentMode })))
     const wardrobeCount = projectedBindings.filter((binding) => binding.characterId === character.id && binding.purpose === 'wardrobe').length
     return { id: `character.${character.id}`, category: 'character' as const, label: character.name, description: wardrobeCount ? `${character.description || 'Character Studio identity'} · wardrobe isolated` : character.description || 'Character Studio identity', insertion: `Character: ${character.name}.`, thumbnail: characterReferences(character)[0]?.preview, meta: `${projectedBindings.filter((binding) => binding.characterId === character.id).length} allocated refs`, onSelect: (nextPrompt: string) => { setPrompt(nextPrompt); loadCharacter(character.id) } }
   })
   const smartWardrobeOptions = wardrobes.filter((wardrobe) => wardrobeReferences(wardrobe).length > 0).map((wardrobe) => { const files = wardrobeReferences(wardrobe).slice(0, 9); const tags = files.map((_, index) => `<Picture ${index + 1}>`).join(', ').replace(/, ([^,]+)$/, ' and $1'); return { id: `wardrobe.${wardrobe.id}`, category: 'wardrobe' as const, label: wardrobe.name, description: wardrobe.description || 'Approved Wardrobe Studio outfit', insertion: `Wardrobe: apply the approved ${wardrobe.name} outfit from ${tags}; preserve its garments, materials, colors, fit, and accessories.`, thumbnail: files[0]?.preview, meta: `${files.length} approved`, onSelect: (nextPrompt: string) => { setPrompt(nextPrompt); loadWardrobe(wardrobe.id) } } })
-  const smartLocationOptions = locations.filter((location) => locationReferences(location).length > 0).map((location) => { const files = locationReferences(location); const projected = selectedLocationIds.includes(location.id) ? selectedLocations : [...selectedLocations, location]; const projectedBindings = allocateWorkspaceReferences(selectedCharacters.map((character) => ({ id: character.id, name: character.name, identity: characterReferences(character), wardrobeIds: character.wardrobeIds })), wardrobes, projected.map((item) => ({ id: item.id, name: item.name, images: locationReferences(item) }))); return { id: `location.${location.id}`, category: 'location' as const, label: location.name, description: location.description || 'Approved Location Studio environment', insertion: `Location: ${location.name}.`, thumbnail: files[0]?.preview, meta: `${projectedBindings.filter((binding) => binding.locationId === location.id).length} allocated view${projectedBindings.filter((binding) => binding.locationId === location.id).length === 1 ? '' : 's'}`, onSelect: (nextPrompt: string) => { setPrompt(nextPrompt); loadLocation(location.id) } } })
+  const smartLocationOptions = locations.filter((location) => locationReferences(location).length > 0).map((location) => { const files = locationReferences(location); const projected = selectedLocationIds.includes(location.id) ? selectedLocations : [...selectedLocations, location]; const projectedBindings = allocateWorkspaceReferences(selectedCharacters.map((character) => ({ id: character.id, name: character.name, identity: characterReferences(character), wardrobeIds: character.wardrobeIds, accessoryIds: character.accessoryIds })), wardrobes, projected.map((item) => ({ id: item.id, name: item.name, images: locationReferences(item), environmentMode: item.environmentMode }))); return { id: `location.${location.id}`, category: 'location' as const, label: location.name, description: location.description || 'Approved Location Studio environment', insertion: `Location: ${location.name}.`, thumbnail: files[0]?.preview, meta: `${projectedBindings.filter((binding) => binding.locationId === location.id).length} allocated view${projectedBindings.filter((binding) => binding.locationId === location.id).length === 1 ? '' : 's'}`, onSelect: (nextPrompt: string) => { setPrompt(nextPrompt); loadLocation(location.id) } } })
   const applyCreatePreset = (preset: 'quality' | 'turbo' | 'preview') => {
     const [width, height] = resolution.split('x').map(Number)
     const portrait = height > width
@@ -1333,7 +1408,7 @@ function CreateView(props: CreateViewProps) {
             {mode === 'reference' && (selectedCharacters.length > 0 || selectedWardrobes.length > 0 || selectedLocations.length > 0) && <SelectedReferenceStrip characters={selectedCharacters} wardrobes={selectedWardrobes} locations={selectedLocations} />}
             <div className="field-label"><label htmlFor="prompt">Prompt</label><span>{prompt.length.toLocaleString()} characters</span></div>
             <SmartPromptEditor ref={promptRef} id="prompt" value={prompt} onChange={setPrompt} options={[...smartCharacterOptions, ...smartWardrobeOptions, ...smartLocationOptions]} placeholder={mode === 'reference' ? 'Describe the scene and references. Type // for production presets…' : 'Describe the shot, subject, movement, camera, lighting, and audio…'} />
-            <label className="no-dialogue-toggle" title="Adds a render instruction that blocks spoken words, narration, singing, lip-sync, captions, and text overlays."><input type="checkbox" checked={noDialogue} onChange={(event) => setNoDialogue(event.target.checked)} /><span><strong>No dialogue</strong><small>{noDialogue ? 'Ambient sound only' : 'Dialogue and lip-sync allowed'}</small></span></label>
+            <label className="no-dialogue-toggle" title={`Adds a render instruction that blocks spoken words, narration, singing, lip-sync, captions, and text overlays${mode === 'reference' ? ' in this Reference render' : ''}.`}><input type="checkbox" checked={noDialogue} onChange={(event) => setNoDialogue(event.target.checked)} /><span><strong>{mode === 'reference' ? 'No dialogue · Reference mode' : 'No dialogue'}</strong><small>{noDialogue ? 'Ambient sound only' : 'Dialogue and lip-sync allowed'}</small></span></label>
             {mode === 'reference' && <ReferencePromptHelper pictureCount={referenceImages.length} videoCount={referenceVideos.length} audioCount={referenceAudios.length} referenceInstructions={composeReferenceInstructions(selectedBindings)} onInsert={insertPromptText} />}
             <div className="prompt-tools" aria-label="Local Ollama prompt tools">
               <div className="prompt-tool-buttons">
@@ -1420,7 +1495,7 @@ function CreateView(props: CreateViewProps) {
             {mode !== 'reference' && <div className="create-presets" aria-label="Recommended H3 presets"><button type="button" onClick={() => applyCreatePreset('quality')}><strong>Native Quality</strong><small>1344 × 768 · 20 steps</small></button><button type="button" onClick={() => applyCreatePreset('turbo')}><strong>Turbo 8</strong><small>Native canvas · official LoRA</small></button><button type="button" onClick={() => applyCreatePreset('preview')}><strong>Preview</strong><small>864 × 480 · Turbo 8</small></button></div>}
             <RenderSize value={resolution} onChange={setResolution} />
             <div className="render-controls"><div className="field-group"><label htmlFor="duration">Duration</label><div className="range-line"><input id="duration" type="range" min="2" max="15" step="0.5" value={duration} onChange={(event) => setDuration(Number(event.target.value))} /><output>{duration}s</output></div></div><SelectField label="Sampling quality" value={turbo === '4' && mode !== 'reference' ? '8' : turbo} onChange={(value) => { if (mode !== 'reference') applyCreatePreset(value === 'off' ? 'quality' : 'turbo'); else { setTurbo(value as 'off' | '4'); setSampler('res_multistep'); setScheduler('simple'); setExperimentalSampling(false); setSigmaShiftMode('model'); setShiftVideo(12); setShiftAudio(3); setLoraStrength(1); setUpscaleMode('off'); if (value === 'off') { const [rw, rh] = resolution.split('x').map(Number); setResolution(rw === rh ? '768x768' : rw > rh ? '1344x768' : '768x1344') } } }} options={mode === 'reference' ? [["off", 'Native quality · 20 steps'], ["4", 'Official 4-step Ref2V']] : [["off", 'Native quality · 20 steps'], ["8", 'Official Turbo 8']]} /></div>
-            <div className="render-extras"><label><input type="checkbox" checked={liveEnabled} onChange={(event) => setLiveEnabled(event.target.checked)} />Live preview <small>{liveEnabled ? liveConnected ? 'Connected · waiting for preview frames' : 'Connecting to ComfyUI…' : 'Off'}</small></label><p className="field-help">Always shows a standard first-frame preview. Start ComfyUI with <code>--preview-method auto</code> for additional previews while sampling.</p><div className="upscale-options" role="group" aria-labelledby="upscale-label"><span id="upscale-label">Post-render upscale</span><label><input type="radio" name="upscale" checked={upscaleMode === 'off'} onChange={() => setUpscaleMode('off')} />Off</label><label><input type="radio" name="upscale" checked={upscaleMode === 'ltx'} disabled={!ltxAvailable} onChange={() => setUpscaleMode('ltx')} />LTX 2.5 latent · 2×</label><label><input type="radio" name="upscale" checked={upscaleMode === 'rtx'} disabled={rtxModels.length === 0} onChange={() => setUpscaleMode('rtx')} />RTX / CUDA frames · 2× · experimental</label></div>{upscaleMode === 'rtx' && <SelectField label="AI upscale model" value={rtxModel} onChange={setRtxModel} options={rtxModels.map((name) => [name, name])} />}<p className={`field-help ${upscaleMode === 'rtx' ? 'upscale-warning' : ''}`}>{upscaleMode === 'ltx' ? `Verified latent pipeline: MiniMax frames are encoded with the LTX‑2.5 video VAE, spatially upsampled exactly 2× in latent space, decoded, trimmed to the original duration, and joined to the untouched MiniMax audio. Final size: ${resolution.split('x').map((value) => Number(value) * 2).join(' × ')}.` : upscaleMode === 'rtx' ? `Experimental frame-by-frame upscale using ${rtxModel || 'the selected model'}. It does not understand motion and can amplify noise, flicker, or temporal shimmer. Diagnose output quality with upscale Off first.` : !ltxAvailable && ltxMissingNodes.length ? `LTX 2× is unavailable until ComfyUI provides: ${ltxMissingNodes.join(', ')}.` : !ltxAvailable && rtxModels.length === 0 ? 'No compatible upscale models were reported by ComfyUI.' : 'The original MiniMax video is saved without post-processing.'}</p></div>
+            <div className="render-extras"><label><input type="checkbox" checked={liveEnabled} onChange={(event) => setLiveEnabled(event.target.checked)} />Live preview <small>{liveEnabled ? liveConnected ? 'Connected · waiting for preview frames' : 'Connecting to ComfyUI…' : 'Off'}</small></label><label className="live-preview-mode"><span>Preview source</span><select value={livePreviewMode} disabled={!liveEnabled} onChange={(event) => setLivePreviewMode(event.target.value as 'standard' | 'h3-override')}><option value="standard">Standard first frame</option><option value="h3-override" disabled={!h3PreviewOverrideAvailable}>MiniMax H3 animated · 50 frames at 12 fps</option></select></label><p className="field-help">{livePreviewMode === 'h3-override' && h3PreviewOverrideAvailable ? 'The installed MiniMax H3 Preview Override node is wired between the model and sampler and streams a 50-frame, 12 fps animated preview.' : h3PreviewOverrideAvailable ? 'MiniMax H3 Preview Override is installed. Select the animated option to preview motion while sampling.' : 'Animated H3 preview requires the MiniMax H3 Preview Override custom node. Standard preview remains available.'}</p><div className="upscale-options" role="group" aria-labelledby="upscale-label"><span id="upscale-label">Post-render upscale</span><label><input type="radio" name="upscale" checked={upscaleMode === 'off'} onChange={() => setUpscaleMode('off')} />Off</label><label><input type="radio" name="upscale" checked={upscaleMode === 'ltx'} disabled={!ltxAvailable} onChange={() => setUpscaleMode('ltx')} />LTX 2.5 latent · 2×</label><label><input type="radio" name="upscale" checked={upscaleMode === 'rtx'} disabled={rtxModels.length === 0} onChange={() => setUpscaleMode('rtx')} />RTX / CUDA frames · 2× · experimental</label></div>{upscaleMode === 'rtx' && <SelectField label="AI upscale model" value={rtxModel} onChange={setRtxModel} options={rtxModels.map((name) => [name, name])} />}<p className={`field-help ${upscaleMode === 'rtx' ? 'upscale-warning' : ''}`}>{upscaleMode === 'ltx' ? `Verified latent pipeline: MiniMax frames are encoded with the LTX‑2.5 video VAE, spatially upsampled exactly 2× in latent space, decoded, trimmed to the original duration, and joined to the untouched MiniMax audio. Final size: ${resolution.split('x').map((value) => Number(value) * 2).join(' × ')}.` : upscaleMode === 'rtx' ? `Experimental frame-by-frame upscale using ${rtxModel || 'the selected model'}. It does not understand motion and can amplify noise, flicker, or temporal shimmer. Diagnose output quality with upscale Off first.` : !ltxAvailable && ltxMissingNodes.length ? `LTX 2× is unavailable until ComfyUI provides: ${ltxMissingNodes.join(', ')}.` : !ltxAvailable && rtxModels.length === 0 ? 'No compatible upscale models were reported by ComfyUI.' : 'The original MiniMax video is saved without post-processing.'}</p></div>
             <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}><SlidersHorizontal size={16} />Advanced controls<ChevronDown size={15} className={advanced ? 'rotated' : ''} /></button>
             {advanced && <div className="advanced-grid"><NumberField label="Full-quality steps" value={steps} min={16} max={30} onChange={setSteps} disabled={turbo !== 'off'} /><NumberField label="Seed" value={seed} min={0} max={999999999999} onChange={setSeed} /><NumberField label="LoRA strength" value={loraStrength} min={0} max={2} step={0.05} onChange={setLoraStrength} disabled={turbo === 'off'} /><label className="sampling-opt-in"><input type="checkbox" checked={experimentalSampling} onChange={(event) => setExperimentalSampling(event.target.checked)} />Use custom sampler and scheduler</label><SelectField label="Experimental Turbo override" value={turbo} onChange={(value) => setTurbo(value as 'off' | '4' | '8')} options={[["off", 'Off · native quality'], ["8", 'Official 8-step'], ["4", '4-step · preview testing']]} /><SelectField label="Sampler" value={experimentalSampling ? sampler : 'res_multistep'} onChange={setSampler} disabled={!experimentalSampling} options={[...new Set([sampler, 'res_multistep', ...choices(info, 'KSamplerSelect', 'sampler_name')])].map((value) => [value, value])} /><SelectField label="Scheduler" value={experimentalSampling ? scheduler : 'simple'} onChange={setScheduler} disabled={!experimentalSampling} options={[...new Set([scheduler, 'simple', ...choices(info, 'BasicScheduler', 'scheduler')])].map((value) => [value, value])} /><SelectField label="Sigma shifts" value={sigmaShiftMode} onChange={(value) => setSigmaShiftMode(value as 'model' | 'custom')} options={[["model", 'Model defaults · video 12 / audio 3'], ["custom", 'Custom official sigma-shift node']]} /><NumberField label="Video sigma shift" value={shiftVideo} min={0.01} max={100} step={0.01} onChange={setShiftVideo} disabled={sigmaShiftMode !== 'custom'} /><NumberField label="Audio sigma shift" value={shiftAudio} min={0.01} max={100} step={0.01} onChange={setShiftAudio} disabled={sigmaShiftMode !== 'custom'} /><p className="field-help">The published ComfyUI workflow uses <strong>res_multistep + simple</strong>, CFG 1, denoise 1, 24 fps, and the model’s native 12/3 shifts. Custom sampling—including Euler + Beta for converted Turbo LoRAs—is experimental and should be tested against the same seed.</p></div>}
             <p className="field-help render-duration">{frameCount(duration)} frames · {(frameCount(duration) / 24).toFixed(2)}s actual duration at 24 fps. Rounded up to MiniMax’s frame grid.</p>
@@ -1472,7 +1547,7 @@ function CharacterReferencePicker({ characters, values, onChange }: { characters
 
 function LocationReferencePicker({ locations, values, onChange }: { locations: LocationProject[]; values: string[]; onChange(value: string): void }) {
   if (!locations.length) return null
-  return <fieldset className="character-reference-picker multi-character-picker location-reference-picker"><legend>Locations in this render</legend><div><span><MapPin size={17} /></span><span><strong>Location library</strong><small>Add environments alongside the cast. All selected assets share the 9-picture limit.</small></span></div><div className="character-reference-choices">{locations.map((location) => { const count = locationReferences(location).length; const selected = values.includes(location.id); return <label className={selected ? 'selected' : ''} key={location.id}><input type="checkbox" checked={selected} disabled={!count} onChange={() => onChange(location.id)} /><span><strong>{location.name}</strong><small>{count ? `${count} approved view${count === 1 ? '' : 's'}` : 'No approved location views'}</small></span></label> })}</div>{values.length > 0 && <button type="button" className="secondary-button" onClick={() => onChange('')}>Clear locations</button>}</fieldset>
+  return <fieldset className="character-reference-picker multi-character-picker location-reference-picker"><legend>Locations in this render</legend><div><span><MapPin size={17} /></span><span><strong>Location library</strong><small>Add environments alongside the cast. All selected assets share the 9-picture limit.</small></span></div><div className="character-reference-choices">{locations.map((location) => { const count = locationReferences(location).length; const selected = values.includes(location.id); return <label className={selected ? 'selected' : ''} key={location.id}><input type="checkbox" checked={selected} disabled={!count} onChange={() => onChange(location.id)} /><span><strong>{location.name}</strong><small>{count ? `${location.environmentMode === 'nature' ? 'Nature only · ' : ''}${count} approved view${count === 1 ? '' : 's'}` : 'No approved location views'}</small></span></label> })}</div>{values.length > 0 && <button type="button" className="secondary-button" onClick={() => onChange('')}>Clear locations</button>}</fieldset>
 }
 
 function ReferencePromptHelper({ pictureCount, videoCount, audioCount, referenceInstructions, onInsert }: { pictureCount: number; videoCount: number; audioCount: number; referenceInstructions: string[]; onInsert(value: string): void }) {

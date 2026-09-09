@@ -297,8 +297,10 @@ function streamLanEvents(request: IncomingMessage, response: ServerResponse, sea
     }
     const buffer = Buffer.from(data as Buffer)
     if (buffer.length <= 8 || buffer.readUInt32BE(0) !== 1) return
-    const mime = buffer.readUInt32BE(4) === 2 ? 'image/png' : 'image/jpeg'
-    send({ type: 'preview', data: { image: `data:${mime};base64,${buffer.subarray(8).toString('base64')}` } })
+    const animatedH3Frame = buffer.length > 32 && buffer.readUInt32BE(4) === 1 && buffer.readUInt32BE(8) === 1 && buffer.readUInt16BE(32) === 0xffd8
+    const imageOffset = animatedH3Frame ? 32 : 8
+    const mime = !animatedH3Frame && buffer.readUInt32BE(4) === 2 ? 'image/png' : 'image/jpeg'
+    send({ type: 'preview', data: { image: `data:${mime};base64,${buffer.subarray(imageOffset).toString('base64')}` } })
   })
   socket.on('error', (error) => send({ type: 'preview_error', data: { message: error.message } }))
   const heartbeat = setInterval(() => { if (!response.destroyed) response.write(': keepalive\n\n') }, 15_000)

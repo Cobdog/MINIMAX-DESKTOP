@@ -64,6 +64,25 @@ export function buildMiniMaxWorkflow(
     }
     modelLink = ['6', 0]
   }
+  if (options.previewOverride) {
+    prompt['7'] = {
+      class_type: 'MiniMaxH3PreviewOverrideCS',
+      inputs: {
+        model: modelLink,
+        decode: 'latent2rgb (fast)',
+        preview_target: 'sampler (VHS)',
+        max_resolution: 512,
+        preview_frames: options.previewOverride.frames,
+        preview_fps: options.previewOverride.fps,
+        webp_quality: 80,
+        every_n_steps: 1,
+        max_preview_overhead: 25,
+        suppress_default_preview: true,
+        playback: 'source fps',
+      },
+    }
+    modelLink = ['7', 0]
+  }
 
   const conditioningInputs: Record<string, string | number | boolean | Link> = {
     clip: ['2', 0],

@@ -4,6 +4,7 @@ import App from './App'
 import MobileApp from './MobileApp'
 import { installBrowserMock } from './browserMock'
 import './styles.css'
+import './guided-studio.css'
 
 installBrowserMock()
 

@@ -44,9 +44,11 @@ export function useLivePreview(url: string | undefined, enabled: boolean, onProg
         } else if (event.data instanceof ArrayBuffer && event.data.byteLength > 8 && active) {
           const header = new DataView(event.data)
           if (header.getUint32(0) !== 1) return
-          const mime = header.getUint32(4) === 2 ? 'image/png' : 'image/jpeg'
+          const animatedH3Frame = event.data.byteLength > 32 && header.getUint32(4) === 1 && header.getUint32(8) === 1 && header.getUint16(32) === 0xffd8
+          const imageOffset = animatedH3Frame ? 32 : 8
+          const mime = !animatedH3Frame && header.getUint32(4) === 2 ? 'image/png' : 'image/jpeg'
           if (blobUrl) URL.revokeObjectURL(blobUrl)
-          blobUrl = URL.createObjectURL(new Blob([event.data.slice(8)], { type: mime }))
+          blobUrl = URL.createObjectURL(new Blob([event.data.slice(imageOffset)], { type: mime }))
           setPreview({ promptId: active, url: blobUrl })
         }
       }

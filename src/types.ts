@@ -1,12 +1,12 @@
-export type View = 'create' | 'ltx25' | 'zimage' | 'characters' | 'wardrobes' | 'locations' | 'movie' | 'queue' | 'library' | 'editor' | 'settings'
+export type View = 'create' | 'ltx25' | 'zimage' | 'characters' | 'wardrobes' | 'accessories' | 'locations' | 'movie' | 'queue' | 'library' | 'editor' | 'settings'
 export type GenerationMode = 'text' | 'image' | 'frames' | 'reference'
 export type ModelKind = 'diffusion_models' | 'text_encoders' | 'vae' | 'loras' | 'vae_approx' | 'clip_vision'
 export type MediaKind = 'image' | 'video' | 'audio'
 export type UpscaleMode = 'off' | 'ltx' | 'rtx'
-export type ReferencePurpose = 'character' | 'character-angle' | 'wardrobe' | 'location' | 'continuity' | 'product' | 'style' | 'generic'
+export type ReferencePurpose = 'character' | 'character-angle' | 'wardrobe' | 'accessory' | 'location' | 'continuity' | 'product' | 'style' | 'generic'
 export type PromptPresetCategory = 'camera' | 'shot' | 'angle' | 'lens' | 'lighting' | 'audio' | 'style' | 'movement' | 'transition' | 'character' | 'wardrobe' | 'location'
 export type PromptPreset = { id: string; category: PromptPresetCategory; label: string; keywords: string[]; description: string; insertion: string }
-export type MovieReferenceBinding = { file: MediaFile; purpose: ReferencePurpose; label: string; characterId?: string; wardrobeId?: string; locationId?: string; source: 'character-studio' | 'wardrobe-studio' | 'location-studio' | 'movie' | 'shot' | 'continuity' }
+export type MovieReferenceBinding = { file: MediaFile; purpose: ReferencePurpose; label: string; characterId?: string; wardrobeId?: string; accessoryId?: string; locationId?: string; locationEnvironmentMode?: LocationProject['environmentMode']; source: 'character-studio' | 'wardrobe-studio' | 'accessory-studio' | 'location-studio' | 'movie' | 'shot' | 'continuity' }
 export type ResolvedMovieShot = { preferredMode: GenerationMode; effectiveMode: GenerationMode; references: MovieReferenceBinding[]; compiledPrompt: string; routeReason: string; omittedReferences: MovieReferenceBinding[] }
 
 export type GenerationDefaults = {
@@ -56,14 +56,21 @@ export type CharacterProject = {
   turntableVideo?: MediaFile
   referenceImages: MediaFile[]
   wardrobeIds: string[]
+  accessoryIds: string[]
+  identityTemplate: 'custom' | 'cinematic' | 'editorial' | 'everyday'
+  hairPreset: string
+  skinTone: string
 }
 export type WardrobeProject = { id: string; name: string; description: string; accessories: string[]; materials: string; colors: string; visualStyle: string; referencePrompt: string; referenceImages: MediaFile[]; selectedReferencePaths?: string[]; createdAt: number; updatedAt: number }
+export type AccessoryProject = { id: string; name: string; category: 'jewelry' | 'eyewear' | 'watch' | 'bag' | 'headwear' | 'prop' | 'other'; description: string; materials: string; colors: string; visualStyle: string; referencePrompt: string; referenceImage?: MediaFile; createdAt: number; updatedAt: number }
 export type LocationProject = {
   id: string
   name: string
+  environmentMode: 'mixed' | 'nature' | 'built'
   description: string
   atmosphere: string
   timeOfDay: string
+  continuityAnchors: string
   visualStyle: string
   referencePrompt: string
   createdAt: number
@@ -75,7 +82,7 @@ export type LocationProject = {
   referenceImages: MediaFile[]
 }
 export type MovieCharacter = { id: string; libraryCharacterId?: string; libraryUpdatedAt?: number; name: string; description: string; wardrobe: string; voiceNotes: string; referenceImages: MediaFile[] }
-export type MovieLocation = { id: string; name: string; description: string; referenceImages: MediaFile[] }
+export type MovieLocation = { id: string; libraryLocationId?: string; libraryUpdatedAt?: number; environmentMode?: LocationProject['environmentMode']; name: string; description: string; referenceImages: MediaFile[] }
 export type MovieChatArea = 'setup' | 'bible' | 'shots' | 'preview'
 export type MovieChatMessage = { id: string; role: 'user' | 'assistant'; content: string; createdAt: number; appliedChanges?: string[]; areas?: MovieChatArea[] }
 export type MovieShot = {
@@ -172,6 +179,7 @@ export type GenerationOptions = {
   steps: number
   turbo: 'off' | '4' | '8'
   experimentalSampling?: boolean
+  previewOverride?: { frames: number; fps: number }
   loraStrength?: number
   sampler: string
   scheduler: string

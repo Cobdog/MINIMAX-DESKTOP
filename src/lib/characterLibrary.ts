@@ -6,7 +6,7 @@ export const CHARACTER_LIBRARY_EVENT = 'minimax-character-library-changed'
 
 export function newCharacterProject(index = 1): CharacterProject {
   const now = Date.now()
-  return { id: createId(), name: `Character ${index}`, description: '', wardrobe: '', voiceNotes: '', visualStyle: 'cinematic photorealism', referencePrompt: '', createdAt: now, updatedAt: now, referenceMode: 'set', referenceImages: [], wardrobeIds: [] }
+  return { id: createId(), name: `Character ${index}`, description: '', wardrobe: '', voiceNotes: '', visualStyle: 'cinematic photorealism', referencePrompt: '', createdAt: now, updatedAt: now, referenceMode: 'set', referenceImages: [], wardrobeIds: [], accessoryIds: [], identityTemplate: 'cinematic', hairPreset: '', skinTone: '' }
 }
 
 export function loadCharacterProjects(): CharacterProject[] {
@@ -20,6 +20,7 @@ export function loadCharacterProjects(): CharacterProject[] {
       referenceMode: item.referenceMode === 'single' ? 'single' : 'set',
       referenceImages: item.referenceImages ?? [],
       wardrobeIds: item.wardrobeIds ?? [],
+      accessoryIds: item.accessoryIds ?? [],
     }))
   } catch { return [] }
 }

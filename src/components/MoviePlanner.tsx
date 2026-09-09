@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BookOpen, Check, ChevronDown, ChevronRight, CirclePause, CirclePlay, Clapperboard, Clock3, Film, ImagePlus, LoaderCircle, MapPin, MessageSquare, Pencil, Plus, RefreshCw, Send, SkipBack, SkipForward, Sparkles, Trash2, Users, X } from 'lucide-react'
 import { CHARACTER_LIBRARY_EVENT, characterReferences, loadCharacterProjects } from '../lib/characterLibrary'
+import { LOCATION_LIBRARY_EVENT, loadLocationProjects, locationReferences } from '../lib/locationLibrary'
 import { composeReferenceInstructions, resolveMovieShot } from '../lib/promptComposer'
 import { SmartPromptEditor, type SmartInsertOption } from './SmartPromptEditor'
 import { createId } from '../lib/createId'
-import type { AppSettings, CharacterProject, GenerationMode, MediaFile, MovieCharacter, MovieChatArea, MovieLocation, MovieProject, MovieScene, MovieShot, ResolvedMovieShot } from '../types'
+import type { AppSettings, CharacterProject, GenerationMode, LocationProject, MediaFile, MovieCharacter, MovieChatArea, MovieLocation, MovieProject, MovieScene, MovieShot, ResolvedMovieShot } from '../types'
 
 type PlannerStep = 'setup' | 'bible' | 'shots' | 'preview'
 
@@ -23,6 +24,7 @@ const plannerSchema: Record<string, unknown> = {
 const characterSchema: Record<string, unknown> = { type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' }, wardrobe: { type: 'string' }, voiceNotes: { type: 'string' } }, required: ['name', 'description', 'wardrobe', 'voiceNotes'] }
 const locationSchema: Record<string, unknown> = { type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' } }, required: ['name', 'description'] }
 const IMPORT_CHARACTER_EVENT = 'minimax-import-library-character'
+const IMPORT_LOCATION_EVENT = 'minimax-import-library-location'
 const movieChatSchema: Record<string, unknown> = {
   type: 'object', properties: {
     reply: { type: 'string' }, changes: { type: 'array', items: { type: 'string' } },
@@ -73,6 +75,7 @@ export function MoviePlanner({ settings, ollamaAvailable, ollamaModel, onOpenSho
   const [previewIndex, setPreviewIndex] = useState(0)
   const [characterDraft, setCharacterDraft] = useState<MovieCharacter | null>(null)
   const [characterLibrary, setCharacterLibrary] = useState<CharacterProject[]>(loadCharacterProjects)
+  const [locationLibrary, setLocationLibrary] = useState<LocationProject[]>(loadLocationProjects)
   const [locationDraft, setLocationDraft] = useState<MovieLocation | null>(null)
   const [expandedScenes, setExpandedScenes] = useState<string[]>(() => projects[0].scenes[0] ? [projects[0].scenes[0].id] : [])
   const [expandedShots, setExpandedShots] = useState<string[]>([])
@@ -85,6 +88,11 @@ export function MoviePlanner({ settings, ollamaAvailable, ollamaModel, onOpenSho
     const refresh = () => setCharacterLibrary(loadCharacterProjects())
     window.addEventListener(CHARACTER_LIBRARY_EVENT, refresh)
     return () => window.removeEventListener(CHARACTER_LIBRARY_EVENT, refresh)
+  }, [])
+  useEffect(() => {
+    const refresh = () => setLocationLibrary(loadLocationProjects())
+    window.addEventListener(LOCATION_LIBRARY_EVENT, refresh)
+    return () => window.removeEventListener(LOCATION_LIBRARY_EVENT, refresh)
   }, [])
 
   useEffect(() => {
@@ -181,12 +189,26 @@ export function MoviePlanner({ settings, ollamaAvailable, ollamaModel, onOpenSho
     window.addEventListener(IMPORT_CHARACTER_EVENT, importCharacter)
     return () => window.removeEventListener(IMPORT_CHARACTER_EVENT, importCharacter)
   }, [characterLibrary, project.id, project.characters, projects, onNotice])
+  useEffect(() => {
+    const importLocation = (event: Event) => {
+      const source = locationLibrary.find((location) => location.id === (event as CustomEvent<string>).detail)
+      if (source) importLibraryLocation(source)
+    }
+    window.addEventListener(IMPORT_LOCATION_EVENT, importLocation)
+    return () => window.removeEventListener(IMPORT_LOCATION_EVENT, importLocation)
+  })
   const refreshLibraryCharacter = (characterId: string) => {
     const character = project.characters.find((item) => item.id === characterId)
     const source = character?.libraryCharacterId ? characterLibrary.find((item) => item.id === character.libraryCharacterId) : undefined
     if (!character || !source) return
     update((value) => ({ ...value, characters: value.characters.map((item) => item.id === characterId ? { ...item, name: source.name, description: source.description, wardrobe: source.wardrobe, voiceNotes: source.voiceNotes, referenceImages: characterReferences(source), libraryUpdatedAt: source.updatedAt } : item) }))
     onNotice('success', `${source.name} refreshed from Character Studio without changing shot assignments.`)
+  }
+  const importLibraryLocation = (source: LocationProject) => {
+    if (project.locations.some((location) => location.libraryLocationId === source.id)) { onNotice('neutral', `${source.name} is already in this movie.`); return }
+    const location: MovieLocation = { id: createId(), libraryLocationId: source.id, libraryUpdatedAt: source.updatedAt, environmentMode: source.environmentMode, name: source.name, description: [source.description, source.atmosphere, source.timeOfDay, source.continuityAnchors].filter(Boolean).join(' '), referenceImages: locationReferences(source) }
+    update((value) => ({ ...value, locations: [...value.locations, location] }))
+    onNotice('success', `${source.name} and ${location.referenceImages.length} approved location view${location.referenceImages.length === 1 ? '' : 's'} added to this movie.`)
   }
   const saveLocation = () => {
     if (!locationDraft?.name.trim()) { onNotice('error', 'Give the location a name before saving.'); return }
@@ -460,15 +482,14 @@ function inlineMarkup(value: string) {
 
 function areaLabel(area: MovieChatArea) { return area === 'setup' ? 'Review story' : area === 'bible' ? 'Review bible' : area === 'shots' ? 'Review shots' : 'Open preview' }
 
-function AssetCollection({ title, subtitle, empty, onAdd, children }: { title: string; subtitle: string; empty: string; onAdd(): void; children: React.ReactNode }) {
+function AssetCollection({ title, subtitle, empty, onAdd, library, children }: { title: string; subtitle: string; empty: string; onAdd(): void; library?: React.ReactNode; children: React.ReactNode }) {
   const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children)
-  const [library, setLibrary] = useState<CharacterProject[]>(loadCharacterProjects)
-  useEffect(() => {
-    const refresh = () => setLibrary(loadCharacterProjects())
-    window.addEventListener(CHARACTER_LIBRARY_EVENT, refresh)
-    return () => window.removeEventListener(CHARACTER_LIBRARY_EVENT, refresh)
-  }, [])
-  return <section className="bible-column"><div className="bible-column-heading"><div><strong>{title}</strong><small>{subtitle}</small></div><button onClick={onAdd}><Plus size={14} />Create</button></div>{title === 'Characters' && library.length > 0 && <div className="bible-library-strip"><span>Add from Character Studio</span>{library.map((character) => { const references = characterReferences(character); return <button key={character.id} disabled={references.length === 0} title={references.length ? `Import ${references.length} approved reference${references.length === 1 ? '' : 's'}` : 'Create a reference first'} onClick={() => window.dispatchEvent(new CustomEvent(IMPORT_CHARACTER_EVENT, { detail: character.id }))}>{character.baseImage?.preview ? <img src={character.baseImage.preview} alt="" /> : <Users size={14} />}<span>{character.name}</span><Plus size={12} /></button> })}</div>}{hasChildren ? <div className="asset-card-grid">{children}</div> : <div className="bible-empty">{empty}</div>}</section>
+  const [characters, setCharacters] = useState<CharacterProject[]>(loadCharacterProjects)
+  const [locations, setLocations] = useState<LocationProject[]>(loadLocationProjects)
+  useEffect(() => { const refresh = () => setCharacters(loadCharacterProjects()); window.addEventListener(CHARACTER_LIBRARY_EVENT, refresh); return () => window.removeEventListener(CHARACTER_LIBRARY_EVENT, refresh) }, [])
+  useEffect(() => { const refresh = () => setLocations(loadLocationProjects()); window.addEventListener(LOCATION_LIBRARY_EVENT, refresh); return () => window.removeEventListener(LOCATION_LIBRARY_EVENT, refresh) }, [])
+  const libraryStrip = title === 'Characters' && characters.length > 0 ? <div className="bible-library-strip"><span>Add from Character Studio</span>{characters.map((character) => { const references = characterReferences(character); return <button key={character.id} disabled={!references.length} onClick={() => window.dispatchEvent(new CustomEvent(IMPORT_CHARACTER_EVENT, { detail: character.id }))}>{character.baseImage?.preview ? <img src={character.baseImage.preview} alt="" /> : <Users size={14} />}<span>{character.name}</span><Plus size={12} /></button> })}</div> : title === 'Locations' && locations.length > 0 ? <div className="bible-library-strip"><span>Add from Location Studio</span>{locations.map((location) => { const references = locationReferences(location); return <button key={location.id} disabled={!references.length} onClick={() => window.dispatchEvent(new CustomEvent(IMPORT_LOCATION_EVENT, { detail: location.id }))}>{references[0]?.preview ? <img src={references[0].preview} alt="" /> : <MapPin size={14} />}<span>{location.name}</span><Plus size={12} /></button> })}</div> : null
+  return <section className="bible-column"><div className="bible-column-heading"><div><strong>{title}</strong><small>{subtitle}</small></div><button onClick={onAdd}><Plus size={14} />Create</button></div>{library ?? libraryStrip}{hasChildren ? <div className="asset-card-grid">{children}</div> : <div className="bible-empty">{empty}</div>}</section>
 }
 function AssetCard({ icon, name, description, references, linked, refreshAvailable, onRefresh, onEdit, onRemove }: { icon: 'character' | 'location'; name: string; description: string; references: MediaFile[]; linked?: boolean; refreshAvailable?: boolean; onRefresh?(): void; onEdit(): void; onRemove(): void }) {
   return <article className="movie-asset-card"><button className="asset-card-main" onClick={onEdit}>{references[0]?.preview ? <img src={references[0].preview} alt="" /> : <span className="asset-placeholder">{icon === 'character' ? <Users size={20} /> : <MapPin size={20} />}</span>}<span className="asset-card-copy"><strong>{name}{linked && <em>Character Studio</em>}</strong><span>{description || `Add ${icon === 'character' ? 'appearance and performance' : 'set and atmosphere'} details`}</span><small>{references.length} approved reference image{references.length === 1 ? '' : 's'}{!linked && icon === 'character' ? ' · movie only' : ''}</small>{refreshAvailable && <small className="asset-refresh-state">Character Studio has newer references</small>}</span></button><div className="asset-card-actions">{refreshAvailable && onRefresh && <button className="refresh" onClick={onRefresh}><RefreshCw size={13} />Refresh</button>}<button onClick={onEdit}><Pencil size={13} />Edit</button><button aria-label={`Remove ${name}`} onClick={onRemove}><Trash2 size={13} /></button></div></article>
