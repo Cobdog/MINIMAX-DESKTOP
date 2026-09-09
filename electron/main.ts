@@ -39,12 +39,39 @@ type AppSettings = {
   generationDefaults: GenerationDefaults
 }
 
-type LanStatus = { running: boolean; url?: string; port?: number; error?: string }
+type LanStatus = { running: boolean; url?: string; desktopUrl?: string; port?: number; error?: string }
+type GpuTelemetry = { available: boolean; name?: string; usagePercent?: number; vramPercent?: number; vramUsedMb?: number; vramTotalMb?: number }
 const ltxUpscaleRequiredNodes = ['VAEEncodeTiled', 'LatentUpscaleModelLoader', 'LTXVLatentUpsampler', 'VAEDecodeTiled', 'ImageFromBatch', 'RepeatImageBatch', 'ImageBatch']
 const ltxNativeRequiredNodes = ['LTXVConditioning', 'LTXVEmptyLatentAudio', 'EmptyLTXVLatentVideo', 'LTXVDualCFGGuider', 'LTXVSeparateAVLatent', 'LTXVConcatAVLatent', 'LTXVLatentUpsampler', 'LTXVAudioVAEDecode', 'ManualSigmas', 'VAEDecodeTiled', 'CLIPTextEncode', 'KSamplerSelect', 'SamplerCustomAdvanced']
 let lanToken = ''
+let mobileCharacterLibrary: unknown[] = []
 let lanServer: Server | null = null
 let lanStatus: LanStatus = { running: false }
+
+function readGpuTelemetry(): Promise<GpuTelemetry> {
+  return new Promise((resolve) => {
+    const child = spawn('nvidia-smi', ['--query-gpu=name,utilization.gpu,memory.used,memory.total', '--format=csv,noheader,nounits'], { windowsHide: true })
+    let output = ''
+    let settled = false
+    const finish = (value: GpuTelemetry) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(value)
+    }
+    const timer = setTimeout(() => { child.kill(); finish({ available: false }) }, 1800)
+    child.stdout.on('data', (chunk) => { output += String(chunk) })
+    child.on('error', () => finish({ available: false }))
+    child.on('close', (code) => {
+      if (code !== 0 || !output.trim()) { finish({ available: false }); return }
+      const [name = 'GPU', usage = '', used = '', total = ''] = output.trim().split(/\r?\n/, 1)[0].split(',').map((part) => part.trim())
+      const usagePercent = Number(usage)
+      const vramUsedMb = Number(used)
+      const vramTotalMb = Number(total)
+      finish({ available: true, name, usagePercent: Number.isFinite(usagePercent) ? usagePercent : undefined, vramUsedMb: Number.isFinite(vramUsedMb) ? vramUsedMb : undefined, vramTotalMb: Number.isFinite(vramTotalMb) ? vramTotalMb : undefined, vramPercent: vramTotalMb > 0 ? Math.round(vramUsedMb / vramTotalMb * 100) : undefined })
+    })
+  })
+}
 
 const modelKinds: ModelKind[] = ['diffusion_models', 'text_encoders', 'vae', 'loras', 'vae_approx', 'clip_vision']
 const modelExtensions = new Set(['.safetensors', '.pt', '.pth', '.gguf', '.onnx'])
@@ -115,6 +142,13 @@ function defaultSettings(): AppSettings {
       refImageSize: 'match', livePreview: true, sigmaShiftMode: 'model', shiftVideo: 12, shiftAudio: 3, loraStrength: 1, upscaleMode: 'off',
     },
   }
+}
+
+function finalOllamaAnswer(value: string) {
+  let answer = value.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '').replace(/<analysis\b[^>]*>[\s\S]*?<\/analysis>/gi, '')
+  const unclosedThink = answer.search(/<(?:think|analysis)\b[^>]*>/i)
+  if (unclosedThink >= 0) answer = answer.slice(0, unclosedThink)
+  return answer.replace(/<\/?(?:think|analysis)\b[^>]*>/gi, '').trim()
 }
 
 function settingsPath() {
@@ -283,7 +317,7 @@ async function readJson(request: IncomingMessage, maximumBytes = 36_000_000) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as Record<string, unknown>
 }
 
-function historyOutput(history: Record<string, unknown>, promptId: string) {
+function historyOutput(history: Record<string, unknown>, promptId: string, kind: 'video' | 'image' = 'video') {
   const entry = history[promptId] as { outputs?: Record<string, unknown> } | undefined
   const files: Array<{ filename: string; subfolder?: string; type?: string }> = []
   const visit = (value: unknown) => {
@@ -296,7 +330,7 @@ function historyOutput(history: Record<string, unknown>, promptId: string) {
   if (entry?.outputs?.['84']) visit(entry.outputs['84'])
   else if (entry?.outputs?.['70']) visit(entry.outputs['70'])
   else if (entry?.outputs) visit(entry.outputs)
-  return files.find((file) => /\.(mp4|webm|mov|mkv)$/i.test(file.filename))
+  return files.find((file) => kind === 'image' ? /\.(png|jpe?g|webp)$/i.test(file.filename) : /\.(mp4|webm|mov|mkv)$/i.test(file.filename))
 }
 
 async function proxyLanMedia(request: IncomingMessage, response: ServerResponse, search: URLSearchParams) {
@@ -321,7 +355,7 @@ async function handleLanRequest(request: IncomingMessage, response: ServerRespon
     const url = new URL(request.url ?? '/', 'http://minimax.local')
     if (url.pathname.startsWith('/api/lan/')) {
       const token = request.headers['x-minimax-token'] ?? url.searchParams.get('token')
-      if (token !== lanToken) return sendJson(response, 401, { error: 'This mobile link is no longer authorized. Scan the current QR code again.' })
+      if (token !== lanToken) return sendJson(response, 401, { error: 'This LAN link is no longer authorized. Open the current sharing panel again.' })
       const settings = await loadSettings()
       if (url.pathname === '/api/lan/bootstrap' && request.method === 'GET') {
         const groups = await Promise.all(modelKinds.map((kind) => scanDirectory(settings.paths[kind], kind)))
@@ -341,6 +375,7 @@ async function handleLanRequest(request: IncomingMessage, response: ServerRespon
           return sendJson(response, 200, { connected: false, latencyMs: Date.now() - started, models: groups.flat(), error: error instanceof Error ? error.message : String(error) })
         }
       }
+      if (url.pathname === '/api/lan/characters' && request.method === 'GET') return sendJson(response, 200, { characters: mobileCharacterLibrary })
       if (url.pathname === '/api/lan/upload' && request.method === 'POST') {
         const body = await readJson(request)
         const data = typeof body.data === 'string' ? body.data : ''
@@ -348,6 +383,19 @@ async function handleLanRequest(request: IncomingMessage, response: ServerRespon
         const form = new FormData()
         form.append('image', new Blob([Buffer.from(data.split(',')[1], 'base64')], { type: 'image/png' }), `mobile-frame-${randomUUID()}.png`)
         form.append('type', 'input'); form.append('subfolder', 'minimax-mobile')
+        return sendJson(response, 200, await comfyFetch(settings.comfyUrl, '/upload/image', { method: 'POST', body: form }))
+      }
+      if (url.pathname === '/api/lan/upload-media' && request.method === 'POST') {
+        const body = await readJson(request, 180_000_000)
+        const data = typeof body.data === 'string' ? body.data : ''
+        const name = typeof body.name === 'string' ? basename(body.name).replace(/[^a-z0-9._-]/gi, '_') : ''
+        const match = /^data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,(.+)$/is.exec(data)
+        if (!match || !name || data.length > 175_000_000) return sendJson(response, 400, { error: 'Invalid reference media.' })
+        const allowed = /^(image\/(png|jpeg|webp)|video\/(mp4|webm|quicktime)|audio\/(mpeg|wav|x-wav|ogg|mp4))$/i
+        if (!allowed.test(match[1])) return sendJson(response, 400, { error: 'Unsupported reference media type.' })
+        const form = new FormData()
+        form.append('image', new Blob([Buffer.from(match[2], 'base64')], { type: match[1] }), name)
+        form.append('type', 'input'); form.append('subfolder', 'minimax-mobile-references'); form.append('overwrite', 'true')
         return sendJson(response, 200, await comfyFetch(settings.comfyUrl, '/upload/image', { method: 'POST', body: form }))
       }
       if (url.pathname === '/api/lan/prompt' && request.method === 'POST') {
@@ -364,7 +412,9 @@ async function handleLanRequest(request: IncomingMessage, response: ServerRespon
         if (!prompt || prompt.length > 50_000) return sendJson(response, 400, { error: 'A shorter prompt-assistant request is required.' })
         const data = await comfyFetch(settings.ollamaUrl, '/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: settings.ollamaModel, prompt, stream: false, think: false, options: { temperature: 0.6, num_predict: 1200 } }) }) as { response?: string; error?: string }
         if (!data.response) return sendJson(response, 502, { error: data.error || 'Ollama returned an empty response.' })
-        return sendJson(response, 200, { response: data.response.trim() })
+        const answer = finalOllamaAnswer(data.response)
+        if (!answer) return sendJson(response, 502, { error: 'Ollama returned reasoning without a final answer.' })
+        return sendJson(response, 200, { response: answer })
       }
       if (url.pathname === '/api/lan/cancel' && request.method === 'POST') {
         const body = await readJson(request, 10_000)
@@ -379,7 +429,7 @@ async function handleLanRequest(request: IncomingMessage, response: ServerRespon
       if (url.pathname.startsWith('/api/lan/history/') && request.method === 'GET') {
         const promptId = decodeURIComponent(url.pathname.slice('/api/lan/history/'.length))
         const history = await comfyFetch(settings.comfyUrl, `/history/${encodeURIComponent(promptId)}`) as Record<string, unknown>
-        const output = historyOutput(history, promptId)
+        const output = historyOutput(history, promptId, url.searchParams.get('kind') === 'image' ? 'image' : 'video')
         const entry = history[promptId] as { status?: { status_str?: string } } | undefined
         return sendJson(response, 200, { finished: Boolean(entry), error: entry?.status?.status_str === 'error' ? 'ComfyUI reported an execution error. Check the desktop console for the failed node.' : undefined, output })
       }
@@ -409,7 +459,8 @@ async function startLanServer() {
     lanServer = createServer((request, response) => void handleLanRequest(request, response))
     lanServer.once('error', (error) => { lanStatus = { running: false, port, error: error.message }; resolve() })
     lanServer.listen(port, '0.0.0.0', () => {
-      lanStatus = { running: true, port, url: `http://${lanAddress()}:${port}/?mobile=1&token=${lanToken}` }
+      const origin = `http://${lanAddress()}:${port}`
+      lanStatus = { running: true, port, url: `${origin}/?mobile=1&token=${lanToken}`, desktopUrl: `${origin}/?desktop=1&token=${lanToken}` }
       resolve()
     })
   })
@@ -509,11 +560,16 @@ app.whenReady().then(async () => {
     return localMediaResponse(candidate, request)
   })
   ipcMain.handle('settings:get', () => loadSettings())
+  ipcMain.handle('system:gpu-telemetry', () => readGpuTelemetry())
   ipcMain.handle('lan:status', () => lanStatus)
+  ipcMain.handle('lan:sync-characters', (_event, characters: unknown[]) => { mobileCharacterLibrary = Array.isArray(characters) ? characters : []; return { synced: mobileCharacterLibrary.length } })
   ipcMain.handle('lan:rotate-token', async () => {
     lanToken = randomUUID().replace(/-/g, '')
     await saveLanToken(lanToken)
-    if (lanStatus.running) lanStatus = { ...lanStatus, url: `http://${lanAddress()}:${lanStatus.port ?? 4178}/?mobile=1&token=${lanToken}` }
+    if (lanStatus.running) {
+      const origin = `http://${lanAddress()}:${lanStatus.port ?? 4178}`
+      lanStatus = { ...lanStatus, url: `${origin}/?mobile=1&token=${lanToken}`, desktopUrl: `${origin}/?desktop=1&token=${lanToken}` }
+    }
     return lanStatus
   })
   ipcMain.handle('settings:save', (_event, settings: AppSettings) => saveSettings(settings))
@@ -642,7 +698,9 @@ app.whenReady().then(async () => {
       body: JSON.stringify({ model, prompt, stream: false, think: false, options: { temperature: 0.65, num_predict: 1200 } }),
     }) as { response?: string; error?: string }
     if (!data.response) throw new Error(data.error || 'Ollama returned an empty response.')
-    return data.response.trim()
+    const answer = finalOllamaAnswer(data.response)
+    if (!answer) throw new Error('Ollama returned reasoning without a final answer.')
+    return answer
   })
   ipcMain.handle('ollama:structured', async (_event, url: string, model: string, prompt: string, schema: Record<string, unknown>) => {
     const data = await comfyFetch(url, '/api/chat', {
@@ -657,7 +715,7 @@ app.whenReady().then(async () => {
         options: { temperature: 0.2, num_predict: 6000 },
       }),
     }) as { message?: { content?: string }; error?: string }
-    const content = data.message?.content
+    const content = data.message?.content ? finalOllamaAnswer(data.message.content) : ''
     if (!content) throw new Error(data.error || 'Ollama returned an empty movie plan.')
     try { return JSON.parse(content) }
     catch { throw new Error('Ollama returned a movie plan that was not valid JSON.') }

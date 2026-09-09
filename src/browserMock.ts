@@ -56,6 +56,7 @@ export function installBrowserMock() {
     getOutputImage: async () => { throw new Error('Open the desktop app to retrieve images.') },
     saveComfyOutputImage: async () => { throw new Error('Open the desktop app to save generated images.') },
     getSettings: async () => current,
+    getGpuTelemetry: async () => ({ available: true, name: 'Preview GPU', usagePercent: 38, vramPercent: 62, vramUsedMb: 14880, vramTotalMb: 24000 }),
     saveSettings: async (next) => (current = next),
     chooseDirectory: async () => null,
     chooseMedia: async () => null,
@@ -106,8 +107,9 @@ export function installBrowserMock() {
       if (properties?.description && !properties?.scenes) return { name: 'North Relay Station', description: 'An isolated concrete relay station on a wind-cut plateau, with a circular control room, oxidized antenna ribs, amber work lights, and a cracked blue orientation stripe running through every corridor.' }
       return { scenes: [{ title: 'Opening', summary: 'The story begins.', location: 'Primary location', shots: [{ title: 'Establishing shot', duration: 5, prompt: 'A cinematic establishing shot introduces the location with controlled camera movement and natural synchronized ambience.', dialogue: '', mode: 'text', characters: [] }] }] }
     },
-    getLanStatus: async () => ({ running: true, url: `${location.origin}/?mobile=1&token=browser-preview`, port: Number(location.port) }),
-    rotateLanToken: async () => ({ running: true, url: `${location.origin}/?mobile=1&token=browser-preview`, port: Number(location.port) }),
+    getLanStatus: async () => ({ running: true, url: `${location.origin}/?mobile=1&token=browser-preview`, desktopUrl: `${location.origin}/?desktop=1&token=browser-preview`, port: Number(location.port) }),
+    syncMobileCharacters: async (characters) => ({ synced: characters.length }),
+    rotateLanToken: async () => ({ running: true, url: `${location.origin}/?mobile=1&token=browser-preview`, desktopUrl: `${location.origin}/?desktop=1&token=browser-preview`, port: Number(location.port) }),
   }
   window.minimax = api
 }

@@ -1,4 +1,4 @@
-export type View = 'create' | 'ltx25' | 'zimage' | 'characters' | 'wardrobes' | 'movie' | 'queue' | 'library' | 'editor' | 'settings'
+export type View = 'create' | 'ltx25' | 'zimage' | 'characters' | 'wardrobes' | 'locations' | 'movie' | 'queue' | 'library' | 'editor' | 'settings'
 export type GenerationMode = 'text' | 'image' | 'frames' | 'reference'
 export type ModelKind = 'diffusion_models' | 'text_encoders' | 'vae' | 'loras' | 'vae_approx' | 'clip_vision'
 export type MediaKind = 'image' | 'video' | 'audio'
@@ -58,6 +58,22 @@ export type CharacterProject = {
   wardrobeIds: string[]
 }
 export type WardrobeProject = { id: string; name: string; description: string; materials: string; colors: string; visualStyle: string; referencePrompt: string; referenceImages: MediaFile[]; selectedReferencePaths?: string[]; createdAt: number; updatedAt: number }
+export type LocationProject = {
+  id: string
+  name: string
+  description: string
+  atmosphere: string
+  timeOfDay: string
+  visualStyle: string
+  referencePrompt: string
+  createdAt: number
+  updatedAt: number
+  referenceMode: 'single' | 'set'
+  selectedReferencePaths?: string[]
+  baseImage?: MediaFile
+  walkthroughVideo?: MediaFile
+  referenceImages: MediaFile[]
+}
 export type MovieCharacter = { id: string; libraryCharacterId?: string; libraryUpdatedAt?: number; name: string; description: string; wardrobe: string; voiceNotes: string; referenceImages: MediaFile[] }
 export type MovieLocation = { id: string; name: string; description: string; referenceImages: MediaFile[] }
 export type MovieChatArea = 'setup' | 'bible' | 'shots' | 'preview'
@@ -191,8 +207,18 @@ export type OllamaModel = {
 export type LanStatus = {
   running: boolean
   url?: string
+  desktopUrl?: string
   port?: number
   error?: string
+}
+
+export type GpuTelemetry = {
+  available: boolean
+  name?: string
+  usagePercent?: number
+  vramPercent?: number
+  vramUsedMb?: number
+  vramTotalMb?: number
 }
 
 export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
@@ -216,6 +242,7 @@ export type GenerationJob = {
   provider?: 'minimax' | 'ltx25'
   movieLink?: { projectId: string; sceneId: string; shotId: string }
   characterProjectId?: string
+  locationProjectId?: string
 }
 
 export type UploadedFile = { name: string; subfolder?: string; type?: string }
@@ -226,6 +253,7 @@ export type DesktopApi = {
   getOutputImage(url: string, file: { filename: string; subfolder?: string; type?: string }): Promise<string>
   saveComfyOutputImage(url: string, file: { filename: string; subfolder?: string; type?: string }, outputDirectory: string): Promise<{ path: string; name: string }>
   getSettings(): Promise<AppSettings>
+  getGpuTelemetry(): Promise<GpuTelemetry>
   saveSettings(settings: AppSettings): Promise<AppSettings>
   chooseDirectory(initialPath?: string): Promise<string | null>
   chooseMedia(type: MediaKind): Promise<{ path: string; name: string } | null>
@@ -247,5 +275,6 @@ export type DesktopApi = {
   generateWithOllama(url: string, model: string, prompt: string): Promise<string>
   generateStructuredWithOllama(url: string, model: string, prompt: string, schema: Record<string, unknown>): Promise<unknown>
   getLanStatus(): Promise<LanStatus>
+  syncMobileCharacters(characters: unknown[]): Promise<{ synced: number }>
   rotateLanToken(): Promise<LanStatus>
 }

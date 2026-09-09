@@ -12,6 +12,8 @@ type StoredWorkspace = {
   encoder: string
   vae: string
   seed: number
+  steps: number
+  guidance: number
 }
 
 const defaults: StoredWorkspace = {
@@ -21,6 +23,8 @@ const defaults: StoredWorkspace = {
   encoder: 'qwen_3_4b.safetensors',
   vae: 'ae.safetensors',
   seed: Math.floor(Math.random() * 1_000_000_000),
+  steps: 8,
+  guidance: 1,
 }
 
 function readWorkspace(): StoredWorkspace {
@@ -47,6 +51,8 @@ export function ZImageWorkspace({
   const [encoder, setEncoder] = useState(initial.encoder)
   const [vae, setVae] = useState(initial.vae)
   const [seed, setSeed] = useState(initial.seed)
+  const [steps, setSteps] = useState(initial.steps)
+  const [guidance, setGuidance] = useState(initial.guidance)
   const [job, setJob] = useState<{ id: string; url: string } | null>(null)
   const [result, setResult] = useState<MediaFile | null>(null)
   const [busy, setBusy] = useState(false)
@@ -55,8 +61,17 @@ export function ZImageWorkspace({
   const [error, setError] = useState(false)
 
   useEffect(() => {
-    localStorage.setItem('minimax.zimage-workspace', JSON.stringify({ prompt, resolution, model, encoder, vae, seed }))
-  }, [encoder, model, prompt, resolution, seed, vae])
+    const loadPrompt = (event: Event) => {
+      const value = (event as CustomEvent<string>).detail
+      if (value?.trim()) { setPrompt(value.trim()); setMessage('Image prompt loaded from Studio copilot.'); setError(false) }
+    }
+    window.addEventListener('minimax:load-image-prompt', loadPrompt)
+    return () => window.removeEventListener('minimax:load-image-prompt', loadPrompt)
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem('minimax.zimage-workspace', JSON.stringify({ prompt, resolution, model, encoder, vae, seed, steps, guidance }))
+  }, [encoder, guidance, model, prompt, resolution, seed, steps, vae])
 
   useEffect(() => {
     if (!job) return
@@ -73,11 +88,11 @@ export function ZImageWorkspace({
           const saved = await window.minimax.saveComfyOutputImage(job.url, image, outputDirectory)
           if (!disposed) {
             setResult({ ...saved, preview, kind: 'image' })
-            setJob(null); setBusy(false); setError(false); setMessage('Frame complete and ready to use.')
+            setJob(null); setBusy(false); setError(false); setMessage('Image complete and ready to use.')
           }
           return
         }
-        if (!disposed) setMessage('Rendering the first frame in ComfyUI…')
+        if (!disposed) setMessage('Rendering the image in ComfyUI…')
       } catch (caught) {
         if (!disposed) { setMessage(caught instanceof Error ? caught.message : String(caught)); setError(true); setBusy(false); setJob(null) }
         return
@@ -102,7 +117,7 @@ export function ZImageWorkspace({
     setBusy(true); setResult(null); setError(false); setMessage('Submitting Z-Image Turbo workflow…')
     try {
       const [width, height] = resolution.split('x').map(Number)
-      const response = await window.minimax.submitPrompt(url, buildZImage(prompt.trim(), width, height, seed, model, encoder, vae))
+      const response = await window.minimax.submitPrompt(url, buildZImage(prompt.trim(), width, height, seed, model, encoder, vae, steps, guidance))
       setJob({ id: response.prompt_id, url })
     } catch (caught) {
       setMessage(caught instanceof Error ? caught.message : String(caught)); setError(true); setBusy(false)
@@ -113,7 +128,7 @@ export function ZImageWorkspace({
     if (!job) return
     try {
       await window.minimax.cancelPrompt(job.url, job.id)
-      setMessage('Frame generation cancelled.'); setError(false)
+      setMessage('Image generation cancelled.'); setError(false)
     } catch (caught) {
       setMessage(`Could not cancel: ${caught instanceof Error ? caught.message : String(caught)}`); setError(true)
     } finally { setJob(null); setBusy(false) }
@@ -132,7 +147,7 @@ export function ZImageWorkspace({
 
   return <div className="standard-page zimage-workspace">
     <div className="page-heading">
-      <div><p className="eyebrow">LOCAL IMAGE WORKSPACE</p><h1>Create a first frame</h1><p>Design a still with Z-Image Turbo, then send it directly to MiniMax I2V.</p></div>
+      <div><p className="eyebrow">LOCAL IMAGE WORKSPACE</p><h1>Create Image</h1><p>Create a production still with Z-Image Turbo, then use it as a reference or send it to MiniMax I2V.</p></div>
       <div className="heading-state"><span className={connected && available ? 'ok' : 'warn'}>{connected && available ? <Check size={15} /> : <AlertCircle size={15} />}{connected ? available ? 'Z-Image ready' : 'Select installed models' : 'Engine offline'}</span></div>
     </div>
 
@@ -144,22 +159,24 @@ export function ZImageWorkspace({
           <div className="zimage-prompt-actions"><button className="secondary-button" onClick={() => void enhance()} disabled={busy || assisting || !ollamaAvailable || !prompt.trim()} title={ollamaAvailable ? `Enhance with ${ollamaModel}` : 'Configure Ollama in Settings'}>{assisting ? <LoaderCircle size={15} className="spin" /> : <WandSparkles size={15} />}Enhance with Ollama</button><small>{ollamaAvailable ? `${ollamaModel} · local` : 'Ollama unavailable'}</small></div>
         </div>
 
-        <RenderSize value={resolution} onChange={setResolution} />
+        <RenderSize value={resolution} onChange={setResolution} provider="zimage" />
         <div className="zimage-seed-row"><label>Seed<input type="number" min="0" max="999999999999" value={seed} disabled={busy} onChange={(event) => setSeed(Number(event.target.value))} /></label><button className="secondary-button" disabled={busy} onClick={() => setSeed(Math.floor(Math.random() * 1_000_000_000))}><Dices size={15} />Randomize</button></div>
 
         <details className="zimage-model-settings">
           <summary>Model components <small>Advanced</small></summary>
+          <div className="zimage-quality-controls"><label>Sampling steps<input type="number" min="4" max="20" value={steps} disabled={busy} onChange={(event) => setSteps(Math.max(4, Math.min(20, Number(event.target.value))))} /></label><label>Guidance<input type="number" min="1" max="3" step="0.1" value={guidance} disabled={busy} onChange={(event) => setGuidance(Math.max(1, Math.min(3, Number(event.target.value))))} /></label></div>
+          <p className="field-help">Turbo defaults are 8 steps and guidance 1. Increase gently for difficult compositions.</p>
           <div className="zimage-models">{fields.map((field) => <label key={field.label}>{field.label}<select value={field.value} disabled={busy} onChange={(event) => field.set(event.target.value)}>{!choices(info, field.node, field.field).includes(field.value) && <option value={field.value}>{field.value} · unavailable</option>}{choices(info, field.node, field.field).map((name) => <option key={name}>{name}</option>)}</select></label>)}</div>
           {!available && <p className="field-help">Choose Z-Image components registered with ComfyUI. Their safetensor folders remain controlled from Settings.</p>}
         </details>
 
         {message && <div className={`zimage-message ${error ? 'error' : ''}`} role={error ? 'alert' : 'status'}>{busy && <LoaderCircle size={16} className="spin" />}<span>{message}</span></div>}
-        <div className="zimage-generate-bar">{busy && <button className="danger-button" onClick={() => void cancel()}><CircleStop size={16} />Cancel</button>}<button className="primary-button" disabled={busy || !connected || !available || !prompt.trim()} onClick={() => void create()}>{busy ? <LoaderCircle size={18} className="spin" /> : <Sparkles size={18} />}{busy ? 'Creating frame…' : 'Create first frame'}</button></div>
+        <div className="zimage-generate-bar">{busy && <button className="danger-button" onClick={() => void cancel()}><CircleStop size={16} />Cancel</button>}<button className="primary-button" disabled={busy || !connected || !available || !prompt.trim()} onClick={() => void create()}>{busy ? <LoaderCircle size={18} className="spin" /> : <Sparkles size={18} />}{busy ? 'Creating image…' : 'Create image'}</button></div>
       </section>
 
       <aside className="zimage-preview-panel">
-        <div className="panel-heading"><div><span>OUTPUT</span><strong>First-frame preview</strong></div>{result && <span className="zimage-complete"><Check size={13} />Ready</span>}</div>
-        <div className="zimage-preview-stage">{result?.preview ? <img src={result.preview} alt="Generated Z-Image first frame" /> : busy ? <div className="render-state"><LoaderCircle className="spin" /><strong>Creating your frame</strong><span>{resolution.replace('x', ' × ')}</span></div> : <div className="empty-preview"><div className="preview-icon"><ImagePlus size={28} /></div><strong>Your first frame will appear here</strong><span>Describe the still, select a canvas, and generate it locally.</span></div>}</div>
+        <div className="panel-heading"><div><span>OUTPUT</span><strong>Image preview</strong></div>{result && <span className="zimage-complete"><Check size={13} />Ready</span>}</div>
+        <div className="zimage-preview-stage">{result?.preview ? <img src={result.preview} alt="Generated Z-Image output" /> : busy ? <div className="render-state"><LoaderCircle className="spin" /><strong>Creating your image</strong><span>{resolution.replace('x', ' × ')}</span></div> : <div className="empty-preview"><div className="preview-icon"><ImagePlus size={28} /></div><strong>Your image will appear here</strong><span>Describe the still, select a canvas, and generate it locally.</span></div>}</div>
         <div className="zimage-preview-actions"><span>{result ? `${result.name} · ${resolution.replace('x', ' × ')}` : 'Saved to ComfyUI · MiniMax_first_frames'}</span><button className="primary-button" disabled={!result} onClick={() => result && onUse(result, resolution)}><ImagePlus size={16} />Use in MiniMax I2V</button></div>
       </aside>
     </div>

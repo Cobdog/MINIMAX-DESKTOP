@@ -171,7 +171,7 @@ export function ClipEditor({ settings, jobs, onUseFrame, onNotice }: {
       <div className="editor-main-column">
         <section className="program-monitor">
           <div className="editor-pane-heading"><div><strong>Preview</strong><span>{programClip ? programClip.name : 'Select a clip from the bin or timeline'}</span></div>{exportUrl && <span className="export-chip">Latest export</span>}</div>
-          <div className="program-stage">{programClip ? <video key={programClip.source} src={programClip.source} controls preload="metadata" /> : <div><Scissors size={30} /><strong>No clip selected</strong><span>Choose media to preview it here.</span></div>}</div>
+          <div className="program-stage">{programClip ? <ProgramPlayback key={`${programClip.id}:${programClip.source}`} clip={programClip} /> : <div><Scissors size={30} /><strong>No clip selected</strong><span>Choose media to preview it here.</span></div>}</div>
         </section>
 
         <section className="timeline-panel">
@@ -206,6 +206,33 @@ function MediaBinItem({ clip, meta, onPreview, onAdd, onDrag, onDuration }: { cl
     <div><strong title={clip.name}>{clip.name}</strong><small>{meta ?? formatTime(clip.duration ?? 0)}</small></div>
     <button onClick={(event) => { event.stopPropagation(); onAdd(clip) }} aria-label={`Add ${clip.name} to timeline`}><Plus size={14} /></button>
   </article>
+}
+
+function ProgramPlayback({ clip }: { clip: ClipItem }) {
+  const [failed, setFailed] = useState(false)
+  const startAt = Math.max(0, clip.start ?? 0)
+  const endAt = clip.end && clip.end > startAt ? clip.end : undefined
+  if (failed) return <div className="playback-error"><strong>Preview unavailable</strong><span>The file may have moved or use a codec this Windows installation cannot decode.</span></div>
+  return <video
+    key={`${clip.id}:${clip.source}:${startAt}:${endAt ?? 'end'}`}
+    src={clip.source}
+    controls
+    playsInline
+    preload="auto"
+    onError={() => setFailed(true)}
+    onLoadedMetadata={(event) => {
+      const video = event.currentTarget
+      if (Number.isFinite(startAt) && startAt < video.duration) video.currentTime = startAt
+    }}
+    onPlay={(event) => {
+      const video = event.currentTarget
+      if (endAt && video.currentTime >= endAt - .04) video.currentTime = startAt
+    }}
+    onTimeUpdate={(event) => {
+      const video = event.currentTarget
+      if (endAt && video.currentTime >= endAt) { video.pause(); video.currentTime = endAt }
+    }}
+  />
 }
 
 function clipLength(clip: ClipItem) { return Math.max(0, (clip.end ?? clip.duration ?? 0) - (clip.start ?? 0)) }

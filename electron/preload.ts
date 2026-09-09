@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('minimax', {
   getOutputImage: (url: string, file: unknown) => ipcRenderer.invoke('comfy:output-image', url, file),
   saveComfyOutputImage: (url: string, file: unknown, outputDirectory: string) => ipcRenderer.invoke('comfy:save-output-image', url, file, outputDirectory),
   getSettings: () => ipcRenderer.invoke('settings:get'),
+  getGpuTelemetry: () => ipcRenderer.invoke('system:gpu-telemetry'),
   saveSettings: (settings: unknown) => ipcRenderer.invoke('settings:save', settings),
   chooseDirectory: (initialPath?: string) => ipcRenderer.invoke('dialog:directory', initialPath),
   chooseMedia: (type: 'image' | 'video' | 'audio') => ipcRenderer.invoke('dialog:media', type),
@@ -27,5 +28,6 @@ contextBridge.exposeInMainWorld('minimax', {
   generateWithOllama: (url: string, model: string, prompt: string) => ipcRenderer.invoke('ollama:generate', url, model, prompt),
   generateStructuredWithOllama: (url: string, model: string, prompt: string, schema: Record<string, unknown>) => ipcRenderer.invoke('ollama:structured', url, model, prompt, schema),
   getLanStatus: () => ipcRenderer.invoke('lan:status'),
+  syncMobileCharacters: (characters: unknown[]) => ipcRenderer.invoke('lan:sync-characters', characters),
   rotateLanToken: () => ipcRenderer.invoke('lan:rotate-token'),
 })
