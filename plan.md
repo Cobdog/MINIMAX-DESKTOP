@@ -386,6 +386,51 @@ Research basis: Blackmagic’s Edit page uses a media pool, viewers, and timelin
 
 Next test gate: run one 5-second LTX T2V and one cropped I2V in both Quality and Turbo, compare the fixed seed, confirm native audio, cancel a queued render, and verify intermediate/final previews remain scoped to the LTX workspace.
 
+### Feature Pass 13 — Mobile LTX and reference preparation (implemented)
+
+- Expose MiniMax H3 and native LTX‑2.5 as clearly separated providers in the LAN mobile Create workspace, with independent persisted prompts and settings.
+- Reuse the official desktop LTX Quality and Turbo workflow builders on mobile, including T2V, cropped I2V, synchronized audio, live preview, and cancellation.
+- Relay real ComfyUI sampler steps and workflow stages immediately on desktop and mobile, and check completed output once per second.
+- Open every newly selected Ref2V video in a focused clipper with source preview, playhead controls, precise in/out points, and a 2–15 second validation window.
+- Re-encode the chosen section to a separate H.264/AAC reference MP4 in the configured output folder; retain source metadata so an existing reference can be revised from its original video.
+- Keep reference clipping independent from the Clip Editor: it never joins media, alters the original, or starts a render.
+
+Next test gate: trim the beginning, middle, and end of long MP4/MOV sources; re-edit an existing reference; render Ref2V with the resulting clip; and verify native LTX T2V/I2V progress and output on a real phone.
+
+### Feature Pass 14 — H3 quality guardrails and diagnostics (implemented)
+
+- Promote three clear production routes in Create and Settings: Native Quality at 1344 × 768 and 20 steps, official Turbo 8 on the native canvas, and an 864 × 480 Turbo 8 Preview.
+- Label every H3 resolution as Draft, Preview, Balanced, or Native Quality so lower-resolution generation is not mistaken for an equivalent final-quality path.
+- Force all guided presets back to `res_multistep` + `simple`, native sigma shifts, LoRA 1.0 when applicable, and post-render upscale off.
+- Restrict full-quality tuning to 16–30 steps and move 4-step FL2V, custom sampler/scheduler, custom sigma shifts, and custom LoRA strength into a clearly warned Experimental disclosure.
+- Compare detected FL2VA, Qwen encoder, video VAE, audio VAE, and Turbo 8 files against the validated official filenames while continuing to support explicitly labeled non-standard fallbacks.
+- Add one-click fixed-seed H3 A/B diagnostics: Native 20-step and official Turbo 8, both 1344 × 768, five seconds, no upscale, saved with diagnostic filenames.
+- Warn that RTX/CUDA frame upscaling is best for already-clean output and may amplify noise or introduce temporal shimmer.
+
+Next test gate: run the diagnostic pair on the target GPU, compare native files before any upscale, then repeat a known problematic prompt using Native Quality and Preview to isolate resolution and Turbo artifacts.
+
+### Feature Pass 15 — Verified upscale isolation (implemented)
+
+- Keep RTX/CUDA frame upscaling explicitly experimental and require confirmation before every desktop or mobile render because independent per-frame enhancement can magnify source noise and temporal shimmer.
+- Verify the MiniMax LTX 2× branch against ComfyUI's current LTX latent-upsample contract: encode completed H3 frames with the LTX‑2.5 video VAE, apply `LTXVLatentUpsampler`, decode, remove temporal padding, and remux untouched H3 audio.
+- Require both exact LTX‑2.5 model selections and the full ComfyUI encode/upscale/decode node chain before enabling the option.
+- Validate the native LTX workspace's full two-stage node set separately, preserving provider isolation from MiniMax.
+- Add graph regression assertions for the selected VAE/upscaler, all latent links, 8n+1 temporal padding, output trim, 24 fps, original audio link, and `_LTX25_2x` saved output.
+- Track ComfyUI DynamicCombo schema changes in LTX I2V and serialize the image-resize branch using its required dotted `resize_type.longer_size` API input.
+- Stream local Clip Editor and reference-clipper media through explicit byte-range responses, allowing Chromium to buffer and seek large MP4/MOV files without repeatedly reading the entire source; throttle playhead rendering independently from native video playback.
+
+Next test gate: render one Native Quality MiniMax clip with upscale Off, then run LTX 2× on the same seed and inspect both saved files. Run RTX only as a third comparison so any new noise or flicker is attributable to that branch.
+
+### Feature Pass 16 — Character Studio foundation (implemented)
+
+- Add a global, persistent Character Studio library independent of individual movie projects.
+- Create a full-body master reference through a targeted Z-Image workspace handoff; generated images are saved to the configured output folder for durable reuse.
+- Prepare a neutral MiniMax I2V turntable from the master reference, automatically link its completed output to the character project, and allow replacement with any existing video.
+- Extract five evenly distributed frames from an approved turntable into a reusable multi-angle set, or deliberately keep only the single master image.
+- Surface library characters in Movie Creator’s Production Bible, where approved references can be imported as normal editable movie cast cards and used by existing shot/reference routing.
+
+Next test gate: make one Z-Image master, generate a six-second turntable, verify its automatic link after completion, split five frames, import the set into a movie, assign it to a shot, and confirm Ref2V sees all selected references.
+
 Research basis: current work finds a real identity-versus-motion tradeoff, while multi-shot systems improve consistency through shared references/features, approved anchor frames, and separate shot/temporal memory. Relevant sources: https://arxiv.org/abs/2412.07750, https://arxiv.org/abs/2512.11274, and https://openaccess.thecvf.com/content/CVPR2025/html/Kara_ShotAdapter_Text-to-Multi-Shot_Video_Generation_with_Diffusion_Models_CVPR_2025_paper.html
 
 ### Phase 1 — Planning foundation

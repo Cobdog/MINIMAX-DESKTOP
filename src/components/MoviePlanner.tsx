@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BookOpen, Check, ChevronDown, ChevronRight, CirclePause, CirclePlay, Clapperboard, Clock3, Film, ImagePlus, LoaderCircle, MapPin, MessageSquare, Pencil, Plus, Send, SkipBack, SkipForward, Sparkles, Trash2, Users, X } from 'lucide-react'
-import type { AppSettings, GenerationMode, MediaFile, MovieCharacter, MovieChatArea, MovieLocation, MovieProject, MovieScene, MovieShot } from '../types'
+import { CHARACTER_LIBRARY_EVENT, characterReferences, loadCharacterProjects } from '../lib/characterLibrary'
+import type { AppSettings, CharacterProject, GenerationMode, MediaFile, MovieCharacter, MovieChatArea, MovieLocation, MovieProject, MovieScene, MovieShot } from '../types'
 
 type PlannerStep = 'setup' | 'bible' | 'shots' | 'preview'
 
@@ -18,6 +19,7 @@ const plannerSchema: Record<string, unknown> = {
 }
 const characterSchema: Record<string, unknown> = { type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' }, wardrobe: { type: 'string' }, voiceNotes: { type: 'string' } }, required: ['name', 'description', 'wardrobe', 'voiceNotes'] }
 const locationSchema: Record<string, unknown> = { type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' } }, required: ['name', 'description'] }
+const IMPORT_CHARACTER_EVENT = 'minimax-import-library-character'
 const movieChatSchema: Record<string, unknown> = {
   type: 'object', properties: {
     reply: { type: 'string' }, changes: { type: 'array', items: { type: 'string' } },
@@ -67,6 +69,7 @@ export function MoviePlanner({ settings, ollamaAvailable, ollamaModel, onOpenSho
   const [chatting, setChatting] = useState(false)
   const [previewIndex, setPreviewIndex] = useState(0)
   const [characterDraft, setCharacterDraft] = useState<MovieCharacter | null>(null)
+  const [characterLibrary, setCharacterLibrary] = useState<CharacterProject[]>(loadCharacterProjects)
   const [locationDraft, setLocationDraft] = useState<MovieLocation | null>(null)
   const [expandedScenes, setExpandedScenes] = useState<string[]>(() => projects[0].scenes[0] ? [projects[0].scenes[0].id] : [])
   const [expandedShots, setExpandedShots] = useState<string[]>([])
@@ -74,6 +77,12 @@ export function MoviePlanner({ settings, ollamaAvailable, ollamaModel, onOpenSho
   const plannedSeconds = useMemo(() => project.scenes.reduce((total, scene) => total + scene.shots.reduce((sum, shot) => sum + shot.duration, 0), 0), [project.scenes])
   const shotCount = project.scenes.reduce((total, scene) => total + scene.shots.length, 0)
   const renderedClips = useMemo(() => project.scenes.flatMap((scene, sceneIndex) => scene.shots.map((shot, shotIndex) => ({ scene, sceneIndex, shot, shotIndex })).filter((item) => item.shot.outputUrl)), [project.scenes])
+
+  useEffect(() => {
+    const refresh = () => setCharacterLibrary(loadCharacterProjects())
+    window.addEventListener(CHARACTER_LIBRARY_EVENT, refresh)
+    return () => window.removeEventListener(CHARACTER_LIBRARY_EVENT, refresh)
+  }, [])
 
   useEffect(() => {
     if (!characterDraft && !locationDraft) return
@@ -156,6 +165,19 @@ export function MoviePlanner({ settings, ollamaAvailable, ollamaModel, onOpenSho
     if (!characterDraft?.name.trim()) { onNotice('error', 'Give the character a name before saving.'); return }
     update((value) => ({ ...value, characters: value.characters.some((item) => item.id === characterDraft.id) ? value.characters.map((item) => item.id === characterDraft.id ? characterDraft : item) : [...value.characters, characterDraft] })); setCharacterDraft(null)
   }
+  useEffect(() => {
+    const importCharacter = (event: Event) => {
+      const source = characterLibrary.find((character) => character.id === (event as CustomEvent<string>).detail)
+      if (!source) return
+      if (project.characters.some((character) => character.libraryCharacterId === source.id)) { onNotice('neutral', `${source.name} is already in this movie.`); return }
+      const character: MovieCharacter = { id: crypto.randomUUID(), libraryCharacterId: source.id, name: source.name, description: source.description, wardrobe: source.wardrobe, voiceNotes: source.voiceNotes, referenceImages: characterReferences(source) }
+      const next = projects.map((item) => item.id === project.id ? { ...item, updatedAt: Date.now(), characters: [...item.characters, character] } : item)
+      commit(next)
+      onNotice('success', `${source.name} and ${character.referenceImages.length} approved reference${character.referenceImages.length === 1 ? '' : 's'} added to this movie.`)
+    }
+    window.addEventListener(IMPORT_CHARACTER_EVENT, importCharacter)
+    return () => window.removeEventListener(IMPORT_CHARACTER_EVENT, importCharacter)
+  }, [characterLibrary, project.id, project.characters, projects, onNotice])
   const saveLocation = () => {
     if (!locationDraft?.name.trim()) { onNotice('error', 'Give the location a name before saving.'); return }
     update((value) => ({ ...value, locations: value.locations.some((item) => item.id === locationDraft.id) ? value.locations.map((item) => item.id === locationDraft.id ? locationDraft : item) : [...value.locations, locationDraft] })); setLocationDraft(null)
@@ -396,7 +418,13 @@ function areaLabel(area: MovieChatArea) { return area === 'setup' ? 'Review stor
 
 function AssetCollection({ title, subtitle, empty, onAdd, children }: { title: string; subtitle: string; empty: string; onAdd(): void; children: React.ReactNode }) {
   const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children)
-  return <section className="bible-column"><div className="bible-column-heading"><div><strong>{title}</strong><small>{subtitle}</small></div><button onClick={onAdd}><Plus size={14} />Create</button></div>{hasChildren ? <div className="asset-card-grid">{children}</div> : <div className="bible-empty">{empty}</div>}</section>
+  const [library, setLibrary] = useState<CharacterProject[]>(loadCharacterProjects)
+  useEffect(() => {
+    const refresh = () => setLibrary(loadCharacterProjects())
+    window.addEventListener(CHARACTER_LIBRARY_EVENT, refresh)
+    return () => window.removeEventListener(CHARACTER_LIBRARY_EVENT, refresh)
+  }, [])
+  return <section className="bible-column"><div className="bible-column-heading"><div><strong>{title}</strong><small>{subtitle}</small></div><button onClick={onAdd}><Plus size={14} />Create</button></div>{title === 'Characters' && library.length > 0 && <div className="bible-library-strip"><span>Character Studio</span>{library.map((character) => { const references = characterReferences(character); return <button key={character.id} disabled={references.length === 0} title={references.length ? `Import ${references.length} approved reference${references.length === 1 ? '' : 's'}` : 'Create a reference first'} onClick={() => window.dispatchEvent(new CustomEvent(IMPORT_CHARACTER_EVENT, { detail: character.id }))}>{character.baseImage?.preview ? <img src={character.baseImage.preview} alt="" /> : <Users size={14} />}<span>{character.name}</span><Plus size={12} /></button> })}</div>}{hasChildren ? <div className="asset-card-grid">{children}</div> : <div className="bible-empty">{empty}</div>}</section>
 }
 function AssetCard({ icon, name, description, references, onEdit, onRemove }: { icon: 'character' | 'location'; name: string; description: string; references: MediaFile[]; onEdit(): void; onRemove(): void }) {
   return <article className="movie-asset-card"><button className="asset-card-main" onClick={onEdit}>{references[0]?.preview ? <img src={references[0].preview} alt="" /> : <span className="asset-placeholder">{icon === 'character' ? <Users size={20} /> : <MapPin size={20} />}</span>}<span className="asset-card-copy"><strong>{name}</strong><span>{description || `Add ${icon === 'character' ? 'appearance and performance' : 'set and atmosphere'} details`}</span><small>{references.length} reference image{references.length === 1 ? '' : 's'}</small></span></button><div className="asset-card-actions"><button onClick={onEdit}><Pencil size={13} />Edit</button><button aria-label={`Remove ${name}`} onClick={onRemove}><Trash2 size={13} /></button></div></article>

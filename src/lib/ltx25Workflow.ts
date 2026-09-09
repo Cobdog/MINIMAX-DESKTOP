@@ -45,7 +45,10 @@ export function buildLtx25Workflow(
   let preparedImage: Link | undefined
   if (options.mode === 'image' && firstFrame) {
     prompt['20'] = { class_type: 'LoadImage', inputs: { image: uploadedName(firstFrame) } }
-    prompt['21'] = { class_type: 'ResizeImageMaskNode', inputs: { input: ['20', 0], resize_type: 'scale longer dimension', resolution: 1536, scale_method: 'lanczos' } }
+    // ResizeImageMaskNode is a current ComfyUI DynamicCombo node. Its selected
+    // branch values must use dotted API keys; a legacy `resolution` input is
+    // ignored and fails validation with a missing `resize_type.longer_size`.
+    prompt['21'] = { class_type: 'ResizeImageMaskNode', inputs: { input: ['20', 0], resize_type: 'scale longer dimension', 'resize_type.longer_size': 1536, scale_method: 'lanczos' } }
     prompt['22'] = { class_type: 'LTXVPreprocess', inputs: { image: ['21', 0], img_compression: 18 } }
     prompt['23'] = { class_type: 'LTXVImgToVideoInplace', inputs: { vae: ['3', 0], image: ['22', 0], latent: initialVideo, strength: 0.7, bypass: false } }
     initialVideo = ['23', 0]

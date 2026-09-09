@@ -126,6 +126,11 @@ export function buildMiniMaxWorkflow(
   prompt['71'] = { class_type: 'ImageFromBatch', inputs: { image: ['16', 0], batch_index: 0, length: 1 } }
   prompt['72'] = { class_type: 'PreviewImage', inputs: { images: ['71', 0] } }
   if (options.upscale?.type === 'ltx') {
+    // MiniMax post-processing intentionally remains non-generative: encode the
+    // completed H3 frame sequence into the LTX video latent domain, apply the
+    // learned spatial x2 node, decode, then remux the untouched H3 audio.
+    // Padding to 8n+1 satisfies the LTX video VAE temporal layout and is removed
+    // after decoding so clip duration cannot drift.
     let images: Link = ['16', 0]
     const frames = frameCount(options.duration)
     const pad = (8 - ((frames - 1) % 8)) % 8

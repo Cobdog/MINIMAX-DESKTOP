@@ -29,7 +29,7 @@ function readWorkspace(): StoredWorkspace {
 }
 
 export function ZImageWorkspace({
-  url, info, connected, ollamaAvailable, ollamaUrl, ollamaModel, onUse,
+  url, info, connected, ollamaAvailable, ollamaUrl, ollamaModel, outputDirectory, onUse,
 }: {
   url: string
   info: ObjectInfo
@@ -37,6 +37,7 @@ export function ZImageWorkspace({
   ollamaAvailable: boolean
   ollamaUrl: string
   ollamaModel: string
+  outputDirectory: string
   onUse(file: MediaFile, resolution: string): void
 }) {
   const initial = useMemo(readWorkspace, [])
@@ -69,8 +70,9 @@ export function ZImageWorkspace({
         const image = Object.values(entry?.outputs ?? {}).flatMap((output) => output.images ?? [])[0]
         if (image) {
           const preview = await window.minimax.getOutputImage(job.url, image)
+          const saved = await window.minimax.saveComfyOutputImage(job.url, image, outputDirectory)
           if (!disposed) {
-            setResult({ path: '', name: image.filename, preview, kind: 'image' })
+            setResult({ ...saved, preview, kind: 'image' })
             setJob(null); setBusy(false); setError(false); setMessage('Frame complete and ready to use.')
           }
           return
@@ -84,7 +86,7 @@ export function ZImageWorkspace({
     }
     void poll()
     return () => { disposed = true; clearTimeout(timer) }
-  }, [job])
+  }, [job, outputDirectory])
 
   const available = choices(info, 'UNETLoader', 'unet_name').includes(model)
     && choices(info, 'CLIPLoader', 'clip_name').includes(encoder)

@@ -2,7 +2,6 @@ import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, protocol } from 
 import { createReadStream, existsSync } from 'node:fs'
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, normalize } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -26,6 +25,7 @@ type GenerationDefaults = {
   shiftVideo: number
   shiftAudio: number
   loraStrength: number
+  upscaleMode: 'off' | 'ltx' | 'rtx'
 }
 
 type AppSettings = {
@@ -40,6 +40,8 @@ type AppSettings = {
 }
 
 type LanStatus = { running: boolean; url?: string; port?: number; error?: string }
+const ltxUpscaleRequiredNodes = ['VAEEncodeTiled', 'LatentUpscaleModelLoader', 'LTXVLatentUpsampler', 'VAEDecodeTiled', 'ImageFromBatch', 'RepeatImageBatch', 'ImageBatch']
+const ltxNativeRequiredNodes = ['LTXVConditioning', 'LTXVEmptyLatentAudio', 'EmptyLTXVLatentVideo', 'LTXVDualCFGGuider', 'LTXVSeparateAVLatent', 'LTXVConcatAVLatent', 'LTXVLatentUpsampler', 'LTXVAudioVAEDecode', 'ManualSigmas', 'VAEDecodeTiled', 'CLIPTextEncode', 'KSamplerSelect', 'SamplerCustomAdvanced']
 let lanToken = ''
 let lanServer: Server | null = null
 let lanStatus: LanStatus = { running: false }
@@ -49,6 +51,47 @@ const modelExtensions = new Set(['.safetensors', '.pt', '.pth', '.gguf', '.onnx'
 const mediaExtensions = new Set(['.mp4', '.webm', '.mov', '.mkv'])
 const imageExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp'])
 const selectedMediaExtensions = new Set([...mediaExtensions, ...imageExtensions])
+
+const mediaMimeTypes: Record<string, string> = {
+  '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.mkv': 'video/x-matroska', '.webm': 'video/webm',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.bmp': 'image/bmp',
+}
+
+async function localMediaResponse(filePath: string, request: Request) {
+  const details = await stat(filePath)
+  if (!details.isFile() || details.size === 0) return new Response('Media file is empty', { status: 404 })
+  const size = details.size
+  const range = request.headers.get('range')
+  let start = 0
+  let end = size - 1
+  let status = 200
+  if (range) {
+    const match = /^bytes=(\d*)-(\d*)$/i.exec(range.trim())
+    if (!match) return new Response(null, { status: 416, headers: { 'content-range': `bytes */${size}` } })
+    if (match[1]) start = Number(match[1])
+    if (match[2]) end = Number(match[2])
+    if (!match[1] && match[2]) {
+      const suffixLength = Math.min(size, Number(match[2]))
+      start = size - suffixLength
+      end = size - 1
+    }
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start >= size || end < start) {
+      return new Response(null, { status: 416, headers: { 'content-range': `bytes */${size}` } })
+    }
+    end = Math.min(end, size - 1)
+    status = 206
+  }
+  const headers = new Headers({
+    'accept-ranges': 'bytes',
+    'content-length': String(end - start + 1),
+    'content-type': mediaMimeTypes[extname(filePath).toLowerCase()] ?? 'application/octet-stream',
+    'cache-control': 'private, max-age=3600',
+  })
+  if (status === 206) headers.set('content-range', `bytes ${start}-${end}/${size}`)
+  if (request.method === 'HEAD') return new Response(null, { status, headers })
+  const stream = createReadStream(filePath, { start, end })
+  return new Response(Readable.toWeb(stream) as ReadableStream, { status, headers })
+}
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'minimax-media', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
@@ -69,7 +112,7 @@ function defaultSettings(): AppSettings {
     generationDefaults: {
       resolution: '1344x768', duration: 5, turbo: 'off', steps: 20,
       sampler: 'res_multistep', scheduler: 'simple', experimentalSampling: false,
-      refImageSize: 'match', livePreview: true, sigmaShiftMode: 'model', shiftVideo: 12, shiftAudio: 3, loraStrength: 1,
+      refImageSize: 'match', livePreview: true, sigmaShiftMode: 'model', shiftVideo: 12, shiftAudio: 3, loraStrength: 1, upscaleMode: 'off',
     },
   }
 }
@@ -101,7 +144,9 @@ async function loadSettings(): Promise<AppSettings> {
   try {
     const raw = JSON.parse(await readFile(settingsPath(), 'utf8')) as Partial<AppSettings>
     const defaults = defaultSettings()
-    return { ...defaults, ...raw, paths: { ...defaults.paths, ...raw.paths }, generationDefaults: { ...defaults.generationDefaults, ...raw.generationDefaults } }
+    const generationDefaults = { ...defaults.generationDefaults, ...raw.generationDefaults }
+    generationDefaults.steps = Math.max(16, Math.min(30, Number(generationDefaults.steps) || 20))
+    return { ...defaults, ...raw, paths: { ...defaults.paths, ...raw.paths }, generationDefaults }
   } catch {
     return defaultSettings()
   }
@@ -287,9 +332,11 @@ async function handleLanRequest(request: IncomingMessage, response: ServerRespon
           const upscalers = comfyChoices(info, 'UpscaleModelLoader', 'model_name')
           const latentUpscalers = comfyChoices(info, 'LatentUpscaleModelLoader', 'model_name')
           const vaes = comfyChoices(info, 'VAELoader', 'vae_name')
+          const ltxUpscaleMissing = ltxUpscaleRequiredNodes.filter((node) => !info[node])
+          const ltxNativeMissing = ltxNativeRequiredNodes.filter((node) => !info[node])
           const ollama = await comfyFetch(settings.ollamaUrl, '/api/tags').catch(() => ({ models: [] })) as { models?: Array<{ name?: string; size?: number; remote_model?: string }> }
           const ollamaModels = (ollama.models ?? []).filter((item) => item.name && !item.remote_model && item.size !== 342).map((item) => item.name as string)
-          return sendJson(response, 200, { connected: true, latencyMs: Date.now() - started, models: groups.flat(), upscalers, ltxModel: latentUpscalers.find((name) => /ltx-2\.5.*spatial.*x2/i.test(name)) ?? '', ltxVae: vaes.find((name) => /ltx-2\.5.*video.*vae/i.test(name)) ?? '', ollamaModels, ollamaModel: settings.ollamaModel })
+          return sendJson(response, 200, { connected: true, latencyMs: Date.now() - started, models: groups.flat(), upscalers, ltxModel: latentUpscalers.find((name) => /ltx-2\.5.*spatial.*x2/i.test(name)) ?? '', ltxVae: vaes.find((name) => /ltx-2\.5.*video.*vae/i.test(name)) ?? '', ltxUpscaleReady: ltxUpscaleMissing.length === 0, ltxUpscaleMissing, ltxNativeReady: ltxNativeMissing.length === 0, ltxNativeMissing, ollamaModels, ollamaModel: settings.ollamaModel })
         } catch (error) {
           return sendJson(response, 200, { connected: false, latencyMs: Date.now() - started, models: groups.flat(), error: error instanceof Error ? error.message : String(error) })
         }
@@ -453,13 +500,13 @@ app.whenReady().then(async () => {
     if (!requestedPath) return new Response('Missing media path', { status: 400 })
     if (requestUrl.hostname === 'selected') {
       if (!existsSync(requestedPath) || !selectedMediaExtensions.has(extname(requestedPath).toLowerCase())) return new Response('Selected media is unavailable', { status: 404 })
-      return net.fetch(pathToFileURL(requestedPath).toString(), { headers: request.headers })
+      return localMediaResponse(requestedPath, request)
     }
     const configured = normalize((await loadSettings()).outputDirectory)
     const candidate = normalize(requestedPath)
     const relative = candidate.toLowerCase().startsWith(`${configured.toLowerCase()}\\`) || candidate.toLowerCase() === configured.toLowerCase()
     if (!relative || !existsSync(candidate)) return new Response('Media is outside the configured output directory', { status: 403 })
-    return net.fetch(pathToFileURL(candidate).toString(), { headers: request.headers })
+    return localMediaResponse(candidate, request)
   })
   ipcMain.handle('settings:get', () => loadSettings())
   ipcMain.handle('lan:status', () => lanStatus)
@@ -523,6 +570,22 @@ app.whenReady().then(async () => {
     const mime = response.headers.get('content-type')?.split(';')[0] ?? ''
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(mime)) throw new Error('ComfyUI did not return a supported image.')
     return `data:${mime};base64,${Buffer.from(await response.arrayBuffer()).toString('base64')}`
+  })
+  ipcMain.handle('comfy:save-output-image', async (_event, url: string, file: { filename: string; subfolder?: string; type?: string }, requestedOutput: string) => {
+    const settings = await loadSettings()
+    const outputDirectory = normalize(requestedOutput)
+    if (outputDirectory.toLowerCase() !== normalize(settings.outputDirectory).toLowerCase()) throw new Error('Character images must be saved inside the configured output folder.')
+    const query = new URLSearchParams({ filename: basename(file.filename), subfolder: file.subfolder ?? '', type: file.type ?? 'output' })
+    const response = await fetch(`${cleanUrl(url)}/view?${query}`)
+    if (!response.ok) throw new Error(`Character image download failed (${response.status}).`)
+    const mime = response.headers.get('content-type')?.split(';')[0] ?? ''
+    const extension = mime === 'image/jpeg' ? '.jpg' : mime === 'image/webp' ? '.webp' : mime === 'image/png' ? '.png' : ''
+    if (!extension) throw new Error('ComfyUI did not return a supported character image.')
+    const directory = join(outputDirectory, 'MiniMax Character References')
+    await mkdir(directory, { recursive: true })
+    const target = join(directory, `character-${Date.now()}-${randomUUID().slice(0, 8)}${extension}`)
+    await writeFile(target, Buffer.from(await response.arrayBuffer()))
+    return { path: target, name: basename(target) }
   })
   ipcMain.handle('comfy:history', (_event, url: string, promptId: string) => comfyFetch(url, `/history/${encodeURIComponent(promptId)}`))
   ipcMain.handle('comfy:cancel', async (_event, url: string, promptId: string) => {
@@ -619,6 +682,27 @@ app.whenReady().then(async () => {
     await runFfmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', ...seek, '-i', input, '-map', '0:v:0', '-frames:v', '1', '-update', '1', '-y', output])
     const extracted = await stat(output).catch(() => null)
     if (!extracted?.size) throw new Error('FFmpeg completed without producing a frame. Check that the clip contains a video stream.')
+    return { path: output, name }
+  })
+  ipcMain.handle('video:trim', async (_event, source: string, start: number, end: number, outputDirectory: string, ffmpegPath: string) => {
+    const input = await resolveVideoSource(source)
+    const from = Number(start)
+    const to = Number(end)
+    const length = to - from
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || length < 2 || length > 15) {
+      throw new Error('Reference clips must be between 2 and 15 seconds long.')
+    }
+    const directory = join(outputDirectory, 'MiniMax Studio Reference Clips')
+    await mkdir(directory, { recursive: true })
+    const name = `Reference_Clip_${Date.now()}.mp4`
+    const output = join(directory, name)
+    await runFfmpeg(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error', '-ss', from.toFixed(3), '-i', input, '-t', length.toFixed(3),
+      '-map', '0:v:0', '-map', '0:a?', '-c:v', 'libx264', '-preset', 'medium', '-crf', '18',
+      '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-y', output,
+    ])
+    const created = await stat(output).catch(() => null)
+    if (!created?.size) throw new Error('FFmpeg completed without producing a reference clip.')
     return { path: output, name }
   })
   ipcMain.handle('video:join', async (_event, clips: Array<{ source: string; start?: number; end?: number }>, outputDirectory: string, ffmpegPath: string) => {

@@ -6,7 +6,9 @@ A local-first Windows desktop interface for MiniMax H3 generation through ComfyU
 
 - Text-to-video, image-to-video, and first/last-frame generation through the FL2VA model
 - A separate LTX‑2.5 T2V/I2V workspace with native synchronized audio, live ComfyUI previews, an official two-stage quality preset, and a distilled single-stage Turbo preset
+- A global Character Studio: Z-Image master references, MiniMax I2V turntable handoff, five-angle frame extraction, single-image or reference-set selection, and one-click Movie Creator imports
 - Mixed image, video, and audio references through the Ref2VA model
+- Non-destructive Ref2V video clipping: preview a longer source, set precise in/out points, and create or revise a focused 2–15 second reference MP4 without changing the original
 - Native synchronized video and stereo-audio decoding
 - Official ComfyUI H3 graph topology and sampling defaults, with detected FL2V 4/8-step and Ref2V 4-step turbo LoRAs
 - Local Ollama prompt enhancement, timed shot planning, and synchronized-audio rewriting
@@ -14,12 +16,14 @@ A local-first Windows desktop interface for MiniMax H3 generation through ComfyU
 - Z-Image Turbo first-frame generation using locally installed ComfyUI models
 - Landscape, portrait, and square output presets with automatic image fitting and an interactive crop preview
 - Official `res_multistep` + `simple` sampling by default, an explicit full-quality experimental override, and WebSocket render progress/previews
-- Persistent generation defaults with official quality, official 8-step Turbo, and experimental Euler/Beta Turbo presets
-- Optional LTX 2.5 2× spatial post-processing for every MiniMax video mode; saves both original and upscaled video while retaining MiniMax audio
+- Persistent generation defaults with Native Quality, official Turbo 8, Preview, and separately disclosed experimental sampling controls
+- Guided H3 Native Quality, Turbo 8, and Preview presets with resolution quality labels, validated official-stack reporting, and custom sampling isolated under an Experimental disclosure
+- A fixed-seed H3 quality diagnostic that queues matching Native and Turbo 8 renders for direct A/B comparison
+- Optional verified LTX 2.5 latent 2× post-processing for every MiniMax video mode; LTX-VAE encodes the completed frames, the learned latent upsampler doubles spatial size, and the app trims padding and retains untouched MiniMax audio
 - A one-click, per-user NSIS Windows installer with desktop and Start menu shortcuts
-- A same-network mobile companion for focused T2V and I2V creation, automatic crop controls, video preview, and download
+- A same-network mobile companion for native MiniMax H3 or LTX‑2.5 T2V/I2V creation, separate provider state, automatic crop controls, video preview, and download
 - A dedicated Z-Image Turbo first-frame workspace with persistent controls, local Ollama enhancement, cancellation, and direct I2V handoff
-- Mobile ComfyUI progress/live previews, Ollama prompt revision, cancellation, and optional LTX 2.5 or RTX/CUDA 2× upscaling
+- Mobile and desktop live ComfyUI sampler steps, stage-aware progress, faster completion updates, Ollama prompt revision, cancellation, verified MiniMax post-render LTX 2.5 latent upscaling, and explicitly experimental RTX/CUDA frame upscaling
 
 ## Mobile companion
 

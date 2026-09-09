@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 
-export function useLivePreview(url: string | undefined, enabled: boolean, onProgress: (id: string, progress: number) => void) {
+export type LiveProgress = { progress?: number; label: string; currentStep?: number; totalSteps?: number }
+
+export function useLivePreview(url: string | undefined, enabled: boolean, onProgress: (id: string, update: LiveProgress) => void) {
   const [clientId] = useState(() => crypto.randomUUID())
   const [preview, setPreview] = useState<{ promptId: string; url: string } | null>(null)
   const [connected, setConnected] = useState(false)
@@ -21,9 +23,17 @@ export function useLivePreview(url: string | undefined, enabled: boolean, onProg
       socket.onclose = () => { setConnected(false); if (!stopped) timer = setTimeout(connect, 3000) }
       socket.onmessage = (event) => {
         if (typeof event.data === 'string') {
-          const msg = JSON.parse(event.data) as { type: string; data: { prompt_id?: string; value?: number; max?: number; output?: { images?: Array<{ filename: string; subfolder?: string; type?: string }> } } }
-          if (msg.type === 'execution_start') { active = msg.data.prompt_id ?? ''; setPreview(null) }
-          if (msg.type === 'progress' && msg.data.max) onProgress(msg.data.prompt_id ?? active, Math.min(95, ((msg.data.value ?? 0) / msg.data.max) * 95))
+          const msg = JSON.parse(event.data) as { type: string; data: { prompt_id?: string; node?: string | null; value?: number; max?: number; output?: { images?: Array<{ filename: string; subfolder?: string; type?: string }> } } }
+          const promptId = msg.data.prompt_id ?? active
+          if (msg.type === 'execution_start') { active = msg.data.prompt_id ?? ''; setPreview(null); onProgress(active, { progress: 1, label: 'Starting workflow' }) }
+          if (msg.type === 'execution_cached') onProgress(promptId, { label: 'Reusing cached model data' })
+          if (msg.type === 'executing' && msg.data.node) onProgress(promptId, { label: 'Loading or processing workflow stage' })
+          if (msg.type === 'progress' && msg.data.max) {
+            const currentStep = Math.max(0, msg.data.value ?? 0)
+            const totalSteps = msg.data.max
+            onProgress(promptId, { progress: Math.min(95, (currentStep / totalSteps) * 95), label: `Sampling · step ${currentStep} of ${totalSteps}`, currentStep, totalSteps })
+          }
+          if (msg.type === 'execution_success') onProgress(promptId, { progress: 98, label: 'Finalizing saved output' })
           if (msg.type === 'executed' && msg.data.output?.images?.[0]) {
             const file = msg.data.output.images[0]
             const query = new URLSearchParams({ filename: file.filename, subfolder: file.subfolder ?? '', type: file.type ?? 'temp' })

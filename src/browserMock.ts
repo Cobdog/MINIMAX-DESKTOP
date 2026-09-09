@@ -19,7 +19,7 @@ const settings: AppSettings = {
   generationDefaults: {
     resolution: '1344x768', duration: 5, turbo: 'off', steps: 20,
     sampler: 'res_multistep', scheduler: 'simple', experimentalSampling: false,
-    refImageSize: 'match', livePreview: true, sigmaShiftMode: 'model', shiftVideo: 12, shiftAudio: 3, loraStrength: 1,
+    refImageSize: 'match', livePreview: true, sigmaShiftMode: 'model', shiftVideo: 12, shiftAudio: 3, loraStrength: 1, upscaleMode: 'off',
   },
 }
 
@@ -40,7 +40,7 @@ const examples: Array<[ModelFile['kind'], string, number]> = [
   ['vae', 'ltx-2.5-audio-vae-bf16.safetensors', 800_000_000],
 ]
 
-const ltxNodes = ['LTXVConditioning', 'LTXVEmptyLatentAudio', 'LTXVDualCFGGuider', 'LTXVLatentUpsampler', 'LTXVAudioVAEDecode', 'ManualSigmas']
+const ltxNodes = ['LTXVConditioning', 'LTXVEmptyLatentAudio', 'EmptyLTXVLatentVideo', 'LTXVDualCFGGuider', 'LTXVSeparateAVLatent', 'LTXVConcatAVLatent', 'LTXVLatentUpsampler', 'LTXVAudioVAEDecode', 'ManualSigmas', 'VAEEncodeTiled', 'VAEDecodeTiled', 'CLIPTextEncode', 'KSamplerSelect', 'SamplerCustomAdvanced', 'ImageFromBatch', 'RepeatImageBatch', 'ImageBatch']
 
 export function installBrowserMock() {
   if (window.minimax) return
@@ -49,9 +49,12 @@ export function installBrowserMock() {
     getObjectInfo: async () => Object.fromEntries([
       ...ltxNodes.map((name) => [name, { input: { required: {} } }]),
       ['LatentUpscaleModelLoader', { input: { required: { model_name: ['COMBO', { options: ['ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors'] }] } } }],
+      ['VAELoader', { input: { required: { vae_name: ['COMBO', { options: ['ltx-2.5-video-vae-bf16.safetensors'] }] } } }],
+      ['UpscaleModelLoader', { input: { required: { model_name: ['COMBO', { options: ['4x-UltraSharp.pth'] }] } } }],
     ]),
     uploadImageData: async () => { throw new Error('Open the desktop app to upload images.') },
     getOutputImage: async () => { throw new Error('Open the desktop app to retrieve images.') },
+    saveComfyOutputImage: async () => { throw new Error('Open the desktop app to save generated images.') },
     getSettings: async () => current,
     saveSettings: async (next) => (current = next),
     chooseDirectory: async () => null,
@@ -66,6 +69,7 @@ export function installBrowserMock() {
     fileDataUrl: async () => '',
     mediaUrl: async (path) => path,
     extractVideoFrame: async () => { throw new Error('Open the desktop app to extract video frames.') },
+    trimVideo: async () => { throw new Error('Open the desktop app to trim reference videos.') },
     joinVideos: async () => { throw new Error('Open the desktop app to join videos.') },
     showOutput: async () => undefined,
     findLatestOutput: async () => null,

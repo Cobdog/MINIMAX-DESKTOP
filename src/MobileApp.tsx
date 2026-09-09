@@ -8,7 +8,7 @@ import { buildMiniMaxWorkflow } from './lib/workflow'
 import { buildLtx25Workflow } from './lib/ltx25Workflow'
 import type { MediaFile, ModelFile } from './types'
 
-type Bootstrap = { connected: boolean; latencyMs: number; models: ModelFile[]; upscalers?: string[]; ltxModel?: string; ltxVae?: string; ollamaModels?: string[]; ollamaModel?: string; error?: string }
+type Bootstrap = { connected: boolean; latencyMs: number; models: ModelFile[]; upscalers?: string[]; ltxModel?: string; ltxVae?: string; ltxUpscaleReady?: boolean; ltxUpscaleMissing?: string[]; ltxNativeReady?: boolean; ltxNativeMissing?: string[]; ollamaModels?: string[]; ollamaModel?: string; error?: string }
 type MobileStatus = 'ready' | 'uploading' | 'queued' | 'rendering' | 'complete' | 'error'
 type MobileUpscale = 'off' | 'ltx' | 'rtx'
 type MobileProvider = 'minimax' | 'ltx25'
@@ -27,7 +27,7 @@ const token = queryToken || localStorage.getItem('minimax.lan-token') || ''
 
 async function lanFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (token === 'browser-preview') {
-    if (path === '/api/lan/bootstrap') return { connected: true, latencyMs: 7, models: previewModels, upscalers: ['4x-UltraSharp.pth'], ltxModel: 'ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors', ltxVae: 'ltx-2.5-video-vae-bf16.safetensors', ollamaModels: ['qwen3:latest'], ollamaModel: 'qwen3:latest' } as T
+    if (path === '/api/lan/bootstrap') return { connected: true, latencyMs: 7, models: previewModels, upscalers: ['4x-UltraSharp.pth'], ltxModel: 'ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors', ltxVae: 'ltx-2.5-video-vae-bf16.safetensors', ltxUpscaleReady: true, ltxNativeReady: true, ollamaModels: ['qwen3:latest'], ollamaModel: 'qwen3:latest' } as T
     throw new Error('Generation is available from the QR link shown in the desktop app.')
   }
   const response = await fetch(path, { ...init, headers: { ...init?.headers, 'x-minimax-token': token } })
@@ -54,6 +54,7 @@ export default function MobileApp() {
   const [outputUrl, setOutputUrl] = useState('')
   const [livePreview, setLivePreview] = useState('')
   const [progress, setProgress] = useState(0)
+  const [progressLabel, setProgressLabel] = useState('Ready')
   const [promptId, setPromptId] = useState('')
   const [assistantInstruction, setAssistantInstruction] = useState('')
   const [assisting, setAssisting] = useState(false)
@@ -64,7 +65,8 @@ export default function MobileApp() {
   const selection = useMemo(() => inferSelections(models, turbo), [models, turbo])
   const ltxSelection = useMemo(() => inferLtx25Selections(models, bootstrap?.ltxModel ? [bootstrap.ltxModel] : []), [bootstrap?.ltxModel, models])
   const miniMaxReady = Boolean(selection.fl2va && selection.textEncoder && selection.videoVae && selection.audioVae && (turbo === 'off' || selection.fl2vLora))
-  const ltxReady = Boolean(ltxSelection.diffusion && ltxSelection.textEncoder && ltxSelection.videoVae && ltxSelection.audioVae && ltxSelection.latentUpscaler)
+  const ltxReady = Boolean(ltxSelection.diffusion && ltxSelection.textEncoder && ltxSelection.videoVae && ltxSelection.audioVae && ltxSelection.latentUpscaler && bootstrap?.ltxNativeReady)
+  const ltxUpscaleReady = Boolean(bootstrap?.ltxModel && bootstrap?.ltxVae && bootstrap?.ltxUpscaleReady)
   const modelReady = provider === 'ltx25' ? ltxReady : miniMaxReady
   const renderDuration = provider === 'ltx25' ? Math.min(duration, 10) : duration
 
@@ -87,7 +89,7 @@ export default function MobileApp() {
     setDuration(nextWorkspace.duration ?? 5)
     setQuality(nextWorkspace.quality ?? (next === 'ltx25' ? 'quality' : 'turbo'))
     setUpscale(next === 'ltx25' ? 'off' : nextWorkspace.upscale ?? 'off')
-    setOutputUrl(''); setLivePreview(''); setProgress(0); setPromptId(''); setMessage(''); setStatus('ready')
+    setOutputUrl(''); setLivePreview(''); setProgress(0); setProgressLabel('Ready'); setPromptId(''); setMessage(''); setStatus('ready')
   }
 
   const refresh = async () => {
@@ -141,9 +143,17 @@ export default function MobileApp() {
     const ready = new Promise<void>((resolve) => { markReady = resolve })
     source.onmessage = (event) => {
       try {
-        const update = JSON.parse(event.data) as { type?: string; data?: { value?: number; max?: number; image?: string; output?: { images?: Array<{ filename: string; subfolder?: string; type?: string }> } } }
+        const update = JSON.parse(event.data) as { type?: string; data?: { node?: string | null; value?: number; max?: number; image?: string; output?: { images?: Array<{ filename: string; subfolder?: string; type?: string }> } } }
         if (update.type === 'stream_ready') markReady()
-        if (update.type === 'progress' && update.data?.max) setProgress(Math.min(95, Math.round(((update.data.value ?? 0) / update.data.max) * 95)))
+        if (update.type === 'execution_start') { setProgress(1); setProgressLabel('Starting workflow') }
+        if (update.type === 'execution_cached') setProgressLabel('Reusing cached model data')
+        if (update.type === 'executing' && update.data?.node) setProgressLabel('Loading or processing workflow stage')
+        if (update.type === 'progress' && update.data?.max) {
+          const step = update.data.value ?? 0
+          setProgress(Math.min(95, Math.round((step / update.data.max) * 95)))
+          setProgressLabel(`Sampling · step ${step} of ${update.data.max}`)
+        }
+        if (update.type === 'execution_success') { setProgress(98); setProgressLabel('Finalizing saved output') }
         if (update.type === 'preview' && update.data?.image) setLivePreview(update.data.image)
         const image = update.type === 'executed' ? update.data?.output?.images?.[0] : undefined
         if (image) setLivePreview(`/api/lan/media?${new URLSearchParams({ token, filename: image.filename, subfolder: image.subfolder ?? '', type: image.type ?? 'temp' })}`)
@@ -158,9 +168,10 @@ export default function MobileApp() {
     if (!bootstrap?.connected) return setMessage('The desktop app cannot reach ComfyUI.')
     if (!modelReady) return setMessage(`The required ${provider === 'ltx25' ? 'LTX‑2.5' : 'MiniMax H3'} models are not available on the desktop.`)
     if (mode === 'image' && !frame) return setMessage('Choose a first frame for I2V.')
-    if (provider === 'minimax' && upscale === 'ltx' && !ltxReady) return setMessage('The LTX 2.5 spatial upscaler is not available in ComfyUI.')
+    if (provider === 'minimax' && upscale === 'ltx' && !ltxUpscaleReady) return setMessage(`Update ComfyUI before using LTX 2× upscale${bootstrap?.ltxUpscaleMissing?.length ? `; missing ${bootstrap.ltxUpscaleMissing.join(', ')}` : ''}.`)
     if (upscale === 'rtx' && !rtxModel) return setMessage('Choose an RTX/CUDA frame upscaler first.')
-    setOutputUrl(''); setLivePreview(''); setProgress(2); setPromptId(''); setStatus(mode === 'image' ? 'uploading' : 'queued'); setMessage(mode === 'image' ? 'Preparing and uploading your crop…' : `Building the ${provider === 'ltx25' ? 'LTX‑2.5' : 'MiniMax'} workflow…`)
+    if (upscale === 'rtx' && !window.confirm('RTX/CUDA upscale processes frames independently and may amplify noise or flicker. Continue with this experimental post-process?')) return
+    setOutputUrl(''); setLivePreview(''); setProgress(2); setProgressLabel(mode === 'image' ? 'Preparing first frame' : 'Preparing workflow'); setPromptId(''); setStatus(mode === 'image' ? 'uploading' : 'queued'); setMessage(mode === 'image' ? 'Preparing and uploading your crop…' : `Building the ${provider === 'ltx25' ? 'LTX‑2.5' : 'MiniMax'} workflow…`)
     const clientId = crypto.randomUUID()
     const previewStream = openPreviewStream(clientId)
     cancelled.current = false
@@ -175,16 +186,17 @@ export default function MobileApp() {
         : buildMiniMaxWorkflow({ mode, prompt: prompt.trim(), width, height, duration: renderDuration, seed, steps: 20, turbo, sampler: 'res_multistep', scheduler: 'simple', upscale: postProcess, refImageSize: 'match', filenamePrefix: `video/MiniMax_Mobile_${Date.now()}`, firstFrame: frame?.path, referenceImages: [], referenceVideos: [], referenceAudios: [] }, selection, { first, images: [], videos: [], audios: [] })
       const queued = await lanFetch<{ prompt_id: string }>('/api/lan/prompt', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: graph, clientId }) })
       setPromptId(queued.prompt_id)
+      setProgressLabel('Waiting for ComfyUI to start')
       setStatus('rendering'); setMessage(`Rendering with ${provider === 'ltx25' ? 'LTX‑2.5' : 'MiniMax H3'} on your desktop GPU. You can keep this page open.`)
       for (let attempt = 0; attempt < 1800; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 2000))
+        await new Promise((resolve) => setTimeout(resolve, 1000))
         if (cancelled.current) { previewStream.source?.close(); return }
         const result = await lanFetch<{ finished: boolean; error?: string; output?: { filename: string; subfolder?: string; type?: string } }>(`/api/lan/history/${encodeURIComponent(queued.prompt_id)}`)
         if (!result.finished) continue
         if (result.error) throw new Error(result.error)
         if (!result.output) throw new Error('ComfyUI finished without returning a video file.')
         const query = new URLSearchParams({ token, filename: result.output.filename, subfolder: result.output.subfolder ?? '', type: result.output.type ?? 'output' })
-        setOutputUrl(`/api/lan/media?${query}`); setProgress(100); setStatus('complete'); setMessage('Video complete. Preview or download it below.'); previewStream.source?.close(); return
+        setOutputUrl(`/api/lan/media?${query}`); setProgress(100); setProgressLabel('Complete'); setStatus('complete'); setMessage('Video complete. Preview or download it below.'); previewStream.source?.close(); return
       }
       throw new Error('The mobile page stopped waiting for this generation. Check the desktop queue.')
     } catch (error) { previewStream.source?.close(); if (!cancelled.current) { setStatus('error'); setMessage(error instanceof Error ? error.message : String(error)) } }
@@ -192,7 +204,7 @@ export default function MobileApp() {
 
   const cancel = async () => {
     if (!promptId) return
-    try { await lanFetch('/api/lan/cancel', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ promptId }) }); cancelled.current = true; setPromptId(''); setStatus('ready'); setProgress(0); setMessage('Generation cancelled.') }
+    try { await lanFetch('/api/lan/cancel', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ promptId }) }); cancelled.current = true; setPromptId(''); setStatus('ready'); setProgress(0); setProgressLabel('Cancelled'); setMessage('Generation cancelled.') }
     catch (error) { setStatus('error'); setMessage(error instanceof Error ? error.message : String(error)) }
   }
 
@@ -208,8 +220,8 @@ export default function MobileApp() {
       {mode === 'image' && <div className="mobile-frame"><div className="mobile-section-head"><span><strong>First frame</strong><small>Automatically cropped to the selected output size</small></span>{frame && <button onClick={() => setFrame(null)} aria-label="Remove first frame"><X size={16} /></button>}</div>{frame ? <><img src={frame.preview} alt="Selected first frame" /><ImageCrop label="First frame" file={frame} resolution={resolution} onChange={setFrame} /></> : <label className="mobile-file-picker"><ImageIcon size={25} /><strong>Choose an image</strong><span>PNG, JPG, or WebP</span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => chooseFrame(event.target.files?.[0])} /></label>}</div>}
       <RenderSize value={resolution} onChange={setResolution} provider={provider} />
       <div className="mobile-options"><label>Duration<span><input aria-label="Duration" type="range" min="3" max={provider === 'ltx25' ? 10 : 15} value={renderDuration} onChange={(event) => setDuration(Number(event.target.value))} /><output>{renderDuration}s</output></span></label><label>Render quality<select value={quality} onChange={(event) => setQuality(event.target.value as 'quality' | 'turbo')}><option value="turbo">{provider === 'ltx25' ? 'Turbo · distilled single-stage 8' : 'Balanced · 8-step turbo'}</option><option value="quality">{provider === 'ltx25' ? 'Quality · official two-stage 8 + 3' : 'Quality · 20 steps'}</option></select></label></div>
-      {provider === 'minimax' && <fieldset className="mobile-upscale"><legend>Post-render upscale</legend><div><label><input type="radio" name="mobile-upscale" checked={upscale === 'off'} onChange={() => setUpscale('off')} />Off</label><label><input type="radio" name="mobile-upscale" checked={upscale === 'ltx'} disabled={!ltxReady} onChange={() => setUpscale('ltx')} />LTX 2.5 · 2×</label><label><input type="radio" name="mobile-upscale" checked={upscale === 'rtx'} disabled={!bootstrap?.upscalers?.length} onChange={() => setUpscale('rtx')} />RTX/CUDA frames · 2×</label></div>{upscale === 'rtx' && <select aria-label="RTX upscale model" value={rtxModel} onChange={(event) => setRtxModel(event.target.value)}>{(bootstrap?.upscalers ?? []).map((name) => <option key={name}>{name}</option>)}</select>}<small>{upscale === 'off' ? 'Keep the native MiniMax output.' : `Saves both the original and ${upscale === 'ltx' ? 'temporally aware LTX' : 'frame-upscaled'} 2× video.`}</small></fieldset>}
-      {(livePreview || status === 'rendering') && <section className="mobile-live-preview"><div><strong>Live preview</strong><span>{progress}%</span></div>{livePreview ? <img src={livePreview} alt="Current ComfyUI generation preview" /> : <div><LoaderCircle className="spin" /><span>Waiting for the first preview frame…</span></div>}<progress max="100" value={progress}>{progress}%</progress></section>}
+      {provider === 'minimax' && <fieldset className="mobile-upscale"><legend>Post-render upscale</legend><div><label><input type="radio" name="mobile-upscale" checked={upscale === 'off'} onChange={() => setUpscale('off')} />Off</label><label><input type="radio" name="mobile-upscale" checked={upscale === 'ltx'} disabled={!ltxUpscaleReady} onChange={() => setUpscale('ltx')} />LTX 2.5 latent · 2×</label><label><input type="radio" name="mobile-upscale" checked={upscale === 'rtx'} disabled={!bootstrap?.upscalers?.length} onChange={() => setUpscale('rtx')} />RTX/CUDA frames · experimental</label></div>{upscale === 'rtx' && <select aria-label="RTX upscale model" value={rtxModel} onChange={(event) => setRtxModel(event.target.value)}>{(bootstrap?.upscalers ?? []).map((name) => <option key={name}>{name}</option>)}</select>}<small>{upscale === 'off' ? 'Keep the native MiniMax output.' : upscale === 'ltx' ? 'Verified LTX video-VAE encode → learned latent 2× → decode; original MiniMax audio is retained.' : 'Frame-by-frame processing may amplify noise, flicker, or temporal shimmer.'}</small></fieldset>}
+      {(livePreview || status === 'uploading' || status === 'queued' || status === 'rendering') && <section className="mobile-live-preview"><div><strong>{progressLabel}</strong><span>{progress}%</span></div>{livePreview ? <img src={livePreview} alt="Current ComfyUI generation preview" /> : <div><LoaderCircle className="spin" /><span>{status === 'uploading' ? 'Preparing your input…' : 'Waiting for the first preview frame…'}</span></div>}<progress max="100" value={progress}>{progress}%</progress></section>}
       {message && <div className={`mobile-message ${status}`} role="status">{status === 'uploading' || status === 'queued' || status === 'rendering' ? <LoaderCircle className="spin" size={17} /> : null}<span>{message}</span></div>}
       <div className="mobile-generate-actions">{promptId && (status === 'queued' || status === 'rendering') && <button className="mobile-cancel" onClick={() => void cancel()}><CircleStop size={18} />Cancel</button>}<button className="mobile-generate" disabled={status === 'uploading' || status === 'queued' || status === 'rendering'} onClick={() => void generate()}>{status === 'uploading' || status === 'queued' || status === 'rendering' ? <LoaderCircle className="spin" size={19} /> : <Play size={19} fill="currentColor" />}Generate video</button></div>
     </section>

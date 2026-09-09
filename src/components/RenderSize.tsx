@@ -12,7 +12,16 @@ export function RenderSize({ value, onChange, provider = 'minimax' }: { value: s
       const next = e.target.value
       onChange(next === 'square' ? '768x768' : orientation === 'square' ? sizes[next][2] : `${h}x${w}`)
     }}><option value="landscape">Landscape</option><option value="portrait">Portrait</option><option value="square">Square</option></select></label>
-    <label>Resolution<select value={value} onChange={(e) => onChange(e.target.value)}>{sizes[orientation].map((size) => <option key={size} value={size}>{size.replace('x', ' × ')}</option>)}</select></label>
+    <label>Resolution<select value={value} onChange={(e) => onChange(e.target.value)}>{sizes[orientation].map((size) => <option key={size} value={size}>{size.replace('x', ' × ')}{provider === 'minimax' ? ` · ${qualityLabel(size)}` : ''}</option>)}</select></label>
     <p className="field-help">{provider === 'ltx25' ? '32-pixel aligned for LTX‑2.5. Quality mode generates at half size before the official latent 2× refinement stage.' : '32-pixel aligned and kept inside MiniMax H3’s official native canvas. Input crops follow this size.'} {(w * h / 1e6).toFixed(2)} megapixels{provider === 'minimax' && (value === '1344x768' || value === '768x1344') ? ' · native 768p' : ''}</p>
   </fieldset>
+}
+
+function qualityLabel(size: string) {
+  const [width, height] = size.split('x').map(Number)
+  const short = Math.min(width, height)
+  if (short >= 768) return 'Native quality'
+  if (short >= 640) return 'Balanced'
+  if (short >= 480) return 'Preview'
+  return 'Draft'
 }

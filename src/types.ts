@@ -1,4 +1,4 @@
-export type View = 'create' | 'ltx25' | 'zimage' | 'movie' | 'queue' | 'library' | 'editor' | 'settings'
+export type View = 'create' | 'ltx25' | 'zimage' | 'characters' | 'movie' | 'queue' | 'library' | 'editor' | 'settings'
 export type GenerationMode = 'text' | 'image' | 'frames' | 'reference'
 export type ModelKind = 'diffusion_models' | 'text_encoders' | 'vae' | 'loras' | 'vae_approx' | 'clip_vision'
 export type MediaKind = 'image' | 'video' | 'audio'
@@ -18,6 +18,7 @@ export type GenerationDefaults = {
   shiftVideo: number
   shiftAudio: number
   loraStrength: number
+  upscaleMode: UpscaleMode
 }
 
 export type AppSettings = {
@@ -34,7 +35,23 @@ export type AppSettings = {
 export type ClipItem = { id: string; name: string; source: string; createdAt: number; start?: number; end?: number; duration?: number }
 export type ClipProject = { id: string; name: string; createdAt: number; updatedAt: number; media: ClipItem[]; clips: ClipItem[] }
 
-export type MovieCharacter = { id: string; name: string; description: string; wardrobe: string; voiceNotes: string; referenceImages: MediaFile[] }
+export type CharacterProject = {
+  id: string
+  name: string
+  description: string
+  wardrobe: string
+  voiceNotes: string
+  visualStyle: string
+  referencePrompt: string
+  createdAt: number
+  updatedAt: number
+  referenceMode: 'single' | 'set'
+  selectedReferencePaths?: string[]
+  baseImage?: MediaFile
+  turntableVideo?: MediaFile
+  referenceImages: MediaFile[]
+}
+export type MovieCharacter = { id: string; libraryCharacterId?: string; name: string; description: string; wardrobe: string; voiceNotes: string; referenceImages: MediaFile[] }
 export type MovieLocation = { id: string; name: string; description: string; referenceImages: MediaFile[] }
 export type MovieChatArea = 'setup' | 'bible' | 'shots' | 'preview'
 export type MovieChatMessage = { id: string; role: 'user' | 'assistant'; content: string; createdAt: number; appliedChanges?: string[]; areas?: MovieChatArea[] }
@@ -85,6 +102,7 @@ export type MediaFile = {
   kind: MediaKind
   preview?: string
   crop?: { x: number; y: number; zoom: number; fit: 'crop' | 'contain' }
+  clip?: { sourcePath: string; sourceName: string; start: number; end: number }
 }
 
 export type ModelSelection = {
@@ -176,6 +194,9 @@ export type GenerationJob = {
   createdAt: number
   status: JobStatus
   progress: number
+  progressLabel?: string
+  currentStep?: number
+  totalSteps?: number
   outputUrl?: string
   error?: string
   width: number
@@ -183,6 +204,7 @@ export type GenerationJob = {
   duration: number
   provider?: 'minimax' | 'ltx25'
   movieLink?: { projectId: string; sceneId: string; shotId: string }
+  characterProjectId?: string
 }
 
 export type UploadedFile = { name: string; subfolder?: string; type?: string }
@@ -191,6 +213,7 @@ export type DesktopApi = {
   getObjectInfo(url: string): Promise<Record<string, { input: { required: Record<string, unknown[]> } }>>
   uploadImageData(url: string, data: string): Promise<UploadedFile>
   getOutputImage(url: string, file: { filename: string; subfolder?: string; type?: string }): Promise<string>
+  saveComfyOutputImage(url: string, file: { filename: string; subfolder?: string; type?: string }, outputDirectory: string): Promise<{ path: string; name: string }>
   getSettings(): Promise<AppSettings>
   saveSettings(settings: AppSettings): Promise<AppSettings>
   chooseDirectory(initialPath?: string): Promise<string | null>
@@ -205,6 +228,7 @@ export type DesktopApi = {
   fileDataUrl(filePath: string): Promise<string>
   mediaUrl(filePath: string): Promise<string>
   extractVideoFrame(source: string, position: number | 'last', outputDirectory: string, ffmpegPath: string): Promise<{ path: string; name: string }>
+  trimVideo(source: string, start: number, end: number, outputDirectory: string, ffmpegPath: string): Promise<{ path: string; name: string }>
   joinVideos(clips: Array<Pick<ClipItem, 'source' | 'start' | 'end'>>, outputDirectory: string, ffmpegPath: string): Promise<{ path: string; url: string }>
   showOutput(path: string): Promise<void>
   findLatestOutput(outputDirectory: string, since: number): Promise<string | null>
