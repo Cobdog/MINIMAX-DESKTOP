@@ -9,6 +9,7 @@ import { buildMiniMaxWorkflow } from './lib/workflow'
 import { buildLtx25Workflow } from './lib/ltx25Workflow'
 import { buildZImage } from './lib/zimage'
 import { applyDialoguePolicy } from './lib/dialogPolicy'
+import { createId } from './lib/createId'
 import type { MediaFile, ModelFile } from './types'
 
 type Bootstrap = { connected: boolean; latencyMs: number; models: ModelFile[]; upscalers?: string[]; ltxModel?: string; ltxVae?: string; ltxUpscaleReady?: boolean; ltxUpscaleMissing?: string[]; ltxNativeReady?: boolean; ltxNativeMissing?: string[]; ollamaModels?: string[]; ollamaModel?: string; error?: string }
@@ -274,7 +275,7 @@ export default function MobileApp() {
     if (upscale === 'rtx' && !rtxModel) return setMessage('Choose an RTX/CUDA frame upscaler first.')
     if (upscale === 'rtx' && !window.confirm('RTX/CUDA upscale processes frames independently and may amplify noise or flicker. Continue with this experimental post-process?')) return
     setOutputUrl(''); setLivePreview(''); setProgress(2); setProgressLabel(mode === 'image' ? 'Preparing first frame' : mode === 'reference' ? 'Uploading references' : 'Preparing workflow'); setPromptId(''); setStatus(mode === 'image' || mode === 'reference' ? 'uploading' : 'queued'); setMessage(mode === 'image' ? 'Preparing and uploading your crop…' : mode === 'reference' ? 'Uploading reference media to the desktop…' : `Building the ${provider === 'ltx25' ? 'LTX‑2.5' : 'MiniMax'} workflow…`)
-    const clientId = crypto.randomUUID()
+    const clientId = createId()
     const previewStream = openPreviewStream(clientId)
     cancelled.current = false
     try {

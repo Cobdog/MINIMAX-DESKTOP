@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, FolderOpen, GripVertical, Image, LoaderCircle, Magnet, Plus, Save, Scissors, Trash2, X } from 'lucide-react'
 import type { AppSettings, ClipItem, ClipProject, GenerationJob, MediaFile } from '../types'
+import { createId } from '../lib/createId'
 
 type DragItem = { origin: 'bin' | 'timeline'; clip: ClipItem }
 
 const makeProject = (n = 1): ClipProject => {
   const now = Date.now()
-  return { id: crypto.randomUUID(), name: n === 1 ? 'My continuous video' : `Project ${n}`, createdAt: now, updatedAt: now, media: [], clips: [] }
+  return { id: createId(), name: n === 1 ? 'My continuous video' : `Project ${n}`, createdAt: now, updatedAt: now, media: [], clips: [] }
 }
 
 function loadProjects() {
@@ -53,7 +54,7 @@ export function ClipEditor({ settings, jobs, onUseFrame, onNotice }: {
 
   const update = (change: (value: ClipProject) => ClipProject) => setProjects((all) => all.map((item) => item.id === project.id ? { ...change(item), updatedAt: Date.now() } : item))
   const addToTimeline = (clip: ClipItem, beforeId?: string) => {
-    const timelineClip = { ...clip, id: crypto.randomUUID(), createdAt: Date.now() }
+    const timelineClip = { ...clip, id: createId(), createdAt: Date.now() }
     update((value) => {
       const clips = [...value.clips]
       const index = beforeId ? clips.findIndex((item) => item.id === beforeId) : -1
@@ -66,7 +67,7 @@ export function ClipEditor({ settings, jobs, onUseFrame, onNotice }: {
   const chooseLocal = async () => {
     const file = await window.minimax.chooseMedia('video')
     if (!file) return
-    const media = { id: crypto.randomUUID(), name: file.name, source: await window.minimax.mediaUrl(file.path), createdAt: Date.now() }
+    const media = { id: createId(), name: file.name, source: await window.minimax.mediaUrl(file.path), createdAt: Date.now() }
     update((value) => ({ ...value, media: [...value.media, media] }))
     setPreview(media)
     onNotice('success', `${file.name} added to the media bin.`)

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Bot, Film, Image as ImageIcon, LoaderCircle, MessageCircle, Send, Sparkles, WandSparkles, X } from 'lucide-react'
+import { createId } from '../lib/createId'
 
 type ChatMode = 'prompt' | 'image' | 'video'
 type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string }
@@ -32,13 +33,13 @@ export function AiChatHead({ available, ollamaUrl, ollamaModel, onUseImage, onUs
     if (!request || !available || busy) return
     const activeMode = mode
     setDraft(''); setBusy(true)
-    setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'user', text: request }])
+    setMessages((current) => [...current, { id: createId(), role: 'user', text: request }])
     try {
       const context = messages.slice(-6).map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}: ${message.text}`).join('\n')
       const response = await window.minimax.generateWithOllama(ollamaUrl, ollamaModel, `${modeCopy[activeMode].instruction}\n\n${context ? `RECENT CONTEXT:\n${context}\n\n` : ''}REQUEST:\n${request}`)
-      setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', text: response.trim() }])
+      setMessages((current) => [...current, { id: createId(), role: 'assistant', text: response.trim() }])
     } catch (error) {
-      setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', text: `I could not reach the local assistant: ${error instanceof Error ? error.message : String(error)}` }])
+      setMessages((current) => [...current, { id: createId(), role: 'assistant', text: `I could not reach the local assistant: ${error instanceof Error ? error.message : String(error)}` }])
     } finally { setBusy(false) }
   }
 

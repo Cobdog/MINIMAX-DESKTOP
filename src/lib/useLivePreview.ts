@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
+import { createId } from './createId'
 
 export type LiveProgress = { progress?: number; label: string; currentStep?: number; totalSteps?: number }
 
 export function useLivePreview(url: string | undefined, enabled: boolean, onProgress: (id: string, update: LiveProgress) => void) {
-  const [clientId] = useState(() => crypto.randomUUID())
+  const [clientId] = useState(createId)
   const [preview, setPreview] = useState<{ promptId: string; url: string } | null>(null)
   const [connected, setConnected] = useState(false)
   useEffect(() => {

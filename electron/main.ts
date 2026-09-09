@@ -453,7 +453,8 @@ async function handleLanRequest(request: IncomingMessage, response: ServerRespon
 }
 
 async function startLanServer() {
-  const port = 4178
+  const configuredPort = Number(process.env.MINIMAX_LAN_PORT)
+  const port = Number.isInteger(configuredPort) && configuredPort >= 1024 && configuredPort <= 65535 ? configuredPort : 4178
   lanToken = await loadLanToken()
   return new Promise<void>((resolve) => {
     lanServer = createServer((request, response) => void handleLanRequest(request, response))

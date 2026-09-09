@@ -24,6 +24,33 @@ export function allocateCharacterReferences(characters: Array<{ id: string; name
   return uniqueBindings(result).slice(0, limit)
 }
 
+export function allocateWorkspaceReferences(
+  characters: Array<{ id: string; name: string; identity: MediaFile[]; wardrobeIds: string[] }>,
+  wardrobes: WardrobeProject[],
+  locations: Array<{ id: string; name: string; images: MediaFile[] }>,
+  limit = 9,
+): MovieReferenceBinding[] {
+  const characterQueues = characters.map((character) => ({
+    identity: character.identity.map((file, index) => ({ file: fitWholeCharacter(file), purpose: (index === 0 ? 'character' : 'character-angle') as MovieReferenceBinding['purpose'], label: `Character: ${character.name} / ${index === 0 ? 'master' : `angle ${index + 1}`}`, characterId: character.id, source: 'character-studio' as const })),
+    wardrobe: character.wardrobeIds.slice(0, 1).flatMap((wardrobeId) => { const wardrobe = wardrobes.find((item) => item.id === wardrobeId); return wardrobe ? wardrobeReferences(wardrobe).map((file) => ({ file: fitWholeCharacter(file), purpose: 'wardrobe' as const, label: `Wardrobe: ${wardrobe.name} for ${character.name}`, characterId: character.id, wardrobeId: wardrobe.id, source: 'wardrobe-studio' as const })) : [] }),
+  }))
+  const locationQueues = locations.map((location) => location.images.map((file) => ({ file, purpose: 'location' as const, label: `Location: ${location.name}`, locationId: location.id, source: 'location-studio' as const })))
+  const result: MovieReferenceBinding[] = []
+  const take = (queue: MovieReferenceBinding[]) => { const next = queue.shift(); if (next && result.length < limit) result.push(next) }
+
+  // Give every selected subject, assigned outfit, and location one authoritative
+  // picture before distributing the remaining slots across their extra views.
+  characterQueues.forEach((queue) => take(queue.identity))
+  characterQueues.forEach((queue) => take(queue.wardrobe))
+  locationQueues.forEach(take)
+  while (result.length < limit && (characterQueues.some((queue) => queue.identity.length || queue.wardrobe.length) || locationQueues.some((queue) => queue.length))) {
+    characterQueues.forEach((queue) => take(queue.identity))
+    characterQueues.forEach((queue) => take(queue.wardrobe))
+    locationQueues.forEach(take)
+  }
+  return uniqueBindings(result).slice(0, limit)
+}
+
 export function resolveMovieShotReferences(project: MovieProject, scene: MovieScene, shot: MovieShot, library: CharacterProject[], continuityFrame?: MediaFile): MovieReferenceBinding[] {
   const bindings: MovieReferenceBinding[] = []
   const wardrobes = loadWardrobeProjects()
@@ -63,7 +90,13 @@ export function composeReferenceInstructions(bindings: MovieReferenceBinding[]) 
     lines.push(`${characterName} must wear the complete approved ${wardrobeName} outfit shown in ${tags}. These are the only clothing references for ${characterName}: match their garments, layers, materials, colors, patterns, fit, footwear, and accessories exactly. Do not borrow, blend, or retain clothing from ${characterName}'s identity pictures or from another character.`)
   }
   if (groups.size > 1) lines.push('Render each named character as a separate, distinct person. Keep every face, body, and assigned outfit paired with its own name; do not merge identities, swap garments, or blend features between people.')
-  for (const binding of numbered.filter((item) => item.purpose === 'location')) lines.push(`Preserve the location design and spatial layout from <Picture ${binding.number}>.`)
+  const locationGroups = new Map<string, typeof numbered>()
+  for (const binding of numbered.filter((item) => item.purpose === 'location')) locationGroups.set(binding.locationId ?? binding.label, [...(locationGroups.get(binding.locationId ?? binding.label) ?? []), binding])
+  for (const group of locationGroups.values()) {
+    const name = group[0].label.replace(/^Location:\s*/, '')
+    const tags = group.map((item) => `<Picture ${item.number}>`).join(', ').replace(/, ([^,]+)$/, ' and $1')
+    lines.push(`${tags} depict the approved ${name} location. Preserve its architecture, layout, materials, lighting, landmarks, atmosphere, and spatial geography.`)
+  }
   for (const binding of numbered.filter((item) => item.purpose === 'continuity')) lines.push(`Continue the framing, lighting, pose, screen direction, and motion state shown in <Picture ${binding.number}>.`)
   for (const binding of numbered.filter((item) => item.purpose === 'generic')) lines.push(`Use <Picture ${binding.number}> as ${binding.label.replace(/^Shot reference:\s*/, 'the visual reference for ')}.`)
   return lines

@@ -1,17 +1,26 @@
 import type { CharacterProject, MediaFile } from '../types'
+import { createId } from './createId'
 
 const KEY = 'minimax.character-projects'
 export const CHARACTER_LIBRARY_EVENT = 'minimax-character-library-changed'
 
 export function newCharacterProject(index = 1): CharacterProject {
   const now = Date.now()
-  return { id: crypto.randomUUID(), name: `Character ${index}`, description: '', wardrobe: '', voiceNotes: '', visualStyle: 'cinematic photorealism', referencePrompt: '', createdAt: now, updatedAt: now, referenceMode: 'set', referenceImages: [], wardrobeIds: [] }
+  return { id: createId(), name: `Character ${index}`, description: '', wardrobe: '', voiceNotes: '', visualStyle: 'cinematic photorealism', referencePrompt: '', createdAt: now, updatedAt: now, referenceMode: 'set', referenceImages: [], wardrobeIds: [] }
 }
 
 export function loadCharacterProjects(): CharacterProject[] {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? '[]') as Partial<CharacterProject>[]
-    return raw.filter((item) => item.id).map((item, index) => ({ ...newCharacterProject(index + 1), ...item, referenceMode: item.referenceMode === 'single' ? 'single' : 'set', referenceImages: item.referenceImages ?? [], wardrobeIds: item.wardrobeIds ?? [] }))
+    return raw.filter((item) => item.id).map((item, index) => ({
+      ...newCharacterProject(index + 1),
+      ...item,
+      wardrobe: '',
+      referencePrompt: item.wardrobe && item.referencePrompt?.includes(item.wardrobe) ? '' : item.referencePrompt ?? '',
+      referenceMode: item.referenceMode === 'single' ? 'single' : 'set',
+      referenceImages: item.referenceImages ?? [],
+      wardrobeIds: item.wardrobeIds ?? [],
+    }))
   } catch { return [] }
 }
 

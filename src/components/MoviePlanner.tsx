@@ -3,6 +3,7 @@ import { BookOpen, Check, ChevronDown, ChevronRight, CirclePause, CirclePlay, Cl
 import { CHARACTER_LIBRARY_EVENT, characterReferences, loadCharacterProjects } from '../lib/characterLibrary'
 import { composeReferenceInstructions, resolveMovieShot } from '../lib/promptComposer'
 import { SmartPromptEditor, type SmartInsertOption } from './SmartPromptEditor'
+import { createId } from '../lib/createId'
 import type { AppSettings, CharacterProject, GenerationMode, MediaFile, MovieCharacter, MovieChatArea, MovieLocation, MovieProject, MovieScene, MovieShot, ResolvedMovieShot } from '../types'
 
 type PlannerStep = 'setup' | 'bible' | 'shots' | 'preview'
@@ -40,7 +41,7 @@ const movieChatSchema: Record<string, unknown> = {
 
 function makeProject(index = 1): MovieProject {
   const now = Date.now()
-  return { id: crypto.randomUUID(), title: index === 1 ? 'Untitled movie' : `Movie ${index}`, createdAt: now, updatedAt: now, status: 'planning', targetRuntime: 60, computeBudgetMinutes: 120, aspectRatio: '16:9', genre: '', visualStyle: '', quality: 'balanced', reviewGate: 'scene', story: '', visualRules: '', characters: [], locations: [], scenes: [], chatMessages: [] }
+  return { id: createId(), title: index === 1 ? 'Untitled movie' : `Movie ${index}`, createdAt: now, updatedAt: now, status: 'planning', targetRuntime: 60, computeBudgetMinutes: 120, aspectRatio: '16:9', genre: '', visualStyle: '', quality: 'balanced', reviewGate: 'scene', story: '', visualRules: '', characters: [], locations: [], scenes: [], chatMessages: [] }
 }
 
 function loadProjects(): MovieProject[] {
@@ -102,7 +103,7 @@ export function MoviePlanner({ settings, ollamaAvailable, ollamaModel, onOpenSho
   const updateScene = (id: string, change: Partial<MovieScene>) => update((value) => ({ ...value, scenes: value.scenes.map((item) => item.id === id ? { ...item, ...change } : item) }))
   const updateShot = (sceneId: string, shotId: string, change: Partial<MovieShot>) => update((value) => ({ ...value, scenes: value.scenes.map((scene) => scene.id === sceneId ? { ...scene, shots: scene.shots.map((shot) => shot.id === shotId ? { ...shot, ...change } : shot) } : scene) }))
   const addScene = () => {
-    const id = crypto.randomUUID()
+    const id = createId()
     update((value) => ({ ...value, scenes: [...value.scenes, { id, title: `Scene ${value.scenes.length + 1}`, summary: '', locationId: value.locations[0]?.id ?? '', transition: value.scenes.length ? 'connected' : 'cut', shots: [] }] }))
     setExpandedScenes((value) => [...value, id])
   }
@@ -172,7 +173,7 @@ export function MoviePlanner({ settings, ollamaAvailable, ollamaModel, onOpenSho
       const source = characterLibrary.find((character) => character.id === (event as CustomEvent<string>).detail)
       if (!source) return
       if (project.characters.some((character) => character.libraryCharacterId === source.id)) { onNotice('neutral', `${source.name} is already in this movie.`); return }
-      const character: MovieCharacter = { id: crypto.randomUUID(), libraryCharacterId: source.id, libraryUpdatedAt: source.updatedAt, name: source.name, description: source.description, wardrobe: source.wardrobe, voiceNotes: source.voiceNotes, referenceImages: characterReferences(source) }
+      const character: MovieCharacter = { id: createId(), libraryCharacterId: source.id, libraryUpdatedAt: source.updatedAt, name: source.name, description: source.description, wardrobe: source.wardrobe, voiceNotes: source.voiceNotes, referenceImages: characterReferences(source) }
       const next = projects.map((item) => item.id === project.id ? { ...item, updatedAt: Date.now(), characters: [...item.characters, character] } : item)
       commit(next)
       onNotice('success', `${source.name} and ${character.referenceImages.length} approved reference${character.referenceImages.length === 1 ? '' : 's'} added to this movie.`)
@@ -222,7 +223,7 @@ export function MoviePlanner({ settings, ollamaAvailable, ollamaModel, onOpenSho
       const areas = normalizeChatAreas(raw.focusAreas, raw)
       update((value) => {
         const changed = changes.length || hasOperations ? applyMovieChatOperations(value, raw) : value
-        return { ...changed, chatMessages: [...value.chatMessages, { id: crypto.randomUUID(), role: 'user' as const, content: question, createdAt: Date.now() }, { id: crypto.randomUUID(), role: 'assistant' as const, content: text(raw.reply) || 'I reviewed the project.', createdAt: Date.now() + 1, appliedChanges, areas }].slice(-100) }
+        return { ...changed, chatMessages: [...value.chatMessages, { id: createId(), role: 'user' as const, content: question, createdAt: Date.now() }, { id: createId(), role: 'assistant' as const, content: text(raw.reply) || 'I reviewed the project.', createdAt: Date.now() + 1, appliedChanges, areas }].slice(-100) }
       })
       setChatInput('')
     } catch (error) { onNotice('error', `Movie copilot: ${error instanceof Error ? error.message : String(error)}`) }
@@ -254,7 +255,7 @@ export function MoviePlanner({ settings, ollamaAvailable, ollamaModel, onOpenSho
       const instruction = composeReferenceInstructions(resolved.references).find((line) => line.includes(`${source.name}'s`)) ?? `Preserve ${source.name}'s approved Character Studio identity.`
       return { id: `character.${source.id}`, category: 'character' as const, label: source.name, description: source.description || 'Character Studio identity', insertion: `Character: ${source.name} — ${instruction}`, thumbnail: characterReferences(source)[0]?.preview, meta: `${characterReferences(source).length} approved · ${source.referenceMode}`, onSelect: (nextPrompt: string) => update((value) => {
         const found = value.characters.find((item) => item.libraryCharacterId === source.id)
-        const character = found ?? { ...candidate, id: crypto.randomUUID() }
+        const character = found ?? { ...candidate, id: createId() }
         return { ...value, characters: found ? value.characters : [...value.characters, character], scenes: value.scenes.map((item) => item.id !== scene.id ? item : { ...item, shots: item.shots.map((valueShot) => valueShot.id !== shot.id ? valueShot : { ...valueShot, prompt: nextPrompt, characterIds: [...new Set([...valueShot.characterIds, character.id])] }) }) }
       }) }
     })
@@ -380,7 +381,7 @@ function applyMovieChatOperations(current: MovieProject, raw: MovieChatResult): 
   for (const rawCharacter of raw.characterUpserts ?? []) {
     const suppliedId = text(rawCharacter.id)
     const existing = characters.find((character) => character.id === suppliedId)
-    const id = existing?.id ?? crypto.randomUUID()
+    const id = existing?.id ?? createId()
     if (suppliedId) characterAliases.set(suppliedId, id)
     const name = text(rawCharacter.name) || existing?.name || ''
     if (!name) continue
@@ -392,7 +393,7 @@ function applyMovieChatOperations(current: MovieProject, raw: MovieChatResult): 
   for (const rawLocation of raw.locationUpserts ?? []) {
     const suppliedId = text(rawLocation.id)
     const existing = locations.find((location) => location.id === suppliedId)
-    const id = existing?.id ?? crypto.randomUUID()
+    const id = existing?.id ?? createId()
     if (suppliedId) locationAliases.set(suppliedId, id)
     const name = text(rawLocation.name) || existing?.name || ''
     if (!name) continue
@@ -404,7 +405,7 @@ function applyMovieChatOperations(current: MovieProject, raw: MovieChatResult): 
   for (const rawScene of raw.sceneUpserts ?? []) {
     const suppliedId = text(rawScene.id)
     const existing = scenes.find((scene) => scene.id === suppliedId)
-    const id = existing?.id ?? crypto.randomUUID()
+    const id = existing?.id ?? createId()
     if (suppliedId) sceneAliases.set(suppliedId, id)
     const title = text(rawScene.title) || existing?.title || ''
     if (!title) continue
@@ -423,7 +424,7 @@ function applyMovieChatOperations(current: MovieProject, raw: MovieChatResult): 
     const requestedSceneId = sceneAliases.get(text(rawShot.sceneId)) ?? text(rawShot.sceneId)
     const targetSceneId = scenes.some((scene) => scene.id === requestedSceneId) ? requestedSceneId : existingScene?.id
     if (!targetSceneId) continue
-    const id = existing?.id ?? crypto.randomUUID()
+    const id = existing?.id ?? createId()
     const title = text(rawShot.title) || existing?.title || ''
     if (!title) continue
     const rawCharacterIds = Array.isArray(rawShot.characterIds) ? rawShot.characterIds.map(text) : existing?.characterIds ?? []
@@ -483,9 +484,9 @@ function ShotReferencePicker({ shot, onAdd, onRemove }: { shot: MovieShot; onAdd
   return <fieldset className="shot-reference-picker"><legend>Explicit shot references</legend><div className="shot-reference-actions">{groups.map(([kind, files]) => <div key={kind}><button type="button" onClick={() => onAdd(kind)}><Plus size={12} />Add {kind}</button>{files.map((file, index) => <span key={`${file.path}-${index}`} title={file.name}>{file.name}<button type="button" aria-label={`Remove ${file.name}`} onClick={() => onRemove(kind, index)}><X size={11} /></button></span>)}</div>)}</div></fieldset>
 }
 
-function blankCharacter(): MovieCharacter { return { id: crypto.randomUUID(), name: '', description: '', wardrobe: '', voiceNotes: '', referenceImages: [] } }
-function blankLocation(): MovieLocation { return { id: crypto.randomUUID(), name: '', description: '', referenceImages: [] } }
-function makeShot(index: number): MovieShot { return { id: crypto.randomUUID(), title: `Shot ${index}`, duration: 5, prompt: '', dialogue: '', mode: 'text', preferredMode: 'text', characterIds: [], referenceImages: [], referenceVideos: [], referenceAudios: [], stage: 'planned' } }
+function blankCharacter(): MovieCharacter { return { id: createId(), name: '', description: '', wardrobe: '', voiceNotes: '', referenceImages: [] } }
+function blankLocation(): MovieLocation { return { id: createId(), name: '', description: '', referenceImages: [] } }
+function makeShot(index: number): MovieShot { return { id: createId(), title: `Shot ${index}`, duration: 5, prompt: '', dialogue: '', mode: 'text', preferredMode: 'text', characterIds: [], referenceImages: [], referenceVideos: [], referenceAudios: [], stage: 'planned' } }
 function normalizePlan(raw: unknown, project: MovieProject): MovieScene[] {
   const value = raw as { scenes?: Array<{ title?: unknown; summary?: unknown; location?: unknown; shots?: Array<{ title?: unknown; duration?: unknown; prompt?: unknown; dialogue?: unknown; mode?: unknown; characters?: unknown }> }> }
   if (!Array.isArray(value?.scenes)) return []
@@ -496,9 +497,9 @@ function normalizePlan(raw: unknown, project: MovieProject): MovieScene[] {
     const shots = Array.isArray(scene.shots) ? scene.shots.slice(0, 16).map((shot, shotIndex) => {
       const names = Array.isArray(shot.characters) ? shot.characters.map(text) : []
       const mode = modes.includes(shot.mode as GenerationMode) ? shot.mode as GenerationMode : 'text'
-      return { id: crypto.randomUUID(), title: text(shot.title) || `Shot ${shotIndex + 1}`, duration: clamp(Number(shot.duration) || 5, 2, 15), prompt: text(shot.prompt), dialogue: text(shot.dialogue), mode, preferredMode: mode, characterIds: project.characters.filter((character) => names.some((name) => name.toLowerCase() === character.name.toLowerCase())).map((character) => character.id), referenceImages: [], referenceVideos: [], referenceAudios: [], stage: 'planned' as const }
+      return { id: createId(), title: text(shot.title) || `Shot ${shotIndex + 1}`, duration: clamp(Number(shot.duration) || 5, 2, 15), prompt: text(shot.prompt), dialogue: text(shot.dialogue), mode, preferredMode: mode, characterIds: project.characters.filter((character) => names.some((name) => name.toLowerCase() === character.name.toLowerCase())).map((character) => character.id), referenceImages: [], referenceVideos: [], referenceAudios: [], stage: 'planned' as const }
     }).filter((shot) => shot.prompt) : []
-    return { id: crypto.randomUUID(), title: text(scene.title) || `Scene ${sceneIndex + 1}`, summary: text(scene.summary), locationId, transition: sceneIndex === 0 ? 'cut' as const : 'connected' as const, shots }
+    return { id: createId(), title: text(scene.title) || `Scene ${sceneIndex + 1}`, summary: text(scene.summary), locationId, transition: sceneIndex === 0 ? 'cut' as const : 'connected' as const, shots }
   }).filter((scene) => scene.shots.length)
 }
 function routeName(mode: GenerationMode) { return ({ text: 'T2V', image: 'I2V', frames: 'First + last', reference: 'Ref2V' } as const)[mode] }

@@ -8,13 +8,14 @@
   "scripts": {
     "dev": "concurrently -k \"pnpm dev:web\" \"pnpm dev:electron\"",
     "dev:web": "vite --host 127.0.0.1",
-    "dev:electron": "pnpm build:electron && wait-on http://127.0.0.1:5173 && cross-env ELECTRON_RUN_AS_NODE= VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
+    "dev:electron": "pnpm build:electron && wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 node scripts/launch-electron.cjs",
     "build": "pnpm typecheck && pnpm build:web && pnpm build:electron",
     "build:web": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "lint": "eslint . --max-warnings 0",
-    "start": "cross-env ELECTRON_RUN_AS_NODE= electron .",
+    "smoke:lan": "node scripts/smoke-lan.cjs",
+    "start": "node scripts/launch-electron.cjs",
     "package:win": "pnpm build && electron-builder --win nsis --x64 --config.npmRebuild=false"
   },
   "dependencies": {

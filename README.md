@@ -78,12 +78,7 @@ pnpm build
 pnpm dev
 ```
 
-If the development environment sets `ELECTRON_RUN_AS_NODE=1`, clear it before launching Electron:
-
-```powershell
-$env:ELECTRON_RUN_AS_NODE=$null
-pnpm start
-```
+The launcher removes `ELECTRON_RUN_AS_NODE` from Electron's child environment, so `pnpm start` and `pnpm dev` work even when an automation or parent shell sets it.
 
 Start ComfyUI separately, then use **Settings → Test connection**. The default server is `http://127.0.0.1:8188`.
 

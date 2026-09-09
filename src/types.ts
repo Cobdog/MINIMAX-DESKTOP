@@ -6,7 +6,7 @@ export type UpscaleMode = 'off' | 'ltx' | 'rtx'
 export type ReferencePurpose = 'character' | 'character-angle' | 'wardrobe' | 'location' | 'continuity' | 'product' | 'style' | 'generic'
 export type PromptPresetCategory = 'camera' | 'shot' | 'angle' | 'lens' | 'lighting' | 'audio' | 'style' | 'movement' | 'transition' | 'character' | 'wardrobe' | 'location'
 export type PromptPreset = { id: string; category: PromptPresetCategory; label: string; keywords: string[]; description: string; insertion: string }
-export type MovieReferenceBinding = { file: MediaFile; purpose: ReferencePurpose; label: string; characterId?: string; wardrobeId?: string; locationId?: string; source: 'character-studio' | 'wardrobe-studio' | 'movie' | 'shot' | 'continuity' }
+export type MovieReferenceBinding = { file: MediaFile; purpose: ReferencePurpose; label: string; characterId?: string; wardrobeId?: string; locationId?: string; source: 'character-studio' | 'wardrobe-studio' | 'location-studio' | 'movie' | 'shot' | 'continuity' }
 export type ResolvedMovieShot = { preferredMode: GenerationMode; effectiveMode: GenerationMode; references: MovieReferenceBinding[]; compiledPrompt: string; routeReason: string; omittedReferences: MovieReferenceBinding[] }
 
 export type GenerationDefaults = {
@@ -57,7 +57,7 @@ export type CharacterProject = {
   referenceImages: MediaFile[]
   wardrobeIds: string[]
 }
-export type WardrobeProject = { id: string; name: string; description: string; materials: string; colors: string; visualStyle: string; referencePrompt: string; referenceImages: MediaFile[]; selectedReferencePaths?: string[]; createdAt: number; updatedAt: number }
+export type WardrobeProject = { id: string; name: string; description: string; accessories: string[]; materials: string; colors: string; visualStyle: string; referencePrompt: string; referenceImages: MediaFile[]; selectedReferencePaths?: string[]; createdAt: number; updatedAt: number }
 export type LocationProject = {
   id: string
   name: string

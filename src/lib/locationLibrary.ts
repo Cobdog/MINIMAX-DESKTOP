@@ -1,11 +1,12 @@
 import type { LocationProject, MediaFile } from '../types'
+import { createId } from './createId'
 
 const KEY = 'minimax.location-projects'
 export const LOCATION_LIBRARY_EVENT = 'minimax-location-library-changed'
 
 export function newLocationProject(index = 1): LocationProject {
   const now = Date.now()
-  return { id: crypto.randomUUID(), name: `Location ${index}`, description: '', atmosphere: '', timeOfDay: '', visualStyle: 'cinematic photorealism', referencePrompt: '', createdAt: now, updatedAt: now, referenceMode: 'set', referenceImages: [] }
+  return { id: createId(), name: `Location ${index}`, description: '', atmosphere: '', timeOfDay: '', visualStyle: 'cinematic photorealism', referencePrompt: '', createdAt: now, updatedAt: now, referenceMode: 'set', referenceImages: [] }
 }
 
 export function loadLocationProjects(): LocationProject[] {
