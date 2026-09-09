@@ -29,6 +29,7 @@ import {
   Save,
   Scissors,
   Settings,
+  Shirt,
   SlidersHorizontal,
   Sparkles,
   Upload,
@@ -39,7 +40,7 @@ import {
 } from 'lucide-react'
 import { buildMiniMaxWorkflow, extractOutputUrl, frameCount } from './lib/workflow'
 import { buildLtx25Workflow } from './lib/ltx25Workflow'
-import { prepareImage } from './lib/imageCrop'
+import { fitWholeCharacter, prepareImage } from './lib/imageCrop'
 import { inferLtx25Selections, inferSelections } from './lib/modelSelection'
 import { choices, type ObjectInfo } from './lib/comfyInfo'
 import { useLivePreview, type LiveProgress } from './lib/useLivePreview'
@@ -51,7 +52,12 @@ import { MoviePlanner } from './components/MoviePlanner'
 import { Ltx25Workspace } from './components/Ltx25Workspace'
 import { VideoReferenceClipper } from './components/VideoReferenceClipper'
 import { CharacterStudio } from './components/CharacterStudio'
+import { WardrobeStudio } from './components/WardrobeStudio'
+import { SmartPromptEditor, type SmartPromptEditorHandle } from './components/SmartPromptEditor'
+import { RenderConstruction } from './components/RenderConstruction'
 import { CHARACTER_LIBRARY_EVENT, characterReferences, loadCharacterProjects, updateCharacterProject } from './lib/characterLibrary'
+import { loadWardrobeProjects, wardrobeReferences, WARDROBE_LIBRARY_EVENT } from './lib/wardrobeLibrary'
+import { buildPromptAssistantRequest } from './lib/promptComposer'
 import type {
   AppSettings,
   CharacterProject,
@@ -66,6 +72,8 @@ import type {
   ModelKind,
   ModelSelection,
   MovieProject,
+  ResolvedMovieShot,
+  WardrobeProject,
   MovieShot,
   OllamaModel,
   UpscaleMode,
@@ -264,12 +272,12 @@ function App() {
   const [referenceVideos, setReferenceVideos] = useState<MediaFile[]>(persisted.referenceVideos)
   const [referenceAudios, setReferenceAudios] = useState<MediaFile[]>(persisted.referenceAudios)
   const [characterProjects, setCharacterProjects] = useState<CharacterProject[]>(loadCharacterProjects)
+  const [wardrobeProjects, setWardrobeProjects] = useState<WardrobeProject[]>(loadWardrobeProjects)
   const [selectedReferenceCharacterId, setSelectedReferenceCharacterId] = useState('')
   const [jobs, setJobs] = useState<GenerationJob[]>(initialJobs)
   const [activeJobId, setActiveJobId] = useState<string | null>(persisted.activeJobId)
   const [movieHandoff, setMovieHandoff] = useState<MovieLink | null>(persisted.movieHandoff)
   const [characterHandoff, setCharacterHandoff] = useState<string | null>(null)
-  const [zImageCharacterId, setZImageCharacterId] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [ltxSubmitting, setLtxSubmitting] = useState(false)
   const [diagnosticRunning, setDiagnosticRunning] = useState(false)
@@ -369,6 +377,11 @@ function App() {
     window.addEventListener(CHARACTER_LIBRARY_EVENT, refresh)
     return () => window.removeEventListener(CHARACTER_LIBRARY_EVENT, refresh)
   }, [])
+  useEffect(() => {
+    const refresh = () => setWardrobeProjects(loadWardrobeProjects())
+    window.addEventListener(WARDROBE_LIBRARY_EVENT, refresh)
+    return () => window.removeEventListener(WARDROBE_LIBRARY_EVENT, refresh)
+  }, [])
 
   useEffect(() => {
     const workspace: PersistedWorkspace = {
@@ -456,21 +469,37 @@ function App() {
   const loadReferenceCharacter = async (characterId: string) => {
     setSelectedReferenceCharacterId(characterId)
     if (!characterId) return
+    setMode('reference')
     const character = characterProjects.find((project) => project.id === characterId)
     if (!character) return
-    const approved = characterReferences(character).slice(0, 9)
-    if (approved.length === 0) {
+    const identity = characterReferences(character)
+    const wardrobe = character.wardrobeIds.flatMap((id) => { const project = wardrobeProjects.find((item) => item.id === id); return project ? wardrobeReferences(project) : [] })
+    const approved = [...identity, ...wardrobe].slice(0, 9)
+    if (identity.length === 0) {
       setReferenceImages([])
       setNotice({ tone: 'error', text: `${character.name} has no approved character images yet.` })
       return
     }
-    const images = await Promise.all(approved.map(async (file) => {
+    const images = await Promise.all(approved.map(async (source) => {
+      const file = fitWholeCharacter(source)
       if (file.preview) return file
       try { return { ...file, preview: await window.minimax.fileDataUrl(file.path) } }
       catch { return file }
     }))
     setReferenceImages(images)
-    setNotice({ tone: 'success', text: `Loaded ${images.length} approved image${images.length === 1 ? '' : 's'} for ${character.name}. Other references and prompt were unchanged.` })
+    const loadedIdentity = Math.min(identity.length, 9)
+    const loadedWardrobe = Math.min(wardrobe.length, Math.max(0, 9 - loadedIdentity))
+    setNotice({ tone: 'success', text: `Loaded ${loadedIdentity} identity and ${loadedWardrobe} wardrobe reference${loadedWardrobe === 1 ? '' : 's'} for ${character.name}. Other media were unchanged.` })
+  }
+
+  const loadReferenceWardrobe = async (wardrobeId: string) => {
+    const wardrobe = wardrobeProjects.find((project) => project.id === wardrobeId)
+    if (!wardrobe) return
+    const approved = wardrobeReferences(wardrobe).slice(0, 9).map(fitWholeCharacter)
+    if (!approved.length) { setNotice({ tone: 'error', text: `${wardrobe.name} has no approved wardrobe images yet.` }); return }
+    const images = await Promise.all(approved.map(async (file) => { if (file.preview) return file; try { return { ...file, preview: await window.minimax.fileDataUrl(file.path) } } catch { return file } }))
+    setSelectedReferenceCharacterId(''); setMode('reference'); setReferenceImages(images)
+    setNotice({ tone: 'success', text: `Loaded ${images.length} approved wardrobe reference${images.length === 1 ? '' : 's'} for ${wardrobe.name}.` })
   }
 
   const editVideoReference = async (index: number) => {
@@ -531,13 +560,12 @@ function App() {
       setNotice({ tone: 'error', text: 'No local Ollama text model is available. Check Ollama in Settings.' })
       return
     }
-    const task = {
-      enhance: 'Rewrite the draft as one polished MiniMax H3 video-generation prompt. Improve subject action, environment, camera, lighting, physical motion, pacing, and synchronized audio while preserving the user intent.',
-      timeline: `Rewrite the draft as a clear time-coded shot plan lasting exactly ${duration} seconds. Use concise [0s-1s] style beats, coherent transitions, camera direction, and synchronized audio cues.`,
-      audio: 'Preserve the visual direction but strengthen the native audio plan with dialogue or vocal intent when relevant, ambience, sound effects, music, spatial placement, timing, and clean transitions.',
-    }[tool]
-    const referenceRule = mode === 'reference' ? ' Preserve and correctly use any <Picture N>, <Video N>, and <Audio N> tags. Do not invent tags for media that was not mentioned.' : ''
-    const request = `${task}${referenceRule}\nReturn only the finished generation prompt, with no analysis, preface, markdown fence, or alternatives.\n\nDRAFT:\n${prompt.trim()}`
+    const referenceMap = mode === 'reference' ? [
+      ...referenceImages.map((file, index) => `<Picture ${index + 1}> = ${selectedReferenceCharacterId ? `${characterProjects.find((item) => item.id === selectedReferenceCharacterId)?.name ?? 'character'} identity` : file.name}`),
+      ...referenceVideos.map((file, index) => `<Video ${index + 1}> = ${file.name}`),
+      ...referenceAudios.map((file, index) => `<Audio ${index + 1}> = ${file.name}`),
+    ] : undefined
+    const request = buildPromptAssistantRequest(tool, prompt, { duration, mode, referenceMap })
     setPromptingTool(tool)
     setPromptSuggestion('')
     try {
@@ -688,6 +716,10 @@ function App() {
       setNotice({ tone: 'error', text: 'Add at least one reference image, video, or audio file.' })
       return
     }
+    if (mode === 'reference' && (referenceImages.length > 9 || referenceVideos.length > 3 || referenceAudios.length > 3)) {
+      setNotice({ tone: 'error', text: 'Reference limits are 9 pictures, 3 videos, and 3 audio files. Remove extras before rendering.' })
+      return
+    }
 
     setSubmitting(true)
     setNotice({ tone: 'neutral', text: 'Uploading inputs and preparing the ComfyUI graph…' })
@@ -825,20 +857,27 @@ function App() {
           <button className="icon-button sidebar-toggle" onClick={() => setSidebarOpen((value) => !value)} aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}><PanelLeftClose size={18} /></button>
         </div>
         <nav aria-label="Primary navigation">
-          <NavButton active={view === 'create'} icon={WandSparkles} label="Create" onClick={() => { setCharacterHandoff(null); setView('create') }} />
-          <NavButton active={view === 'ltx25'} icon={Aperture} label="LTX 2.5" onClick={() => setView('ltx25')} />
-          <NavButton active={view === 'zimage'} icon={ImageIcon} label="First frame" onClick={() => { setZImageCharacterId(null); setView('zimage') }} />
-          <NavButton active={view === 'characters'} icon={Users} label="Characters" onClick={() => setView('characters')} />
-          <NavButton active={view === 'movie'} icon={Clapperboard} label="Movie" onClick={() => setView('movie')} />
-          <NavButton active={view === 'queue'} icon={ListVideo} label="Queue" count={pendingJobs.length} onClick={() => setView('queue')} />
-          <NavButton active={view === 'library'} icon={Library} label="Library" onClick={() => setView('library')} />
-          <NavButton active={view === 'editor'} icon={Scissors} label="Clip editor" onClick={() => setView('editor')} />
+          <div className="nav-group"><span className="nav-section-label">Generate</span>
+            <NavButton active={view === 'create'} icon={WandSparkles} label="Create" onClick={() => { setCharacterHandoff(null); setView('create') }} />
+            <NavButton active={view === 'ltx25'} icon={Aperture} label="LTX 2.5" onClick={() => setView('ltx25')} />
+          </div>
+          <div className="nav-group"><span className="nav-section-label">Plan</span>
+            <NavButton active={view === 'zimage'} icon={ImageIcon} label="First frame" onClick={() => setView('zimage')} />
+            <NavButton active={view === 'characters'} icon={Users} label="Characters" onClick={() => setView('characters')} />
+            <NavButton active={view === 'wardrobes'} icon={Shirt} label="Wardrobe" onClick={() => setView('wardrobes')} />
+          </div>
+          <div className="nav-group"><span className="nav-section-label">Review</span>
+            <NavButton active={view === 'queue'} icon={ListVideo} label="Queue" count={pendingJobs.length} onClick={() => setView('queue')} />
+            <NavButton active={view === 'library'} icon={Library} label="Library" onClick={() => setView('library')} />
+            <NavButton active={view === 'editor'} icon={Scissors} label="Clip editor" onClick={() => setView('editor')} />
+          </div>
         </nav>
         <div className="sidebar-spacer" />
         <div className={`model-health ${modelReady ? 'healthy' : ''}`}>
           <HardDrive size={17} />
           <div><strong>{modelReady ? 'Models ready' : 'Models incomplete'}</strong><span>{models.length} local files indexed</span></div>
         </div>
+        <nav className="sidebar-secondary" aria-label="Advanced tools"><div className="nav-group"><span className="nav-section-label">Advanced tools</span><NavButton active={view === 'movie'} icon={Clapperboard} label="Movie" onClick={() => setView('movie')} /></div></nav>
         <NavButton active={view === 'settings'} icon={Settings} label="Settings" onClick={() => setView('settings')} />
       </aside>
 
@@ -880,8 +919,10 @@ function App() {
             chooseMedia={chooseMedia}
             referenceImages={referenceImages}
             characters={characterProjects}
+            wardrobes={wardrobeProjects}
             selectedCharacterId={selectedReferenceCharacterId}
             loadCharacter={(characterId) => void loadReferenceCharacter(characterId)}
+            loadWardrobe={(wardrobeId) => void loadReferenceWardrobe(wardrobeId)}
             referenceVideos={referenceVideos}
             referenceAudios={referenceAudios}
             removeReference={(kind, index) => {
@@ -925,24 +966,23 @@ function App() {
           onGenerate={(options, file) => void generateLtx(options, file)}
           onCancel={(job) => void cancelJob(job)}
         />}
-        <div hidden={view !== 'zimage'}><ZImageWorkspace key={zImageCharacterId ?? 'first-frame'} url={settings.comfyUrl} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} ollamaUrl={settings.ollamaUrl} ollamaModel={settings.ollamaModel} outputDirectory={settings.outputDirectory} onUse={(file, frameResolution) => {
-          if (zImageCharacterId) {
-            updateCharacterProject(zImageCharacterId, { baseImage: file }); setZImageCharacterId(null); setView('characters'); setNotice({ tone: 'success', text: 'Z-Image saved as the character’s master reference.' }); return
-          }
+        <div hidden={view !== 'zimage'}><ZImageWorkspace key="first-frame" url={settings.comfyUrl} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} ollamaUrl={settings.ollamaUrl} ollamaModel={settings.ollamaModel} outputDirectory={settings.outputDirectory} onUse={(file, frameResolution) => {
           setFirstFrame(file); setResolution(frameResolution); setMode('image'); setActiveJobId(null); setView('create'); setNotice({ tone: 'success', text: 'Z-Image frame loaded into the MiniMax I2V workspace.' })
         }} /></div>
-        {view === 'characters' && <CharacterStudio settings={settings} ollamaAvailable={ollamaModels.length > 0} onNotice={(tone, text) => setNotice({ tone, text })} onCreateWithZImage={(project, characterPrompt) => { setZImageCharacterId(project.id); localStorage.setItem('minimax.zimage-workspace', JSON.stringify({ prompt: characterPrompt, resolution: '768x1024', model: 'z_image_turbo_bf16.safetensors', encoder: 'qwen_3_4b.safetensors', vae: 'ae.safetensors', seed: Math.floor(Math.random() * 1_000_000_000) })); setView('zimage'); setNotice({ tone: 'neutral', text: `Z-Image prepared for ${project.name}. Review the prompt and generate the master reference.` }) }} onCreateTurntable={(project) => {
+        {view === 'characters' && <CharacterStudio settings={settings} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} onNotice={(tone, text) => setNotice({ tone, text })} onCreateTurntable={(project) => {
           if (!project.baseImage) return
-          const firstFrame = { ...project.baseImage }; delete firstFrame.preview
+          const firstFrame = fitWholeCharacter({ ...project.baseImage }); delete firstFrame.preview
           localStorage.setItem('ltx25.workspace', JSON.stringify({ mode: 'image', prompt: `Character identity turntable reference video of ${project.name}. The character remains completely still in a neutral full-body pose while the camera performs one smooth complete 360-degree orbit at constant speed. Even neutral studio lighting, plain background, stable face and body proportions, no cuts, no pose changes, no expression changes, no clothing changes, no added objects, no text.`, duration: 6, resolution: '768x768', preset: 'quality', seed: Math.floor(Math.random() * 1_000_000_000), liveEnabled: true, firstFrame }))
           setMovieHandoff(null); setCharacterHandoff(project.id); setActiveJobId(null); setView('ltx25'); setNotice({ tone: 'neutral', text: `LTX‑2.5 I2V turntable prepared for ${project.name}. The completed video will return to this Character Studio project automatically.` })
         }} />}
-        {view === 'movie' && <MoviePlanner settings={settings} ollamaAvailable={ollamaModels.length > 0} ollamaModel={settings.ollamaModel} onNotice={(tone, text) => setNotice({ tone, text })} onOpenShot={async (shot: MovieShot, aspectRatio: MovieProject['aspectRatio'], movieReferences: MediaFile[], context: { projectId: string; sceneId: string; continuationSource?: string }) => {
+        {view === 'wardrobes' && <WardrobeStudio settings={settings} info={info} connected={status.connected} onNotice={(tone, text) => setNotice({ tone, text })} />}
+        {view === 'movie' && <MoviePlanner settings={settings} ollamaAvailable={ollamaModels.length > 0} ollamaModel={settings.ollamaModel} onNotice={(tone, text) => setNotice({ tone, text })} onOpenShot={async (shot: MovieShot, aspectRatio: MovieProject['aspectRatio'], resolved: ResolvedMovieShot, context: { projectId: string; sceneId: string; continuationSource?: string }) => {
           setCharacterHandoff(null)
-          const moviePrompt = shot.dialogue && !shot.prompt.includes(shot.dialogue) ? `${shot.prompt}\nDialogue: "${shot.dialogue}"` : shot.prompt
-          setPrompt(context.continuationSource ? `Continue directly from the supplied first frame with no visual reset. Preserve subject identity, wardrobe, props, lighting, color, lens, camera axis, screen direction, pose, and motion momentum. ${moviePrompt}` : moviePrompt)
+          setSelectedReferenceCharacterId('')
+          setPrompt(resolved.compiledPrompt)
           setDuration(Math.max(2, Math.min(15, shot.duration)))
-          setMode(shot.mode)
+          setMode(resolved.effectiveMode)
+          if (resolved.effectiveMode === 'reference' && turbo === '8') setTurbo('off')
           setResolution(aspectRatio === '9:16' ? '768x1344' : aspectRatio === '1:1' ? '768x768' : '1344x768')
           let inheritedFrame: MediaFile | null = null
           if (context.continuationSource) {
@@ -955,9 +995,10 @@ function App() {
             }
           }
           setMovieHandoff({ projectId: context.projectId, sceneId: context.sceneId, shotId: shot.id })
-          setFirstFrame(inheritedFrame); setLastFrame(null); setReferenceImages(shot.mode === 'reference' ? movieReferences : []); setReferenceVideos([]); setReferenceAudios([])
+          const resolvedImages = resolved.references.map((binding) => binding.purpose === 'continuity' && inheritedFrame ? inheritedFrame : binding.file)
+          setFirstFrame(resolved.effectiveMode === 'image' ? inheritedFrame : null); setLastFrame(null); setReferenceImages(resolved.effectiveMode === 'reference' ? resolvedImages : []); setReferenceVideos(resolved.effectiveMode === 'reference' ? shot.referenceVideos ?? [] : []); setReferenceAudios(resolved.effectiveMode === 'reference' ? shot.referenceAudios ?? [] : [])
           setActiveJobId(null); setView('create')
-          const inputNote = inheritedFrame ? ' The previous scene’s last frame was loaded automatically for continuous I2V.' : shot.mode === 'image' ? ' Add the approved first frame before rendering.' : shot.mode === 'frames' ? ' Add the approved first and last frames before rendering.' : shot.mode === 'reference' ? movieReferences.length ? ` Loaded ${movieReferences.length} approved movie reference${movieReferences.length === 1 ? '' : 's'}.` : ' Add the approved character, location, or voice references before rendering.' : ''
+          const inputNote = resolved.effectiveMode === 'reference' ? ` Loaded ${resolvedImages.length} semantically resolved reference image${resolvedImages.length === 1 ? '' : 's'}.` : inheritedFrame ? ' The previous scene’s last frame was loaded automatically for continuous I2V.' : resolved.effectiveMode === 'image' ? ' Add the approved first frame before rendering.' : resolved.effectiveMode === 'frames' ? ' Add the approved first and last frames before rendering.' : ''
           setNotice({ tone: 'success', text: `${shot.title} loaded into Create.${inputNote}` })
         }} />}
         {view === 'queue' && <JobsView title="Queue" note="Running and recent local generations" jobs={jobs} empty="No generations have been queued." cancellingIds={cancellingIds} onCancel={cancelJob} />}
@@ -1023,7 +1064,7 @@ type CreateViewProps = {
   setFirstFrame(value: MediaFile | null): void; setLastFrame(value: MediaFile | null): void
   chooseMedia(kind: MediaKind, setter: (file: MediaFile) => void): Promise<void>
   referenceImages: MediaFile[]; referenceVideos: MediaFile[]; referenceAudios: MediaFile[]
-  characters: CharacterProject[]; selectedCharacterId: string; loadCharacter(characterId: string): void
+  characters: CharacterProject[]; wardrobes: WardrobeProject[]; selectedCharacterId: string; loadCharacter(characterId: string): void; loadWardrobe(wardrobeId: string): void
   removeReference(kind: MediaKind, index: number): void
   chooseReference(kind: MediaKind): Promise<void>
   editVideoReference(index: number): void
@@ -1043,25 +1084,22 @@ function CreateView(props: CreateViewProps) {
     upscaleMode, setUpscaleMode, ltxAvailable, ltxMissingNodes, rtxModels, rtxModel, setRtxModel, updateReference,
     mode, setMode, prompt, setPrompt, duration, setDuration, resolution, setResolution, turbo, setTurbo, steps, setSteps,
     seed, setSeed, advanced, setAdvanced, firstFrame, lastFrame, setFirstFrame, setLastFrame, chooseMedia,
-    referenceImages, referenceVideos, referenceAudios, characters, selectedCharacterId, loadCharacter, removeReference, chooseReference, editVideoReference, h3Validated, modelReady, selection,
+    referenceImages, referenceVideos, referenceAudios, characters, wardrobes, selectedCharacterId, loadCharacter, loadWardrobe, removeReference, chooseReference, editVideoReference, h3Validated, modelReady, selection,
     submitting, cancelling, connected, ollamaAvailable, ollamaModel, promptSuggestion, promptingTool,
     onPromptTool, onUseSuggestion, onDismissSuggestion, onGenerate, onCancel, latestJob,
   } = props
-  const promptRef = useRef<HTMLTextAreaElement>(null)
+  const promptRef = useRef<SmartPromptEditorHandle>(null)
   const selectedCharacter = characters.find((character) => character.id === selectedCharacterId)
-  const insertPromptText = (text: string) => {
-    const input = promptRef.current
-    if (!input) { setPrompt(`${prompt}${prompt && !prompt.endsWith(' ') ? ' ' : ''}${text}`); return }
-    const start = input.selectionStart
-    const end = input.selectionEnd
-    const before = prompt.slice(0, start)
-    const after = prompt.slice(end)
-    const needsLeadingSpace = before.length > 0 && !/\s$/.test(before)
-    const needsTrailingSpace = after.length > 0 && !/^\s/.test(after)
-    const inserted = `${needsLeadingSpace ? ' ' : ''}${text}${needsTrailingSpace ? ' ' : ''}`
-    setPrompt(`${before}${inserted}${after}`)
-    window.requestAnimationFrame(() => { input.focus(); const cursor = start + inserted.length; input.setSelectionRange(cursor, cursor) })
-  }
+  const insertPromptText = (text: string) => promptRef.current?.insert(text)
+  const smartCharacterOptions = characters.filter((character) => characterReferences(character).length > 0).map((character) => {
+    const files = characterReferences(character).slice(0, 9)
+    const identityTags = files.map((_, index) => `<Picture ${index + 1}>`).join(', ').replace(/, ([^,]+)$/, ' and $1')
+    let picture = files.length + 1
+    const wardrobeParts = character.wardrobeIds.flatMap((id) => { const wardrobe = wardrobes.find((item) => item.id === id); if (!wardrobe) return []; const count = Math.min(wardrobeReferences(wardrobe).length, Math.max(0, 10 - picture)); const tags = Array.from({ length: count }, () => `<Picture ${picture++}>`).join(', ').replace(/, ([^,]+)$/, ' and $1'); return count ? [`Apply the approved ${wardrobe.name} wardrobe from ${tags}; use those pictures for clothing, materials, colors, and accessories only.`] : [] })
+    const insertion = `Character: ${character.name} — preserve ${character.name}'s identity, facial structure, hair, and body proportions from ${identityTags}. ${wardrobeParts.join(' ')}`.trim()
+    return { id: `character.${character.id}`, category: 'character' as const, label: character.name, description: wardrobeParts.length ? `${character.description || 'Character Studio identity'} · assigned wardrobe included` : character.description || 'Character Studio identity', insertion, thumbnail: files[0]?.preview, meta: `${picture - 1} total refs`, onSelect: (nextPrompt: string) => { setPrompt(nextPrompt); loadCharacter(character.id) } }
+  })
+  const smartWardrobeOptions = wardrobes.filter((wardrobe) => wardrobeReferences(wardrobe).length > 0).map((wardrobe) => { const files = wardrobeReferences(wardrobe).slice(0, 9); const tags = files.map((_, index) => `<Picture ${index + 1}>`).join(', ').replace(/, ([^,]+)$/, ' and $1'); return { id: `wardrobe.${wardrobe.id}`, category: 'wardrobe' as const, label: wardrobe.name, description: wardrobe.description || 'Approved Wardrobe Studio outfit', insertion: `Wardrobe: apply the approved ${wardrobe.name} outfit from ${tags}; preserve its garments, materials, colors, fit, and accessories.`, thumbnail: files[0]?.preview, meta: `${files.length} approved`, onSelect: (nextPrompt: string) => { setPrompt(nextPrompt); loadWardrobe(wardrobe.id) } } })
   const applyCreatePreset = (preset: 'quality' | 'turbo' | 'preview') => {
     const [width, height] = resolution.split('x').map(Number)
     const portrait = height > width
@@ -1085,9 +1123,11 @@ function CreateView(props: CreateViewProps) {
             {modeInfo.map((item) => <button key={item.id} role="tab" aria-selected={mode === item.id} className={mode === item.id ? 'selected' : ''} onClick={() => { setMode(item.id); if (item.id === 'reference' && turbo === '8') setTurbo('off') }}><item.icon size={18} /><span><strong>{item.label}</strong><small>{item.note}</small></span></button>)}
           </div>
 
+          <section className="create-section create-direction-section">
+            <div className="create-section-heading"><span><WandSparkles size={15} /></span><div><strong>Shot direction</strong><small>Describe the subject, action, camera, lighting, and sound.</small></div><em className={prompt.trim() ? 'complete' : ''}>{prompt.trim() ? 'Ready' : 'Required'}</em></div>
           <div className="field-group prompt-field">
             <div className="field-label"><label htmlFor="prompt">Prompt</label><span>{prompt.length.toLocaleString()} characters</span></div>
-            <textarea ref={promptRef} id="prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={mode === 'reference' ? 'Describe the scene and reference inputs, e.g. Use <Picture 1> for the subject and <Audio 1> for the voice…' : 'Describe the shot, subject, movement, camera, lighting, and audio…'} />
+            <SmartPromptEditor ref={promptRef} id="prompt" value={prompt} onChange={setPrompt} options={[...smartCharacterOptions, ...smartWardrobeOptions]} placeholder={mode === 'reference' ? 'Describe the scene and references. Type // for production presets…' : 'Describe the shot, subject, movement, camera, lighting, and audio…'} />
             {mode === 'reference' && <ReferencePromptHelper pictureCount={referenceImages.length} videoCount={referenceVideos.length} audioCount={referenceAudios.length} characterName={selectedCharacter?.name} onInsert={insertPromptText} />}
             <div className="prompt-tools" aria-label="Local Ollama prompt tools">
               <div className="prompt-tool-buttons">
@@ -1113,7 +1153,10 @@ function CreateView(props: CreateViewProps) {
               </div>
             )}
           </div>
+          </section>
 
+          {(mode === 'image' || mode === 'frames' || mode === 'reference') && <section className="create-section create-input-section">
+            <div className="create-section-heading"><span><ImageIcon size={15} /></span><div><strong>Source media</strong><small>{mode === 'reference' ? 'Choose reusable identity, motion, and audio references.' : mode === 'frames' ? 'Set the opening and closing composition.' : 'Choose the frame this shot begins from.'}</small></div><em className={(mode === 'reference' ? referenceImages.length + referenceVideos.length + referenceAudios.length > 0 : firstFrame && (mode !== 'frames' || lastFrame)) ? 'complete' : ''}>{mode === 'reference' ? `${referenceImages.length + referenceVideos.length + referenceAudios.length} loaded` : mode === 'frames' ? `${Number(Boolean(firstFrame)) + Number(Boolean(lastFrame))} of 2` : firstFrame ? 'Ready' : 'Required'}</em></div>
           {(mode === 'image' || mode === 'frames') && (
             <div className={`frame-grid ${mode === 'image' ? 'single' : ''}`}>
               <div><MediaDrop label="First frame" note="PNG, JPG or WebP" file={firstFrame} onChoose={() => void chooseMedia('image', (file) => setFirstFrame(file))} onRemove={() => setFirstFrame(null)} />{firstFrame && <ImageCrop label="First frame" file={firstFrame} resolution={resolution} onChange={setFirstFrame} />}</div>
@@ -1123,14 +1166,17 @@ function CreateView(props: CreateViewProps) {
           {mode === 'reference' && (
             <div className="reference-groups">
               <CharacterReferencePicker characters={characters} value={selectedCharacterId} onChange={loadCharacter} />
+              <fieldset className="reference-fidelity"><legend><Gauge size={15} /><span><strong>Reference fidelity</strong><small>Choose how much source-image detail H3 preserves.</small></span></legend><div><label className={refImageSize === 'match' ? 'selected' : ''}><input type="radio" name="reference-fidelity" checked={refImageSize === 'match'} onChange={() => setRefImageSize('match')} /><span><strong>Balanced</strong><small>Fit references to the output canvas. Faster and uses less memory.</small></span></label><label className={refImageSize === 'max' ? 'selected' : ''}><input type="radio" name="reference-fidelity" checked={refImageSize === 'max'} onChange={() => setRefImageSize('max')} /><span><strong>Maximum identity</strong><small>Keep more original image detail. Slower and uses more memory.</small></span></label></div></fieldset>
               <ReferenceRow icon={ImageIcon} label="Pictures" limit="Up to 9" kind="image" files={referenceImages} onAdd={() => void chooseReference('image')} onRemove={(index) => removeReference('image', index)} />
               {referenceImages.length > 0 && <div className="reference-crops">{referenceImages.map((file, i) => <details key={`${file.path}-${i}`}><summary>Picture {i + 1} · crop to output</summary><ImageCrop label={`Picture ${i + 1}`} file={file} resolution={resolution} onChange={(next) => updateReference(i, next)} /></details>)}</div>}
               <ReferenceRow icon={Film} label="Videos" limit="Up to 3 · trim longer sources to 2–15 seconds" kind="video" files={referenceVideos} onAdd={() => void chooseReference('video')} onEdit={editVideoReference} onRemove={(index) => removeReference('video', index)} />
               <ReferenceRow icon={Volume2} label="Audio" limit="Up to 3" kind="audio" files={referenceAudios} onAdd={() => void chooseReference('audio')} onRemove={(index) => removeReference('audio', index)} />
-              <SelectField label="Reference image fidelity" value={refImageSize} onChange={(value) => setRefImageSize(value as 'match' | 'max')} options={[["match", 'Match output · faster'], ["max", 'Maximum identity · slower']]} />
             </div>
           )}
+          </section>}
 
+          <section className="create-section create-output-section">
+            <div className="create-section-heading"><span><Gauge size={15} /></span><div><strong>Output and quality</strong><small>Choose a recommended preset or tune the render.</small></div><em className="complete">{resolution.replace('x', ' × ')} · {duration}s</em></div>
           {mode !== 'reference' && <div className="create-presets" aria-label="Recommended H3 presets">
             <button type="button" onClick={() => applyCreatePreset('quality')}><strong>Native Quality</strong><small>1344 × 768 · 20 steps</small></button>
             <button type="button" onClick={() => applyCreatePreset('turbo')}><strong>Turbo 8</strong><small>Native canvas · official LoRA</small></button>
@@ -1177,6 +1223,7 @@ function CreateView(props: CreateViewProps) {
           </div>}
 
           <p className="field-help render-duration">{frameCount(duration)} frames · {(frameCount(duration) / 24).toFixed(2)}s actual duration at 24 fps. Rounded up to MiniMax’s frame grid.</p>
+          </section>
           <div className="generate-bar">
             <div className="generation-summary"><Gauge size={17} /><span><strong>{resolution.replace('x', ' × ')}</strong><small>{duration}s · 24 fps · {turbo === 'off' ? `${steps} steps` : `${turbo}-step turbo`}</small></span></div>
             <div className="generate-actions">{latestJob && ['queued', 'running'].includes(latestJob.status) && <button className="danger-button" onClick={() => onCancel(latestJob)} disabled={cancelling}><CircleStop size={16} />{cancelling ? 'Stopping…' : 'Cancel generation'}</button>}<button className="primary-button" onClick={onGenerate} disabled={submitting || !connected || !modelReady}>{submitting ? <LoaderCircle size={18} className="spin" /> : <Play size={18} fill="currentColor" />}{submitting ? 'Submitting…' : 'Generate video'}</button></div>
@@ -1187,7 +1234,7 @@ function CreateView(props: CreateViewProps) {
           <div className="panel-heading"><div><span>OUTPUT</span><strong>Current workspace</strong></div>{latestJob && <StatusBadge status={latestJob.status} />}</div>
           {liveEnabled && livePreview?.promptId === latestJob?.promptId && latestJob && ['running', 'queued'].includes(latestJob.status) && <figure className="live-preview"><img src={livePreview?.url} alt="Live generation preview" /><figcaption>Live preview · intermediate frame</figcaption></figure>}
           <div className="preview-stage">
-            {latestJob?.outputUrl ? <VideoPlayer src={latestJob.outputUrl} /> : latestJob && ['queued', 'running'].includes(latestJob.status) ? <div className="render-state"><div className="render-orbit"><LoaderCircle className="spin" /></div><strong>{latestJob.progressLabel ?? (latestJob.status === 'queued' ? 'Waiting in queue' : 'Rendering locally')}</strong><span>{latestJob.currentStep !== undefined && latestJob.totalSteps ? `Live sampler step ${latestJob.currentStep} of ${latestJob.totalSteps}` : `${latestJob.width} × ${latestJob.height} · ${latestJob.duration}s`}</span><div className="progress"><i style={{ width: `${latestJob.progress}%` }} /></div><small>{Math.round(latestJob.progress)}% · live ComfyUI status</small></div> : <div className="empty-preview"><div className="preview-icon"><Film size={28} /></div><strong>Your video will appear here</strong><span>Configure a shot, then send it to the local engine.</span></div>}
+            {latestJob?.outputUrl ? <VideoPlayer src={latestJob.outputUrl} /> : latestJob && ['queued', 'running'].includes(latestJob.status) ? <div className="render-state constructing"><RenderConstruction /><strong>{latestJob.progressLabel ?? (latestJob.status === 'queued' ? 'Waiting in queue' : 'Rendering locally')}</strong><span>{latestJob.currentStep !== undefined && latestJob.totalSteps ? `Live sampler step ${latestJob.currentStep} of ${latestJob.totalSteps}` : `${latestJob.width} × ${latestJob.height} · ${latestJob.duration}s`}</span><div className="progress"><i style={{ width: `${latestJob.progress}%` }} /></div><small>{Math.round(latestJob.progress)}% · live ComfyUI status</small></div> : <div className="empty-preview"><div className="preview-icon"><Film size={28} /></div><strong>Your video will appear here</strong><span>Configure a shot, then send it to the local engine.</span></div>}
           </div>
           <div className="pipeline-summary">
             <PipelineItem ready={Boolean(mode === 'reference' ? selection.ref2va : selection.fl2va)} label="Diffusion" value={mode === 'reference' ? selection.ref2va : selection.fl2va} />
@@ -1223,7 +1270,7 @@ function ReferenceRow({ icon: Icon, label, limit, kind, files, onAdd, onEdit, on
 
 function CharacterReferencePicker({ characters, value, onChange }: { characters: CharacterProject[]; value: string; onChange(value: string): void }) {
   const id = useId()
-  return <div className="character-reference-picker"><div><span><Users size={17} /></span><label htmlFor={id}><strong>Character library</strong><small>Load approved character images only</small></label></div><div className="select-wrap"><select id={id} value={value} onChange={(event) => onChange(event.target.value)}><option value="">Choose a character…</option>{characters.map((character) => { const count = characterReferences(character).length; return <option key={character.id} value={character.id} disabled={count === 0}>{character.name} · {count ? `${count} image${count === 1 ? '' : 's'}` : 'no approved images'}</option> })}</select><ChevronDown size={15} /></div></div>
+  return <div className="character-reference-picker"><div><span><Users size={17} /></span><label htmlFor={id}><strong>Character library</strong><small>Load identity images and assigned wardrobes</small></label></div><div className="select-wrap"><select id={id} value={value} onChange={(event) => onChange(event.target.value)}><option value="">Choose a character…</option>{characters.map((character) => { const count = characterReferences(character).length; return <option key={character.id} value={character.id} disabled={count === 0}>{character.name} · {count ? `${count} identity image${count === 1 ? '' : 's'}` : 'no approved images'}</option> })}</select><ChevronDown size={15} /></div></div>
 }
 
 function ReferencePromptHelper({ pictureCount, videoCount, audioCount, characterName, onInsert }: { pictureCount: number; videoCount: number; audioCount: number; characterName?: string; onInsert(value: string): void }) {
@@ -1274,7 +1321,7 @@ function LibraryView({ jobs, onEdit }: { jobs: GenerationJob[]; onEdit(): void }
 }
 
 function JobsView({ title, note, jobs, empty, cancellingIds, onCancel }: { title: string; note: string; jobs: GenerationJob[]; empty: string; cancellingIds: Set<string>; onCancel(job: GenerationJob): Promise<void> }) {
-  return <div className="standard-page"><div className="page-heading"><div><p className="eyebrow">LOCAL WORKSPACE</p><h1>{title}</h1><p>{note}</p></div></div>{jobs.length === 0 ? <div className="empty-page"><History size={28} /><strong>{empty}</strong><span>New work is saved automatically on this device.</span></div> : <div className="job-list">{jobs.map((job) => <article className="job-row" key={job.id}><div className="job-thumbnail">{job.outputUrl ? <video src={job.outputUrl} muted /> : job.status === 'running' ? <LoaderCircle className="spin" /> : <Film />}</div><div className="job-copy"><div><StatusBadge status={job.status} /><span>{new Date(job.createdAt).toLocaleString()}</span></div><strong>{shortPrompt(job.prompt)}</strong><small>{job.width} × {job.height} · {job.duration}s · {job.mode}</small>{['running', 'queued'].includes(job.status) && <><small className="job-progress-label">{job.progressLabel ?? (job.status === 'queued' ? 'Waiting in queue' : 'Rendering locally')}{job.currentStep !== undefined && job.totalSteps ? ` · ${job.currentStep}/${job.totalSteps}` : ''}</small><div className="progress compact"><i style={{ width: `${job.progress}%` }} /></div></>}{job.error && <p className="job-error">{job.error}</p>}</div><div className="job-actions">{job.outputUrl && <a className="secondary-button" href={job.outputUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} />Open</a>}{['running', 'queued'].includes(job.status) && <button className="danger-button" disabled={cancellingIds.has(job.id)} onClick={() => void onCancel(job)}>{cancellingIds.has(job.id) ? <LoaderCircle size={15} className="spin" /> : <CircleStop size={15} />}{cancellingIds.has(job.id) ? 'Stopping…' : 'Stop'}</button>}</div></article>)}</div>}</div>
+  return <div className="standard-page"><div className="page-heading"><div><p className="eyebrow">LOCAL WORKSPACE</p><h1>{title}</h1><p>{note}</p></div></div>{jobs.length === 0 ? <div className="empty-page"><History size={28} /><strong>{empty}</strong><span>New work is saved automatically on this device.</span></div> : <div className="job-list">{jobs.map((job) => <article className={`job-row ${['running', 'queued'].includes(job.status) ? 'constructing' : ''}`} key={job.id}><div className="job-thumbnail">{job.outputUrl ? <video src={job.outputUrl} muted /> : job.status === 'running' ? <LoaderCircle className="spin" /> : <Film />}</div><div className="job-copy"><div><StatusBadge status={job.status} /><span>{new Date(job.createdAt).toLocaleString()}</span></div><strong>{shortPrompt(job.prompt)}</strong><small>{job.width} × {job.height} · {job.duration}s · {job.mode}</small>{['running', 'queued'].includes(job.status) && <><small className="job-progress-label">{job.progressLabel ?? (job.status === 'queued' ? 'Waiting in queue' : 'Rendering locally')}{job.currentStep !== undefined && job.totalSteps ? ` · ${job.currentStep}/${job.totalSteps}` : ''}</small><div className="progress compact"><i style={{ width: `${job.progress}%` }} /></div></>}{job.error && <p className="job-error">{job.error}</p>}</div><div className="job-actions">{job.outputUrl && <a className="secondary-button" href={job.outputUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} />Open</a>}{['running', 'queued'].includes(job.status) && <button className="danger-button" disabled={cancellingIds.has(job.id)} onClick={() => void onCancel(job)}>{cancellingIds.has(job.id) ? <LoaderCircle size={15} className="spin" /> : <CircleStop size={15} />}{cancellingIds.has(job.id) ? 'Stopping…' : 'Stop'}</button>}</div></article>)}</div>}</div>
 }
 
 function SettingsView({ settings, setSettings, info, models, h3Report, scanning, status, checking, diagnosticRunning, ollamaModels, onRefreshOllama, onScan, onCheck, onSave, onApplyDefaults, onRunDiagnostics }: { settings: AppSettings; setSettings(value: AppSettings): void; info: ObjectInfo; models: ModelFile[]; h3Report: ReturnType<typeof h3StackReport>; scanning: boolean; status: ComfyStatus; checking: boolean; diagnosticRunning: boolean; ollamaModels: OllamaModel[]; onRefreshOllama(): void; onScan(): void; onCheck(): void; onSave(): void; onApplyDefaults(): void; onRunDiagnostics(): void }) {

@@ -1,8 +1,13 @@
-export type View = 'create' | 'ltx25' | 'zimage' | 'characters' | 'movie' | 'queue' | 'library' | 'editor' | 'settings'
+export type View = 'create' | 'ltx25' | 'zimage' | 'characters' | 'wardrobes' | 'movie' | 'queue' | 'library' | 'editor' | 'settings'
 export type GenerationMode = 'text' | 'image' | 'frames' | 'reference'
 export type ModelKind = 'diffusion_models' | 'text_encoders' | 'vae' | 'loras' | 'vae_approx' | 'clip_vision'
 export type MediaKind = 'image' | 'video' | 'audio'
 export type UpscaleMode = 'off' | 'ltx' | 'rtx'
+export type ReferencePurpose = 'character' | 'character-angle' | 'wardrobe' | 'location' | 'continuity' | 'product' | 'style' | 'generic'
+export type PromptPresetCategory = 'camera' | 'shot' | 'angle' | 'lens' | 'lighting' | 'audio' | 'style' | 'movement' | 'transition' | 'character' | 'wardrobe' | 'location'
+export type PromptPreset = { id: string; category: PromptPresetCategory; label: string; keywords: string[]; description: string; insertion: string }
+export type MovieReferenceBinding = { file: MediaFile; purpose: ReferencePurpose; label: string; characterId?: string; wardrobeId?: string; locationId?: string; source: 'character-studio' | 'wardrobe-studio' | 'movie' | 'shot' | 'continuity' }
+export type ResolvedMovieShot = { preferredMode: GenerationMode; effectiveMode: GenerationMode; references: MovieReferenceBinding[]; compiledPrompt: string; routeReason: string; omittedReferences: MovieReferenceBinding[] }
 
 export type GenerationDefaults = {
   resolution: string
@@ -50,8 +55,10 @@ export type CharacterProject = {
   baseImage?: MediaFile
   turntableVideo?: MediaFile
   referenceImages: MediaFile[]
+  wardrobeIds: string[]
 }
-export type MovieCharacter = { id: string; libraryCharacterId?: string; name: string; description: string; wardrobe: string; voiceNotes: string; referenceImages: MediaFile[] }
+export type WardrobeProject = { id: string; name: string; description: string; materials: string; colors: string; visualStyle: string; referencePrompt: string; referenceImages: MediaFile[]; selectedReferencePaths?: string[]; createdAt: number; updatedAt: number }
+export type MovieCharacter = { id: string; libraryCharacterId?: string; libraryUpdatedAt?: number; name: string; description: string; wardrobe: string; voiceNotes: string; referenceImages: MediaFile[] }
 export type MovieLocation = { id: string; name: string; description: string; referenceImages: MediaFile[] }
 export type MovieChatArea = 'setup' | 'bible' | 'shots' | 'preview'
 export type MovieChatMessage = { id: string; role: 'user' | 'assistant'; content: string; createdAt: number; appliedChanges?: string[]; areas?: MovieChatArea[] }
@@ -62,7 +69,11 @@ export type MovieShot = {
   prompt: string
   dialogue: string
   mode: GenerationMode
+  preferredMode?: GenerationMode
   characterIds: string[]
+  referenceImages?: MediaFile[]
+  referenceVideos?: MediaFile[]
+  referenceAudios?: MediaFile[]
   stage: 'planned' | 'ready' | 'rendered' | 'approved'
   outputUrl?: string
   renderedAt?: number

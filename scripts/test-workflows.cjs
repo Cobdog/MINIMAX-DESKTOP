@@ -12,7 +12,12 @@ const { frameCount, buildMiniMaxWorkflow, extractOutputUrl, OFFICIAL_H3_SAMPLER,
 const { buildZImage } = load('src/lib/zimage.ts')
 const { buildLtx25Workflow, ltx25FrameCount, LTX25_FIRST_STAGE_SIGMAS, LTX25_REFINER_SIGMAS } = load('src/lib/ltx25Workflow.ts')
 const { inferSelections, inferLtx25Selections } = load('src/lib/modelSelection.ts')
-const { cropRect } = load('src/lib/imageCrop.ts')
+const { cropRect, fitWholeCharacter } = load('src/lib/imageCrop.ts')
+const { promptPresets, searchPromptPresets } = load('src/lib/promptPresets.ts')
+assert.equal(fitWholeCharacter({ path: 'character.png', name: 'Character', kind: 'image' }).crop.fit, 'contain')
+assert.equal(fitWholeCharacter({ path: 'character.png', name: 'Character', kind: 'image', crop: { x: .5, y: .5, zoom: 1, fit: 'crop' } }).crop.fit, 'crop')
+assert.ok(promptPresets.length >= 190)
+assert.ok(searchPromptPresets('dolly zoom').some((item) => item.id === 'camera.vertigo'))
 for (let seconds = 2; seconds <= 15; seconds += 0.5) {
   const frames = frameCount(seconds)
   assert.equal((frames - 5) % 17, 0)

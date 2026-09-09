@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "lint": "eslint . --max-warnings 0",
     "start": "cross-env ELECTRON_RUN_AS_NODE= electron .",
-    "package:win": "pnpm build && electron-builder --win nsis --x64"
+    "package:win": "pnpm build && electron-builder --win nsis --x64 --config.npmRebuild=false"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

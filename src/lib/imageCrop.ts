@@ -1,6 +1,11 @@
 import type { MediaFile } from '../types'
 
 export const defaultCrop = { x: 0.5, y: 0.5, zoom: 1, fit: 'crop' as const }
+export const defaultCharacterCrop = { x: 0.5, y: 0.5, zoom: 1, fit: 'contain' as const }
+
+export function fitWholeCharacter(file: MediaFile): MediaFile {
+  return file.crop ? file : { ...file, crop: { ...defaultCharacterCrop } }
+}
 
 export function cropRect(sw: number, sh: number, width: number, height: number, crop = defaultCrop as NonNullable<MediaFile['crop']>) {
   const scale = Math.max(width / sw, height / sh) * Math.max(1, crop.zoom)
