@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, protocol } from 'electron'
 import { createReadStream, existsSync } from 'node:fs'
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, extname, join, normalize } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
@@ -220,28 +220,20 @@ async function scanDirectory(root: string, kind: ModelKind) {
   return results
 }
 
-async function findLatestMedia(root: string, since: number, kind: 'video' | 'audio' = 'video') {
-  if (!root || !existsSync(root)) return null
-  const pending = [normalize(root)]
-  let latest: { path: string; modified: number } | null = null
-  while (pending.length) {
-    const current = pending.pop()!
-    let entries
-    try {
-      entries = await readdir(current, { withFileTypes: true })
-    } catch {
-      continue
-    }
-    for (const entry of entries) {
-      const fullPath = join(current, entry.name)
-      if (entry.isDirectory()) pending.push(fullPath)
-      else if (entry.isFile() && (kind === 'audio' ? audioExtensions : mediaExtensions).has(extname(entry.name).toLowerCase())) {
-        const info = await stat(fullPath)
-        if (info.mtimeMs >= since - 5000 && (!latest || info.mtimeMs > latest.modified)) latest = { path: fullPath, modified: info.mtimeMs }
-      }
-    }
-  }
-  return latest?.path ?? null
+/** Resolves a ComfyUI-reported output file inside the configured output
+ *  directory. Attributing outputs by exact filename — instead of scanning for
+ *  the newest file — is what keeps concurrent renders from being credited to
+ *  the wrong job (and the wrong character library entry). */
+function resolveOutputFile(outputDirectory: string, file: { filename: string; subfolder?: string; type?: string }) {
+  if (!outputDirectory || !file.filename) return null
+  if (file.type && file.type !== 'output') return null
+  const relativePath = file.subfolder ? join(file.subfolder, file.filename) : file.filename
+  if (isAbsolute(relativePath) || relativePath.split(/[\\/]/).includes('..')) return null
+  const root = resolve(outputDirectory)
+  const candidate = resolve(root, relativePath)
+  const containment = relative(root, candidate)
+  if (containment.startsWith('..') || isAbsolute(containment)) return null
+  return existsSync(candidate) ? candidate : null
 }
 
 function cleanUrl(url: string) {
@@ -674,8 +666,8 @@ app.whenReady().then(async () => {
     const history = await comfyFetch(url, `/history/${encodeURIComponent(promptId)}`) as Record<string, unknown>
     return { cancelled: false, state: promptId in history ? 'finished' as const : 'unknown' as const }
   })
-  ipcMain.handle('outputs:latest', async (_event, outputDirectory: string, since: number, kind: 'video' | 'audio' = 'video') => {
-    const path = await findLatestMedia(outputDirectory, since, kind)
+  ipcMain.handle('outputs:resolve', (_event, outputDirectory: string, file: { filename: string; subfolder?: string; type?: string }) => {
+    const path = resolveOutputFile(outputDirectory, file)
     return path ? `minimax-media://local?path=${encodeURIComponent(path)}` : null
   })
   ipcMain.handle('comfy:upload', async (_event, url: string, filePath: string, subfolder = 'minimax-desktop') => {

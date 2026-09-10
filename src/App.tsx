@@ -49,7 +49,7 @@ import {
   Watch,
   X,
 } from 'lucide-react'
-import { buildMiniMaxWorkflow, extractOutputUrl, frameCount } from './lib/workflow'
+import { buildMiniMaxWorkflow, extractOutputFile, extractOutputUrl, frameCount, outputFileFromUrl } from './lib/workflow'
 import { buildLtx25Workflow } from './lib/ltx25Workflow'
 import { ACE_STEP_REQUIRED_NODES, buildAceStepWorkflow, inferAceStepSelections } from './lib/aceStepWorkflow'
 import { fitWholeCharacter, prepareImage } from './lib/imageCrop'
@@ -606,12 +606,19 @@ function App() {
           let observation: PollObservation
           if (entry?.status?.status_str === 'error') {
             observation = { kind: 'executionError' }
-          } else if (outputUrl && entry?.status?.completed) {
-            const localOutput = await window.minimax.findLatestOutput(settings.outputDirectory, job.createdAt, mediaType)
-            observation = { kind: 'completed', outputUrl, localOutputPath: localOutput ?? undefined }
           } else if (entry?.status?.completed) {
-            const localOutput = await window.minimax.findLatestOutput(settings.outputDirectory, job.createdAt, mediaType)
-            observation = localOutput ? { kind: 'completed', outputUrl: localOutput, localOutputPath: localOutput } : { kind: 'completedNoLocalOutput' }
+            // Attribute the output by the exact filename ComfyUI reported —
+            // never by the newest file on disk, which can belong to a
+            // concurrent render and would poison library reference sets. A
+            // descriptor that resolves remotely but not locally still
+            // completes the job (streamed via the media proxy).
+            const file = extractOutputFile(history, promptId, mediaType)
+            if (file) {
+              const localOutput = await window.minimax.resolveOutput(settings.outputDirectory, file)
+              observation = { kind: 'completed', outputUrl: outputUrl ?? localOutput ?? '', localOutputPath: localOutput ?? undefined }
+            } else {
+              observation = { kind: 'completedNoLocalOutput' }
+            }
           } else {
             observation = { kind: 'incomplete' }
           }
@@ -667,7 +674,8 @@ function App() {
   const continueFromRenderedVideo = async (job: GenerationJob, position: number | 'last') => {
     if (!settings || !job.outputUrl) return
     try {
-      const source = job.localOutputPath ?? await window.minimax.findLatestOutput(settings.outputDirectory, job.createdAt)
+      const descriptor = outputFileFromUrl(job.outputUrl)
+      const source = job.localOutputPath ?? (descriptor ? await window.minimax.resolveOutput(settings.outputDirectory, descriptor) : null)
       if (!source) throw new Error('The completed video file could not be found in the output folder.')
       const extracted = await window.minimax.extractVideoFrame(source, position, settings.outputDirectory, settings.ffmpegPath)
       const frame: MediaFile = { ...extracted, kind: 'image', preview: await window.minimax.mediaUrl(extracted.path) }

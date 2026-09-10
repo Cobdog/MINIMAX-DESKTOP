@@ -178,10 +178,16 @@ export function buildMiniMaxWorkflow(
   return prompt
 }
 
-export function extractOutputUrl(history: Record<string, unknown>, promptId: string, comfyUrl: string, mediaType: 'video' | 'audio' = 'video') {
+export type ComfyOutputFile = { filename: string; subfolder?: string; type?: string }
+
+/** The exact output file ComfyUI reported for a finished prompt, preferring
+ *  the RTX-upscale save node ('84'), then the LTX-upscale node ('70'), then
+ *  anything matching the media type. Callers use this descriptor to resolve
+ *  the local output path — never a newest-file-on-disk guess. */
+export function extractOutputFile(history: Record<string, unknown>, promptId: string, mediaType: 'video' | 'audio' = 'video'): ComfyOutputFile | undefined {
   const entry = history[promptId] as { outputs?: Record<string, Record<string, unknown>> } | undefined
   if (!entry?.outputs) return undefined
-  const candidates: Array<{ filename: string; subfolder?: string; type?: string }> = []
+  const candidates: ComfyOutputFile[] = []
   const visit = (value: unknown) => {
     if (Array.isArray(value)) {
       value.forEach(visit)
@@ -202,11 +208,26 @@ export function extractOutputUrl(history: Record<string, unknown>, promptId: str
   else if (entry.outputs['70']) visit(entry.outputs['70'])
   else visit(entry.outputs)
   const expected = mediaType === 'audio' ? /\.(flac|wav|mp3|ogg|m4a|aac|opus)$/i : /\.(mp4|webm|mov|mkv|gif)$/i
-  const file = candidates.find((candidate) => expected.test(candidate.filename)) ?? candidates[0]
-  if (file) {
-    const query = new URLSearchParams({ filename: file.filename, subfolder: file.subfolder ?? '', type: file.type ?? 'output' })
-    const upstream = `${comfyUrl.replace(/\/+$/, '')}/view?${query.toString()}`
-    return `minimax-media://comfy?url=${encodeURIComponent(upstream)}`
-  }
-  return undefined
+  return candidates.find((candidate) => expected.test(candidate.filename)) ?? candidates[0]
+}
+
+export function extractOutputUrl(history: Record<string, unknown>, promptId: string, comfyUrl: string, mediaType: 'video' | 'audio' = 'video') {
+  const file = extractOutputFile(history, promptId, mediaType)
+  if (!file) return undefined
+  const query = new URLSearchParams({ filename: file.filename, subfolder: file.subfolder ?? '', type: file.type ?? 'output' })
+  const upstream = `${comfyUrl.replace(/\/+$/, '')}/view?${query.toString()}`
+  return `minimax-media://comfy?url=${encodeURIComponent(upstream)}`
+}
+
+/** Recovers the output descriptor encoded in a minimax-media://comfy URL that
+ *  extractOutputUrl built, so a persisted job's exact output can be re-resolved
+ *  on disk without touching ComfyUI again. */
+export function outputFileFromUrl(url: string): ComfyOutputFile | undefined {
+  if (!url.startsWith('minimax-media://comfy?')) return undefined
+  const upstream = new URLSearchParams(url.slice('minimax-media://comfy?'.length)).get('url')
+  if (!upstream) return undefined
+  const params = new URL(upstream).searchParams
+  const filename = params.get('filename')
+  if (!filename) return undefined
+  return { filename, subfolder: params.get('subfolder') || undefined, type: params.get('type') || undefined }
 }

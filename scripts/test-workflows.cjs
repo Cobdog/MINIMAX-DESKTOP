@@ -5,10 +5,10 @@ const ts = require('typescript')
 function load(path) {
   const exports = {}
   const code = ts.transpileModule(fs.readFileSync(path, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
-  vm.runInNewContext(code, { exports, require, URLSearchParams })
+  vm.runInNewContext(code, { exports, require, URLSearchParams, URL })
   return exports
 }
-const { frameCount, buildMiniMaxWorkflow, extractOutputUrl, OFFICIAL_H3_SAMPLER, OFFICIAL_H3_SCHEDULER } = load('src/lib/workflow.ts')
+const { frameCount, buildMiniMaxWorkflow, extractOutputUrl, extractOutputFile, outputFileFromUrl, OFFICIAL_H3_SAMPLER, OFFICIAL_H3_SCHEDULER } = load('src/lib/workflow.ts')
 const { buildZImage } = load('src/lib/zimage.ts')
 const { buildLtx25Workflow, ltx25FrameCount, LTX25_FIRST_STAGE_SIGMAS, LTX25_REFINER_SIGMAS } = load('src/lib/ltx25Workflow.ts')
 const { inferSelections, inferLtx25Selections } = load('src/lib/modelSelection.ts')
@@ -154,6 +154,28 @@ const rtx = buildMiniMaxWorkflow({ mode: 'text', width: 608, height: 352, prompt
 }
 const url = extractOutputUrl({ job: { outputs: { 19: { images: [{ filename: 'original.mp4' }] }, 70: { images: [{ filename: 'upscaled.mp4' }] } } } }, 'job', 'http://localhost:8188')
 assert.ok(decodeURIComponent(url).includes('upscaled.mp4'))
+
+// P0-1: completed outputs are attributed by the exact filename ComfyUI
+// reported for THAT prompt — a concurrent render's newer file on disk can
+// never be credited to this job (the mtime scan is gone from the codebase).
+const historyA = { promptA: { outputs: { 19: { images: [{ filename: 'A_video_00001_.mp4', subfolder: 'video', type: 'output' }] } } } }
+const historyB = { promptB: { outputs: { 19: { images: [{ filename: 'B_video_00001_.mp4', subfolder: 'video', type: 'output' }] } } } }
+const fileA = extractOutputFile(historyA, 'promptA')
+assert.equal(fileA.filename, 'A_video_00001_.mp4')
+assert.equal(fileA.subfolder, 'video')
+assert.equal(fileA.type, 'output')
+assert.equal(extractOutputFile(historyB, 'promptB').filename, 'B_video_00001_.mp4')
+// Audio jobs pick the audio extension over stray images.
+const audioFile = extractOutputFile({ promptC: { outputs: { 19: { images: [{ filename: 'still.png' }], audio: [{ filename: 'track.flac' }] } } } }, 'promptC', 'audio')
+assert.equal(audioFile.filename, 'track.flac')
+// The descriptor round-trips through the persisted output URL, so a stored
+// job can re-resolve its exact file without ComfyUI.
+const recovered = outputFileFromUrl(extractOutputUrl(historyA, 'promptA', 'http://127.0.0.1:8188'))
+assert.equal(recovered.filename, fileA.filename)
+assert.equal(recovered.subfolder, fileA.subfolder)
+assert.equal(recovered.type, fileA.type)
+assert.equal(outputFileFromUrl('minimax-media://local?path=C%3A%5Cout%5Cx.mp4'), undefined)
+assert.equal(outputFileFromUrl('http://127.0.0.1:8188/view?filename=x.mp4'), undefined)
 
 const { reduceJobPoll, isPastRunningDeadline, isTerminalStatus, NO_OUTPUT_POLL_CAP } = load('src/lib/jobReducer.ts')
 const baseJob = { id: 'j1', promptId: 'p1', mode: 'text', prompt: 'test', createdAt: Date.now() - 1000, status: 'running', progress: 40, width: 608, height: 352, duration: 5 }

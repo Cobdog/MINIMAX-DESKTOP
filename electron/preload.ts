@@ -24,7 +24,7 @@ contextBridge.exposeInMainWorld('minimax', {
   trimVideo: (source: string, start: number, end: number, outputDirectory: string, ffmpegPath: string) => ipcRenderer.invoke('video:trim', source, start, end, outputDirectory, ffmpegPath),
   joinVideos: (clips: unknown[], outputDirectory: string, ffmpegPath: string) => ipcRenderer.invoke('video:join', clips, outputDirectory, ffmpegPath),
   showOutput: (outputPath: string) => ipcRenderer.invoke('shell:show-output', outputPath),
-  findLatestOutput: (outputPath: string, since: number, kind: 'video' | 'audio' = 'video') => ipcRenderer.invoke('outputs:latest', outputPath, since, kind),
+  resolveOutput: (outputDirectory: string, file: { filename: string; subfolder?: string; type?: string }) => ipcRenderer.invoke('outputs:resolve', outputDirectory, file),
   listOllamaModels: (url: string) => ipcRenderer.invoke('ollama:list', url),
   generateWithOllama: (url: string, model: string, prompt: string) => ipcRenderer.invoke('ollama:generate', url, model, prompt),
   generateStructuredWithOllama: (url: string, model: string, prompt: string, schema: Record<string, unknown>) => ipcRenderer.invoke('ollama:structured', url, model, prompt, schema),

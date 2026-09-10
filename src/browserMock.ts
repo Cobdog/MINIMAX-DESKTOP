@@ -87,7 +87,7 @@ export function installBrowserMock() {
     trimVideo: async () => { throw new Error('Open the desktop app to trim reference videos.') },
     joinVideos: async () => { throw new Error('Open the desktop app to join videos.') },
     showOutput: async () => undefined,
-    findLatestOutput: async () => null,
+    resolveOutput: async () => null,
     listOllamaModels: async () => [
       { name: 'qwen3:latest', size: 5_225_388_164, family: 'qwen3', parameterSize: '8.2B', local: true },
       { name: 'llama3.1:8b', size: 4_920_753_328, family: 'llama', parameterSize: '8.0B', local: true },
