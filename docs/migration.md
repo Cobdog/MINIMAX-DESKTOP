@@ -1,6 +1,6 @@
 # Web Migration Design — Stripping Electron
 
-> Status: **approved direction, design reviewed 2026-09-10**. This document is the contract for the migration epic. The API gap table is verified against code at `a001153`.
+> Status: **COMPLETE (2026-09-10).** Phases A (stabilization), B1 (API), B2 (bridge), C (extraction), and D (decommission) all landed. This document is now the record of what was decided and why; the current architecture lives in [architecture.md](architecture.md).
 
 ## Goal
 
@@ -137,3 +137,14 @@ Video-route `source` forms: `{ output: <contained path> }`, `{ comfy: { filename
 - **Upload size**: reference videos up to 175 MB already flow through the LAN route; keep the cap and MIME allowlist on every new upload path.
 - **Path semantics drift** (B2's real work): the biggest regression surface is persisted localStorage state referencing dead local paths; lazy upgrade + notice, never silent drop.
 - **ffmpeg on the server** inherits the audit's injection findings — `video:join` clip validation must land with B1, not after.
+
+## Phase D — Electron decommission (2026-09-10, complete)
+
+- Deleted: `electron/` (main + preload), `src/browserMock.ts`, `scripts/launch-electron.cjs`, `tsconfig.electron.json`, the NSIS/electron-builder packaging, and the Electron devDependency stack (electron, electron-builder, concurrently, cross-env, wait-on, qrcode)
+- Renderer: `window.minimax` is always the HTTP client; the LAN/QR sharing dialog (a desktop-shell artifact) is gone; Settings path pickers replaced by plain text inputs; "open output folder" shell buttons removed
+- Media URLs: legacy `minimax-media://` values and raw `/view` links in persisted state are translated to `/api/lan/media` routes at playback (`src/lib/mediaUrls.ts`), so pre-migration jobs and libraries keep working
+- Dead bridge methods dropped from `DesktopApi` (getQueue, getOutputImage, showOutput, getLanStatus, rotateLanToken)
+- Scripts: `pnpm build` (typecheck + web + server), `pnpm start:server`, `pnpm dev` (vite HMR with `/api` proxy), `pnpm smoke:server` (self-contained boot test: SPA served, routes answer, SSRF/concat-injection/traversal probes rejected)
+- Docs rewritten for the web shape (README, architecture.md)
+
+The renderer was never the hard part — the Electron-era `DesktopApi` interface survived the whole migration unchanged in shape, which is why no component was rewritten to change transports.

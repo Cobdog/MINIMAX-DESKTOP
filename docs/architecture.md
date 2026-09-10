@@ -1,95 +1,87 @@
 # Architecture
 
-> Contributor-oriented overview of how MiniMax Studio is built. For the exhaustive file-by-file census, see [inventory.md](inventory.md). Last verified against `18fe989` (2026-09-09).
+> Contributor-oriented overview of MiniMax Studio as a web application. For the migration history, see [migration.md](migration.md). Last verified at the Electron decommission (2026-09-10).
 
 ## What this is
 
-An Electron desktop app (Windows-first) that provides a studio UI for local AI generation: MiniMax H3 video (T2V/I2V/Ref2V), LTX-2.5 video, ACE-Step 1.5 music, and Z-Image stills — all executed by a **local ComfyUI** instance the app does not own or manage. Local Ollama supplies prompt enhancement and structured planning. A LAN companion server lets a phone drive generation from the same Wi-Fi.
+A standalone Node web server (`server/`) that serves a React SPA (`src/`) and a local API, fronting local services the app does not own: **ComfyUI** (rendering), **Ollama** (prompt assistance), **FFmpeg** (clip operations). Every browser on the network — workstation, phone, tablet — gets the full Studio.
 
 The app **indexes models from their existing locations** — it never downloads, copies, or reorganizes model files.
 
 ## Process model
 
 ```
-┌─────────────────────────────┐        IPC (30 invoke channels)      ┌──────────────────────┐
-│  Renderer (React 18 SPA)    │ ◄──────────────────────────────────► │  Electron main        │
-│  src/App.tsx (desktop)      │      electron/preload.ts bridge      │  electron/main.ts     │
-│  src/MobileApp.tsx (mobile) │                                      │  (823 lines, all of:  │
-└──────┬──────────────────────┘                                      │   settings, model     │
-       │                                                             │   scan, REST proxy,   │
-       │ direct WebSocket                                            │   ffmpeg, LAN server, │
-       ▼                                                             │   media protocol)     │
-ws://<comfy>/ws?clientId=…                                           └──────┬───────────────┘
-(progress + binary preview frames)                                          │ REST + WS bridge
-                                                                            ▼
-                                                                    ComfyUI  :8188 ──┐
-                                                                    Ollama   :11434 ──┤ local services
-                                                                    (render farm)     │
-                                                                            ┌────────┘
-                                                                            ▼
-                                                              LAN HTTP :4178 (0.0.0.0, token)
-                                                                            │
-                                                                   phone / tablet (PWA)
+┌──────────────────────────────────────────────────────┐
+│  minimax-studio server (server/index.ts, Node 20+)   │
+│                                                      │
+│  static:  dist/ — the SPA (full Studio + mobile view)│
+│  /api/*:  settings · comfy proxy · ollama · ffmpeg   │
+│           ops · uploads · media (Range) · SSE bridge │
+│  config:  ~/.minimax-studio/settings.json            │
+└──────┬────────────────────────────┬──────────────────┘
+       │ REST + WS                  │ spawns
+       ▼                            ▼
+   ComfyUI :8188                  ffmpeg
+   Ollama  :11434                 (frames/trim/join)
+
+  any browser ── http://workstation:4178 ──► full Studio
+                 ?mobile=1 ───────────────► touch companion
 ```
 
-Three processes plus one sidecar:
+Two modules:
 
-| Process | Entry | Responsibility |
-|---|---|---|
-| Electron main | `electron/main.ts` | Window, settings persistence (`userData/settings.json`), model-folder scanning, **all** ComfyUI/Ollama REST calls, FFmpeg spawning, `nvidia-smi` telemetry, the `minimax-media://` privileged protocol, the LAN server |
-| Preload | `electron/preload.ts` | `contextBridge` exposing 30 `ipcRenderer.invoke` wrappers as `window.minimax` |
-| Renderer | `src/main.tsx` | React SPA; `App` (desktop) or `MobileApp` (when `?mobile=1`) |
+| Module | Role |
+|---|---|
+| `server/core.ts` | `createStudioServer(paths)` factory: settings persistence (atomic write-then-rename), model scanning, ComfyUI/Ollama proxy, GPU telemetry, FFmpeg operations, output resolution, the full route table, static hosting. Zero Electron imports; everything path-parameterized |
+| `server/index.ts` | Standalone entry: resolves config home (`MINIMAX_STUDIO_HOME`, default `~/.minimax-studio`), serves `dist/`, listens on 4178 (`MINIMAX_LAN_PORT`) |
 
-Design consequences worth knowing:
+## The renderer bridge
 
-- **All REST is proxied through main; progress is not.** The renderer opens its own WebSocket directly to ComfyUI (`src/lib/useLivePreview.ts`) with auto-reconnect and binary preview-frame parsing. The main process separately bridges ComfyUI `/ws` → SSE for mobile clients.
-- **No main→renderer push exists.** Desktop progress arrives via the renderer's WebSocket; everything else is request/response over IPC.
-- **One bundle serves desktop and browser.** `src/browserMock.ts` installs a fake `window.minimax` when the preload is absent, so the LAN-served SPA runs — but against mock data (see [audit](audit/code-quality-audit.md), P1-4: the "full Studio" LAN link is a mock shell today).
+The SPA never talks to ComfyUI REST directly — it consumes the server's API through `src/lib/apiClient.ts`, which implements the `DesktopApi` interface (`src/types.ts`) over HTTP and installs as `window.minimax` at startup. The interface is the seam that made the Electron→web migration possible: the same 24-method contract the old preload exposed.
 
-## ComfyUI workflow layer
+Media references flow as strings on `MediaFile.path`:
+- `comfy-input:<subfolder>/<name>` — user-picked files, uploaded to ComfyUI's input tree at selection time
+- output-contained paths — generated files, resolvable server-side (containment-checked)
+- legacy `minimax-media://` URLs from the Electron era are translated by `src/lib/mediaUrls.ts` at playback
 
-`src/lib/` contains the graph builders, which deliberately mirror ComfyUI's official templates:
+The server is authoritative for service URLs, the output directory, and the FFmpeg executable — those bridge arguments are accepted and ignored, so a compromised or buggy renderer cannot redirect them.
 
-- `workflow.ts` — MiniMax H3 T2V/I2V/Ref2V graphs with optional turbo LoRAs, sigma-shift node, animated-preview node, and post-render LTX/RTX upscale branches. `frameCount()` implements the 17k+5 latent grid arithmetic.
-- `ltx25Workflow.ts` — LTX-2.5 official two-stage Quality (8 steps half-res → latent 2× → 3-step refine) and single-stage Turbo graphs, with fixed sigma schedules.
-- `aceStepWorkflow.ts`, `zimage.ts` — ACE-Step 1.5 and Z-Image graphs.
-- `modelSelection.ts` — regex inference mapping installed model files to graph inputs, preferring official precision variants.
+## API surface
 
-⚠️ **Known coupling:** output extraction (`workflow.ts:181`, `main.ts:325`) prefers history outputs from hard-coded node ids `'84'` then `'70'`. These literals must stay in sync with the graph builders.
+All routes under `/api/lan/` (legacy prefix retained from the mobile-companion era). Representative routes: `bootstrap`, `settings` (GET/POST), `object-info`, `comfy-status` (SSRF-guarded), `prompt`, `history/{id}`, `cancel`, `events` (SSE⇄WS bridge), `ollama` + `ollama/structured`, `video/{frame,frames,trim,join}`, `outputs/{resolve,save-image}`, `upload` / `upload-media` / `upload-output`, `media` (ComfyUI proxy or output-contained local serving with Range), `telemetry`, `characters`. Full contract table in [migration.md](migration.md).
 
-## Generation pipeline (and where it's fragile)
+Security posture: **open on the LAN by default** (ComfyUI-consistent; a deliberate 2026-09-10 decision), token-gated via `--token` / `MINIMAX_LAN_TOKEN=1` for hostile networks. Input validation everywhere: path containment (`relative()`-based), numeric FFmpeg arguments (concat-directive injection guarded), MIME allowlists and size caps on uploads, SSRF guard on probe-able URLs.
+
+## Generation pipeline
 
 1. Compose effective prompt (`composeH3Prompt`, dialogue/movement/clothing policies)
-2. Upload reference media (`comfy:upload*` → ComfyUI `input/minimax-desktop/`)
-3. Build graph, submit (`comfy:submit` → `POST /prompt` with a client id)
-4. Track: WebSocket progress events + 1 s history polling per pending job
-5. On completion: read exact output from history (`extractOutputUrl`) for playback; a separate `outputs:latest` mtime-scan heuristic attempts to localize the file for library writes
+2. Reference media already uploaded at selection time (`comfy-input:` refs) or resolved from outputs
+3. Build the official ComfyUI graph (`src/lib/workflow.ts` et al.), submit via `prompt`
+4. Track: WebSocket progress (same-machine) or SSE (remote) + history polling through the shared poll kernel (`src/lib/promptWatch.ts` — tolerance, deadline, cancellation)
+5. On completion: attribute the output by the **exact filename ComfyUI reported** (`extractOutputFile` + `outputs/resolve`) — never newest-file-on-disk; resolve locally when possible, stream via the proxy otherwise
 6. Post-processing: optional LTX latent 2× upscale; library/queue persistence
 
-Steps 4–6 are the fragile part — see the [code-quality audit](audit/code-quality-audit.md) (P0-1 output attribution, P1-1/P1-5/P1-6 polling robustness) before touching them.
+Job state transitions live in the pure reducer `src/lib/jobReducer.ts` (terminal-state guards, no-output cap, deadline), unit-tested in `scripts/test-workflows.cjs`.
 
 ## State & persistence
 
-Two tiers, no state library:
+- **Server-side:** `~/.minimax-studio/settings.json` (atomic writes), LAN token file
+- **Browser localStorage (per browser):** ~20 keys — workspace state, jobs (last 100), movie projects + undo history, clip projects, frame bookmarks, six library collections. Libraries signal changes via `window` CustomEvents; saves route through `persistToLocalStorage` (`src/lib/libraryStorage.ts`) which survives quota exhaustion by scrubbing inline previews
+- **Disk (output directory):** FFmpeg artifacts (reference clips, extracted frames, joined videos, character references) in named subfolders
 
-- **Main process / disk:** `userData/settings.json` (hand-rolled JSON, merge-over-defaults), `lan-access-token.txt`
-- **Renderer localStorage:** ~20 keys (`minimax.workspace`, `minimax.jobs` last-100, movie projects + undo history, clip projects, frame bookmarks, per-workspace state, six library collections). Libraries signal changes via `window` CustomEvents.
+## Development
 
-FFmpeg artifacts (reference clips, extracted frames, joined videos, character references) are written into subfolders of the configured ComfyUI output directory. Temp files go to the OS temp dir.
+```bash
+pnpm build          # typecheck + web build + server build
+pnpm start:server   # run the app on :4178
+pnpm dev            # vite HMR on :5173 (proxies /api to :4178)
+pnpm test           # assertion suite
+pnpm smoke:server   # boots the built server on a scratch port; verifies routes + guards
+```
 
-## LAN companion
+## Known debts / follow-ups
 
-`startLanServer()` (main.ts:460) binds `0.0.0.0:4178` (env `MINIMAX_LAN_PORT`), plaintext HTTP, gated by a persisted 128-bit token (`x-minimax-token` header or `?token=` query). All `/api/lan/*` routes proxy ComfyUI/Ollama — local services are never directly exposed. Static `dist/` serving with SPA fallback handles everything else. Security posture and known gaps: [security audit](audit/security-audit.md).
-
-## Build & packaging
-
-Vite 6 + TypeScript (two tsconfigs: renderer ES2022/strict, electron NodeNext). electron-builder → NSIS x64 per-user installer. Runtime deps are deliberately minimal: `react`, `react-dom`, `lucide-react`, `qrcode`, `ws`.
-
-## Known structural debts
-
-Maintained in the audits, not here, so this document stays evergreen-structural:
-
-- `src/App.tsx` (1,961 lines) concentrates 31 `useState` and all desktop orchestration
-- Desktop/mobile duplicate generation semantics with drift
-- Main-process path guards use Windows-only separators (fail closed on POSIX)
-- No test framework wired (one orphaned assertion suite in `scripts/test-workflows.cjs`)
+- Remote browsers opening the full Studio get degraded live preview (direct WebSocket to ComfyUI assumes same-machine); the SSE bridge should become the fallback
+- `App.tsx` remains a 1,900-line God component — decomposition tracked on the board
+- Desktop/mobile generation semantics share builders but duplicate orchestration with drift
+- No CI yet; the assertion suite is wired (`pnpm test`) but nothing runs it on push

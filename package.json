@@ -1,30 +1,23 @@
 {
-  "name": "minimax-desktop",
+  "name": "minimax-studio",
   "version": "0.1.0",
   "private": true,
-  "description": "Local-first MiniMax H3 desktop studio powered by ComfyUI",
+  "description": "Local-first web studio for MiniMax H3, LTX-2.5, ACE-Step and Z-Image generation through ComfyUI",
   "author": "James",
-  "main": "dist-electron/electron/main.js",
   "scripts": {
-    "dev": "concurrently -k \"pnpm dev:web\" \"pnpm dev:electron\"",
-    "dev:web": "vite --host 127.0.0.1",
-    "dev:electron": "pnpm build:electron && wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 node scripts/launch-electron.cjs",
-    "build": "pnpm typecheck && pnpm build:web && pnpm build:electron",
+    "dev": "vite",
+    "dev:server": "pnpm build:web && pnpm start:server",
+    "build": "pnpm typecheck && pnpm build:web && pnpm build:server",
     "build:web": "vite build",
-    "build:electron": "tsc -p tsconfig.electron.json",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "build:server": "tsc -p tsconfig.server.json",
+    "start:server": "node dist-server/server/index.js",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
     "lint": "eslint . --max-warnings 0",
     "test": "node scripts/test-workflows.cjs",
-    "smoke:lan": "node scripts/smoke-lan.cjs",
-    "start": "node scripts/launch-electron.cjs",
-    "package:win": "pnpm build && electron-builder --win nsis --x64 --config.npmRebuild=false",
-    "build:server": "tsc -p tsconfig.server.json",
-    "start:server": "pnpm build:server && node dist-server/server/index.js",
-    "dev:server": "pnpm build:web && pnpm start:server"
+    "smoke:server": "node scripts/smoke-server.cjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
-    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "ws": "^8.21.3"
@@ -33,57 +26,16 @@
     "@eslint/js": "^9.17.0",
     "@rollup/rollup-win32-x64-msvc": "4.63.1",
     "@types/node": "^22.10.5",
-    "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.4",
-    "concurrently": "^9.1.2",
-    "cross-env": "^7.0.3",
-    "electron": "^34.0.0",
-    "electron-builder": "^26.0.12",
     "eslint": "^9.17.0",
     "eslint-plugin-react-hooks": "^5.1.0",
     "eslint-plugin-react-refresh": "^0.4.16",
     "globals": "^15.14.0",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.19.1",
-    "vite": "^6.0.7",
-    "wait-on": "^8.0.1"
-  },
-  "build": {
-    "appId": "com.james.minimaxstudio",
-    "productName": "MiniMax Studio",
-    "asar": true,
-    "directories": {
-      "output": "release",
-      "buildResources": "build"
-    },
-    "files": [
-      "dist/**/*",
-      "dist-electron/**/*",
-      "package.json"
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "build/icon.png",
-      "artifactName": "MiniMax-Studio-Setup-${version}.${ext}"
-    },
-    "nsis": {
-      "oneClick": true,
-      "perMachine": false,
-      "allowElevation": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "MiniMax Studio",
-      "deleteAppDataOnUninstall": false
-    }
+    "vite": "^6.0.7"
   }
 }

@@ -288,7 +288,6 @@ export type UploadedFile = { name: string; subfolder?: string; type?: string }
 export type DesktopApi = {
   getObjectInfo(url: string): Promise<Record<string, { input: { required: Record<string, unknown[]> } }>>
   uploadImageData(url: string, data: string): Promise<UploadedFile>
-  getOutputImage(url: string, file: { filename: string; subfolder?: string; type?: string }): Promise<string>
   saveComfyOutputImage(url: string, file: { filename: string; subfolder?: string; type?: string }, outputDirectory: string): Promise<{ path: string; name: string }>
   getSettings(): Promise<AppSettings>
   getGpuTelemetry(): Promise<GpuTelemetry>
@@ -298,7 +297,6 @@ export type DesktopApi = {
   scanModels(settings: AppSettings): Promise<ModelFile[]>
   getComfyStatus(url: string): Promise<ComfyStatus>
   submitPrompt(url: string, prompt: unknown, clientId?: string): Promise<{ prompt_id: string; number?: number; node_errors?: unknown }>
-  getQueue(url: string): Promise<unknown>
   getHistory(url: string, promptId: string): Promise<Record<string, unknown>>
   cancelPrompt(url: string, promptId: string): Promise<{ cancelled: boolean; state: 'running' | 'pending' | 'finished' | 'unknown' }>
   uploadInput(url: string, filePath: string): Promise<UploadedFile>
@@ -308,12 +306,9 @@ export type DesktopApi = {
   extractVideoFrames(source: string, positions: number[], outputDirectory: string, ffmpegPath: string): Promise<Array<{ path: string; name: string }>>
   trimVideo(source: string, start: number, end: number, outputDirectory: string, ffmpegPath: string): Promise<{ path: string; name: string }>
   joinVideos(clips: Array<Pick<ClipItem, 'source' | 'start' | 'end'>>, outputDirectory: string, ffmpegPath: string): Promise<{ path: string; url: string }>
-  showOutput(path: string): Promise<void>
   resolveOutput(outputDirectory: string, file: { filename: string; subfolder?: string; type?: string }): Promise<string | null>
   listOllamaModels(url: string): Promise<OllamaModel[]>
   generateWithOllama(url: string, model: string, prompt: string): Promise<string>
   generateStructuredWithOllama(url: string, model: string, prompt: string, schema: Record<string, unknown>): Promise<unknown>
-  getLanStatus(): Promise<LanStatus>
   syncMobileCharacters(characters: unknown[]): Promise<{ synced: number }>
-  rotateLanToken(): Promise<LanStatus>
 }

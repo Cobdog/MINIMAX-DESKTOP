@@ -1,8 +1,25 @@
 # MiniMax Studio
 
-A local-first Windows desktop interface for MiniMax H3 generation through ComfyUI. Models are indexed and used from their existing locations; the application does not download, copy, or reorganize model files.
+A local-first **web app** for MiniMax H3 generation through ComfyUI: one small Node server on your workstation, the full Studio in any browser on your network — desktop, phone, or tablet. Models are indexed and used from their existing locations; the app never downloads, copies, or reorganizes model files.
 
-> **This is the Cobdog fork** of [jamesk9526/MINIMAX-DESKTOP](https://github.com/jamesk9526/MINIMAX-DESKTOP), under active restructure and hardening. The upstream project is days old and was built at AI-generation velocity; this fork's first moves were a [full inventory](docs/inventory.md), an [architecture review](docs/architecture.md), and adversarial [code-quality](docs/audit/code-quality-audit.md) and [security](docs/audit/security-audit.md) audits. Known issues are tracked there — read them before relying on the fragile paths (output attribution, job polling, library persistence).
+> Fork of [jamesk9526/MINIMAX-DESKTOP](https://github.com/jamesk9526/MINIMAX-DESKTOP), restructured and hardened. The Electron shell was removed in favor of this standalone server + SPA architecture (see [docs/migration.md](docs/migration.md)). Known issues and their status live in the [audits](docs/audit/).
+
+## Quick start
+
+```bash
+pnpm install
+pnpm build
+pnpm start:server
+# → http://127.0.0.1:4178  (LAN address printed on startup)
+```
+
+Requirements: Node 20+, a local ComfyUI with the MiniMax H3 core nodes, and the H3 model components already on disk. FFmpeg for clip tools. Optional: local Ollama for prompt features; NVIDIA tooling for GPU telemetry.
+
+Configuration lives in `~/.minimax-studio/` (override with `MINIMAX_STUDIO_HOME`): `settings.json` holds the ComfyUI/Ollama addresses, model folders, and defaults — also editable from the app's Settings page. Default port `4178` (override with `MINIMAX_LAN_PORT`).
+
+**Security posture:** open on your LAN by default, exactly like ComfyUI itself — anyone on the same network can use the studio. For hostile networks (café Wi-Fi, shared offices), start with `--token` (or `MINIMAX_LAN_TOKEN=1`) and pass the token as `?token=…`.
+
+**Development:** `pnpm start:server` (or `pnpm dev:server` to rebuild first) serves the app on 4178; `pnpm dev` runs vite HMR on 5173 with `/api` proxied to a server already running on 4178. `pnpm test` runs the assertion suite; `pnpm smoke:server` boots the built server on a scratch port and verifies the SPA, routes, and security guards.
 
 ## Capabilities
 
@@ -11,7 +28,7 @@ A local-first Windows desktop interface for MiniMax H3 generation through ComfyU
 - Official ComfyUI H3 graph topology and sampling defaults (`res_multistep` + `simple`), with detected FL2V 4/8-step and Ref2V 4-step turbo LoRAs
 - Guided quality presets — Native Quality, official Turbo 8, Preview — with custom sampling isolated under an explicit Experimental disclosure
 - A fixed-seed quality diagnostic that queues matching Native and Turbo 8 renders for direct A/B comparison
-- Optional verified LTX 2.5 latent 2× post-processing (LTX-VAE encode → latent upsample → trim, audio retained) and explicitly experimental RTX/CUDA frame upscaling
+- Optional verified LTX 2.5 latent 2× post-processing and explicitly experimental RTX/CUDA frame upscaling
 - Non-destructive reference video clipping: preview a source, set in/out points, create a focused 2–15 s reference MP4
 
 **Other providers (separate workspaces, separate state)**
@@ -26,18 +43,12 @@ A local-first Windows desktop interface for MiniMax H3 generation through ComfyU
 
 **Local integration**
 - Local Ollama prompt enhancement, timed shot planning, and synchronized-audio rewriting — prompt text never leaves the workstation
-- In-app playback through a range-aware local media proxy (ComfyUI history or the configured output directory)
+- Live WebSocket render progress and previews; GPU/VRAM telemetry; job queue with cancellation and bounded failure detection
 - Landscape/portrait/square output presets with automatic fitting and interactive crop preview
-- Live WebSocket render progress and previews; GPU/VRAM telemetry; job queue with cancellation
 
-**Mobile companion**
-- Same-network phone/tablet access for MiniMax H3 or LTX-2.5 T2V/I2V creation with separate provider state, QR pairing, token rotation, video preview, and download
-
-## Mobile companion
-
-Launch MiniMax Studio, select **Mobile** in the top bar, and scan the QR code from a phone connected to the same trusted Wi-Fi or LAN. The private access token persists across desktop restarts, so saved phone links keep working. Use **Rotate access link** in the QR dialog to invalidate every previously scanned link. Windows Firewall may ask whether the app can accept private-network connections the first time.
-
-The phone uses the model folders, ComfyUI address, and output settings configured on the desktop. Service is over local HTTP. Browsers require a trusted HTTPS origin for verified PWA installation and service-worker caching, so use the HTTP version in the browser or as a home-screen shortcut until the HTTPS pass is complete. **Caveat:** the "full Studio" desktop link opens the app with mock data in a browser — only the dedicated mobile interface can actually generate from a phone today (see [audit P1-4](docs/audit/code-quality-audit.md)).
+**Every device**
+- The full Studio runs in any modern browser; `?mobile=1` serves the touch-first companion view; both are PWA-installable on phones
+- Files arrive by drag-and-drop upload (or file picker) and generated outputs are browsable, previewable, and directly reusable as new inputs
 
 ## Local services
 
@@ -52,22 +63,20 @@ MiniMax generation is built from ComfyUI's official T2V/I2V/Ref2V core graph: na
 
 Turbo sampling uses the official sampler/scheduler pair unless custom sampling is explicitly enabled; custom combinations remain marked experimental because they are not equivalent to the published template.
 
-Settings can persist resolution, duration, quality mode, full-quality steps, LoRA strength, reference-image fidelity, live preview, sampler/scheduler, and sigma-shift defaults. Native H3 behavior leaves shifts on the model baseline (video 12, audio 3); the Euler/Beta custom-shift preset is intentionally labeled experimental (targets converted Turbo LoRA compatibility, not the published template).
-
 The **LTX 2.5** workspace is a separate provider and never reads or changes MiniMax prompts, inputs, turbo LoRAs, samplers, sigma shifts, or upscale choices. Its Quality preset follows ComfyUI's official two-stage distilled workflow (8-step half-res pass → LTX latent 2× → 3-step refinement); Turbo uses the official fixed 8-step distilled schedule as a single full-resolution stage.
 
 ## How generation works
 
-The renderer sends media paths through a context-isolated Electron bridge. Electron uploads selected inputs to the configured local ComfyUI server and submits a native API-format graph using these core nodes:
+The renderer builds ComfyUI API-format graphs in the browser and submits them through the server's `/api` routes; the server proxies ComfyUI, runs FFmpeg for clip operations, and serves generated media with HTTP Range support. Progress arrives over WebSocket (same-machine) or the server's SSE bridge (remote devices).
 
 - `MiniMaxH3ImageToVideo` or `MiniMaxH3ReferenceToVideo`
 - `UNETLoader`, `CLIPLoader`, and separate video/audio `VAELoader` nodes
 - `SamplerCustomAdvanced` with `res_multistep`
 - `VAEDecode`, `VAEDecodeAudio`, `CreateVideo`, and `SaveVideo`
 
-Durations are converted to MiniMax H3's required `17k + 5` frame grid at 24 fps. Reference autogrow inputs use ComfyUI's required dotted API keys, such as `ref_images.ref_image_0`.
+Durations convert to MiniMax H3's required `17k + 5` frame grid at 24 fps. Completed outputs are attributed by the exact filename ComfyUI reports — never by newest-file-on-disk.
 
-For the full process model — IPC surface, WebSocket topology, persistence tiers, LAN server — see [docs/architecture.md](docs/architecture.md).
+For the process model, API surface, and persistence tiers, see [docs/architecture.md](docs/architecture.md).
 
 ## ACE-Step 1.5 setup
 
@@ -85,80 +94,16 @@ The app detects either XL checkpoint independently, so an installation with only
 
 Reference downloads and node documentation are maintained by [Comfy-Org's ACE-Step 1.5 workflow templates](https://github.com/Comfy-Org/workflow_templates/tree/main/templates) and [the TextEncodeAceStepAudio1.5 embedded docs](https://github.com/Comfy-Org/embedded-docs/blob/main/comfyui_embedded_docs/docs/TextEncodeAceStepAudio1.5/en.md).
 
-Generated tracks are written by ComfyUI's audio saver to the configured output directory as FLAC and appear in the Music workspace and Queue with an audio player.
-
-## Requirements
-
-- Windows (path handling in the main process assumes Windows separators)
-- Node.js 20+, pnpm 10+
-- A current local ComfyUI instance with MiniMax H3 core nodes (and LTX-2.5 or ACE-Step 1.5 core nodes when using those workspaces)
-- The MiniMax H3 model components already present on disk
-- Optional: local Ollama for prompt features; NVIDIA GPU tooling for telemetry
-
-The default model root is `%USERPROFILE%\Documents\ComfyUI\models`, but every category can be changed in **Settings → Model locations**.
-
-## Development
-
-```powershell
-pnpm install
-pnpm build
-pnpm dev
-```
-
-The launcher removes `ELECTRON_RUN_AS_NODE` from Electron's child environment, so `pnpm start` and `pnpm dev` work even when an automation or parent shell sets it.
-
-Start ComfyUI separately, then use **Settings → Test connection**. The default server is `http://127.0.0.1:8188`.
-
-### Build and package
-
-```powershell
-pnpm build
-pnpm package:win
-```
-
-The one-click per-user NSIS installer (desktop and Start-menu shortcuts) is written to `release\MiniMax-Studio-Setup-0.1.0.exe`.
-
-### Tests
-
-There is no test framework wired yet. `scripts/test-workflows.cjs` holds a genuine assertion suite (graph shape, node-link resolution, frame-grid math) — run it manually with `node scripts/test-workflows.cjs` until it's wired into `pnpm test` (tracked in the fork's hardening plan).
-
 ## Documentation
 
 | Doc | Contents |
 | --- | --- |
-| [docs/architecture.md](docs/architecture.md) | Process model, IPC surface, generation pipeline, persistence tiers |
-| [docs/inventory.md](docs/inventory.md) | Exhaustive file/feature/dependency census |
+| [docs/architecture.md](docs/architecture.md) | Server + SPA process model, API surface, generation pipeline |
+| [docs/inventory.md](docs/inventory.md) | Exhaustive file/feature/dependency census (pre-migration) |
 | [docs/audit/code-quality-audit.md](docs/audit/code-quality-audit.md) | Adversarial review: P0–P3 findings, top-10 fixes |
-| [docs/audit/security-audit.md](docs/audit/security-audit.md) | Threat model, HIGH→INFO findings, hardening priorities |
+| [docs/audit/security-audit.md](docs/audit/security-audit.md) | Threat model, findings, hardening priorities |
+| [docs/migration.md](docs/migration.md) | The Electron → web migration record |
 | [docs/history/plan-v0.md](docs/history/plan-v0.md) | Upstream's original planning document (historical) |
-
-## Screenshots
-
-Captured from the desktop workflow.
-
-### Reference prompt builder
-
-The reference mode keeps the generated reference instructions visible above the editable prompt, numbers each image, and preserves the existing video output preview.
-
-![Reference prompt builder with numbered references and generated prompt](Readmescreenshots/step-0001.png)
-
-### ACE-Step 1.5 music generation
-
-Music is a first-class sidebar workspace exposing the two XL checkpoints, lyric or instrumental generation, and audio-specific controls.
-
-![ACE-Step 1.5 Music workspace](Readmescreenshots/step-0005.png)
-
-### Reusable production libraries
-
-Character, wardrobe, and location studios keep reusable references and continuity details in separate libraries that can be brought into movie planning.
-
-![Character Studio reference production](Readmescreenshots/step-0010.png)
-
-![Wardrobe Studio](Readmescreenshots/step-0015.png)
-
-![Location Studio](Readmescreenshots/step-0020.png)
-
-![Movie Planner production bible](Readmescreenshots/step-0026.png)
 
 ## License
 

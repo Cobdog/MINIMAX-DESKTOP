@@ -139,9 +139,6 @@ export function createWebApiClient(): DesktopApi {
     async submitPrompt(_url: string, prompt: unknown, clientId?: string) {
       return postJson('/api/lan/prompt', { prompt, clientId })
     },
-    async getQueue() {
-      return null
-    },
     async getHistory(_url: string, promptId: string) {
       const body = await apiFetch<{ history?: Record<string, unknown> }>(`/api/lan/history/${encodeURIComponent(promptId)}`)
       return body.history ?? {}
@@ -161,12 +158,6 @@ export function createWebApiClient(): DesktopApi {
     },
     async saveComfyOutputImage(_url: string, file: { filename: string; subfolder?: string; type?: string }) {
       return postJson('/api/lan/outputs/save-image', file)
-    },
-    async getOutputImage(_url: string, file: { filename: string; subfolder?: string; type?: string }) {
-      const query = new URLSearchParams({ filename: file.filename, subfolder: file.subfolder ?? '', type: file.type ?? 'output' })
-      const response = await fetch(`/api/lan/media?${query}`, { headers: { 'x-minimax-token': authToken() } })
-      if (!response.ok) throw new Error('The generated image is unavailable.')
-      return readFileAsDataUrl(await response.blob())
     },
     async listOllamaModels() {
       const names = (await bootstrap()).ollamaModels as string[]
@@ -202,22 +193,13 @@ export function createWebApiClient(): DesktopApi {
     async joinVideos(clips: Array<{ source: string; start?: number; end?: number }>) {
       return postJson('/api/lan/video/join', { clips: clips.map((clip) => ({ source: videoSource(clip.source), start: clip.start, end: clip.end })) })
     },
-    async showOutput() {
-      // No shell in the browser; the server logs the path instead.
-    },
     async resolveOutput(_outputDirectory: string, file: { filename: string; subfolder?: string; type?: string }) {
       const query = new URLSearchParams({ filename: file.filename, subfolder: file.subfolder ?? '', type: file.type ?? 'output' })
       const body = await apiFetch<{ url: string } | { error: string }>(`/api/lan/outputs/resolve?${query}`)
       return 'url' in body ? body.url : null
     },
-    async getLanStatus() {
-      return { running: true }
-    },
     async syncMobileCharacters(characters: unknown[]) {
       return postJson('/api/lan/characters', { characters })
-    },
-    async rotateLanToken() {
-      return { running: true }
     },
   }
 }
@@ -228,18 +210,9 @@ function mediaQuery(filePath: string): Record<string, string> {
   return { source: 'output', path: filePath }
 }
 
-let webBridgeActive = false
-
 /** Installs the HTTP bridge as window.minimax when no preload bridge exists. */
 export function installWebApiClient() {
   if (window.minimax) return false
   window.minimax = createWebApiClient()
-  webBridgeActive = true
   return true
-}
-
-/** True when the renderer talks to the web server instead of Electron — UI
- *  uses this to hide native-only affordances (folder pickers, shell reveal). */
-export function isWebBridge() {
-  return webBridgeActive
 }

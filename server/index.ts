@@ -17,7 +17,7 @@ import { createStudioServer } from './core'
 const home = process.env.MINIMAX_STUDIO_HOME ?? join(homedir(), '.minimax-studio')
 mkdirSync(home, { recursive: true })
 
-const staticRoot = join(__dirname, '..', 'dist')
+const staticRoot = join(__dirname, '..', '..', 'dist')
 if (!existsSync(join(staticRoot, 'index.html'))) {
   console.error('The web build is missing — run `pnpm build:web` (or `pnpm build`) before starting the server.')
   process.exit(1)

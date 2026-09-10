@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createId } from './createId'
+import { webMediaUrl } from './mediaUrls'
 
 export type LiveProgress = { progress?: number; label: string; currentStep?: number; totalSteps?: number }
 export type LivePreview = {
@@ -81,7 +82,7 @@ export function useLivePreview(url: string | undefined, enabled: boolean, onProg
             const file = msg.data.output.images[0]
             const query = new URLSearchParams({ filename: file.filename, subfolder: file.subfolder ?? '', type: file.type ?? 'temp' })
             const upstream = `${url.replace(/\/+$/, '')}/view?${query}`
-            replacePreview({ promptId: msg.data.prompt_id ?? active, url: `minimax-media://comfy?url=${encodeURIComponent(upstream)}`, mime: 'image/jpeg', animated: false })
+            replacePreview({ promptId: msg.data.prompt_id ?? active, url: webMediaUrl(`minimax-media://comfy?url=${encodeURIComponent(upstream)}`) ?? upstream, mime: 'image/jpeg', animated: false })
           }
         } else if (event.data instanceof ArrayBuffer && event.data.byteLength > 8 && active) {
           const header = new DataView(event.data)

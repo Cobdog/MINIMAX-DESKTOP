@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import QRCode from 'qrcode'
 import { createId } from './lib/createId'
 import { isPastRunningDeadline, isTerminalStatus, reduceJobPoll, type PollObservation, type PollReduction } from './lib/jobReducer'
 import { STORAGE_ERROR_EVENT } from './lib/libraryStorage'
-import { isWebBridge } from './lib/apiClient'
+import { webMediaUrl } from './lib/mediaUrls'
 import {
   Activity,
   AlertCircle,
@@ -33,7 +32,6 @@ import {
   PanelLeftClose,
   Play,
   Plus,
-  QrCode,
   RefreshCw,
   RotateCcw,
   Save,
@@ -91,7 +89,6 @@ import type {
   GpuTelemetry,
   Ltx25GenerationOptions,
   LocationProject,
-  LanStatus,
   MediaFile,
   MediaKind,
   ModelFile,
@@ -224,13 +221,9 @@ function h3StackReport(models: ModelFile[]) {
 }
 
 function playableOutputUrl(value?: string) {
-  if (!value || value.startsWith('minimax-media:')) return value
-  try {
-    const url = new URL(value)
-    return url.pathname === '/view' ? `minimax-media://comfy?url=${encodeURIComponent(value)}` : value
-  } catch {
-    return value
-  }
+  // All playable media flows through the web server's media routes; legacy
+  // Electron-era minimax-media:// URLs and raw /view links are translated.
+  return webMediaUrl(value)
 }
 
 const initialJobs = (): GenerationJob[] => {
@@ -406,9 +399,6 @@ function App() {
   const [promptSuggestion, setPromptSuggestion] = useState('')
   const [promptingTool, setPromptingTool] = useState<'enhance' | 'timeline' | 'audio' | null>(null)
   const [dialogueGenerating, setDialogueGenerating] = useState(false)
-  const [lanOpen, setLanOpen] = useState(false)
-  const [lanStatus, setLanStatus] = useState<LanStatus>({ running: false })
-  const [lanQr, setLanQr] = useState('')
   const [videoClipDraft, setVideoClipDraft] = useState<{ source: MediaFile; replaceIndex?: number } | null>(null)
   const [createResetKey, setCreateResetKey] = useState(0)
   const [ltxResetKey, setLtxResetKey] = useState(0)
@@ -473,10 +463,6 @@ function App() {
   }, [checkConnection, refreshOllama, scanModels])
 
   useEffect(() => {
-    void window.minimax.getLanStatus().then(setLanStatus)
-  }, [])
-
-  useEffect(() => {
     let disposed = false
     const refresh = () => {
       if (document.hidden) return
@@ -486,21 +472,6 @@ function App() {
     const timer = window.setInterval(refresh, 4000)
     return () => { disposed = true; window.clearInterval(timer) }
   }, [])
-
-  useEffect(() => {
-    if (!lanOpen || !lanStatus.url) {
-      setLanQr('')
-      return
-    }
-    void QRCode.toDataURL(lanStatus.url, { width: 300, margin: 2, color: { dark: '#101412', light: '#ffffff' } }).then(setLanQr)
-  }, [lanOpen, lanStatus.url])
-
-  useEffect(() => {
-    if (!lanOpen) return
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setLanOpen(false) }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [lanOpen])
 
   useEffect(() => {
     localStorage.setItem('minimax.jobs', JSON.stringify(jobs.slice(0, 100)))
@@ -1306,7 +1277,6 @@ function App() {
         <div className="titlebar-drag" />
         {(view === 'create' || view === 'ltx25' || view === 'zimage') && <button className="titlebar-action titlebar-reset" onClick={resetCurrentWorkspace} title="Reset prompts, options, media, selections, and the current preview in this workspace"><RotateCcw size={14} />Reset workspace</button>}
         <GpuMeter value={gpu} />
-        <button className="titlebar-action" onClick={() => { setLanOpen(true); void window.minimax.getLanStatus().then(setLanStatus) }} title="Share MiniMax Studio over your local network"><QrCode size={14} />LAN</button>
         <button className={`connection-chip ${status.connected ? 'online' : ''}`} onClick={() => void checkConnection(settings.comfyUrl)} title="Check ComfyUI connection">
           {checking ? <LoaderCircle size={14} className="spin" /> : <span className="status-dot" />}
           {status.connected ? `Local engine · ${status.latencyMs} ms` : 'Engine offline'}
@@ -1522,24 +1492,9 @@ function App() {
         setPrompt(videoPrompt); setMode('text'); setNoDialogue(true); setActiveJobId(null); setView('create')
         setNotice({ tone: 'success', text: 'Video prompt loaded into Create with No dialogue enabled.' })
       }} />
-      {lanOpen && <LanCompanionDialog status={lanStatus} qr={lanQr} onRotate={async () => setLanStatus(await window.minimax.rotateLanToken())} onClose={() => setLanOpen(false)} />}
       {videoClipDraft && <VideoReferenceClipper source={videoClipDraft.source} onClose={() => setVideoClipDraft(null)} onCreate={createVideoReferenceClip} />}
     </div>
   )
-}
-
-function LanCompanionDialog({ status, qr, onRotate, onClose }: { status: LanStatus; qr: string; onRotate(): Promise<void>; onClose(): void }) {
-  const [rotating, setRotating] = useState(false)
-  return <div className="lan-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-    <section className="lan-dialog" role="dialog" aria-modal="true" aria-labelledby="lan-dialog-title">
-      <header><div><QrCode size={20} /><span><strong id="lan-dialog-title">Share over your LAN</strong><small>Touch-first mobile creation or the complete Studio interface</small></span></div><button className="icon-button" onClick={onClose} aria-label="Close LAN sharing"><X size={18} /></button></header>
-      {status.running && status.url ? <div className="lan-dialog-body">
-        <div className="lan-qr">{qr ? <img src={qr} alt="QR code for the MiniMax mobile companion" /> : <LoaderCircle className="spin" aria-label="Preparing QR code" />}</div>
-        <div className="lan-instructions"><span className="lan-ready"><Check size={15} />LAN server ready</span><h2>Open on another device</h2><p>Scan for the touch-first mobile workspace, or open the full interface on a tablet or computer connected to the same trusted Wi-Fi or LAN.</p><label>Mobile address<input readOnly value={status.url} onFocus={(event) => event.currentTarget.select()} /></label><label>Full Studio address<input readOnly value={status.desktopUrl ?? status.url.replace('?mobile=1', '?desktop=1')} onFocus={(event) => event.currentTarget.select()} /></label><small>The full Studio view shares the interface and browser-local project state. Hardware generation and local-file access remain protected by the authenticated LAN services. Windows Firewall may ask to allow private-network access the first time.</small></div>
-      </div> : <div className="lan-dialog-error"><AlertCircle size={22} /><span><strong>Mobile server unavailable</strong><p>{status.error ?? 'Restart MiniMax Studio, then try again.'}</p></span></div>}
-      <footer><button className="secondary-button" disabled={rotating || !status.running} title="Invalidate previously scanned mobile links" onClick={async () => { if (!window.confirm('Rotate the mobile access link? Previously scanned links will stop working.')) return; setRotating(true); try { await onRotate() } finally { setRotating(false) } }}><RotateCcw size={14} />{rotating ? 'Rotating…' : 'Rotate access link'}</button><button className="primary-button" onClick={onClose}>Done</button></footer>
-    </section>
-  </div>
 }
 
 function GpuMeter({ value }: { value: GpuTelemetry | null }) {
@@ -2006,8 +1961,8 @@ function SettingsView({ settings, setSettings, info, models, h3Report, scanning,
       </div>
       <p className="settings-note">Prompts go directly to the local Ollama server. Embedding and cloud-backed models are excluded.</p>
     </section>
-    <section className="settings-section"><div className="settings-heading"><div><HardDrive size={19} /><span><strong>Model locations</strong><small>Files are indexed in place and are never moved or copied.</small></span></div><button className="secondary-button" onClick={onScan} disabled={scanning}>{scanning ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}{scanning ? 'Scanning…' : 'Rescan'}</button></div><div className="path-table">{pathRows.map((row) => { const count = models.filter((model) => model.kind === row.kind).length; return <div className="path-row" key={row.kind}><div className="path-kind"><Folder size={17} /><span><strong>{row.label}</strong><small>{row.note}</small></span></div><div className="path-input"><input value={settings.paths[row.kind]} onChange={(event) => setSettings({ ...settings, paths: { ...settings.paths, [row.kind]: event.target.value } })} />{!isWebBridge() && <button onClick={async () => { const path = await window.minimax.chooseDirectory(settings.paths[row.kind]); if (path) setSettings({ ...settings, paths: { ...settings.paths, [row.kind]: path } }) }} aria-label={`Browse for ${row.label}`}><FolderOpen size={17} /></button>}</div><span className="file-count">{count} files</span></div>})}</div></section>
-    <section className="settings-section"><div className="settings-heading"><div><FolderOpen size={19} /><span><strong>Output & clip tools</strong><small>Completed videos, extracted frames, and editor exports stay local.</small></span></div></div><div className="connection-row"><div className="field-group grow"><label htmlFor="output-path">Output directory</label><input id="output-path" value={settings.outputDirectory} onChange={(event) => setSettings({ ...settings, outputDirectory: event.target.value })} /></div>{!isWebBridge() && <button className="secondary-button test-button" onClick={async () => { const path = await window.minimax.chooseDirectory(settings.outputDirectory); if (path) setSettings({ ...settings, outputDirectory: path }) }}><FolderOpen size={16} />Browse</button>}</div><div className="connection-row clip-tool-path"><div className="field-group grow"><label htmlFor="ffmpeg-path">FFmpeg executable</label><input id="ffmpeg-path" value={settings.ffmpegPath} onChange={(event) => setSettings({ ...settings, ffmpegPath: event.target.value })} /></div></div><p className="settings-note">The clip editor uses FFmpeg for frame extraction, trim points, joining, and full-project export.</p></section>
+    <section className="settings-section"><div className="settings-heading"><div><HardDrive size={19} /><span><strong>Model locations</strong><small>Files are indexed in place and are never moved or copied.</small></span></div><button className="secondary-button" onClick={onScan} disabled={scanning}>{scanning ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}{scanning ? 'Scanning…' : 'Rescan'}</button></div><div className="path-table">{pathRows.map((row) => { const count = models.filter((model) => model.kind === row.kind).length; return <div className="path-row" key={row.kind}><div className="path-kind"><Folder size={17} /><span><strong>{row.label}</strong><small>{row.note}</small></span></div><div className="path-input"><input value={settings.paths[row.kind]} onChange={(event) => setSettings({ ...settings, paths: { ...settings.paths, [row.kind]: event.target.value } })} /></div><span className="file-count">{count} files</span></div>})}</div></section>
+    <section className="settings-section"><div className="settings-heading"><div><FolderOpen size={19} /><span><strong>Output & clip tools</strong><small>Completed videos, extracted frames, and editor exports stay local.</small></span></div></div><div className="connection-row"><div className="field-group grow"><label htmlFor="output-path">Output directory</label><input id="output-path" value={settings.outputDirectory} onChange={(event) => setSettings({ ...settings, outputDirectory: event.target.value })} /></div></div><div className="connection-row clip-tool-path"><div className="field-group grow"><label htmlFor="ffmpeg-path">FFmpeg executable</label><input id="ffmpeg-path" value={settings.ffmpegPath} onChange={(event) => setSettings({ ...settings, ffmpegPath: event.target.value })} /></div></div><p className="settings-note">The clip editor uses FFmpeg for frame extraction, trim points, joining, and full-project export.</p></section>
   </div>
 }
 
