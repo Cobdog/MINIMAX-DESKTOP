@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type Keyboard
 import QRCode from 'qrcode'
 import { createId } from './lib/createId'
 import { isPastRunningDeadline, isTerminalStatus, reduceJobPoll, type PollObservation, type PollReduction } from './lib/jobReducer'
+import { STORAGE_ERROR_EVENT } from './lib/libraryStorage'
 import {
   Activity,
   AlertCircle,
@@ -514,6 +515,14 @@ function App() {
     const refresh = () => setCharacterProjects(loadCharacterProjects())
     window.addEventListener(CHARACTER_LIBRARY_EVENT, refresh)
     return () => window.removeEventListener(CHARACTER_LIBRARY_EVENT, refresh)
+  }, [])
+  useEffect(() => {
+    const onStorageError = (event: Event) => {
+      const detail = (event as CustomEvent<{ key: string; message: string }>).detail
+      setNotice({ tone: 'error', text: `A library could not be saved (${detail.key}): ${detail.message}` })
+    }
+    window.addEventListener(STORAGE_ERROR_EVENT, onStorageError)
+    return () => window.removeEventListener(STORAGE_ERROR_EVENT, onStorageError)
   }, [])
   useEffect(() => {
     let disposed = false

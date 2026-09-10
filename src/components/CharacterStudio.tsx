@@ -67,11 +67,13 @@ export function CharacterStudio({ settings, info, connected, ollamaAvailable, au
   useEffect(() => { const refresh = () => setHairStyles(loadHairStyleProjects()); window.addEventListener(HAIR_LIBRARY_EVENT, refresh); return () => window.removeEventListener(HAIR_LIBRARY_EVENT, refresh) }, [])
 
   const commit = (next: CharacterProject[]) => { setProjects(next); saveCharacterProjects(next) }
-  const patchProject = (id: string, change: Partial<CharacterProject>) => setProjects((current) => {
-    const next = current.map((project) => project.id === id ? { ...project, ...change, updatedAt: Date.now() } : project)
-    saveCharacterProjects(next)
-    return next
-  })
+  // Persists from the on-disk library (not the state closure) so changes made
+  // by other components are not clobbered — and keeps side effects out of the
+  // setState updater, where a quota failure would crash the render.
+  const patchProject = (id: string, change: Partial<CharacterProject>) => {
+    const next = loadCharacterProjects().map((project) => project.id === id ? { ...project, ...change, updatedAt: Date.now() } : project)
+    commit(next)
+  }
   const patch = (change: Partial<CharacterProject>) => commit(projects.map((project) => project.id === active.id ? { ...project, ...change, updatedAt: Date.now() } : project))
   const add = () => {
     const project = newCharacterProject(projects.length + 1)
@@ -163,10 +165,9 @@ export function CharacterStudio({ settings, info, connected, ollamaAvailable, au
         if (entry?.status?.status_str === 'error') throw new Error('Master-reference generation failed. Check the ComfyUI log.')
         const image = Object.values(entry?.outputs ?? {}).flatMap((output) => output.images ?? [])[0]
         if (image) {
-          const preview = await window.minimax.getOutputImage(masterJob.url, image)
           const saved = await window.minimax.saveComfyOutputImage(masterJob.url, image, settings.outputDirectory)
           if (!disposed) {
-            const file = { ...saved, preview, kind: 'image' as const }
+            const file = { ...saved, preview: await window.minimax.mediaUrl(saved.path), kind: 'image' as const }
             setCandidate({ characterId: masterJob.characterId, target: masterJob.target, file })
             setMasterMessage('Reference ready for approval.'); setMasterJob(null); setMasterBusy(false); setMasterError(false)
           }
@@ -195,7 +196,7 @@ export function CharacterStudio({ settings, info, connected, ollamaAvailable, au
           if (image) completed.push({ batchJob, image })
         }
         if (completed.length === batchJobs.length) {
-          const ready = await Promise.all(completed.map(async ({ batchJob, image }) => { const preview = await window.minimax.getOutputImage(batchJob.url, image); const saved = await window.minimax.saveComfyOutputImage(batchJob.url, image, settings.outputDirectory); return { ...saved, preview, kind: 'image' as const } }))
+          const ready = await Promise.all(completed.map(async ({ batchJob, image }) => { const saved = await window.minimax.saveComfyOutputImage(batchJob.url, image, settings.outputDirectory); return { ...saved, preview: await window.minimax.mediaUrl(saved.path), kind: 'image' as const } }))
           if (!disposed) { setIdentityCandidates(ready); setSelectedCandidatePaths(ready.map((file) => file.path)); setBatchJobs([]); setMasterBusy(false); setMasterMessage(`${ready.length} identity candidates ready. Approve one or more.`) }; return
         }
         if (!disposed) setMasterMessage(`Rendering identity batch… ${completed.length} of ${batchJobs.length} ready`)

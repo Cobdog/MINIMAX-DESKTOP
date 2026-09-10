@@ -1,5 +1,6 @@
 import type { HairStyleProject, MediaFile } from '../types'
 import { createId } from './createId'
+import { persistToLocalStorage } from './libraryStorage'
 
 const KEY = 'minimax.hair-style-projects'
 export const HAIR_LIBRARY_EVENT = 'minimax-hair-library-changed'
@@ -17,7 +18,7 @@ export function loadHairStyleProjects(): HairStyleProject[] {
 }
 
 export function saveHairStyleProjects(projects: HairStyleProject[]) {
-  localStorage.setItem(KEY, JSON.stringify(projects))
+  if (!persistToLocalStorage(KEY, projects)) return
   window.dispatchEvent(new CustomEvent(HAIR_LIBRARY_EVENT))
 }
 

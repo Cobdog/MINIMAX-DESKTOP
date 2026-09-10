@@ -104,7 +104,7 @@ export function LocationStudio({ settings, info, connected, ollamaAvailable, aut
         const entry = history[job.id] as { status?: { status_str?: string }; outputs?: Record<string, { images?: Array<{ filename: string; subfolder?: string; type?: string }> }> } | undefined
         if (entry?.status?.status_str === 'error') throw new Error('Location-reference generation failed. Check the ComfyUI log.')
         const image = Object.values(entry?.outputs ?? {}).flatMap((output) => output.images ?? [])[0]
-        if (image) { const preview = await window.minimax.getOutputImage(job.url, image); const saved = await window.minimax.saveComfyOutputImage(job.url, image, settings.outputDirectory); if (!disposed) { setCandidate({ locationId: job.locationId, file: { ...saved, preview, kind: 'image' } }); setBusy(false); setJob(null); setError(false); setMessage('Location reference ready for approval.') }; return }
+        if (image) { const saved = await window.minimax.saveComfyOutputImage(job.url, image, settings.outputDirectory); const preview = await window.minimax.mediaUrl(saved.path); if (!disposed) { setCandidate({ locationId: job.locationId, file: { ...saved, preview, kind: 'image' } }); setBusy(false); setJob(null); setError(false); setMessage('Location reference ready for approval.') }; return }
       } catch (reason) { if (!disposed) { setMessage(reason instanceof Error ? reason.message : String(reason)); setError(true); setBusy(false); setJob(null) }; return }
       if (!disposed) timer = setTimeout(poll, 2000)
     }

@@ -214,4 +214,49 @@ const baseJob = { id: 'j1', promptId: 'p1', mode: 'text', prompt: 'test', create
   assert.ok(!isPastRunningDeadline({ ...old, status: 'completed' }, Date.now()))
   assert.ok(isTerminalStatus('cancelled') && !isTerminalStatus('queued'))
 }
-console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, and job poll reduction')
+
+// Library persistence must survive localStorage quota exhaustion (P0-2):
+// first retry scrubs inline data-URL previews; total failure reports an event
+// instead of throwing inside a React render.
+{
+  const events = []
+  let quotaFailures = 0
+  const storage = {
+    store: new Map(),
+    setItem(key, value) { if (quotaFailures-- > 0) throw new Error('The quota has been exceeded'); this.store.set(key, value) },
+    getItem(key) { return this.store.get(key) ?? null },
+  }
+  const context = {
+    exports: {},
+    require,
+    URLSearchParams,
+    localStorage: storage,
+    CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init?.detail } },
+    window: { dispatchEvent: (event) => events.push(event) },
+  }
+  const code = ts.transpileModule(fs.readFileSync('src/lib/libraryStorage.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
+  vm.runInNewContext(code, context)
+  const { persistToLocalStorage, STORAGE_ERROR_EVENT } = context.exports
+
+  quotaFailures = 0
+  assert.equal(persistToLocalStorage('k1', { a: 1 }), true)
+  assert.equal(storage.getItem('k1'), '{"a":1}')
+  assert.equal(events.length, 0)
+
+  quotaFailures = 1
+  const mediaUrlFile = { path: 'x.png', preview: 'minimax-media://selected?path=x.png' }
+  const dataUrlFile = { path: 'y.png', preview: 'data:image/png;base64,AAAA' }
+  assert.equal(persistToLocalStorage('k2', [mediaUrlFile, dataUrlFile]), true)
+  const stored = JSON.parse(storage.getItem('k2'))
+  assert.equal(stored[0].preview, 'minimax-media://selected?path=x.png')
+  assert.equal(stored[1].preview, undefined)
+  assert.equal(stored[1].path, 'y.png')
+  assert.equal(events.length, 1)
+  assert.equal(events[0].type, STORAGE_ERROR_EVENT)
+
+  quotaFailures = 5
+  assert.equal(persistToLocalStorage('k3', { b: 2 }), false)
+  assert.equal(events.length, 2)
+  assert.equal(events[1].detail.key, 'k3')
+}
+console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, and quota-safe library persistence')

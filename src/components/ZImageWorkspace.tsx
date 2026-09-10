@@ -99,8 +99,8 @@ export function ZImageWorkspace({
         if (entry?.status?.status_str === 'error') throw new Error('Z-Image failed. Check the selected components and ComfyUI log.')
         const image = Object.values(entry?.outputs ?? {}).flatMap((output) => output.images ?? [])[0]
         if (image) {
-          const preview = await window.minimax.getOutputImage(job.url, image)
           const saved = await window.minimax.saveComfyOutputImage(job.url, image, outputDirectory)
+          const preview = await window.minimax.mediaUrl(saved.path)
           if (!disposed) {
             setResult({ ...saved, preview, kind: 'image' })
             setJob(null); setBusy(false); setError(false); setMessage('Image complete and ready to use.')

@@ -1,5 +1,6 @@
 import type { CharacterProject, MediaFile } from '../types'
 import { createId } from './createId'
+import { persistToLocalStorage } from './libraryStorage'
 
 const KEY = 'minimax.character-projects'
 export const CHARACTER_LIBRARY_EVENT = 'minimax-character-library-changed'
@@ -27,7 +28,7 @@ export function loadCharacterProjects(): CharacterProject[] {
 }
 
 export function saveCharacterProjects(projects: CharacterProject[]) {
-  localStorage.setItem(KEY, JSON.stringify(projects))
+  if (!persistToLocalStorage(KEY, projects)) return
   window.dispatchEvent(new CustomEvent(CHARACTER_LIBRARY_EVENT))
 }
 

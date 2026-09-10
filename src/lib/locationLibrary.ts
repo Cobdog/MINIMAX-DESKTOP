@@ -1,5 +1,6 @@
 import type { LocationProject, MediaFile } from '../types'
 import { createId } from './createId'
+import { persistToLocalStorage } from './libraryStorage'
 
 const KEY = 'minimax.location-projects'
 export const LOCATION_LIBRARY_EVENT = 'minimax-location-library-changed'
@@ -17,7 +18,7 @@ export function loadLocationProjects(): LocationProject[] {
 }
 
 export function saveLocationProjects(projects: LocationProject[]) {
-  localStorage.setItem(KEY, JSON.stringify(projects))
+  if (!persistToLocalStorage(KEY, projects)) return
   window.dispatchEvent(new CustomEvent(LOCATION_LIBRARY_EVENT))
 }
 

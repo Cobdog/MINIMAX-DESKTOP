@@ -1,5 +1,6 @@
 import type { AccessoryProject, MediaFile } from '../types'
 import { createId } from './createId'
+import { persistToLocalStorage } from './libraryStorage'
 
 const KEY = 'minimax.accessory-projects'
 const MIGRATION_KEY = 'minimax.accessories-migrated-from-wardrobe-v1'
@@ -18,13 +19,13 @@ export function loadAccessoryProjects(): AccessoryProject[] {
     const wardrobes = JSON.parse(localStorage.getItem('minimax.wardrobe-projects') ?? '[]') as Array<{ accessories?: string[]; visualStyle?: string }>
     const migrated = wardrobes.flatMap((wardrobe) => (wardrobe.accessories ?? []).map((description) => ({ description, visualStyle: wardrobe.visualStyle }))).map(({ description, visualStyle }, index) => ({ ...newAccessoryProject(projects.length + index + 1), name: description.slice(0, 48) || `Accessory ${projects.length + index + 1}`, description, visualStyle: visualStyle || 'cinematic product photography' }))
     const next = [...projects, ...migrated]
-    localStorage.setItem(KEY, JSON.stringify(next)); localStorage.setItem(MIGRATION_KEY, '1')
+    if (persistToLocalStorage(KEY, next)) localStorage.setItem(MIGRATION_KEY, '1')
     return next
   } catch { return [] }
 }
 
 export function saveAccessoryProjects(projects: AccessoryProject[]) {
-  localStorage.setItem(KEY, JSON.stringify(projects))
+  if (!persistToLocalStorage(KEY, projects)) return
   window.dispatchEvent(new CustomEvent(ACCESSORY_LIBRARY_EVENT))
 }
 
