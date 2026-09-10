@@ -37,9 +37,16 @@ studio.startLanServer().then(() => {
     console.error(`MiniMax Studio could not start: ${status.error ?? 'unknown error'}`)
     process.exit(1)
   }
+  const scheme = status.secure ? 'https' : 'http'
   console.log(`MiniMax Studio is running.`)
-  console.log(`  Open:       http://127.0.0.1:${status.port}`)
-  console.log(`  On the LAN: http://${studio.lanAddress()}:${status.port}`)
+  console.log(`  Open:       ${scheme}://127.0.0.1:${status.port}`)
+  console.log(`  On the LAN: ${scheme}://${studio.lanAddress()}:${status.port}`)
   console.log(`  Config:     ${home}`)
+  if (status.secure && status.certificateFingerprint) {
+    console.log(`  TLS:        self-signed (first visit shows a warning — verify this SHA-256 fingerprint, then trust it):`)
+    console.log(`              ${status.certificateFingerprint}`)
+  } else {
+    console.log(`  TLS:        plain HTTP (PWA install and token mode are safer over HTTPS; install openssl or drop --no-https)`)
+  }
   console.log(`  Auth:       ${process.argv.includes('--token') || /^(1|true|yes)$/i.test(process.env.MINIMAX_LAN_TOKEN ?? '') ? 'token required (passed as ?token= or x-minimax-token)' : 'open on the LAN (pass --token to require a token)'}`)
 })

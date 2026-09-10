@@ -8,6 +8,9 @@ const path = require('node:path')
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-smoke-'))
 const port = String(4190 + Math.floor(Math.random() * 100))
+// Accept the first-run self-signed certificate so the smoke exercises the
+// production TLS path; also pin the expected scheme through the run.
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 const child = spawn(process.execPath, ['dist-server/server/index.js'], {
   env: { ...process.env, MINIMAX_STUDIO_HOME: home, MINIMAX_LAN_PORT: port },
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -26,7 +29,7 @@ const timeout = setTimeout(() => fail('server did not become ready in 15 s'), 15
 async function waitFor(pathname) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     try {
-      const response = await fetch(`http://127.0.0.1:${port}${pathname}`)
+      const response = await fetch(`https://127.0.0.1:${port}${pathname}`)
       if (response.ok) return response
     } catch { /* not up yet */ }
     await new Promise((resolve) => setTimeout(resolve, 300))
@@ -37,7 +40,7 @@ async function waitFor(pathname) {
 async function main() {
   await waitFor('/api/lan/settings')
   clearTimeout(timeout)
-  const base = `http://127.0.0.1:${port}`
+  const base = `https://127.0.0.1:${port}`
 
   const index = await fetch(`${base}/`)
   const html = await index.text()
@@ -69,7 +72,7 @@ async function main() {
   if (subfolder.status !== 400) fail(`media proxy subfolder traversal not rejected (${subfolder.status})`)
 
   child.kill()
-  console.log('PASS: standalone server boots, serves the SPA, and rejects SSRF / concat-injection / traversal probes; CSP present; no path leaks')
+  console.log('PASS: standalone TLS server boots, serves the SPA, and rejects SSRF / concat-injection / traversal probes; CSP present; no path leaks')
 }
 
 void main()

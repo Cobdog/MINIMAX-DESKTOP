@@ -244,6 +244,8 @@ export type LanStatus = {
   desktopUrl?: string
   port?: number
   error?: string
+  secure?: boolean
+  certificateFingerprint?: string
 }
 
 export type GpuTelemetry = {

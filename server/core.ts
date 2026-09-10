@@ -13,8 +13,9 @@ import { createReadStream, existsSync } from 'node:fs'
 import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
-import { spawn } from 'node:child_process'
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { execFile, spawn } from 'node:child_process'
+import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { createServer as createHttpsServer } from 'node:https'
 import { networkInterfaces, tmpdir } from 'node:os'
 import { Readable } from 'node:stream'
 import WebSocket from 'ws'
@@ -238,6 +239,44 @@ async function localMediaResponse(filePath: string, request: Request) {
   if (request.method === 'HEAD') return new Response(null, { status, headers })
   const stream = createReadStream(filePath, { start, end })
   return new Response(Readable.toWeb(stream) as ReadableStream, { status, headers })
+}
+
+/** Generates a self-signed certificate with openssl on first run and returns
+ *  it with a SHA-256 fingerprint the user can verify against the console or
+ *  a paired device. Returns null when openssl is unavailable (HTTP fall-
+ *  back — the token-free default posture tolerates it; PWA install does not).
+ */
+async function ensureSelfSignedCertificate(directory: string, lanIp: string): Promise<{ certPem: string; keyPem: string; fingerprint: string } | null> {
+  const certPath = join(directory, 'self-signed-cert.pem')
+  const keyPath = join(directory, 'self-signed-key.pem')
+  const fingerprintPath = join(directory, 'self-signed-fingerprint.txt')
+  try {
+    const existing = await Promise.all([readFile(certPath, 'utf8'), readFile(keyPath, 'utf8'), readFile(fingerprintPath, 'utf8')])
+    if (existing[0] && existing[1] && existing[2]) return { certPem: existing[0], keyPem: existing[1], fingerprint: existing[2].trim() }
+  } catch { /* Generate on first run. */ }
+  try {
+    await mkdir(directory, { recursive: true })
+    await new Promise<void>((resolve, reject) => {
+      execFile('openssl', [
+        'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+        '-keyout', keyPath, '-out', certPath, '-days', '3650',
+        '-subj', '/CN=MiniMax Studio',
+        '-addext', `subjectAltName=IP:${lanIp},IP:127.0.0.1,DNS:localhost`,
+      ], { windowsHide: true }, (error) => { if (error) reject(error); else resolve() })
+    })
+    const [certPem, keyPem] = await Promise.all([readFile(certPath, 'utf8'), readFile(keyPath, 'utf8')])
+    const fingerprint = await new Promise<string>((resolve, reject) => {
+      execFile('openssl', ['x509', '-in', certPath, '-noout', '-fingerprint', '-sha256'], { windowsHide: true }, (error, stdout) => {
+        if (error) reject(error)
+        else resolve(stdout.trim().replace(/^.*=/, '').replace(/:/g, '').toLowerCase())
+      })
+    })
+    await writeFile(keyPath, keyPem, { encoding: 'utf8', mode: 0o600 })
+    await writeFile(fingerprintPath, fingerprint, 'utf8')
+    return { certPem, keyPem, fingerprint }
+  } catch {
+    return null
+  }
 }
 
 export function createStudioServer(paths: StudioServerPaths) {
@@ -845,12 +884,21 @@ export function createStudioServer(paths: StudioServerPaths) {
     const configuredPort = Number(process.env.MINIMAX_LAN_PORT)
     const port = Number.isInteger(configuredPort) && configuredPort >= 1024 && configuredPort <= 65535 ? configuredPort : 4178
     lanToken = await loadLanToken()
+    const address = lanAddress()
+    // HTTPS by default (PWA install, and no cleartext tokens on hostile LANs);
+    // --no-https / MINIMAX_NO_HTTPS=1 falls back to plain HTTP, as does a
+    // missing openssl.
+    const httpsPreferred = !process.argv.includes('--no-https') && !/^(1|true|yes)$/i.test(process.env.MINIMAX_NO_HTTPS ?? '')
+    const certificate = httpsPreferred ? await ensureSelfSignedCertificate(dirname(paths.lanTokenFile), address) : null
     return new Promise<void>((resolvePromise) => {
-      lanServer = createServer((request, response) => void handleLanRequest(request, response))
-      lanServer.once('error', (error) => { lanStatus = { running: false, port, error: error.message }; resolvePromise() })
+      const handler = (request: IncomingMessage, response: ServerResponse) => void handleLanRequest(request, response)
+      lanServer = certificate
+        ? createHttpsServer({ cert: certificate.certPem, key: certificate.keyPem }, handler)
+        : createHttpServer(handler)
+      lanServer.once('error', (error) => { lanStatus = { running: false, port, error: error.message, secure: false }; resolvePromise() })
       lanServer.listen(port, '0.0.0.0', () => {
-        const origin = `http://${lanAddress()}:${port}`
-        lanStatus = { running: true, port, url: `${origin}/?mobile=1&token=${lanToken}`, desktopUrl: `${origin}/?desktop=1&token=${lanToken}` }
+        const origin = `${certificate ? 'https' : 'http'}://${address}:${port}`
+        lanStatus = { running: true, port, secure: Boolean(certificate), certificateFingerprint: certificate?.fingerprint, url: `${origin}/?mobile=1`, desktopUrl: `${origin}/?desktop=1` }
         resolvePromise()
       })
     })
