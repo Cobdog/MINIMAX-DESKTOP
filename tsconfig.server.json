@@ -5,10 +5,10 @@
     "moduleResolution": "NodeNext",
     "strict": true,
     "skipLibCheck": true,
-    "outDir": "dist-electron",
+    "outDir": "dist-server",
     "rootDir": ".",
     "types": ["node"],
     "sourceMap": true
   },
-  "include": ["electron/**/*.ts", "server/**/*.ts", "src/types.ts"]
+  "include": ["server/**/*.ts", "src/types.ts"]
 }

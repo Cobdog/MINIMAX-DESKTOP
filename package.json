@@ -4,7 +4,7 @@
   "private": true,
   "description": "Local-first MiniMax H3 desktop studio powered by ComfyUI",
   "author": "James",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/electron/main.js",
   "scripts": {
     "dev": "concurrently -k \"pnpm dev:web\" \"pnpm dev:electron\"",
     "dev:web": "vite --host 127.0.0.1",
@@ -17,7 +17,10 @@
     "test": "node scripts/test-workflows.cjs",
     "smoke:lan": "node scripts/smoke-lan.cjs",
     "start": "node scripts/launch-electron.cjs",
-    "package:win": "pnpm build && electron-builder --win nsis --x64 --config.npmRebuild=false"
+    "package:win": "pnpm build && electron-builder --win nsis --x64 --config.npmRebuild=false",
+    "build:server": "tsc -p tsconfig.server.json",
+    "start:server": "pnpm build:server && node dist-server/server/index.js",
+    "dev:server": "pnpm build:web && pnpm start:server"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
