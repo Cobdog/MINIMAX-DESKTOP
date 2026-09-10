@@ -6,6 +6,7 @@ A local-first Windows desktop interface for MiniMax H3 generation through ComfyU
 
 - Text-to-video, image-to-video, and first/last-frame generation through the FL2VA model
 - A separate LTX‑2.5 T2V/I2V workspace with native synchronized audio, live ComfyUI previews, an official two-stage quality preset, and a distilled single-stage Turbo preset
+- A dedicated ACE‑Step 1.5 music workspace through ComfyUI, with XL SFT and XL Base checkpoint selection, lyric/instrumental modes, tempo/key/language controls, FLAC output, progress, cancellation, and in-app playback
 - A global Character Studio: Z-Image master references, MiniMax I2V turntable handoff, five-angle frame extraction, single-image or reference-set selection, and one-click Movie Creator imports
 - Mixed image, video, and audio references through the Ref2VA model
 - Non-destructive Ref2V video clipping: preview a longer source, set precise in/out points, and create or revise a focused 2–15 second reference MP4 without changing the original
@@ -61,11 +62,57 @@ The installer is written to `release\MiniMax-Studio-Setup-0.1.0.exe`.
 - ComfyUI connection health, GPU/VRAM display, job status, cancellation, history, and output playback
 - Responsive layouts for compact and large desktop windows
 
+## Screenshots
+
+The screenshots below are captured from the current desktop workflow. The complete capture sequence is kept in [`Readmescreenshots`](Readmescreenshots) for maintainers who need the full interaction history.
+
+### Reference prompt builder
+
+The reference mode keeps the generated reference instructions visible above the editable prompt, numbers each image, and preserves the existing video output preview.
+
+![Reference prompt builder with numbered references and generated prompt](Readmescreenshots/step-0001.png)
+
+### ACE-Step 1.5 music generation
+
+Music is a first-class sidebar workspace. It exposes the two requested XL checkpoints, lyric or instrumental generation, and the audio-specific controls without changing the video workspaces.
+
+![ACE-Step 1.5 Music workspace](Readmescreenshots/step-0005.png)
+
+### Reusable production libraries
+
+Character, wardrobe, and location studios keep reusable references and continuity details in separate libraries that can be brought into movie planning.
+
+![Character Studio reference production](Readmescreenshots/step-0010.png)
+
+![Wardrobe Studio](Readmescreenshots/step-0015.png)
+
+![Location Studio](Readmescreenshots/step-0020.png)
+
+![Movie Planner production bible](Readmescreenshots/step-0026.png)
+
+## ACE-Step 1.5 setup
+
+The Music workspace submits the native ComfyUI ACE-Step 1.5 graph; it does not call a separate hosted music service. Install the following files into the configured ComfyUI model folders, then use **Settings → Test connection** and rescan models:
+
+| ComfyUI folder | Required file |
+| --- | --- |
+| `models/diffusion_models` | `acestep_v1.5_xl_sft_bf16.safetensors` |
+| `models/diffusion_models` | `acestep_v1.5_xl_base_bf16.safetensors` |
+| `models/vae` | `ace_1.5_vae.safetensors` |
+| `models/text_encoders` | `qwen_0.6b_ace15.safetensors` |
+| `models/text_encoders` | `qwen_4b_ace15.safetensors` |
+
+The app detects either XL checkpoint independently, so an installation with only Base or only SFT remains usable. A current ComfyUI build must expose `TextEncodeAceStepAudio1.5`, `EmptyAceStep1.5LatentAudio`, `ModelSamplingAuraFlow`, `VAEDecodeAudio`, and `SaveAudioAdvanced` in its object info. The generated graph follows Comfy-Org's published ACE-Step 1.5 templates: 50 Euler/simple diffusion steps, AuraFlow shift 3, and the published per-checkpoint CFG defaults (SFT 7, Base 6).
+
+Reference downloads and node documentation are maintained by [Comfy-Org's ACE-Step 1.5 workflow templates](https://github.com/Comfy-Org/workflow_templates/tree/main/templates) and [the TextEncodeAceStepAudio1.5 embedded docs](https://github.com/Comfy-Org/embedded-docs/blob/main/comfyui_embedded_docs/docs/TextEncodeAceStepAudio1.5/en.md).
+
+Generated tracks are written by ComfyUI's audio saver to the configured output directory as FLAC and appear in the Music workspace and Queue with an audio player. Video Library cards intentionally remain video-only, so adding music does not change frame-bookmark or video editing behavior.
+
 ## Requirements
 
 - Node.js 20+
 - pnpm 10+
-- A current local ComfyUI instance with MiniMax H3 core nodes (and current LTX‑2.5 core nodes when using the LTX workspace)
+- A current local ComfyUI instance with MiniMax H3 core nodes (and current LTX‑2.5 or ACE-Step 1.5 core nodes when using those workspaces)
 - The MiniMax H3 model components already present on disk
 
 The default model root is `%USERPROFILE%\Documents\ComfyUI\models`, but every category can be changed in **Settings → Model locations**.
