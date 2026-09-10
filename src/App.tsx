@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import QRCode from 'qrcode'
 import { createId } from './lib/createId'
+import { isPastRunningDeadline, isTerminalStatus, reduceJobPoll, type PollObservation, type PollReduction } from './lib/jobReducer'
 import {
   Activity,
   AlertCircle,
@@ -572,6 +573,19 @@ function App() {
 
   useEffect(() => {
     if (!settings || !pendingKey || !status.connected) return
+    // Applies a reduction only while the job is still non-terminal, so a stale
+    // in-flight poll response can neither resurrect nor duplicate work.
+    const applyReduction = (jobId: string, reduction: PollReduction) => {
+      setJobs((current) => {
+        let changed = false
+        const next = current.map((item) => {
+          if (item.id !== jobId || isTerminalStatus(item.status) || reduction.job === item) return item
+          changed = true
+          return reduction.job
+        })
+        return changed ? next : current
+      })
+    }
     const timer = window.setInterval(() => {
       for (const job of jobsRef.current.filter((j) => j.status === 'queued' || j.status === 'running')) {
         const promptId = job.promptId
@@ -580,37 +594,58 @@ function App() {
           const entry = history[promptId] as { status?: { status_str?: string; completed?: boolean; messages?: unknown[] } } | undefined
           const mediaType = job.mediaType ?? 'video'
           const outputUrl = playableOutputUrl(extractOutputUrl(history, promptId, settings.comfyUrl, mediaType))
+          let observation: PollObservation
           if (entry?.status?.status_str === 'error') {
-            setJobs((current) => current.map((item) => item.id === job.id ? { ...item, status: 'failed', error: 'ComfyUI reported an execution error. The original may still be saved if upscaling failed.' } : item))
+            observation = { kind: 'executionError' }
           } else if (outputUrl && entry?.status?.completed) {
-            recordMovieOutput(job.movieLink, outputUrl)
             const localOutput = await window.minimax.findLatestOutput(settings.outputDirectory, job.createdAt, mediaType)
-            let extractionError: string | null = null
-            if (job.characterProjectId) {
-              recordCharacterTurntable(job.characterProjectId, localOutput ?? outputUrl)
-              if (localOutput) extractionError = await extractAutomatedReferenceSet('character', job.characterProjectId, localOutput, job.duration, settings)
-            } else if (job.locationProjectId) {
-              recordLocationWalkthrough(job.locationProjectId, localOutput ?? outputUrl)
-              if (localOutput) extractionError = await extractAutomatedReferenceSet('location', job.locationProjectId, localOutput, job.duration, settings)
-            }
-            if (extractionError) setNotice({ tone: 'error', text: `The video rendered, but its reference frames could not be extracted: ${extractionError}` })
-            setJobs((current) => current.map((item) => item.id === job.id ? { ...item, status: 'completed', progress: 100, outputUrl, localOutputPath: localOutput ?? undefined } : item))
+            observation = { kind: 'completed', outputUrl, localOutputPath: localOutput ?? undefined }
           } else if (entry?.status?.completed) {
             const localOutput = await window.minimax.findLatestOutput(settings.outputDirectory, job.createdAt, mediaType)
-            if (localOutput) recordMovieOutput(job.movieLink, localOutput)
-            if (localOutput) recordCharacterTurntable(job.characterProjectId, localOutput)
-            if (localOutput) recordLocationWalkthrough(job.locationProjectId, localOutput)
-            const extractionError = localOutput && job.characterProjectId ? await extractAutomatedReferenceSet('character', job.characterProjectId, localOutput, job.duration, settings) : localOutput && job.locationProjectId ? await extractAutomatedReferenceSet('location', job.locationProjectId, localOutput, job.duration, settings) : null
-            if (extractionError) setNotice({ tone: 'error', text: `The video rendered, but its reference frames could not be extracted: ${extractionError}` })
-            setJobs((current) => current.map((item) => item.id === job.id ? localOutput ? { ...item, status: 'completed', progress: 100, outputUrl: localOutput, localOutputPath: localOutput } : { ...item, status: 'running', progress: 98 } : item))
+            observation = localOutput ? { kind: 'completed', outputUrl: localOutput, localOutputPath: localOutput } : { kind: 'completedNoLocalOutput' }
           } else {
-            setJobs((current) => current.map((item) => item.id === job.id ? { ...item, status: 'running' } : item))
+            observation = { kind: 'incomplete' }
           }
+          const reduction = reduceJobPoll(job, observation, Date.now())
+          if (reduction.transitionedTo === 'completed') {
+            // Re-check live state: an earlier in-flight response may have
+            // already completed this job and fired these side effects.
+            const current = jobsRef.current.find((item) => item.id === job.id)
+            if (current && !isTerminalStatus(current.status)) {
+              const remote = reduction.job.outputUrl ?? ''
+              recordMovieOutput(job.movieLink, remote)
+              let extractionError: string | null = null
+              const local = reduction.job.localOutputPath
+              if (job.characterProjectId) {
+                recordCharacterTurntable(job.characterProjectId, local ?? remote)
+                if (local) extractionError = await extractAutomatedReferenceSet('character', job.characterProjectId, local, job.duration, settings)
+              } else if (job.locationProjectId) {
+                recordLocationWalkthrough(job.locationProjectId, local ?? remote)
+                if (local) extractionError = await extractAutomatedReferenceSet('location', job.locationProjectId, local, job.duration, settings)
+              }
+              if (extractionError) setNotice({ tone: 'error', text: `The video rendered, but its reference frames could not be extracted: ${extractionError}` })
+            }
+          }
+          applyReduction(job.id, reduction)
         }).catch(() => undefined)
       }
     }, 1000)
     return () => window.clearInterval(timer)
   }, [pendingKey, settings, status.connected])
+
+  // Deadline sweep, independent of ComfyUI connectivity: a job whose polls
+  // stopped resolving (server died mid-render) must still reach a terminal
+  // state instead of showing "running" forever.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      for (const job of jobsRef.current) {
+        if (!isPastRunningDeadline(job, Date.now())) continue
+        const reduction = reduceJobPoll(job, { kind: 'pollFailed' }, Date.now())
+        if (reduction.transitionedTo) setJobs((current) => current.map((item) => item.id === job.id && !isTerminalStatus(item.status) ? reduction.job : item))
+      }
+    }, 30_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const chooseMedia = async (kind: MediaKind, setter: (file: MediaFile) => void) => {
     const picked = await window.minimax.chooseMedia(kind)

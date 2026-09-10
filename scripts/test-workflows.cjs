@@ -154,4 +154,64 @@ const rtx = buildMiniMaxWorkflow({ mode: 'text', width: 608, height: 352, prompt
 }
 const url = extractOutputUrl({ job: { outputs: { 19: { images: [{ filename: 'original.mp4' }] }, 70: { images: [{ filename: 'upscaled.mp4' }] } } } }, 'job', 'http://localhost:8188')
 assert.ok(decodeURIComponent(url).includes('upscaled.mp4'))
-console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, and output selection')
+
+const { reduceJobPoll, isPastRunningDeadline, isTerminalStatus, NO_OUTPUT_POLL_CAP } = load('src/lib/jobReducer.ts')
+const baseJob = { id: 'j1', promptId: 'p1', mode: 'text', prompt: 'test', createdAt: Date.now() - 1000, status: 'running', progress: 40, width: 608, height: 352, duration: 5 }
+{
+  // Happy path: completed observation with a localized output file.
+  const done = reduceJobPoll(baseJob, { kind: 'completed', outputUrl: 'http://127.0.0.1:8188/view?filename=out.mp4', localOutputPath: 'C:/out/out.mp4' }, Date.now())
+  assert.equal(done.transitionedTo, 'completed')
+  assert.equal(done.job.status, 'completed')
+  assert.equal(done.job.progress, 100)
+  assert.equal(done.job.localOutputPath, 'C:/out/out.mp4')
+
+  // P1-5: a stale poll response must not resurrect a terminal job.
+  const stale = reduceJobPoll(done.job, { kind: 'incomplete' }, Date.now())
+  assert.equal(stale.transitionedTo, undefined)
+  assert.equal(stale.job.status, 'completed')
+  const staleError = reduceJobPoll(done.job, { kind: 'executionError' }, Date.now())
+  assert.equal(staleError.transitionedTo, undefined)
+  assert.equal(staleError.job.status, 'completed')
+
+  // P1-5 (side-effect gate): incomplete on a running job keeps identity for
+  // already-running jobs so idle ticks do not churn React state.
+  const running = { ...baseJob, status: 'running' }
+  const idle = reduceJobPoll(running, { kind: 'incomplete' }, Date.now())
+  assert.equal(idle.job, running)
+  const queued = reduceJobPoll({ ...baseJob, status: 'queued' }, { kind: 'incomplete' }, Date.now())
+  assert.equal(queued.job.status, 'running')
+
+  // pollFailed must not fail a live job — tolerance, not brittleness.
+  const tolerant = reduceJobPoll(baseJob, { kind: 'pollFailed' }, Date.now())
+  assert.equal(tolerant.transitionedTo, undefined)
+  assert.equal(tolerant.job.status, 'running')
+
+  // Execution errors surface with the original wording.
+  const errored = reduceJobPoll(baseJob, { kind: 'executionError' }, Date.now())
+  assert.equal(errored.transitionedTo, 'failed')
+  assert.ok(errored.job.error?.includes('execution error'))
+
+  // P1-6: completed-but-no-output spins at 98% for a bounded count, then fails.
+  let spinning = baseJob
+  for (let i = 1; i < NO_OUTPUT_POLL_CAP; i++) {
+    spinning = reduceJobPoll(spinning, { kind: 'completedNoLocalOutput' }, Date.now()).job
+    assert.equal(spinning.status, 'running')
+    assert.equal(spinning.progress, 98)
+    assert.equal(spinning.noOutputPolls, i)
+  }
+  const gaveUp = reduceJobPoll(spinning, { kind: 'completedNoLocalOutput' }, Date.now())
+  assert.equal(gaveUp.transitionedTo, 'failed')
+  assert.ok(gaveUp.job.error?.includes('output file never appeared'))
+
+  // P1-1: any observation past the running deadline fails the job instead of
+  // leaving it "running" forever against a dead server.
+  const old = { ...baseJob, createdAt: Date.now() - 61 * 60 * 1000 }
+  assert.ok(isPastRunningDeadline(old, Date.now()))
+  const timedOut = reduceJobPoll(old, { kind: 'pollFailed' }, Date.now())
+  assert.equal(timedOut.transitionedTo, 'failed')
+  assert.ok(timedOut.job.error?.includes('no completion'))
+  // Terminal jobs are exempt from the deadline.
+  assert.ok(!isPastRunningDeadline({ ...old, status: 'completed' }, Date.now()))
+  assert.ok(isTerminalStatus('cancelled') && !isTerminalStatus('queued'))
+}
+console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, and job poll reduction')

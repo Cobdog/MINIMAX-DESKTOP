@@ -259,6 +259,9 @@ export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancell
 export type GenerationJob = {
   id: string
   promptId?: string
+  /** Consecutive polls where ComfyUI history says completed but no output file
+   *  has been found yet; drives the give-up cap in lib/jobReducer. */
+  noOutputPolls?: number
   mode: GenerationMode
   prompt: string
   createdAt: number
