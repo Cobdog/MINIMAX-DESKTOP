@@ -185,6 +185,11 @@ function lanAddress() {
  *  directory. Attributing outputs by exact filename — instead of scanning for
  *  the newest file — is what keeps concurrent renders from being credited to
  *  the wrong job (and the wrong character library entry). */
+/** Content-Security-Policy for the SPA document. ws: is required because
+ *  live preview opens a WebSocket to the user-configured ComfyUI address,
+ *  which is not known ahead of time. */
+const CONTENT_SECURITY_POLICY = "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+
 function resolveOutputFile(outputDirectory: string, file: { filename: string; subfolder?: string; type?: string }) {
   if (!outputDirectory || !file.filename) return null
   if (file.type && file.type !== 'output') return null
@@ -555,6 +560,9 @@ export function createStudioServer(paths: StudioServerPaths) {
   async function proxyLanMedia(request: IncomingMessage, response: ServerResponse, search: URLSearchParams) {
     const filename = search.get('filename') ?? ''
     if (!filename || filename.includes('/') || filename.includes('\\')) return sendJson(response, 400, { error: 'Invalid output filename.' })
+    // Subfolders may nest (video/…) but must not traverse or escape.
+    const requestedSubfolder = search.get('subfolder') ?? ''
+    if (requestedSubfolder && (isAbsolute(requestedSubfolder) || requestedSubfolder.split(/[\\/]/).includes('..'))) return sendJson(response, 400, { error: 'Invalid output subfolder.' })
     const settings = await loadSettings()
     const query = new URLSearchParams({ filename, subfolder: search.get('subfolder') ?? '', type: search.get('type') ?? 'output' })
     const upstream = await fetch(`${cleanUrl(settings.comfyUrl)}/view?${query}`, { headers: typeof request.headers.range === 'string' ? { Range: request.headers.range } : undefined })
@@ -625,9 +633,12 @@ export function createStudioServer(paths: StudioServerPaths) {
             const ltxNativeMissing = ltxNativeRequiredNodes.filter((node) => !info[node])
             const ollama = await comfyFetch(settings.ollamaUrl, '/api/tags').catch(() => ({ models: [] })) as { models?: Array<{ name?: string; size?: number; remote_model?: string }> }
             const ollamaModels = (ollama.models ?? []).filter((item) => item.name && !item.remote_model && item.size !== 342).map((item) => item.name as string)
-            return sendJson(response, 200, { connected: true, latencyMs: Date.now() - started, models: groups.flat(), upscalers, ltxModel: latentUpscalers.find((name) => /ltx-2\.5.*spatial.*x2/i.test(name)) ?? '', ltxVae: vaes.find((name) => /ltx-2\.5.*video.*vae/i.test(name)) ?? '', ltxUpscaleReady: ltxUpscaleMissing.length === 0, ltxUpscaleMissing, ltxNativeReady: ltxNativeMissing.length === 0, ltxNativeMissing, ollamaModels, ollamaModel: settings.ollamaModel })
+            // Model paths are stripped: the renderer matches by name and kind, and
+            // full filesystem paths are a recon leak to anyone who can reach the API.
+            const models = groups.flat().map((model) => ({ name: model.name, kind: model.kind, bytes: model.bytes }))
+            return sendJson(response, 200, { connected: true, latencyMs: Date.now() - started, models, upscalers, ltxModel: latentUpscalers.find((name) => /ltx-2\.5.*spatial.*x2/i.test(name)) ?? '', ltxVae: vaes.find((name) => /ltx-2\.5.*video.*vae/i.test(name)) ?? '', ltxUpscaleReady: ltxUpscaleMissing.length === 0, ltxUpscaleMissing, ltxNativeReady: ltxNativeMissing.length === 0, ltxNativeMissing, ollamaModels, ollamaModel: settings.ollamaModel })
           } catch (error) {
-            return sendJson(response, 200, { connected: false, latencyMs: Date.now() - started, models: groups.flat(), error: error instanceof Error ? error.message : String(error) })
+            return sendJson(response, 200, { connected: false, latencyMs: Date.now() - started, models: groups.flat().map((model) => ({ name: model.name, kind: model.kind, bytes: model.bytes })), error: error instanceof Error ? error.message : String(error) })
           }
         }
         if (url.pathname === '/api/lan/characters' && request.method === 'GET') return sendJson(response, 200, { characters: mobileCharacterLibrary })
@@ -816,10 +827,10 @@ export function createStudioServer(paths: StudioServerPaths) {
       const filePath = normalize(join(distRoot, requested))
       if (!(filePath === distRoot || filePath.startsWith(distRoot + sep)) || !existsSync(filePath)) {
         const fallback = join(distRoot, 'index.html')
-        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff' }); return createReadStream(fallback).pipe(response)
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'content-security-policy': CONTENT_SECURITY_POLICY }); return createReadStream(fallback).pipe(response)
       }
       const mime: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' }
-      response.writeHead(200, { 'content-type': mime[extname(filePath).toLowerCase()] ?? 'application/octet-stream', 'cache-control': requested === 'index.html' ? 'no-cache' : 'public, max-age=86400', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff' })
+      response.writeHead(200, { 'content-type': mime[extname(filePath).toLowerCase()] ?? 'application/octet-stream', 'cache-control': requested === 'index.html' ? 'no-cache' : 'public, max-age=86400', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'content-security-policy': CONTENT_SECURITY_POLICY })
       createReadStream(filePath).pipe(response)
     } catch (error) {
       sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) })

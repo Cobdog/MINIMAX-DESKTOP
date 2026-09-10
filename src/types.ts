@@ -127,7 +127,8 @@ export type MovieProject = {
 
 export type ModelFile = {
   name: string
-  path: string
+  /** Server-side only; not sent to the renderer (the API strips it). */
+  path?: string
   kind: ModelKind
   bytes: number
 }

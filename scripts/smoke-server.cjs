@@ -42,9 +42,15 @@ async function main() {
   const index = await fetch(`${base}/`)
   const html = await index.text()
   if (index.status !== 200 || !html.includes('id="root"')) fail('SPA shell not served at /')
+  const csp = index.headers.get('content-security-policy') ?? ''
+  if (!csp.includes("default-src 'self'") || !csp.includes("script-src 'self'")) fail('Content-Security-Policy missing or too loose on the document')
 
   const settings = await (await fetch(`${base}/api/lan/settings`)).json()
   if (typeof settings.settings?.comfyUrl !== 'string') fail('settings route returned an unexpected shape')
+
+  const bootstrap = await (await fetch(`${base}/api/lan/bootstrap`)).json()
+  const leaksPath = (bootstrap.models ?? []).some((model) => typeof model.path === 'string' && model.path.includes('/'))
+  if (leaksPath) fail('bootstrap leaks full model filesystem paths')
 
   const evil = await fetch(`${base}/api/lan/comfy-status?url=${encodeURIComponent('http://example.com')}`)
   if (evil.status !== 400) fail(`SSRF guard did not reject an external URL (${evil.status})`)
@@ -59,8 +65,11 @@ async function main() {
   const traversal = await fetch(`${base}/api/lan/media?source=output&path=${encodeURIComponent('/etc/passwd')}`)
   if (traversal.status !== 403) fail(`output-directory containment failed (${traversal.status})`)
 
+  const subfolder = await fetch(`${base}/api/lan/media?filename=x.mp4&subfolder=${encodeURIComponent('../../etc')}`)
+  if (subfolder.status !== 400) fail(`media proxy subfolder traversal not rejected (${subfolder.status})`)
+
   child.kill()
-  console.log('PASS: standalone server boots, serves the SPA, and rejects SSRF / concat-injection / traversal probes')
+  console.log('PASS: standalone server boots, serves the SPA, and rejects SSRF / concat-injection / traversal probes; CSP present; no path leaks')
 }
 
 void main()
