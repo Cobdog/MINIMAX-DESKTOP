@@ -1,4 +1,4 @@
-export type View = 'create' | 'ltx25' | 'zimage' | 'characters' | 'hair' | 'wardrobes' | 'accessories' | 'locations' | 'movie' | 'queue' | 'library' | 'editor' | 'settings'
+export type View = 'create' | 'ltx25' | 'music' | 'zimage' | 'characters' | 'hair' | 'wardrobes' | 'accessories' | 'locations' | 'movie' | 'queue' | 'library' | 'editor' | 'settings'
 export type GenerationMode = 'text' | 'image' | 'frames' | 'reference'
 export type ModelKind = 'diffusion_models' | 'text_encoders' | 'vae' | 'loras' | 'vae_approx' | 'clip_vision'
 export type MediaKind = 'image' | 'video' | 'audio'
@@ -171,6 +171,29 @@ export type Ltx25GenerationOptions = {
   filenamePrefix: string
 }
 
+export type AceStepModelSelection = {
+  base: string
+  sft: string
+  textEncoderSmall: string
+  textEncoderLarge: string
+  vae: string
+}
+
+export type AceStepGenerationOptions = {
+  model: 'sft' | 'base'
+  tags: string
+  lyrics: string
+  instrumental: boolean
+  duration: number
+  bpm: number
+  timeSignature: string
+  language: string
+  keyScale: string
+  seed: number
+  generateAudioCodes: boolean
+  filenamePrefix: string
+}
+
 export type GenerationOptions = {
   mode: GenerationMode
   prompt: string
@@ -250,7 +273,8 @@ export type GenerationJob = {
   width: number
   height: number
   duration: number
-  provider?: 'minimax' | 'ltx25'
+  provider?: 'minimax' | 'ltx25' | 'acestep'
+  mediaType?: 'video' | 'audio'
   movieLink?: { projectId: string; sceneId: string; shotId: string }
   characterProjectId?: string
   locationProjectId?: string
@@ -278,10 +302,11 @@ export type DesktopApi = {
   fileDataUrl(filePath: string): Promise<string>
   mediaUrl(filePath: string): Promise<string>
   extractVideoFrame(source: string, position: number | 'last', outputDirectory: string, ffmpegPath: string): Promise<{ path: string; name: string }>
+  extractVideoFrames(source: string, positions: number[], outputDirectory: string, ffmpegPath: string): Promise<Array<{ path: string; name: string }>>
   trimVideo(source: string, start: number, end: number, outputDirectory: string, ffmpegPath: string): Promise<{ path: string; name: string }>
   joinVideos(clips: Array<Pick<ClipItem, 'source' | 'start' | 'end'>>, outputDirectory: string, ffmpegPath: string): Promise<{ path: string; url: string }>
   showOutput(path: string): Promise<void>
-  findLatestOutput(outputDirectory: string, since: number): Promise<string | null>
+  findLatestOutput(outputDirectory: string, since: number, kind?: 'video' | 'audio'): Promise<string | null>
   listOllamaModels(url: string): Promise<OllamaModel[]>
   generateWithOllama(url: string, model: string, prompt: string): Promise<string>
   generateStructuredWithOllama(url: string, model: string, prompt: string, schema: Record<string, unknown>): Promise<unknown>

@@ -66,11 +66,9 @@ export function buildMiniMaxWorkflow(
   }
   if (options.previewOverride) {
     prompt['7'] = {
-      class_type: options.previewOverride.nodeType ?? 'MiniMaxH3PreviewOverrideCS',
+      class_type: options.previewOverride.nodeType ?? 'MiniMaxH3PreviewOverride',
       inputs: {
         model: modelLink,
-        decode: 'latent2rgb (fast)',
-        preview_target: 'sampler (VHS)',
         max_resolution: 512,
         preview_frames: options.previewOverride.frames,
         preview_fps: options.previewOverride.fps,
@@ -78,11 +76,7 @@ export function buildMiniMaxWorkflow(
         // full MiniMax video VAE used by the final decode branch.
         vae_name: options.previewOverride.vaeName ?? models.previewVae,
         jpeg_quality: options.previewOverride.jpegQuality ?? 85,
-        webp_quality: 80,
-        every_n_steps: 1,
-        max_preview_overhead: 25,
         suppress_default_preview: true,
-        playback: 'source fps',
       },
     }
     modelLink = ['7', 0]
@@ -184,7 +178,7 @@ export function buildMiniMaxWorkflow(
   return prompt
 }
 
-export function extractOutputUrl(history: Record<string, unknown>, promptId: string, comfyUrl: string) {
+export function extractOutputUrl(history: Record<string, unknown>, promptId: string, comfyUrl: string, mediaType: 'video' | 'audio' = 'video') {
   const entry = history[promptId] as { outputs?: Record<string, Record<string, unknown>> } | undefined
   if (!entry?.outputs) return undefined
   const candidates: Array<{ filename: string; subfolder?: string; type?: string }> = []
@@ -207,7 +201,8 @@ export function extractOutputUrl(history: Record<string, unknown>, promptId: str
   if (entry.outputs['84']) visit(entry.outputs['84'])
   else if (entry.outputs['70']) visit(entry.outputs['70'])
   else visit(entry.outputs)
-  const file = candidates.find((candidate) => /\.(mp4|webm|mov|mkv|gif)$/i.test(candidate.filename)) ?? candidates[0]
+  const expected = mediaType === 'audio' ? /\.(flac|wav|mp3|ogg|m4a|aac|opus)$/i : /\.(mp4|webm|mov|mkv|gif)$/i
+  const file = candidates.find((candidate) => expected.test(candidate.filename)) ?? candidates[0]
   if (file) {
     const query = new URLSearchParams({ filename: file.filename, subfolder: file.subfolder ?? '', type: file.type ?? 'output' })
     const upstream = `${comfyUrl.replace(/\/+$/, '')}/view?${query.toString()}`

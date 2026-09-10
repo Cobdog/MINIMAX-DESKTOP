@@ -76,11 +76,13 @@ function readGpuTelemetry(): Promise<GpuTelemetry> {
 const modelKinds: ModelKind[] = ['diffusion_models', 'text_encoders', 'vae', 'loras', 'vae_approx', 'clip_vision']
 const modelExtensions = new Set(['.safetensors', '.pt', '.pth', '.gguf', '.onnx'])
 const mediaExtensions = new Set(['.mp4', '.webm', '.mov', '.mkv'])
+const audioExtensions = new Set(['.flac', '.wav', '.mp3', '.ogg', '.m4a', '.aac', '.opus'])
 const imageExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp'])
-const selectedMediaExtensions = new Set([...mediaExtensions, ...imageExtensions])
+const selectedMediaExtensions = new Set([...mediaExtensions, ...audioExtensions, ...imageExtensions])
 
 const mediaMimeTypes: Record<string, string> = {
   '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.mkv': 'video/x-matroska', '.webm': 'video/webm',
+  '.flac': 'audio/flac', '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.opus': 'audio/opus',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.bmp': 'image/bmp',
 }
 
@@ -137,7 +139,7 @@ function defaultSettings(): AppSettings {
     outputDirectory: join(app.getPath('documents'), 'ComfyUI', 'output'),
     ffmpegPath: existsSync('C:\\FFMPEG\\bin\\ffmpeg.exe') ? 'C:\\FFMPEG\\bin\\ffmpeg.exe' : 'ffmpeg',
     generationDefaults: {
-      resolution: '1344x768', duration: 5, turbo: 'off', steps: 20,
+      resolution: '1344x768', duration: 5, turbo: 'off', steps: 30,
       sampler: 'res_multistep', scheduler: 'simple', experimentalSampling: false,
       refImageSize: 'match', livePreview: true, sigmaShiftMode: 'model', shiftVideo: 12, shiftAudio: 3, loraStrength: 1, upscaleMode: 'off',
     },
@@ -179,7 +181,8 @@ async function loadSettings(): Promise<AppSettings> {
     const raw = JSON.parse(await readFile(settingsPath(), 'utf8')) as Partial<AppSettings>
     const defaults = defaultSettings()
     const generationDefaults = { ...defaults.generationDefaults, ...raw.generationDefaults }
-    generationDefaults.steps = Math.max(16, Math.min(30, Number(generationDefaults.steps) || 20))
+    generationDefaults.steps = Math.max(16, Math.min(30, Number(generationDefaults.steps) || 30))
+    if (raw.generationDefaults?.steps === 20) generationDefaults.steps = 30
     return { ...defaults, ...raw, paths: { ...defaults.paths, ...raw.paths }, generationDefaults }
   } catch {
     return defaultSettings()
@@ -217,7 +220,7 @@ async function scanDirectory(root: string, kind: ModelKind) {
   return results
 }
 
-async function findLatestMedia(root: string, since: number) {
+async function findLatestMedia(root: string, since: number, kind: 'video' | 'audio' = 'video') {
   if (!root || !existsSync(root)) return null
   const pending = [normalize(root)]
   let latest: { path: string; modified: number } | null = null
@@ -232,7 +235,7 @@ async function findLatestMedia(root: string, since: number) {
     for (const entry of entries) {
       const fullPath = join(current, entry.name)
       if (entry.isDirectory()) pending.push(fullPath)
-      else if (entry.isFile() && mediaExtensions.has(extname(entry.name).toLowerCase())) {
+      else if (entry.isFile() && (kind === 'audio' ? audioExtensions : mediaExtensions).has(extname(entry.name).toLowerCase())) {
         const info = await stat(fullPath)
         if (info.mtimeMs >= since - 5000 && (!latest || info.mtimeMs > latest.modified)) latest = { path: fullPath, modified: info.mtimeMs }
       }
@@ -671,8 +674,8 @@ app.whenReady().then(async () => {
     const history = await comfyFetch(url, `/history/${encodeURIComponent(promptId)}`) as Record<string, unknown>
     return { cancelled: false, state: promptId in history ? 'finished' as const : 'unknown' as const }
   })
-  ipcMain.handle('outputs:latest', async (_event, outputDirectory: string, since: number) => {
-    const path = await findLatestMedia(outputDirectory, since)
+  ipcMain.handle('outputs:latest', async (_event, outputDirectory: string, since: number, kind: 'video' | 'audio' = 'video') => {
+    const path = await findLatestMedia(outputDirectory, since, kind)
     return path ? `minimax-media://local?path=${encodeURIComponent(path)}` : null
   })
   ipcMain.handle('comfy:upload', async (_event, url: string, filePath: string, subfolder = 'minimax-desktop') => {
@@ -744,6 +747,27 @@ app.whenReady().then(async () => {
     const extracted = await stat(output).catch(() => null)
     if (!extracted?.size) throw new Error('FFmpeg completed without producing a frame. Check that the clip contains a video stream.')
     return { path: output, name }
+  })
+  ipcMain.handle('video:frames', async (_event, source: string, positions: number[], outputDirectory: string, ffmpegPath: string) => {
+    if (!Array.isArray(positions) || positions.length === 0 || positions.length > 100 || positions.some((position) => !Number.isFinite(position) || position < 0)) {
+      throw new Error('Choose between 1 and 100 valid frame bookmarks.')
+    }
+    const input = await resolveVideoSource(source)
+    const framesDirectory = join(outputDirectory, 'MiniMax Studio Frames')
+    await mkdir(framesDirectory, { recursive: true })
+    const batchId = Date.now()
+    const outputs: Array<{ path: string; name: string }> = []
+    for (let index = 0; index < positions.length; index += 1) {
+      const position = positions[index]
+      const label = `at_${position.toFixed(2).replace('.', '-')}`
+      const name = `frame_${label}_${batchId}_${index + 1}.png`
+      const output = join(framesDirectory, name)
+      await runFfmpeg(ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-ss', String(position), '-i', input, '-map', '0:v:0', '-frames:v', '1', '-update', '1', '-y', output])
+      const extracted = await stat(output).catch(() => null)
+      if (!extracted?.size) throw new Error(`FFmpeg did not produce the bookmarked frame at ${position.toFixed(3)} seconds.`)
+      outputs.push({ path: output, name })
+    }
+    return outputs
   })
   ipcMain.handle('video:trim', async (_event, source: string, start: number, end: number, outputDirectory: string, ffmpegPath: string) => {
     const input = await resolveVideoSource(source)

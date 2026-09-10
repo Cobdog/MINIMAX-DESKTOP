@@ -1,7 +1,15 @@
 export const noDialogueDirection = 'Audio direction: no spoken dialogue, narration, voice-over, singing, lip-sync, subtitles, captions, or text overlays. Use only natural ambient sound effects and room tone when audio is appropriate.'
 
+export const naturalMovementDirection = 'Motion direction: when living subjects are present, use subtle natural micro-movements such as gentle breathing, occasional blinking, small eye movements, and restrained posture adjustments. Preserve the requested pose, action, framing, identity, wardrobe, and scene continuity. Do not add gestures, camera movement, or new actions.'
+
 export function applyDialoguePolicy(prompt: string, noDialogue: boolean) {
   return noDialogue ? `${prompt.trim()} ${noDialogueDirection}`.trim() : prompt.trim()
+}
+
+export function applyNaturalMovementPolicy(prompt: string, naturalMovement: boolean) {
+  const trimmed = prompt.trim()
+  if (!naturalMovement || trimmed.includes(naturalMovementDirection)) return trimmed
+  return `${trimmed} ${naturalMovementDirection}`.trim()
 }
 
 export function buildCharacterDialogueRequest(input: {

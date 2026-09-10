@@ -17,7 +17,7 @@ const settings: AppSettings = {
   outputDirectory: 'C:\\Users\\James\\Documents\\ComfyUI\\output',
   ffmpegPath: 'C:\\FFMPEG\\bin\\ffmpeg.exe',
   generationDefaults: {
-    resolution: '1344x768', duration: 5, turbo: 'off', steps: 20,
+    resolution: '1344x768', duration: 5, turbo: 'off', steps: 30,
     sampler: 'res_multistep', scheduler: 'simple', experimentalSampling: false,
     refImageSize: 'match', livePreview: true, sigmaShiftMode: 'model', shiftVideo: 12, shiftAudio: 3, loraStrength: 1, upscaleMode: 'off',
   },
@@ -42,9 +42,15 @@ const examples: Array<[ModelFile['kind'], string, number]> = [
   ['diffusion_models', 'z_image_bf16.safetensors', 12_000_000_000],
   ['text_encoders', 'qwen_3_4b.safetensors', 8_000_000_000],
   ['vae', 'ae.safetensors', 350_000_000],
+  ['diffusion_models', 'acestep_v1.5_xl_sft_bf16.safetensors', 8_000_000_000],
+  ['diffusion_models', 'acestep_v1.5_xl_base_bf16.safetensors', 8_000_000_000],
+  ['text_encoders', 'qwen_0.6b_ace15.safetensors', 1_200_000_000],
+  ['text_encoders', 'qwen_4b_ace15.safetensors', 8_000_000_000],
+  ['vae', 'ace_1.5_vae.safetensors', 500_000_000],
 ]
 
 const ltxNodes = ['LTXVConditioning', 'LTXVEmptyLatentAudio', 'EmptyLTXVLatentVideo', 'LTXVDualCFGGuider', 'LTXVSeparateAVLatent', 'LTXVConcatAVLatent', 'LTXVLatentUpsampler', 'LTXVAudioVAEDecode', 'ManualSigmas', 'VAEEncodeTiled', 'VAEDecodeTiled', 'CLIPTextEncode', 'KSamplerSelect', 'SamplerCustomAdvanced', 'ImageFromBatch', 'RepeatImageBatch', 'ImageBatch']
+const aceNodes = ['DualCLIPLoader', 'TextEncodeAceStepAudio1.5', 'EmptyAceStep1.5LatentAudio', 'ConditioningZeroOut', 'ModelSamplingAuraFlow', 'KSampler', 'VAEDecodeAudio', 'SaveAudioAdvanced']
 
 export function installBrowserMock() {
   if (window.minimax) return
@@ -52,10 +58,11 @@ export function installBrowserMock() {
   const api: DesktopApi = {
     getObjectInfo: async () => Object.fromEntries([
       ...ltxNodes.map((name) => [name, { input: { required: {} } }]),
+      ...aceNodes.map((name) => [name, { input: { required: {} } }]),
       ['LatentUpscaleModelLoader', { input: { required: { model_name: ['COMBO', { options: ['ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors'] }] } } }],
-      ['UNETLoader', { input: { required: { unet_name: ['COMBO', { options: ['z_image_turbo_bf16.safetensors', 'z_image_bf16.safetensors'] }] } } }],
+      ['UNETLoader', { input: { required: { unet_name: ['COMBO', { options: ['z_image_turbo_bf16.safetensors', 'z_image_bf16.safetensors', 'acestep_v1.5_xl_sft_bf16.safetensors', 'acestep_v1.5_xl_base_bf16.safetensors'] }] } } }],
       ['CLIPLoader', { input: { required: { clip_name: ['COMBO', { options: ['qwen_3_4b.safetensors'] }] } } }],
-      ['VAELoader', { input: { required: { vae_name: ['COMBO', { options: ['ltx-2.5-video-vae-bf16.safetensors', 'ae.safetensors'] }] } } }],
+      ['VAELoader', { input: { required: { vae_name: ['COMBO', { options: ['ltx-2.5-video-vae-bf16.safetensors', 'ae.safetensors', 'ace_1.5_vae.safetensors'] }] } } }],
       ['UpscaleModelLoader', { input: { required: { model_name: ['COMBO', { options: ['4x-UltraSharp.pth'] }] } } }],
     ]),
     uploadImageData: async () => { throw new Error('Open the desktop app to upload images.') },
@@ -76,6 +83,7 @@ export function installBrowserMock() {
     fileDataUrl: async () => '',
     mediaUrl: async (path) => path,
     extractVideoFrame: async () => { throw new Error('Open the desktop app to extract video frames.') },
+    extractVideoFrames: async () => { throw new Error('Open the desktop app to extract video frames.') },
     trimVideo: async () => { throw new Error('Open the desktop app to trim reference videos.') },
     joinVideos: async () => { throw new Error('Open the desktop app to join videos.') },
     showOutput: async () => undefined,
