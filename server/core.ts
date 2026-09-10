@@ -12,7 +12,7 @@
 import { createReadStream, existsSync } from 'node:fs'
 import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { networkInterfaces, tmpdir } from 'node:os'
@@ -148,6 +148,15 @@ function lanAuthRequired() {
   return process.argv.includes('--token') || /^(1|true|yes)$/i.test(process.env.MINIMAX_LAN_TOKEN ?? '')
 }
 
+/** Constant-time token comparison; digests are compared so token length is
+ *  not leaked through comparison timing either. */
+function tokenMatches(candidate: string | undefined, expected: string) {
+  if (!candidate || !expected) return false
+  const candidateDigest = createHash('sha256').update(candidate).digest()
+  const expectedDigest = createHash('sha256').update(expected).digest()
+  return timingSafeEqual(candidateDigest, expectedDigest)
+}
+
 /** SSRF guard for user-supplied service URLs: only loopback or private-LAN
  *  origins may be probed; anything else is rejected. */
 function isLocalServiceUrl(candidate: string) {
@@ -279,7 +288,7 @@ export function createStudioServer(paths: StudioServerPaths) {
 
   async function saveLanToken(token: string) {
     await mkdir(dirname(paths.lanTokenFile), { recursive: true })
-    await writeFile(paths.lanTokenFile, token, 'utf8')
+    await writeFile(paths.lanTokenFile, token, { encoding: 'utf8', mode: 0o600 })
   }
 
   async function loadLanToken() {
@@ -593,8 +602,14 @@ export function createStudioServer(paths: StudioServerPaths) {
       const url = new URL(request.url ?? '/', 'http://minimax.local')
       if (url.pathname.startsWith('/api/lan/')) {
         if (lanAuthRequired()) {
-          const token = request.headers['x-minimax-token'] ?? url.searchParams.get('token')
-          if (token !== lanToken) return sendJson(response, 401, { error: 'This LAN link is no longer authorized. Open the current sharing panel again.' })
+          // Header token for fetch-able routes; the query parameter is only
+          // honored where the browser cannot set headers at all (EventSource,
+          // and <img>/<video> src on the media route). Constant-time compare.
+          const header = request.headers['x-minimax-token']
+          const headerToken = Array.isArray(header) ? header[0] : header
+          const queryTokenAllowed = url.pathname === '/api/lan/events' || url.pathname === '/api/lan/media'
+          const presented = headerToken ?? (queryTokenAllowed ? url.searchParams.get('token') ?? undefined : undefined)
+          if (!tokenMatches(presented, lanToken)) return sendJson(response, 401, { error: 'This link is no longer authorized. Request a fresh link with the current access token.' })
         }
         const settings = await loadSettings()
         if (url.pathname === '/api/lan/bootstrap' && request.method === 'GET') {

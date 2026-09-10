@@ -178,6 +178,10 @@ export function createWebApiClient(): DesktopApi {
     },
     async mediaUrl(filePath: string) {
       const query = new URLSearchParams(mediaQuery(filePath))
+      // Media URLs are consumed by <img>/<video> sources, which cannot set
+      // headers — the token rides in the query for those routes only.
+      const token = authToken()
+      if (token) query.set('token', token)
       return `/api/lan/media?${query}`
     },
     async extractVideoFrame(source: string, position: number | 'last') {
