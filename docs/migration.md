@@ -113,6 +113,12 @@ All 🆕 routes now exist in the LAN server (runtime-verified compile + contract
 
 Video-route `source` forms: `{ output: <contained path> }`, `{ comfy: { filename, subfolder?, type? } }` (downloaded to temp server-side), or a legacy `minimax-media://` URL. FFmpeg executable and output directory always come from server settings — never from the request. Auth: open by default; `--token` / `MINIMAX_LAN_TOKEN=1` restores token gating.
 
+## Phase B2 — bridge swap (2026-09-10)
+
+`src/lib/apiClient.ts` implements the full `DesktopApi` over the LAN API and installs as `window.minimax` when no preload bridge exists (port 5173 static dev keeps the mock). Media references: user picks upload at selection time and address as `comfy-input:<subfolder>/<name>`; output-derived files keep server-contained paths; both resolve through `/api/lan/media`. Server-authoritative settings mean URL/outputDirectory/ffmpegPath bridge arguments are accepted and ignored. Native-only affordances hide under `isWebBridge()` (folder-picker buttons in Settings; `chooseDirectory` returns null and paths are edited as text). Server additions: raw `history` passthrough on the history route, `POST /api/lan/upload-output` (output-contained file → ComfyUI input), `POST /api/lan/characters` (Cast library sync).
+
+**Known limitation (follow-up):** desktop live preview still opens a WebSocket directly to the configured ComfyUI URL — correct for workstation browsers, wrong for phones opening the full Studio (they should fall back to the `/api/lan/events` SSE bridge, as MobileApp already does). Graceful degradation today: preview reconnects silently; generation polling works regardless.
+
 ## Phases (mapped to Flux tasks)
 
 - **B1 — API extension** (`sc1mlke`): add the 🆕 routes to the LAN server while it still lives in `electron/main.ts`; every route input-validated (containment, numeric ffmpeg args, MIME allowlists) per the security audit. Route contract = the table above.

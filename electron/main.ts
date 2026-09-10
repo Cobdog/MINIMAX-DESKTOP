@@ -497,6 +497,26 @@ async function handleLanRequest(request: IncomingMessage, response: ServerRespon
         }
       }
       if (url.pathname === '/api/lan/characters' && request.method === 'GET') return sendJson(response, 200, { characters: mobileCharacterLibrary })
+      if (url.pathname === '/api/lan/characters' && request.method === 'POST') {
+        const body = await readJson(request, 36_000_000)
+        mobileCharacterLibrary = Array.isArray(body.characters) ? body.characters : []
+        return sendJson(response, 200, { synced: mobileCharacterLibrary.length })
+      }
+      if (url.pathname === '/api/lan/upload-output' && request.method === 'POST') {
+        const body = await readJson(request, 10_000)
+        const requested = typeof body.path === 'string' ? body.path : ''
+        const root = resolve(settings.outputDirectory)
+        const candidate = requested ? resolve(requested) : root
+        const containment = relative(root, candidate)
+        if (!requested || containment.startsWith('..') || isAbsolute(containment) || !existsSync(candidate)) return sendJson(response, 403, { error: 'The file is outside the configured output directory.' })
+        const bytes = await readFile(candidate)
+        const form = new FormData()
+        form.append('image', new Blob([bytes]), basename(candidate))
+        form.append('type', 'input')
+        form.append('subfolder', typeof body.subfolder === 'string' && body.subfolder ? body.subfolder : 'minimax-desktop')
+        form.append('overwrite', 'true')
+        return sendJson(response, 200, await comfyFetch(settings.comfyUrl, '/upload/image', { method: 'POST', body: form }))
+      }
       if (url.pathname === '/api/lan/upload' && request.method === 'POST') {
         const body = await readJson(request)
         const data = typeof body.data === 'string' ? body.data : ''
@@ -552,7 +572,7 @@ async function handleLanRequest(request: IncomingMessage, response: ServerRespon
         const history = await comfyFetch(settings.comfyUrl, `/history/${encodeURIComponent(promptId)}`) as Record<string, unknown>
         const output = historyOutput(history, promptId, url.searchParams.get('kind') === 'image' ? 'image' : 'video')
         const entry = history[promptId] as { status?: { status_str?: string } } | undefined
-        return sendJson(response, 200, { finished: Boolean(entry), error: entry?.status?.status_str === 'error' ? 'ComfyUI reported an execution error. Check the desktop console for the failed node.' : undefined, output })
+        return sendJson(response, 200, { finished: Boolean(entry), error: entry?.status?.status_str === 'error' ? 'ComfyUI reported an execution error. Check the desktop console for the failed node.' : undefined, output, history })
       }
       if (url.pathname === '/api/lan/settings' && request.method === 'GET') return sendJson(response, 200, { settings })
       if (url.pathname === '/api/lan/settings' && request.method === 'POST') {
