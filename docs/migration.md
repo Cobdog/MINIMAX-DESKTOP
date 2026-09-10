@@ -91,6 +91,28 @@ Status legend: ✅ exists (may need shape adaptation in `apiClient`) · ➕ exte
 3. **Dialog replacement** — every `chooseMedia`/`chooseDirectory` call site becomes an upload dropzone or a settings text field (paths are server-side config now; the Settings view gains a "server-side path" hint and a validation button instead of a folder picker).
 4. **MoviePlanner / libraries** — unchanged logic; their persisted `MediaFile`s must survive the path-semantics migration (localStorage data written by the Electron era is upgraded lazily: entries whose path doesn't resolve server-side get dropped with a notice, not silently — applying the P1-8 lesson).
 
+## Phase B1 — landed contract (2026-09-10)
+
+All 🆕 routes now exist in the LAN server (runtime-verified compile + contract; live smoke lands with B2/C when the server runs headless):
+
+| Route | Method | Contract |
+|---|---|---|
+| `/api/lan/settings` | GET | `{ settings }` |
+| `/api/lan/settings` | POST | `{ settings }` body (min. `comfyUrl`+`outputDirectory` strings); merged over defaults + clamped, atomic write; returns saved `{ settings }` |
+| `/api/lan/object-info` | GET | raw ComfyUI `/object_info` from the configured server |
+| `/api/lan/comfy-status?url=` | GET | SSRF-guarded (loopback/private-LAN only; defaults to configured URL) → `{ connected, latencyMs, stats?, error? }` |
+| `/api/lan/ollama/structured` | POST | `{ prompt ≤50k, schema }` → JSON-schema chat → `{ result }` or 502 with parse error |
+| `/api/lan/telemetry` | GET | `GpuTelemetry` (nvidia-smi, 1.8 s timeout) |
+| `/api/lan/outputs/resolve` | GET | `filename`/`subfolder`/`type` query → `{ path, url }` or 404; containment-checked |
+| `/api/lan/outputs/save-image` | POST | `{ filename, subfolder?, type? }` → saves into `outputDirectory/MiniMax Character References/` → `{ path, name }` |
+| `/api/lan/video/frame` | POST | `{ source, position }` (`'last'` or seconds ≥0) → `{ path, name, url }` |
+| `/api/lan/video/frames` | POST | `{ source, positions[1..100] }` → `{ frames: [{path,name,url}] }` |
+| `/api/lan/video/trim` | POST | `{ source, start, end }` (2–15 s span) → `{ path, name, url }` |
+| `/api/lan/video/join` | POST | `{ clips[2..100] }` — start/end validated numeric ≥0 (concat-injection fix) → `{ path, name, url }` |
+| `/api/lan/media?source=output&path=` | GET | output-contained local file, Range/206 support |
+
+Video-route `source` forms: `{ output: <contained path> }`, `{ comfy: { filename, subfolder?, type? } }` (downloaded to temp server-side), or a legacy `minimax-media://` URL. FFmpeg executable and output directory always come from server settings — never from the request. Auth: open by default; `--token` / `MINIMAX_LAN_TOKEN=1` restores token gating.
+
 ## Phases (mapped to Flux tasks)
 
 - **B1 — API extension** (`sc1mlke`): add the 🆕 routes to the LAN server while it still lives in `electron/main.ts`; every route input-validated (containment, numeric ffmpeg args, MIME allowlists) per the security audit. Route contract = the table above.

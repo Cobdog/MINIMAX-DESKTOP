@@ -5,7 +5,7 @@ import { basename, dirname, extname, isAbsolute, join, normalize, relative, reso
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { networkInterfaces } from 'node:os'
+import { networkInterfaces, tmpdir } from 'node:os'
 import { Readable } from 'node:stream'
 import WebSocket from 'ws'
 
@@ -176,14 +176,17 @@ async function loadLanToken() {
   return created
 }
 
+function normalizeSettings(raw: Partial<AppSettings>): AppSettings {
+  const defaults = defaultSettings()
+  const generationDefaults = { ...defaults.generationDefaults, ...raw.generationDefaults }
+  generationDefaults.steps = Math.max(16, Math.min(30, Number(generationDefaults.steps) || 30))
+  if (raw.generationDefaults?.steps === 20) generationDefaults.steps = 30
+  return { ...defaults, ...raw, paths: { ...defaults.paths, ...raw.paths }, generationDefaults }
+}
+
 async function loadSettings(): Promise<AppSettings> {
   try {
-    const raw = JSON.parse(await readFile(settingsPath(), 'utf8')) as Partial<AppSettings>
-    const defaults = defaultSettings()
-    const generationDefaults = { ...defaults.generationDefaults, ...raw.generationDefaults }
-    generationDefaults.steps = Math.max(16, Math.min(30, Number(generationDefaults.steps) || 30))
-    if (raw.generationDefaults?.steps === 20) generationDefaults.steps = 30
-    return { ...defaults, ...raw, paths: { ...defaults.paths, ...raw.paths }, generationDefaults }
+    return normalizeSettings(JSON.parse(await readFile(settingsPath(), 'utf8')) as Partial<AppSettings>)
   } catch {
     return defaultSettings()
   }
@@ -243,6 +246,116 @@ function resolveOutputFile(outputDirectory: string, file: { filename: string; su
   const containment = relative(root, candidate)
   if (containment.startsWith('..') || isAbsolute(containment)) return null
   return existsSync(candidate) ? candidate : null
+}
+
+/** Default LAN posture (2026-09-10 decision): open, like ComfyUI itself.
+ *  Token gating stays available for hostile networks via --token or
+ *  MINIMAX_LAN_TOKEN=1. */
+function lanAuthRequired() {
+  return process.argv.includes('--token') || /^(1|true|yes)$/i.test(process.env.MINIMAX_LAN_TOKEN ?? '')
+}
+
+/** SSRF guard for user-supplied service URLs: only loopback or private-LAN
+ *  origins may be probed; anything else is rejected. */
+function isLocalServiceUrl(candidate: string) {
+  try {
+    const target = new URL(candidate)
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') return false
+    const host = target.hostname.toLowerCase()
+    if (host === 'localhost' || host === '::1' || host === '[::1]') return true
+    return /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host)
+  } catch { return false }
+}
+
+/** Resolves a video source for LAN API callers. Accepted forms: an explicit
+ *  { output: <contained path> } or { comfy: { filename, subfolder?, type? } }
+ *  descriptor, or a legacy minimax-media:// URL from the Electron era. The
+ *  result is always a local file path (ComfyUI inputs are downloaded to the
+ *  OS temp dir first). */
+async function resolveLanVideoSource(source: unknown): Promise<string> {
+  if (typeof source === 'string' && source.startsWith('minimax-media://')) {
+    const parsed = new URL(source)
+    if (parsed.hostname === 'local') return resolveLanVideoSource({ output: parsed.searchParams.get('path') ?? '' })
+    if (parsed.hostname === 'comfy') {
+      const upstream = parsed.searchParams.get('url')
+      const query = upstream ? new URL(upstream).searchParams : null
+      return resolveLanVideoSource({ comfy: query ? { filename: query.get('filename') ?? '', subfolder: query.get('subfolder') || undefined, type: query.get('type') || undefined } : undefined })
+    }
+    throw new Error('Unsupported media source.')
+  }
+  if (source && typeof source === 'object' && !Array.isArray(source)) {
+    const spec = source as { output?: unknown; comfy?: unknown }
+    if (typeof spec.output === 'string' && spec.output) {
+      const root = resolve((await loadSettings()).outputDirectory)
+      const candidate = resolve(spec.output)
+      const containment = relative(root, candidate)
+      if (containment.startsWith('..') || isAbsolute(containment) || !existsSync(candidate)) throw new Error('The requested output file is unavailable.')
+      return candidate
+    }
+    if (spec.comfy && typeof spec.comfy === 'object') {
+      const file = spec.comfy as { filename?: unknown; subfolder?: unknown; type?: unknown }
+      if (typeof file.filename !== 'string' || !file.filename || file.filename.includes('/') || file.filename.includes('\\')) throw new Error('A valid ComfyUI file reference is required.')
+      const settings = await loadSettings()
+      const subfolder = typeof file.subfolder === 'string' && file.subfolder && !file.subfolder.includes('..') ? file.subfolder : ''
+      const type = file.type === 'input' || file.type === 'temp' ? file.type : 'output'
+      const query = new URLSearchParams({ filename: file.filename, subfolder, type })
+      const upstream = await fetch(`${cleanUrl(settings.comfyUrl)}/view?${query}`)
+      if (!upstream.ok) throw new Error('The ComfyUI media file is unavailable.')
+      const target = join(tmpdir(), `minimax-source-${randomUUID()}${extname(file.filename)}`)
+      await writeFile(target, Buffer.from(await upstream.arrayBuffer()))
+      return target
+    }
+  }
+  throw new Error('A media source is required.')
+}
+
+/** HTTP (non-protocol) local file serving with Range support, for the LAN API. */
+async function serveLocalMediaHttp(request: IncomingMessage, response: ServerResponse, filePath: string) {
+  const details = await stat(filePath).catch(() => null)
+  if (!details?.isFile() || details.size === 0) return sendJson(response, 404, { error: 'The media file is unavailable.' })
+  const size = details.size
+  let start = 0
+  let end = size - 1
+  let status = 200
+  const range = typeof request.headers.range === 'string' ? request.headers.range : ''
+  if (range) {
+    const match = /^bytes=(\d*)-(\d*)$/i.exec(range.trim())
+    if (!match) { response.writeHead(416, { 'content-range': `bytes */${size}` }); return response.end() }
+    if (match[1]) start = Number(match[1])
+    if (match[2]) end = Number(match[2])
+    if (!match[1] && match[2]) { start = size - Math.min(size, Number(match[2])); end = size - 1 }
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start >= size || end < start) {
+      response.writeHead(416, { 'content-range': `bytes */${size}` }); return response.end()
+    }
+    end = Math.min(end, size - 1)
+    status = 206
+  }
+  const headers: Record<string, string> = {
+    'accept-ranges': 'bytes',
+    'content-length': String(end - start + 1),
+    'content-type': mediaMimeTypes[extname(filePath).toLowerCase()] ?? 'application/octet-stream',
+    'cache-control': 'private, max-age=3600',
+  }
+  if (status === 206) headers['content-range'] = `bytes ${start}-${end}/${size}`
+  response.writeHead(status, headers)
+  createReadStream(filePath, { start, end }).pipe(response)
+}
+
+/** Saves a ComfyUI-generated image into the output directory's character
+ *  reference folder (the web twin of the comfy:save-output-image bridge). */
+async function saveLanOutputImage(file: { filename: string; subfolder?: string; type?: string }) {
+  if (!file.filename || file.filename.includes('/') || file.filename.includes('\\')) throw new Error('A valid output file reference is required.')
+  const settings = await loadSettings()
+  const subfolder = file.subfolder && !file.subfolder.includes('..') ? file.subfolder : ''
+  const query = new URLSearchParams({ filename: file.filename, subfolder, type: file.type ?? 'output' })
+  const upstream = await fetch(`${cleanUrl(settings.comfyUrl)}/view?${query}`)
+  if (!upstream.ok) throw new Error('The generated image is unavailable from ComfyUI.')
+  const directory = join(settings.outputDirectory, 'MiniMax Character References')
+  await mkdir(directory, { recursive: true })
+  const extension = extname(file.filename) || '.png'
+  const target = join(directory, `character-${Date.now()}-${randomUUID().slice(0, 8)}${extension}`)
+  await writeFile(target, Buffer.from(await upstream.arrayBuffer()))
+  return { path: target, name: basename(target) }
 }
 
 function cleanUrl(url: string) {
@@ -360,8 +473,10 @@ async function handleLanRequest(request: IncomingMessage, response: ServerRespon
   try {
     const url = new URL(request.url ?? '/', 'http://minimax.local')
     if (url.pathname.startsWith('/api/lan/')) {
-      const token = request.headers['x-minimax-token'] ?? url.searchParams.get('token')
-      if (token !== lanToken) return sendJson(response, 401, { error: 'This LAN link is no longer authorized. Open the current sharing panel again.' })
+      if (lanAuthRequired()) {
+        const token = request.headers['x-minimax-token'] ?? url.searchParams.get('token')
+        if (token !== lanToken) return sendJson(response, 401, { error: 'This LAN link is no longer authorized. Open the current sharing panel again.' })
+      }
       const settings = await loadSettings()
       if (url.pathname === '/api/lan/bootstrap' && request.method === 'GET') {
         const groups = await Promise.all(modelKinds.map((kind) => scanDirectory(settings.paths[kind], kind)))
@@ -439,7 +554,163 @@ async function handleLanRequest(request: IncomingMessage, response: ServerRespon
         const entry = history[promptId] as { status?: { status_str?: string } } | undefined
         return sendJson(response, 200, { finished: Boolean(entry), error: entry?.status?.status_str === 'error' ? 'ComfyUI reported an execution error. Check the desktop console for the failed node.' : undefined, output })
       }
-      if (url.pathname === '/api/lan/media' && request.method === 'GET') return proxyLanMedia(request, response, url.searchParams)
+      if (url.pathname === '/api/lan/settings' && request.method === 'GET') return sendJson(response, 200, { settings })
+      if (url.pathname === '/api/lan/settings' && request.method === 'POST') {
+        const body = await readJson(request, 200_000)
+        const raw = body.settings && typeof body.settings === 'object' ? body.settings as Partial<AppSettings> : null
+        if (!raw || typeof raw.comfyUrl !== 'string' || typeof raw.outputDirectory !== 'string') return sendJson(response, 400, { error: 'A settings object with service URLs is required.' })
+        return sendJson(response, 200, { settings: await saveSettings(normalizeSettings(raw)) })
+      }
+      if (url.pathname === '/api/lan/object-info' && request.method === 'GET') {
+        return sendJson(response, 200, await comfyFetch(settings.comfyUrl, '/object_info'))
+      }
+      if (url.pathname === '/api/lan/comfy-status' && request.method === 'GET') {
+        const candidate = url.searchParams.get('url') ?? settings.comfyUrl
+        if (!isLocalServiceUrl(candidate)) return sendJson(response, 400, { error: 'Only local service addresses can be tested.' })
+        const started = Date.now()
+        try {
+          const stats = await comfyFetch(candidate, '/system_stats')
+          return sendJson(response, 200, { connected: true, latencyMs: Date.now() - started, stats })
+        } catch (error) {
+          return sendJson(response, 200, { connected: false, latencyMs: Date.now() - started, error: error instanceof Error ? error.message : String(error) })
+        }
+      }
+      if (url.pathname === '/api/lan/ollama/structured' && request.method === 'POST') {
+        const body = await readJson(request, 1_000_000)
+        const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
+        if (!prompt || prompt.length > 50_000) return sendJson(response, 400, { error: 'A structured prompt is required.' })
+        if (!body.schema || typeof body.schema !== 'object' || Array.isArray(body.schema)) return sendJson(response, 400, { error: 'A JSON schema is required.' })
+        const data = await comfyFetch(settings.ollamaUrl, '/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: settings.ollamaModel, messages: [{ role: 'user', content: prompt }], stream: false, think: false, format: body.schema, options: { temperature: 0.2, num_predict: 6000 } }),
+        }) as { message?: { content?: string }; error?: string }
+        const content = data.message?.content ? finalOllamaAnswer(data.message.content) : ''
+        if (!content) return sendJson(response, 502, { error: data.error || 'Ollama returned an empty response.' })
+        try { return sendJson(response, 200, { result: JSON.parse(content) }) } catch { return sendJson(response, 502, { error: 'Ollama returned a response that was not valid JSON.' }) }
+      }
+      if (url.pathname === '/api/lan/telemetry' && request.method === 'GET') return sendJson(response, 200, await readGpuTelemetry())
+      if (url.pathname === '/api/lan/outputs/resolve' && request.method === 'GET') {
+        const file = { filename: url.searchParams.get('filename') ?? '', subfolder: url.searchParams.get('subfolder') || undefined, type: url.searchParams.get('type') || undefined }
+        const path = resolveOutputFile(settings.outputDirectory, file)
+        if (!path) return sendJson(response, 404, { error: 'The output file was not found in the output directory.' })
+        return sendJson(response, 200, { path, url: `/api/lan/media?source=output&path=${encodeURIComponent(path)}` })
+      }
+      if (url.pathname === '/api/lan/outputs/save-image' && request.method === 'POST') {
+        const body = await readJson(request, 10_000)
+        const file = typeof body.filename === 'string' ? { filename: body.filename, subfolder: typeof body.subfolder === 'string' ? body.subfolder : undefined, type: typeof body.type === 'string' ? body.type : undefined } : null
+        if (!file?.filename) return sendJson(response, 400, { error: 'An output file reference is required.' })
+        try { return sendJson(response, 200, await saveLanOutputImage(file)) } catch (error) { return sendJson(response, 502, { error: error instanceof Error ? error.message : String(error) }) }
+      }
+      if (url.pathname === '/api/lan/video/frame' && request.method === 'POST') {
+        const body = await readJson(request, 200_000)
+        const position = body.position === 'last' ? 'last' as const : Number(body.position)
+        if (position !== 'last' && (!Number.isFinite(position) || position < 0)) return sendJson(response, 400, { error: 'A valid frame position is required.' })
+        try {
+          const input = await resolveLanVideoSource(body.source)
+          const framesDirectory = join(settings.outputDirectory, 'MiniMax Studio Frames')
+          await mkdir(framesDirectory, { recursive: true })
+          const label = position === 'last' ? 'last' : `at_${Math.max(0, position).toFixed(2).replace('.', '-')}`
+          const name = `frame_${label}_${Date.now()}.png`
+          const output = join(framesDirectory, name)
+          const seek = position === 'last' ? ['-sseof', '-0.15'] : ['-ss', String(Math.max(0, position))]
+          await runFfmpeg(settings.ffmpegPath, ['-hide_banner', '-loglevel', 'error', ...seek, '-i', input, '-map', '0:v:0', '-frames:v', '1', '-update', '1', '-y', output])
+          const extracted = await stat(output).catch(() => null)
+          if (!extracted?.size) return sendJson(response, 500, { error: 'FFmpeg completed without producing a frame. Check that the clip contains a video stream.' })
+          return sendJson(response, 200, { path: output, name, url: `/api/lan/media?source=output&path=${encodeURIComponent(output)}` })
+        } catch (error) { return sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) }) }
+      }
+      if (url.pathname === '/api/lan/video/frames' && request.method === 'POST') {
+        const body = await readJson(request, 200_000)
+        const positions = Array.isArray(body.positions) ? body.positions.map(Number) : []
+        if (positions.length === 0 || positions.length > 100 || positions.some((position) => !Number.isFinite(position) || position < 0)) {
+          return sendJson(response, 400, { error: 'Choose between 1 and 100 valid frame bookmarks.' })
+        }
+        try {
+          const input = await resolveLanVideoSource(body.source)
+          const framesDirectory = join(settings.outputDirectory, 'MiniMax Studio Frames')
+          await mkdir(framesDirectory, { recursive: true })
+          const batchId = Date.now()
+          const outputs: Array<{ path: string; name: string; url: string }> = []
+          for (let index = 0; index < positions.length; index += 1) {
+            const position = positions[index]
+            const name = `frame_at_${position.toFixed(2).replace('.', '-')}_${batchId}_${index + 1}.png`
+            const output = join(framesDirectory, name)
+            await runFfmpeg(settings.ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-ss', String(position), '-i', input, '-map', '0:v:0', '-frames:v', '1', '-update', '1', '-y', output])
+            const extracted = await stat(output).catch(() => null)
+            if (!extracted?.size) return sendJson(response, 500, { error: `FFmpeg did not produce the bookmarked frame at ${position.toFixed(3)} seconds.` })
+            outputs.push({ path: output, name, url: `/api/lan/media?source=output&path=${encodeURIComponent(output)}` })
+          }
+          return sendJson(response, 200, { frames: outputs })
+        } catch (error) { return sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) }) }
+      }
+      if (url.pathname === '/api/lan/video/trim' && request.method === 'POST') {
+        const body = await readJson(request, 200_000)
+        const from = Number(body.start)
+        const to = Number(body.end)
+        const length = to - from
+        if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || length < 2 || length > 15) {
+          return sendJson(response, 400, { error: 'Reference clips must be between 2 and 15 seconds long.' })
+        }
+        try {
+          const input = await resolveLanVideoSource(body.source)
+          const directory = join(settings.outputDirectory, 'MiniMax Studio Reference Clips')
+          await mkdir(directory, { recursive: true })
+          const name = `Reference_Clip_${Date.now()}.mp4`
+          const output = join(directory, name)
+          await runFfmpeg(settings.ffmpegPath, [
+            '-hide_banner', '-loglevel', 'error', '-ss', from.toFixed(3), '-i', input, '-t', length.toFixed(3),
+            '-map', '0:v:0', '-map', '0:a?', '-c:v', 'libx264', '-preset', 'medium', '-crf', '18',
+            '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-y', output,
+          ])
+          const created = await stat(output).catch(() => null)
+          if (!created?.size) return sendJson(response, 500, { error: 'FFmpeg completed without producing a reference clip.' })
+          return sendJson(response, 200, { path: output, name, url: `/api/lan/media?source=output&path=${encodeURIComponent(output)}` })
+        } catch (error) { return sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) }) }
+      }
+      if (url.pathname === '/api/lan/video/join' && request.method === 'POST') {
+        const body = await readJson(request, 5_000_000)
+        const clips = Array.isArray(body.clips) ? body.clips as Array<Record<string, unknown>> : []
+        if (clips.length < 2 || clips.length > 100) return sendJson(response, 400, { error: 'Provide between 2 and 100 clips to join.' })
+        // Concat-directive injection guard: in/out points are numeric and
+        // non-negative before they ever reach the ffmpeg list file.
+        for (const clip of clips) {
+          if (!clip || typeof clip !== 'object') return sendJson(response, 400, { error: 'Each clip needs a media source.' })
+          for (const key of ['start', 'end']) {
+            const value = clip[key]
+            if (value !== undefined && (!Number.isFinite(Number(value)) || Number(value) < 0)) return sendJson(response, 400, { error: 'Clip in/out points must be non-negative numbers of seconds.' })
+          }
+        }
+        try {
+          const inputs = await Promise.all(clips.map((clip) => resolveLanVideoSource(clip.source)))
+          const directory = join(settings.outputDirectory, 'video')
+          await mkdir(directory, { recursive: true })
+          const listPath = join(tmpdir(), `minimax-concat-${randomUUID()}.txt`)
+          const escapePath = (path: string) => path.replace(/\\/g, '/').replace(/'/g, "'\\''")
+          const list = inputs.map((path, index) => {
+            const clip = clips[index]
+            const start = Number(clip.start)
+            const end = Number(clip.end)
+            return [`file '${escapePath(path)}'`, Number.isFinite(start) && start > 0 ? `inpoint ${start}` : '', Number.isFinite(end) && end > (Number.isFinite(start) ? start : 0) ? `outpoint ${end}` : ''].filter(Boolean).join('\n')
+          }).join('\n')
+          await writeFile(listPath, list, 'utf8')
+          const output = join(directory, `MiniMax_Joined_${Date.now()}.mp4`)
+          await runFfmpeg(settings.ffmpegPath, ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-map', '0', '-c', 'copy', '-movflags', '+faststart', output])
+          return sendJson(response, 200, { path: output, name: basename(output), url: `/api/lan/media?source=output&path=${encodeURIComponent(output)}` })
+        } catch (error) { return sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) }) }
+      }
+      if (url.pathname === '/api/lan/media' && request.method === 'GET') {
+        if (url.searchParams.get('source') === 'output') {
+          const requested = url.searchParams.get('path') ?? ''
+          const root = resolve(settings.outputDirectory)
+          const candidate = requested ? resolve(requested) : root
+          const containment = relative(root, candidate)
+          if (!requested || containment.startsWith('..') || isAbsolute(containment)) return sendJson(response, 403, { error: 'Media is outside the configured output directory.' })
+          if (!existsSync(candidate)) return sendJson(response, 404, { error: 'The media file is unavailable.' })
+          return serveLocalMediaHttp(request, response, candidate)
+        }
+        return proxyLanMedia(request, response, url.searchParams)
+      }
       return sendJson(response, 404, { error: 'Unknown mobile API route.' })
     }
 
