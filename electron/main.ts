@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, protocol } from 'electron'
 import { createReadStream, existsSync } from 'node:fs'
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
@@ -191,7 +191,12 @@ async function loadSettings(): Promise<AppSettings> {
 
 async function saveSettings(settings: AppSettings) {
   await mkdir(dirname(settingsPath()), { recursive: true })
-  await writeFile(settingsPath(), JSON.stringify(settings, null, 2), 'utf8')
+  // Write-then-rename so a crash mid-write can never leave settings.json half
+  // written — loadSettings treats unparseable content as "reset to defaults",
+  // which would silently discard every configured path.
+  const staged = `${settingsPath()}.tmp`
+  await writeFile(staged, JSON.stringify(settings, null, 2), 'utf8')
+  await rename(staged, settingsPath())
   return settings
 }
 
@@ -212,8 +217,12 @@ async function scanDirectory(root: string, kind: ModelKind) {
       if (entry.isDirectory()) {
         if (!entry.name.startsWith('.')) pending.push(fullPath)
       } else if (entry.isFile() && modelExtensions.has(extname(entry.name).toLowerCase())) {
-        const info = await stat(fullPath)
-        results.push({ name: entry.name, path: fullPath, kind, bytes: info.size })
+        // Skip unreadable files instead of rejecting the whole scan — one
+        // EACCES entry must not blank the model list.
+        try {
+          const info = await stat(fullPath)
+          results.push({ name: entry.name, path: fullPath, kind, bytes: info.size })
+        } catch { /* Unreadable entry; leave it out. */ }
       }
     }
   }
@@ -807,6 +816,11 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+}).catch((error) => {
+  // A throw anywhere in startup (token write, protocol registration, window
+  // creation) previously left a running process with no window.
+  dialog.showErrorBox('MiniMax Studio failed to start', `Startup failed before the window could open:\n\n${error instanceof Error ? error.stack ?? error.message : String(error)}\n\nThe application will close.`)
+  app.quit()
 })
 
 app.on('window-all-closed', () => {
