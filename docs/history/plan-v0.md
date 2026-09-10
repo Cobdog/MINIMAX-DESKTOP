@@ -1,4 +1,6 @@
-# Automated Movie Pipeline Plan
+# Automated Movie Pipeline Plan (upstream historical document)
+
+> **Archived 2026-09-09 (Cobdog fork).** This was the upstream repo's root-level `plan.md` — in substance an AI-assisted development log that tracked 18 numbered "feature passes" as the codebase was generated, not a user-facing plan. It is preserved verbatim for two reasons: (1) it contains design intent for the Movie Planner and production-library flows that survives nowhere else; (2) its unimplemented "next" passes are the only recorded upstream roadmap — **Pass 8** (trusted HTTPS for the mobile companion), **Pass 10** (DaVinci/EDL timeline export), **Pass 11** (automation controller). Status tags ("implemented / in progress / next") reflect 2026-09-07..09, the repo's first two days, and have not been re-verified since. Do not treat feature claims here as current reality — see [../inventory.md](../inventory.md) and the [audits](../audit/) for the verified state.
 
 ## Objective
 
