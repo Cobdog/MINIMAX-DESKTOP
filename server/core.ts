@@ -600,9 +600,13 @@ export function createStudioServer(paths: StudioServerPaths) {
         }
       })
       socket.on('error', () => { socket?.close() })
+      // A ComfyUI restart must not freeze every connected stream: reconnect
+      // the upstream while the SSE client is still here.
+      socket.on('close', () => { if (!response.writableEnded) retry = setTimeout(connect, 3000) })
     }
+    let retry: ReturnType<typeof setTimeout> | undefined
     connect()
-    request.on('close', () => { clearInterval(heartbeat); socket?.close() })
+    request.on('close', () => { clearInterval(heartbeat); clearTimeout(retry); socket?.close() })
   }
 
   async function handleLanRequest(request: IncomingMessage, response: ServerResponse) {
