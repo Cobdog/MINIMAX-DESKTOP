@@ -1,0 +1,22 @@
+/** The Library view: completed generations with search, filtering, and frame
+ *  bookmark extraction. */
+import { useState } from 'react'
+import { Bookmark, ExternalLink, Film, History, Scissors } from 'lucide-react'
+import type { AppSettings, GenerationJob, MediaFile } from '../types'
+import { FrameBookmarkStudio, type BookmarkVideo } from '../components/FrameBookmarkStudio'
+import { shortPrompt } from '../lib/format'
+
+export function LibraryView({ jobs, settings, onEdit, onUseLtx, onNotice }: { jobs: GenerationJob[]; settings: AppSettings; onEdit(): void; onUseLtx(file: MediaFile): void; onNotice(tone: 'error' | 'success' | 'neutral', text: string): void }) {
+  const [query, setQuery] = useState('')
+  const [provider, setProvider] = useState<'all' | 'minimax' | 'ltx25'>('all')
+  const [sort, setSort] = useState<'newest' | 'oldest'>('newest')
+  const [bookmarkVideo, setBookmarkVideo] = useState<BookmarkVideo | null>(null)
+  const available = jobs.filter((job) => job.mediaType !== 'audio' && Boolean(job.outputUrl))
+  const filtered = available.filter((job) => (provider === 'all' || (job.provider ?? 'minimax') === provider) && (!query.trim() || job.prompt.toLowerCase().includes(query.trim().toLowerCase()))).sort((a, b) => sort === 'newest' ? b.createdAt - a.createdAt : a.createdAt - b.createdAt)
+  const videos: BookmarkVideo[] = available.map((job) => ({ id: `job-${job.id}`, name: shortPrompt(job.prompt), source: job.outputUrl!, duration: job.duration, provider: job.provider === 'ltx25' ? 'ltx25' : 'minimax' }))
+  return <div className="standard-page library-page"><div className="page-heading"><div><p className="eyebrow">LOCAL LIBRARY</p><h1>Video library</h1><p>Review renders, collect reusable frames, or assemble clips without changing the originals.</p></div><button className="primary-button" onClick={onEdit}><Scissors size={16} />Open clip editor</button></div>
+    <div className="library-toolbar"><label><span>Search renders</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search prompts…" /></label><label><span>Provider</span><select value={provider} onChange={(event) => setProvider(event.target.value as typeof provider)}><option value="all">All providers</option><option value="minimax">MiniMax H3</option><option value="ltx25">LTX 2.5</option></select></label><label><span>Sort</span><select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label><div><strong>{filtered.length}</strong><span>of {available.length} videos</span></div></div>
+    {available.length === 0 ? <div className="empty-page"><History size={28} /><strong>Completed generations will appear here.</strong><span>New work is saved automatically on this device.</span></div> : filtered.length === 0 ? <div className="empty-page compact"><Film size={25} /><strong>No videos match these filters.</strong><button className="secondary-button" onClick={() => { setQuery(''); setProvider('all') }}>Clear filters</button></div> : <div className="library-grid">{filtered.map((job) => { const video = videos.find((item) => item.id === `job-${job.id}`)!; return <article className="library-card" key={job.id}><video src={job.outputUrl} controls preload="metadata" /><div><div className="library-card-meta"><span className={`library-provider ${job.provider === 'ltx25' ? 'ltx' : ''}`}>{job.provider === 'ltx25' ? 'LTX 2.5' : 'MiniMax H3'}</span><time dateTime={new Date(job.createdAt).toISOString()}>{new Date(job.createdAt).toLocaleDateString()}</time></div><strong title={job.prompt}>{shortPrompt(job.prompt)}</strong><small>{job.width} × {job.height} · {job.duration}s · {job.mode}</small><div className="library-card-actions"><button className="primary-button" onClick={() => setBookmarkVideo(video)}><Bookmark size={15} />Frame bookmarks</button><a className="secondary-button" href={job.outputUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} />Open</a></div></div></article> })}</div>}
+    {bookmarkVideo && <FrameBookmarkStudio key={bookmarkVideo.id} initialVideo={bookmarkVideo} videos={videos} settings={settings} onClose={() => setBookmarkVideo(null)} onUseLtx={onUseLtx} onNotice={onNotice} />}
+  </div>
+}
