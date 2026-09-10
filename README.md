@@ -103,6 +103,7 @@ Reference downloads and node documentation are maintained by [Comfy-Org's ACE-St
 | [docs/audit/code-quality-audit.md](docs/audit/code-quality-audit.md) | Adversarial review: P0–P3 findings, top-10 fixes |
 | [docs/audit/security-audit.md](docs/audit/security-audit.md) | Threat model, findings, hardening priorities |
 | [docs/migration.md](docs/migration.md) | The Electron → web migration record |
+| [docs/research/ecosystem-2026-09.md](docs/research/ecosystem-2026-09.md) | H3/LTX/ACE/Z-Image ecosystem research driving the roadmap |
 | [docs/history/plan-v0.md](docs/history/plan-v0.md) | Upstream's original planning document (historical) |
 
 ## License
