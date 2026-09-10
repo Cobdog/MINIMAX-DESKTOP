@@ -1,6 +1,19 @@
 packages:
   - .
 
-onlyBuiltDependencies:
-  - electron
-  - esbuild
+# pnpm 11: allowBuilds replaces onlyBuiltDependencies; unreviewed builds are a
+# hard error (strictDepBuilds). electron + esbuild postinstalls are required.
+# electron-winstaller only serves the Squirrel target — this app packages NSIS
+# only, so its script is denied. Flip to true if Squirrel packaging is ever used.
+allowBuilds:
+  electron: true
+  esbuild: true
+  electron-winstaller: false
+
+overrides:
+  # pnpm 11 blocks git-resolved subdeps (blockExoticSubdeps). @electron/rebuild 3.x
+  # pulls @electron/node-gyp as a GitHub tarball; 4.x uses the npm-published node-gyp.
+  # electron-builder only consumes rebuild transitively and this app packages with
+  # npmRebuild=false (pure-JS runtime deps), so the major bump is inert for packaging.
+  "@electron/rebuild": ^4.2.0
+  electron-builder-squirrel-windows: 26.0.12
