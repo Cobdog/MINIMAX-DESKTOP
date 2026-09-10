@@ -14,7 +14,9 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
     "lint": "eslint . --max-warnings 0",
     "test": "node scripts/test-workflows.cjs",
-    "smoke:server": "node scripts/smoke-server.cjs"
+    "smoke:server": "node scripts/smoke-server.cjs",
+    "test:e2e": "pnpm build && playwright test",
+    "test:all": "pnpm test && pnpm test:e2e && pnpm smoke:server"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -24,6 +26,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
+    "@playwright/test": "^1.63.0",
     "@rollup/rollup-win32-x64-msvc": "4.63.1",
     "@types/node": "^22.10.5",
     "@types/react": "^18.3.18",

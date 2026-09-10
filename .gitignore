@@ -7,3 +7,6 @@ release/
 Thumbs.db
 .flux/
 dist-server/
+test-home/
+test-results/
+playwright-report/
