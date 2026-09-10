@@ -10,6 +10,7 @@ import { buildLtx25Workflow } from './lib/ltx25Workflow'
 import { buildZImage } from './lib/zimage'
 import { applyDialoguePolicy } from './lib/dialogPolicy'
 import { createId } from './lib/createId'
+import { startPollLoop } from './lib/promptWatch'
 import type { MediaFile, ModelFile } from './types'
 
 type Bootstrap = { connected: boolean; latencyMs: number; models: ModelFile[]; upscalers?: string[]; ltxModel?: string; ltxVae?: string; ltxUpscaleReady?: boolean; ltxUpscaleMissing?: string[]; ltxNativeReady?: boolean; ltxNativeMissing?: string[]; ollamaModels?: string[]; ollamaModel?: string; error?: string }
@@ -295,17 +296,23 @@ export default function MobileApp() {
       setPromptId(queued.prompt_id)
       setProgressLabel('Waiting for ComfyUI to start')
       setStatus('rendering'); setMessage(`Rendering with ${provider === 'ltx25' ? 'LTX‑2.5' : 'MiniMax H3'} on your desktop GPU. You can keep this page open.`)
-      for (let attempt = 0; attempt < 1800; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 1000))
-        if (cancelled.current) { previewStream.source?.close(); return }
-        const result = await lanFetch<{ finished: boolean; error?: string; output?: { filename: string; subfolder?: string; type?: string } }>(`/api/lan/history/${encodeURIComponent(queued.prompt_id)}`)
-        if (!result.finished) continue
-        if (result.error) throw new Error(result.error)
-        if (!result.output) throw new Error('ComfyUI finished without returning a video file.')
-        const query = new URLSearchParams({ token, filename: result.output.filename, subfolder: result.output.subfolder ?? '', type: result.output.type ?? 'output' })
-        setOutputUrl(`/api/lan/media?${query}`); setProgress(100); setProgressLabel('Complete'); setStatus('complete'); setMessage('Video complete. Preview or download it below.'); previewStream.source?.close(); return
-      }
-      throw new Error('The mobile page stopped waiting for this generation. Check the desktop queue.')
+      await new Promise<void>((resolve, reject) => {
+        startPollLoop({
+          intervalMs: 1000,
+          deadlineMs: 30 * 60 * 1000,
+          tick: async () => {
+            if (cancelled.current) { previewStream.source?.close(); resolve(); return true }
+            const result = await lanFetch<{ finished: boolean; error?: string; output?: { filename: string; subfolder?: string; type?: string } }>(`/api/lan/history/${encodeURIComponent(queued.prompt_id)}`)
+            if (!result.finished) return false
+            if (result.error) { reject(new Error(result.error)); return true }
+            if (!result.output) { reject(new Error('ComfyUI finished without returning a video file.')); return true }
+            const query = new URLSearchParams({ token, filename: result.output.filename, subfolder: result.output.subfolder ?? '', type: result.output.type ?? 'output' })
+            setOutputUrl(`/api/lan/media?${query}`); setProgress(100); setProgressLabel('Complete'); setStatus('complete'); setMessage('Video complete. Preview or download it below.'); previewStream.source?.close(); resolve()
+            return true
+          },
+          onExhausted: (message) => reject(new Error(message)),
+        })
+      })
     } catch (error) { previewStream.source?.close(); if (!cancelled.current) { setStatus('error'); setMessage(error instanceof Error ? error.message : String(error)) } }
   }
 

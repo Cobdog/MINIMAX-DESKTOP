@@ -281,4 +281,99 @@ const baseJob = { id: 'j1', promptId: 'p1', mode: 'text', prompt: 'test', create
   assert.equal(events.length, 2)
   assert.equal(events[1].detail.key, 'k3')
 }
-console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, and quota-safe library persistence')
+
+// Shared poll kernel (P1-1/P1-7 family): transient failures are retried within
+// tolerance, exhaustion and deadline surface one clear message, cancellation
+// stops the watch. Async — runs the suite's tail as a promise chain.
+async function runKernelTests() {
+  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const kernelContext = { exports: {}, require, URLSearchParams, URL, setTimeout, clearTimeout }
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/lib/promptWatch.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, kernelContext)
+  const { startPollLoop } = kernelContext.exports
+
+  // Transient failures inside tolerance are retried; the watch still completes.
+  {
+    let ticks = 0
+    let exhausted = null
+    let completed = false
+    startPollLoop({
+      intervalMs: 5,
+      tolerance: 3,
+      tick: async () => { ticks += 1; if (ticks < 3) throw new Error('transient'); completed = true; return true },
+      onExhausted: (message) => { exhausted = message },
+    })
+    await delay(120)
+    assert.equal(completed, true)
+    assert.equal(exhausted, null)
+    assert.equal(ticks, 3)
+  }
+
+  // Exceeding tolerance exhausts with the reachability message and stops.
+  {
+    let ticks = 0
+    let exhausted = null
+    startPollLoop({
+      intervalMs: 5,
+      tolerance: 2,
+      tick: async () => { ticks += 1; throw new Error('down') },
+      onExhausted: (message) => { exhausted = message },
+    })
+    await delay(150)
+    assert.ok(exhausted?.includes('Could not reach ComfyUI'))
+    assert.equal(ticks, 3) // tolerance 2 → third consecutive failure exhausts
+    const settled = ticks
+    await delay(60)
+    assert.equal(ticks, settled) // stopped
+  }
+
+  // The wall-clock deadline exhausts even when every tick succeeds.
+  {
+    let exhausted = null
+    startPollLoop({
+      intervalMs: 5,
+      deadlineMs: 30,
+      tick: async () => false,
+      onExhausted: (message) => { exhausted = message },
+    })
+    await delay(200)
+    assert.ok(exhausted?.includes('Still rendering'))
+  }
+
+  // A successful tick resets the failure streak.
+  {
+    let ticks = 0
+    let exhausted = null
+    let completed = false
+    startPollLoop({
+      intervalMs: 5,
+      tolerance: 2,
+      tick: async () => { ticks += 1; if (ticks % 2 === 1 && ticks < 6) throw new Error('flaky'); if (ticks >= 6) { completed = true; return true } return false },
+      onExhausted: (message) => { exhausted = message },
+    })
+    await delay(200)
+    assert.equal(completed, true)
+    assert.equal(exhausted, null)
+  }
+
+  // cancel() stops future ticks.
+  {
+    let ticks = 0
+    const loop = startPollLoop({
+      intervalMs: 5,
+      tick: async () => { ticks += 1; return false },
+      onExhausted: () => {},
+    })
+    await delay(20)
+    loop.cancel()
+    const settled = ticks
+    await delay(80)
+    assert.equal(ticks, settled)
+  }
+}
+
+runKernelTests().then(() => {
+  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, and poll-loop kernel (tolerance/deadline/cancel)')
+}, (error) => {
+  console.error(error)
+  process.exitCode = 1
+})

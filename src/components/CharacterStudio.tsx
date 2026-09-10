@@ -3,6 +3,7 @@ import { AlertCircle, Check, CircleStop, Film, ImagePlus, Images, LoaderCircle, 
 import { CHARACTER_LIBRARY_EVENT, characterReferences, loadCharacterProjects, newCharacterProject, saveCharacterProjects } from '../lib/characterLibrary'
 import { choices, type ObjectInfo } from '../lib/comfyInfo'
 import { buildZImage } from '../lib/zimage'
+import { startPollLoop } from '../lib/promptWatch'
 import { loadWardrobeProjects, wardrobeReferences, WARDROBE_LIBRARY_EVENT } from '../lib/wardrobeLibrary'
 import { ACCESSORY_LIBRARY_EVENT, loadAccessoryProjects } from '../lib/accessoryLibrary'
 import { HAIR_LIBRARY_EVENT, loadHairStyleProjects } from '../lib/hairLibrary'
@@ -157,53 +158,67 @@ export function CharacterStudio({ settings, info, connected, ollamaAvailable, au
   useEffect(() => {
     if (!masterJob) return
     let disposed = false
-    let timer: ReturnType<typeof setTimeout>
-    const poll = async () => {
-      try {
+    const loop = startPollLoop({
+      intervalMs: 2000,
+      tick: async () => {
         const history = await window.minimax.getHistory(masterJob.url, masterJob.id)
         const entry = history[masterJob.id] as { status?: { status_str?: string }; outputs?: Record<string, { images?: Array<{ filename: string; subfolder?: string; type?: string }> }> } | undefined
-        if (entry?.status?.status_str === 'error') throw new Error('Master-reference generation failed. Check the ComfyUI log.')
+        if (entry?.status?.status_str === 'error') {
+          if (!disposed) { setMasterMessage('Master-reference generation failed. Check the ComfyUI log.'); setMasterError(true); setMasterBusy(false); setMasterJob(null) }
+          return true
+        }
         const image = Object.values(entry?.outputs ?? {}).flatMap((output) => output.images ?? [])[0]
         if (image) {
-          const saved = await window.minimax.saveComfyOutputImage(masterJob.url, image, settings.outputDirectory)
-          if (!disposed) {
-            const file = { ...saved, preview: await window.minimax.mediaUrl(saved.path), kind: 'image' as const }
-            setCandidate({ characterId: masterJob.characterId, target: masterJob.target, file })
-            setMasterMessage('Reference ready for approval.'); setMasterJob(null); setMasterBusy(false); setMasterError(false)
+          try {
+            const saved = await window.minimax.saveComfyOutputImage(masterJob.url, image, settings.outputDirectory)
+            if (!disposed) {
+              const file = { ...saved, preview: await window.minimax.mediaUrl(saved.path), kind: 'image' as const }
+              setCandidate({ characterId: masterJob.characterId, target: masterJob.target, file })
+              setMasterMessage('Reference ready for approval.'); setMasterJob(null); setMasterBusy(false); setMasterError(false)
+            }
+          } catch (error) {
+            if (!disposed) { setMasterMessage(error instanceof Error ? error.message : String(error)); setMasterError(true); setMasterBusy(false); setMasterJob(null) }
           }
-          return
+          return true
         }
-      } catch (error) {
-        if (!disposed) { setMasterMessage(error instanceof Error ? error.message : String(error)); setMasterError(true); setMasterBusy(false); setMasterJob(null) }
-        return
-      }
-      if (!disposed) timer = setTimeout(poll, 2000)
-    }
-    void poll()
-    return () => { disposed = true; clearTimeout(timer) }
+        return false
+      },
+      onExhausted: (message) => { if (!disposed) { setMasterMessage(message); setMasterError(true); setMasterBusy(false); setMasterJob(null) } },
+    })
+    return () => { disposed = true; loop.cancel() }
   }, [masterJob, onNotice, settings.outputDirectory])
   useEffect(() => {
     if (!batchJobs.length) return
-    let disposed = false; let timer: ReturnType<typeof setTimeout>
-    const poll = async () => {
-      try {
+    let disposed = false
+    const loop = startPollLoop({
+      intervalMs: 2000,
+      tick: async () => {
         const completed: Array<{ batchJob: (typeof batchJobs)[number]; image: { filename: string; subfolder?: string; type?: string } }> = []
         for (const batchJob of batchJobs) {
           const history = await window.minimax.getHistory(batchJob.url, batchJob.id)
           const entry = history[batchJob.id] as { status?: { status_str?: string }; outputs?: Record<string, { images?: Array<{ filename: string; subfolder?: string; type?: string }> }> } | undefined
-          if (entry?.status?.status_str === 'error') throw new Error('One identity candidate failed. Check the ComfyUI log.')
+          if (entry?.status?.status_str === 'error') {
+            if (!disposed) { setMasterMessage('One identity candidate failed. Check the ComfyUI log.'); setMasterError(true); setBatchJobs([]); setMasterBusy(false) }
+            return true
+          }
           const image = Object.values(entry?.outputs ?? {}).flatMap((output) => output.images ?? [])[0]
           if (image) completed.push({ batchJob, image })
         }
         if (completed.length === batchJobs.length) {
-          const ready = await Promise.all(completed.map(async ({ batchJob, image }) => { const saved = await window.minimax.saveComfyOutputImage(batchJob.url, image, settings.outputDirectory); return { ...saved, preview: await window.minimax.mediaUrl(saved.path), kind: 'image' as const } }))
-          if (!disposed) { setIdentityCandidates(ready); setSelectedCandidatePaths(ready.map((file) => file.path)); setBatchJobs([]); setMasterBusy(false); setMasterMessage(`${ready.length} identity candidates ready. Approve one or more.`) }; return
+          try {
+            const ready = await Promise.all(completed.map(async ({ batchJob, image }) => { const saved = await window.minimax.saveComfyOutputImage(batchJob.url, image, settings.outputDirectory); return { ...saved, preview: await window.minimax.mediaUrl(saved.path), kind: 'image' as const } }))
+            if (!disposed) { setIdentityCandidates(ready); setSelectedCandidatePaths(ready.map((file) => file.path)); setBatchJobs([]); setMasterBusy(false); setMasterMessage(`${ready.length} identity candidates ready. Approve one or more.`) }
+          } catch (error) {
+            if (!disposed) { setMasterMessage(error instanceof Error ? error.message : String(error)); setMasterError(true); setBatchJobs([]); setMasterBusy(false) }
+          }
+          return true
         }
         if (!disposed) setMasterMessage(`Rendering identity batch… ${completed.length} of ${batchJobs.length} ready`)
-      } catch (error) { if (!disposed) { setMasterMessage(error instanceof Error ? error.message : String(error)); setMasterError(true); setBatchJobs([]); setMasterBusy(false) }; return }
-      timer = setTimeout(poll, 2000)
-    }
-    void poll(); return () => { disposed = true; clearTimeout(timer) }
+        return false
+      },
+      onExhausted: (message) => { if (!disposed) { setMasterMessage(message); setMasterError(true); setBatchJobs([]); setMasterBusy(false) } },
+    })
+    return () => { disposed = true; loop.cancel() }
   }, [batchJobs, settings.outputDirectory])
   const splitTurntable = async () => {
     if (!active.turntableVideo || videoDuration <= 0 || splitting) return

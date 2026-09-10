@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertCircle, Check, CircleStop, Dices, Gauge, ImagePlus, LoaderCircle, Sparkles, WandSparkles } from 'lucide-react'
 import { buildZImage, type ZImageVariant } from '../lib/zimage'
+import { startPollLoop } from '../lib/promptWatch'
 import { choices, type ObjectInfo } from '../lib/comfyInfo'
 import { RenderSize } from './RenderSize'
 import type { MediaFile } from '../types'
@@ -91,31 +92,35 @@ export function ZImageWorkspace({
   useEffect(() => {
     if (!job) return
     let disposed = false
-    let timer: ReturnType<typeof setTimeout>
-    const poll = async () => {
-      try {
+    const loop = startPollLoop({
+      intervalMs: 2000,
+      tick: async () => {
         const history = await window.minimax.getHistory(job.url, job.id)
         const entry = history[job.id] as { status?: { status_str: string }; outputs?: Record<string, { images?: Array<{ filename: string; subfolder?: string; type?: string }> }> } | undefined
-        if (entry?.status?.status_str === 'error') throw new Error('Z-Image failed. Check the selected components and ComfyUI log.')
+        if (entry?.status?.status_str === 'error') {
+          if (!disposed) { setMessage('Z-Image failed. Check the selected components and ComfyUI log.'); setError(true); setBusy(false); setJob(null) }
+          return true
+        }
         const image = Object.values(entry?.outputs ?? {}).flatMap((output) => output.images ?? [])[0]
         if (image) {
-          const saved = await window.minimax.saveComfyOutputImage(job.url, image, outputDirectory)
-          const preview = await window.minimax.mediaUrl(saved.path)
-          if (!disposed) {
-            setResult({ ...saved, preview, kind: 'image' })
-            setJob(null); setBusy(false); setError(false); setMessage('Image complete and ready to use.')
+          try {
+            const saved = await window.minimax.saveComfyOutputImage(job.url, image, outputDirectory)
+            const preview = await window.minimax.mediaUrl(saved.path)
+            if (!disposed) {
+              setResult({ ...saved, preview, kind: 'image' })
+              setJob(null); setBusy(false); setError(false); setMessage('Image complete and ready to use.')
+            }
+          } catch (caught) {
+            if (!disposed) { setMessage(caught instanceof Error ? caught.message : String(caught)); setError(true); setBusy(false); setJob(null) }
           }
-          return
+          return true
         }
         if (!disposed) setMessage('Rendering the image in ComfyUI…')
-      } catch (caught) {
-        if (!disposed) { setMessage(caught instanceof Error ? caught.message : String(caught)); setError(true); setBusy(false); setJob(null) }
-        return
-      }
-      if (!disposed) timer = setTimeout(poll, 2000)
-    }
-    void poll()
-    return () => { disposed = true; clearTimeout(timer) }
+        return false
+      },
+      onExhausted: (message) => { if (!disposed) { setMessage(message); setError(true); setBusy(false); setJob(null) } },
+    })
+    return () => { disposed = true; loop.cancel() }
   }, [job, outputDirectory])
 
   const installedModels = choices(info, 'UNETLoader', 'unet_name')
