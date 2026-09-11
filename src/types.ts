@@ -218,6 +218,10 @@ export type GenerationOptions = {
   referenceImages: string[]
   referenceVideos: string[]
   referenceAudios: string[]
+  /** Timeline keyframes for reference mode: pinned via chained
+   *  MiniMaxH3AddGuide nodes at these frame indices (round(seconds*24);
+   *  negative counts from the end). */
+  timelineGuides?: Array<{ frameIndex: number }>
 }
 
 export type ComfyStatus = {

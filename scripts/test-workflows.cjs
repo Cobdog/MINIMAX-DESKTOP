@@ -8,7 +8,8 @@ function load(path) {
   vm.runInNewContext(code, { exports, require, URLSearchParams, URL })
   return exports
 }
-const { frameCount, buildMiniMaxWorkflow, extractOutputUrl, extractOutputFile, outputFileFromUrl, OFFICIAL_H3_SAMPLER, OFFICIAL_H3_SCHEDULER } = load('src/lib/workflow.ts')
+const workflowModule = load('src/lib/workflow.ts')
+const { frameCount, buildMiniMaxWorkflow, extractOutputUrl, extractOutputFile, outputFileFromUrl, OFFICIAL_H3_SAMPLER, OFFICIAL_H3_SCHEDULER } = workflowModule
 const { buildZImage } = load('src/lib/zimage.ts')
 const { buildLtx25Workflow, ltx25FrameCount, LTX25_FIRST_STAGE_SIGMAS, LTX25_REFINER_SIGMAS } = load('src/lib/ltx25Workflow.ts')
 const { inferSelections, inferLtx25Selections } = load('src/lib/modelSelection.ts')
@@ -455,8 +456,43 @@ assert.ok(referenceOrderWarnings('Uses <Audio 2> first, then <Audio 1>.', { imag
   assert.equal(storage.loadPromptLibrary().length, 8, 'delete restores corpus-only state')
 }
 
+
+// ---- Multiframe timeline guides (MiniMaxH3AddGuide) -------------------------
+{
+  const guidesGraph = buildMiniMaxWorkflow({ mode: 'reference', prompt: 'p', width: 1344, height: 768, duration: 6, seed: 1, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', filenamePrefix: 't', referenceImages: ['a.png'], referenceVideos: [], referenceAudios: [], timelineGuides: [{ frameIndex: 36 }, { frameIndex: 72 }, { frameIndex: 120 }] }, models, { images: [{ name: 'a.png' }], videos: [], audios: [], guides: [{ name: 'g1.png' }, { name: 'g2.png' }, { name: 'g3.png' }] })
+  assert.equal(guidesGraph['650'].class_type, 'MiniMaxH3AddGuide')
+  assert.equal(guidesGraph['651'].class_type, 'MiniMaxH3AddGuide')
+  assert.equal(guidesGraph['652'].class_type, 'MiniMaxH3AddGuide')
+  // Chain: R2V -> AG1 -> AG2 -> AG3 -> BasicGuider, shared latent, both VAEs.
+  assert.equal(guidesGraph['650'].inputs.positive.join('|'), '10|0')
+  assert.equal(guidesGraph['651'].inputs.positive.join('|'), '650|0')
+  assert.equal(guidesGraph['652'].inputs.positive.join('|'), '651|0')
+  assert.equal(guidesGraph['12'].inputs.conditioning.join('|'), '652|0')
+  for (const id of ['650', '651', '652']) {
+    assert.equal(guidesGraph[id].inputs.latent.join('|'), '10|1', id + ' latent')
+    assert.equal(guidesGraph[id].inputs.vae.join('|'), '3|0', id + ' vae')
+    assert.equal(guidesGraph[id].inputs.audio_vae.join('|'), '4|0', id + ' audio_vae')
+  }
+  assert.equal(guidesGraph['650'].inputs.frame_idx, 36)
+  assert.equal(guidesGraph['652'].inputs.frame_idx, 120)
+  assert.equal(guidesGraph['600'].class_type, 'LoadImage')
+  assert.equal(guidesGraph['600'].inputs.image, 'g1.png')
+  // Without guides the classic graph is unchanged.
+  const classicGraph = buildMiniMaxWorkflow({ mode: 'reference', prompt: 'p', width: 1344, height: 768, duration: 6, seed: 1, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', filenamePrefix: 't', referenceImages: ['a.png'], referenceVideos: [], referenceAudios: [] }, models, { images: [{ name: 'a.png' }], videos: [], audios: [] })
+  assert.equal(classicGraph['12'].inputs.conditioning.join('|'), '10|0')
+  assert.equal(classicGraph['650'], undefined)
+  // Frame helpers follow the official round(seconds*24) convention.
+  const { frameIndexForSeconds, guideFrameWarning } = workflowModule
+  assert.equal(frameIndexForSeconds(1.5), 36)
+  assert.equal(frameIndexForSeconds(3), 72)
+  assert.equal(frameIndexForSeconds(-2), -48)
+  assert.equal(guideFrameWarning(1.5, 6), null)
+  assert.equal(guideFrameWarning(5.5, 5) !== null, true, 'beyond duration warns')
+  assert.equal(guideFrameWarning(-6, 5) !== null, true, 'before start warns')
+}
+
 runKernelTests().then(() => {
-  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), and the local prompt library storage (technique corpus + save/delete round-trip)')
+  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the local prompt library storage (technique corpus + save/delete round-trip), and multiframe AddGuide chaining (topology, frame indices, classic-graph invariance)')
 }, (error) => {
   console.error(error)
   process.exitCode = 1

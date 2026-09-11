@@ -33,6 +33,8 @@ export type PersistedWorkspace = {
   referenceImages: MediaFile[]
   referenceVideos: MediaFile[]
   referenceAudios: MediaFile[]
+  /** Reference-mode timeline keyframes pinned via MiniMaxH3AddGuide. */
+  timelineGuides: Array<{ file: MediaFile; seconds: number }>
   selectedReferenceCharacterIds: string[]
   selectedReferenceLocationIds: string[]
   activeJobId: string | null
@@ -44,7 +46,7 @@ export const workspaceDefaults: PersistedWorkspace = {
   sampler: 'res_multistep', scheduler: 'simple', experimentalSampling: false, refImageSize: 'match', noDialogue: true, naturalMovement: true, clothingPolicy: 'wardrobe',
   sigmaShiftMode: 'model', shiftVideo: 12, shiftAudio: 3, loraStrength: 1, seed: Math.floor(Math.random() * 1_000_000_000),
   advanced: false, liveEnabled: true, livePreviewMode: 'standard', upscaleMode: 'off', rtxModel: '', firstFrame: null,
-  lastFrame: null, referenceImages: [], referenceVideos: [], referenceAudios: [], selectedReferenceCharacterIds: [], selectedReferenceLocationIds: [], activeJobId: null, movieHandoff: null,
+  lastFrame: null, referenceImages: [], referenceVideos: [], referenceAudios: [], timelineGuides: [], selectedReferenceCharacterIds: [], selectedReferenceLocationIds: [], activeJobId: null, movieHandoff: null,
 }
 
 export function readWorkspace(): PersistedWorkspace {

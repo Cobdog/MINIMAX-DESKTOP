@@ -3,7 +3,7 @@
  *  graph submission, and cancellation-aware job bookkeeping. */
 import { useState } from 'react'
 import { createId } from '../lib/createId'
-import { buildMiniMaxWorkflow } from '../lib/workflow'
+import { buildMiniMaxWorkflow, frameIndexForSeconds, guideFrameWarning } from '../lib/workflow'
 import { buildLtx25Workflow } from '../lib/ltx25Workflow'
 import { ACE_STEP_REQUIRED_NODES, buildAceStepWorkflow } from '../lib/aceStepWorkflow'
 import { prepareImage } from '../lib/imageCrop'
@@ -210,6 +210,11 @@ export function useGenerationFlows(options: {
       notify('error', 'Reference limits are 9 pictures, 3 videos, and 3 audio files. Remove extras before rendering.')
       return
     }
+    const invalidGuide = ws.timelineGuides.find((guide) => guideFrameWarning(guide.seconds, duration))
+    if (mode === 'reference' && invalidGuide) {
+      notify('error', guideFrameWarning(invalidGuide.seconds, duration)!)
+      return
+    }
 
     setSubmitting(true)
     notify('neutral', 'Uploading inputs and preparing the ComfyUI graph…')
@@ -238,12 +243,14 @@ export function useGenerationFlows(options: {
       const upload = async (file: MediaFile, fitToOutput = false) => file.kind === 'image' && (fitToOutput || Boolean(file.crop))
         ? window.minimax.uploadImageData(settings.comfyUrl, await prepareImage(file, width, height))
         : window.minimax.uploadInput(settings.comfyUrl, file.path)
-      const [first, last, images, videos, audios] = await Promise.all([
+      const guides = mode === 'reference' ? ws.timelineGuides : []
+      const [first, last, images, videos, audios, guideUploads] = await Promise.all([
         firstFrame && (mode === 'image' || mode === 'frames') ? upload(firstFrame, true) : undefined,
         lastFrame && mode === 'frames' ? upload(lastFrame, true) : undefined,
         Promise.all(mode === 'reference' ? renderReferenceImages.map((file) => upload(file)) : []),
         Promise.all(mode === 'reference' ? referenceVideos.map((file) => upload(file)) : []),
         Promise.all(mode === 'reference' ? referenceAudios.map((file) => upload(file)) : []),
+        Promise.all(guides.map(({ file }) => upload(file))),
       ])
       if (cancellationRequests.current.has(localId)) throw new Error('Generation cancelled before submission.')
       const graph = buildMiniMaxWorkflow({
@@ -269,7 +276,8 @@ export function useGenerationFlows(options: {
         referenceImages: renderReferenceImages.map((item) => item.path),
         referenceVideos: referenceVideos.map((item) => item.path),
         referenceAudios: referenceAudios.map((item) => item.path),
-      }, selection, { first, last, images, videos, audios })
+        timelineGuides: guides.length ? guides.map((guide) => ({ frameIndex: frameIndexForSeconds(guide.seconds) })) : undefined,
+      }, selection, { first, last, images, videos, audios, guides: guideUploads })
       const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, clientId)
       if (cancellationRequests.current.has(localId)) {
         await window.minimax.cancelPrompt(settings.comfyUrl, response.prompt_id)

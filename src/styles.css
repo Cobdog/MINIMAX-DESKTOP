@@ -2260,3 +2260,17 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .prompt-library-saved-heading small { color: var(--muted-2); font-size: 9px; }
 .prompt-library-technique-badge { flex: 0 0 auto; padding: 2px 7px; border: 1px solid rgba(198,255,99,.25); border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 8px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .prompt-library-attribution { color: var(--muted-2); font-size: 9.5px; line-height: 1.5; }
+
+/* Timeline keyframes (MiniMaxH3AddGuide) in the source-media modal. */
+.timeline-guides { display: grid; gap: 8px; padding: 12px; border: 1px dashed var(--line-strong); border-radius: 9px; }
+.timeline-guide-row { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.timeline-guide-row.invalid { border-color: rgba(255,127,127,.35); }
+.timeline-guide-row > img, .timeline-guide-row > span.reference-choice-placeholder { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 6px; object-fit: cover; background: var(--surface-3); display: grid; place-items: center; color: var(--muted); }
+.timeline-guide-row > span { display: grid; flex: 1; min-width: 0; gap: 2px; }
+.timeline-guide-row > span small { overflow: hidden; color: var(--muted-2); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-guide-row label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; }
+.timeline-guide-row input { width: 74px; min-height: 30px; padding: 4px 7px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-3); color: var(--text); }
+.timeline-guide-row output { min-width: 68px; color: var(--accent); font-size: 9px; font-variant-numeric: tabular-nums; text-align: right; }
+.timeline-guide-row > button { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.timeline-guide-row > button:hover { color: var(--danger); }
+.timeline-guide-note { color: var(--muted-2); font-size: 9px; line-height: 1.5; }

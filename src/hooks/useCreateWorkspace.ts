@@ -51,6 +51,7 @@ export function useCreateWorkspace(options: {
   const [referenceImages, setReferenceImages] = useState<MediaFile[]>(persisted.referenceImages)
   const [referenceVideos, setReferenceVideos] = useState<MediaFile[]>(persisted.referenceVideos)
   const [referenceAudios, setReferenceAudios] = useState<MediaFile[]>(persisted.referenceAudios)
+  const [timelineGuides, setTimelineGuides] = useState<Array<{ file: MediaFile; seconds: number }>>(persisted.timelineGuides)
   const [characterProjects, setCharacterProjects] = useState<CharacterProject[]>(loadCharacterProjects)
   const [wardrobeProjects, setWardrobeProjects] = useState<WardrobeProject[]>(loadWardrobeProjects)
   const [locationProjects, setLocationProjects] = useState<LocationProject[]>(loadLocationProjects)
@@ -102,10 +103,12 @@ export function useCreateWorkspace(options: {
       upscaleMode, rtxModel, firstFrame: withoutPreview(firstFrame), lastFrame: withoutPreview(lastFrame),
       referenceImages: referenceImages.map((file) => withoutPreview(file)!),
       referenceVideos: referenceVideos.map((file) => withoutPreview(file)!),
-      referenceAudios: referenceAudios.map((file) => withoutPreview(file)!), selectedReferenceCharacterIds, selectedReferenceLocationIds, activeJobId, movieHandoff,
+      referenceAudios: referenceAudios.map((file) => withoutPreview(file)!),
+      timelineGuides: timelineGuides.map((guide) => ({ file: withoutPreview(guide.file)!, seconds: guide.seconds })),
+      selectedReferenceCharacterIds, selectedReferenceLocationIds, activeJobId, movieHandoff,
     }
     localStorage.setItem('minimax.workspace', JSON.stringify(workspace))
-  }, [activeJobId, advanced, clothingPolicy, duration, experimentalSampling, firstFrame, lastFrame, liveEnabled, livePreviewMode, loraStrength, mode, movieHandoff, naturalMovement, noDialogue, prompt, refImageSize, referenceAudios, referenceImages, referenceVideos, resolution, rtxModel, sampler, scheduler, seed, selectedReferenceCharacterIds, selectedReferenceLocationIds, shiftAudio, shiftVideo, sigmaShiftMode, steps, turbo, upscaleMode])
+  }, [activeJobId, advanced, clothingPolicy, duration, experimentalSampling, firstFrame, lastFrame, liveEnabled, livePreviewMode, loraStrength, mode, movieHandoff, naturalMovement, noDialogue, prompt, refImageSize, referenceAudios, referenceImages, referenceVideos, resolution, rtxModel, sampler, scheduler, seed, selectedReferenceCharacterIds, selectedReferenceLocationIds, shiftAudio, shiftVideo, sigmaShiftMode, steps, timelineGuides, turbo, upscaleMode])
 
   useEffect(() => {
     if (!settings || mediaHydrated.current) return
@@ -294,6 +297,7 @@ export function useCreateWorkspace(options: {
     setReferenceImages([])
     setReferenceVideos([])
     setReferenceAudios([])
+    setTimelineGuides([])
     setVideoClipDraft(() => null)
     setActiveJobId(null)
     setMovieHandoff(null)
@@ -317,6 +321,7 @@ export function useCreateWorkspace(options: {
     // media and references
     firstFrame, setFirstFrame, lastFrame, setLastFrame,
     referenceImages, setReferenceImages, referenceVideos, setReferenceVideos, referenceAudios, setReferenceAudios,
+    timelineGuides, setTimelineGuides,
     // libraries
     characterProjects, wardrobeProjects, locationProjects,
     selectedReferenceCharacterIds, setSelectedReferenceCharacterIds,

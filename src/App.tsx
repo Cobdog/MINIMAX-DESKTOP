@@ -115,7 +115,7 @@ function App() {
     sigmaShiftMode, shiftVideo, shiftAudio, loraStrength, liveEnabled, setLiveEnabled,
     livePreviewMode, setLivePreviewMode, upscaleMode, rtxModel, seed, advanced, setAdvanced,
     firstFrame, setFirstFrame, lastFrame, setLastFrame,
-    referenceImages, setReferenceImages, referenceVideos, setReferenceVideos, referenceAudios, setReferenceAudios,
+    referenceImages, setReferenceImages, referenceVideos, setReferenceVideos, referenceAudios, setReferenceAudios, timelineGuides, setTimelineGuides,
     characterProjects, wardrobeProjects, locationProjects,
     selectedReferenceCharacterIds, setSelectedReferenceCharacterIds,
     selectedReferenceLocationIds, setSelectedReferenceLocationIds,
@@ -405,6 +405,8 @@ function App() {
             setLastFrame={setLastFrame}
             chooseMedia={chooseMedia}
             referenceImages={referenceImages}
+            timelineGuides={timelineGuides}
+            setTimelineGuides={setTimelineGuides}
             characters={characterProjects}
             wardrobes={wardrobeProjects}
             locations={locationProjects}

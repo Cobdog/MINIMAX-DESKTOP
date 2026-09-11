@@ -15,6 +15,22 @@ export function frameCount(seconds: number) {
   return base + ((5 - (base % 17) + 17) % 17)
 }
 
+/** Official frame-index convention: round(seconds * 24); negative seconds
+ *  count from the end of the video. */
+export function frameIndexForSeconds(seconds: number) {
+  return Math.round(seconds * 24)
+}
+
+/** A guide's frame index must land inside the generated clip (index plus the
+ *  guide's own length stays within duration). Returns a warning or null. */
+export function guideFrameWarning(seconds: number, duration: number): string | null {
+  const index = frameIndexForSeconds(seconds)
+  const total = frameCount(duration)
+  if (index >= total) return `The ${seconds.toFixed(1)}s keyframe lands at or beyond the ${duration}s duration — move it earlier.`
+  if (index <= -total) return `The ${seconds.toFixed(1)}s keyframe lands at or before the start of the clip.`
+  return null
+}
+
 export function uploadedName(file: UploadedFile) {
   return file.subfolder ? `${file.subfolder.replace(/\\/g, '/')}/${file.name}` : file.name
 }
@@ -42,6 +58,7 @@ export function buildMiniMaxWorkflow(
     images: UploadedFile[]
     videos: UploadedFile[]
     audios: UploadedFile[]
+    guides?: UploadedFile[]
   },
 ): ComfyPrompt {
   const prompt: ComfyPrompt = {
@@ -115,8 +132,34 @@ export function buildMiniMaxWorkflow(
     prompt['10'] = { class_type: 'MiniMaxH3ImageToVideo', inputs: conditioningInputs }
   }
 
+  // Official multiframe topology: R2V positive -> AddGuide -> AddGuide ->
+  // ... -> BasicGuider, with every guide sharing the R2V latent and both
+  // VAEs (verified against Comfy-Org's video_minimax_h3_multiframe_reference
+  // template). Guide-only images stay out of the ref_images slots.
+  let conditioningSource: Link = ['10', 0]
+  if (options.mode === 'reference' && options.timelineGuides?.length) {
+    options.timelineGuides.forEach((guide, index) => {
+      const upload = uploads.guides?.[index]
+      if (!upload) return
+      const imageLink = addLoader(prompt, `60${index}`, 'image', uploadedName(upload))
+      const guideId = `65${index}`
+      prompt[guideId] = {
+        class_type: 'MiniMaxH3AddGuide',
+        inputs: {
+          positive: conditioningSource,
+          latent: ['10', 1],
+          vae: ['3', 0],
+          audio_vae: ['4', 0],
+          image: imageLink,
+          frame_idx: guide.frameIndex,
+        },
+      }
+      conditioningSource = [guideId, 0]
+    })
+  }
+
   prompt['11'] = { class_type: 'RandomNoise', inputs: { noise_seed: options.seed } }
-  prompt['12'] = { class_type: 'BasicGuider', inputs: { model: modelLink, conditioning: ['10', 0] } }
+  prompt['12'] = { class_type: 'BasicGuider', inputs: { model: modelLink, conditioning: conditioningSource } }
   const sampler = options.experimentalSampling ? options.sampler : OFFICIAL_H3_SAMPLER
   const scheduler = options.experimentalSampling ? options.scheduler : OFFICIAL_H3_SCHEDULER
   prompt['13'] = { class_type: 'KSamplerSelect', inputs: { sampler_name: sampler } }
