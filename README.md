@@ -32,6 +32,8 @@ Configuration lives in `~/.minimax-studio/` (override with `MINIMAX_STUDIO_HOME`
 - **Multiframe timeline keyframes**: pin images at exact seconds through chained `MiniMaxH3AddGuide` (official multiframe topology), with frame readouts, in-duration validation, and mirroring guide images into prompt-visible Pictures
 - Guided quality presets — Native Quality, official Turbo 8, Preview — with custom sampling isolated under an explicit Experimental disclosure
 - A fixed-seed quality diagnostic that queues matching Native and Turbo 8 renders for direct A/B comparison
+- **Character sheets in-model**: Character Studio's sheet generation prefers the H3 ContactSheet + Turnaround LoRA path (five coordinated views in one pass, saved straight into the reference set) with the LTX turntable as fallback; reference discipline warns when a character carries more than four identity pictures (every reference is scaled to a 2048px short edge)
+- **Graph compatibility**: renders record a graph-family version, and Settings tracks the ComfyUI version the graphs were verified against — warning when the engine updates past it (with the H3 Quality Test as the re-verification path); director's-looseness presets counter H3's strong prompt adherence
 - **Latent scene chaining**: render a Movie Planner scene as one continuous sequence — each segment pins the previous clip's tail as never-denoised conditioning (ComfyUI-H3-Motion-Context), so motion and audio carry across clips at the latent level. Segments cap at 15 s; joins read as true continuation rather than re-synthesis. The Clip Editor's frame-accurate pixel concat remains the manual fallback when you want explicit control
 - **Reproducibility manifests** on every render (seed, model files + sizes, LoRA strength, sampler, graph-version hash) — downloadable per job or exported in bulk
 - **Queue hygiene**: a failed render automatically soft-resets the engine (`/free`) and retries once with tiled VAE decoding before surfacing the error
@@ -41,6 +43,7 @@ Configuration lives in `~/.minimax-studio/` (override with `MINIMAX_STUDIO_HOME`
 **Other providers (separate workspaces, separate state)**
 - LTX-2.5 T2V/I2V with native synchronized audio, the official two-stage Quality preset and single-stage Turbo preset
 - ACE-Step 1.5 music generation with XL SFT/Base checkpoint selection, lyric/instrumental modes, tempo/key/language controls, and FLAC output
+- **MiniMax Music 3**: complete songs up to five minutes — official three-section caption builder (Global Metadata / Vocal Details / Arrangement), lyrics with `[Intro]…[Outro]` structure tags, a local Ollama caption rewriter following the official skill's rules, tiled low-VRAM audio decode, mp3 V0 output
 - Z-Image Turbo first-frame and standalone still generation with direct I2V handoff
 
 **Production libraries**
