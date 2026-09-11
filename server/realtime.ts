@@ -26,7 +26,7 @@
 import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import WebSocket, { WebSocketServer } from 'ws'
-import type { GpuTelemetry, JobLifecycleEvent, LlmStreamRequest, PreviewMime, RealtimeChannel, RealtimeEnvelope } from '../src/types'
+import type { EngineLifecycleEvent, EnginePhase, GpuTelemetry, JobLifecycleEvent, LlmStreamRequest, PreviewMime, RealtimeChannel, RealtimeEnvelope } from '../src/types'
 import { logEvent, logFailure } from './logger'
 
 export const REALTIME_WS_PATH = '/ws'
@@ -739,10 +739,10 @@ export function createRealtimeHub(options: RealtimeHubOptions) {
       if (upstream.linger) { clearTimeout(upstream.linger); upstream.linger = null }
       upstream.socket?.close()
     },
-    /** Reserved engine channel emitter (wave 2c managed runtime): the payload
-     *  shape is frozen now, the sidecar wiring lands with it. */
-    emitEngine(phase: string, detail?: string, pid?: number) {
-      pushChannel('engine', 'lifecycle', { phase, detail, pid, at: Date.now() })
+    /** Engine channel emitter (wave 2c): supervised sidecar lifecycle events
+     *  from server/engineProcess.ts, fanned out to engine subscribers. */
+    emitEngine(name: string, phase: EnginePhase, detail?: string, pid?: number) {
+      pushChannel('engine', 'lifecycle', { name, phase, detail, pid, at: Date.now() } satisfies EngineLifecycleEvent)
     },
     close() {
       if (drainTicker) clearInterval(drainTicker)

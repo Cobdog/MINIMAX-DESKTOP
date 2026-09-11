@@ -300,11 +300,11 @@ export type JobLifecycleEvent =
   | { type: 'preview_meta'; promptId: string; mime: string; fps?: number; step?: number; totalSteps?: number }
   | { type: 'queue_status'; promptId: string; queueRemaining?: number }
 
-/** Reserved for the managed ComfyUI runtime (wave 2c): lifecycle events for
- *  the engine process itself. Typed now so the channel contract is frozen
- *  before the sidecar lands. */
+/** Lifecycle events for supervised engine/sidecar processes (wave 2c), emitted
+ *  by server/engineProcess.ts through the fabric's engine channel. `name`
+ *  identifies which managed process (e.g. 'comfyui', 'trainer', 'refmod'). */
 export type EnginePhase = 'booting' | 'starting' | 'ready' | 'stopping' | 'stopped' | 'failed'
-export type EngineLifecycleEvent = { phase: EnginePhase; detail?: string; pid?: number; at: number }
+export type EngineLifecycleEvent = { name: string; phase: EnginePhase; detail?: string; pid?: number; at: number }
 
 /** A GPU/VRAM sample pushed on the telemetry channel while at least one
  *  subscriber is connected (the sampler stops when the last one leaves). */

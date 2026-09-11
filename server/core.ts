@@ -23,6 +23,7 @@ import type { AppSettings, GpuTelemetry, LanStatus, ModelKind } from '../src/typ
 import { failureRef, logEvent, logFailure } from './logger'
 import { createStudioRepository, type StudioRepository } from './repo'
 import { createRealtimeHub, type RealtimeHub } from './realtime'
+import { EngineProcess } from './engineProcess'
 
 export type StudioServerPaths = {
   settingsFile: string
@@ -369,6 +370,13 @@ export function createStudioServer(paths: StudioServerPaths) {
     readTelemetry: () => readGpuTelemetrySampled(),
     isLocalServiceUrl,
   })
+
+  // EngineProcess supervision (wave 2c): sidecar lifecycle phases ride the
+  // fabric's engine channel, and http readiness probes reuse the SAME
+  // local-only SSRF guard the LLM channel enforces (the module default is
+  // deny-all until this wiring runs, so probes fail closed, never open).
+  EngineProcess.setEngineSink((event) => realtimeHub.emitEngine(event.name, event.phase, event.detail, event.pid))
+  EngineProcess.setUrlGuard(isLocalServiceUrl)
 
   function defaultSettings(): AppSettings {
     const root = join(paths.documentsDirectory, 'ComfyUI', 'models')
@@ -1254,6 +1262,9 @@ export function createStudioServer(paths: StudioServerPaths) {
 
   function stopLanServer() {
     realtimeHub.close()
+    // No supervised sidecar outlives the server that started it: graceful
+    // quit line first, forced tree-kill for whatever ignores it.
+    void EngineProcess.shutdownAll()
     lanServer?.close()
     lanServer = null
     lanStatus = { running: false }

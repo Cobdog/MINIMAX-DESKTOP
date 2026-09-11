@@ -1,0 +1,26 @@
+# Windows leg of the EngineProcess supervision contract (wave 2c): the
+# taskkill /T /F tree-kill path, the python.exe unbuffered flags, and the
+# portability of the fixtures only execute on Windows. Deliberately minimal —
+# server build only, no browser install (the ubuntu CI leg owns e2e).
+name: Engine CI (Windows)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  engine:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:server
+      - run: node scripts/test-engine-process.cjs
