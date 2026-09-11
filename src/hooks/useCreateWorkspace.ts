@@ -3,15 +3,17 @@
  *  selection and ordering, media picking, and workspace reset. Generation
  *  submission itself stays in App — this hook owns what is being composed. */
 import { useEffect, useRef, useState } from 'react'
-import type { AppSettings, CharacterProject, GenerationMode, LocationProject, MediaFile, MediaKind, MovieReferenceBinding, UpscaleMode, WardrobeProject } from '../types'
+import type { AppSettings, CharacterProject, GenerationMode, HairStyleProject, LocationProject, MediaFile, MediaKind, MovieReferenceBinding, UpscaleMode, WardrobeProject } from '../types'
 import { CHARACTER_LIBRARY_EVENT, characterReferences, loadCharacterProjects } from '../lib/characterLibrary'
 import { loadWardrobeProjects, wardrobeReferences, WARDROBE_LIBRARY_EVENT } from '../lib/wardrobeLibrary'
 import { loadLocationProjects, locationReferences, LOCATION_LIBRARY_EVENT } from '../lib/locationLibrary'
+import { HAIR_LIBRARY_EVENT, loadHairStyleProjects } from '../lib/hairLibrary'
 import { allocateWorkspaceReferences, composeReferenceInstructions } from '../lib/promptComposer'
 import { fitWholeCharacter } from '../lib/imageCrop'
 import { syncReferencePrompt } from '../lib/promptPolicies'
 import { readWorkspace, withoutPreview, workspaceDefaults, type MovieLink, type PersistedWorkspace } from '../lib/workspace'
 import type { NoticeTone } from './useGenerationQueue'
+import { useDebouncedPersist } from './useDebouncedPersist'
 
 export type VideoClipDraft = { source: MediaFile; replaceIndex?: number }
 
@@ -55,6 +57,7 @@ export function useCreateWorkspace(options: {
   const [characterProjects, setCharacterProjects] = useState<CharacterProject[]>(loadCharacterProjects)
   const [wardrobeProjects, setWardrobeProjects] = useState<WardrobeProject[]>(loadWardrobeProjects)
   const [locationProjects, setLocationProjects] = useState<LocationProject[]>(loadLocationProjects)
+  const [hairStyleProjects, setHairStyleProjects] = useState<HairStyleProject[]>(loadHairStyleProjects)
   const [selectedReferenceCharacterIds, setSelectedReferenceCharacterIds] = useState<string[]>(persisted.selectedReferenceCharacterIds)
   const [selectedReferenceLocationIds, setSelectedReferenceLocationIds] = useState<string[]>(persisted.selectedReferenceLocationIds)
   const [activeJobId, setActiveJobId] = useState<string | null>(persisted.activeJobId)
@@ -78,6 +81,11 @@ export function useCreateWorkspace(options: {
     window.addEventListener(LOCATION_LIBRARY_EVENT, refresh)
     return () => window.removeEventListener(LOCATION_LIBRARY_EVENT, refresh)
   }, [])
+  useEffect(() => {
+    const refresh = () => setHairStyleProjects(loadHairStyleProjects())
+    window.addEventListener(HAIR_LIBRARY_EVENT, refresh)
+    return () => window.removeEventListener(HAIR_LIBRARY_EVENT, refresh)
+  }, [])
 
   useEffect(() => {
     let disposed = false
@@ -96,6 +104,11 @@ export function useCreateWorkspace(options: {
     return () => { disposed = true }
   }, [characterProjects, wardrobeProjects])
 
+  // Persistence is debounced (300 ms trailing): this effect fires on every
+  // keystroke via `prompt`, and the write serializes the whole workspace
+  // synchronously. The debounce hook flushes the latest pending write on
+  // pagehide/beforeunload/unmount, so a normal close loses nothing.
+  const persistWorkspace = useDebouncedPersist(300)
   useEffect(() => {
     const workspace: PersistedWorkspace = {
       mode, prompt, duration, resolution, turbo, steps, sampler, scheduler, experimentalSampling, refImageSize, noDialogue, naturalMovement, clothingPolicy,
@@ -107,8 +120,8 @@ export function useCreateWorkspace(options: {
       timelineGuides: timelineGuides.map((guide) => ({ file: withoutPreview(guide.file)!, seconds: guide.seconds })),
       selectedReferenceCharacterIds, selectedReferenceLocationIds, activeJobId, movieHandoff,
     }
-    localStorage.setItem('minimax.workspace', JSON.stringify(workspace))
-  }, [activeJobId, advanced, clothingPolicy, duration, experimentalSampling, firstFrame, lastFrame, liveEnabled, livePreviewMode, loraStrength, mode, movieHandoff, naturalMovement, noDialogue, prompt, refImageSize, referenceAudios, referenceImages, referenceVideos, resolution, rtxModel, sampler, scheduler, seed, selectedReferenceCharacterIds, selectedReferenceLocationIds, shiftAudio, shiftVideo, sigmaShiftMode, steps, timelineGuides, turbo, upscaleMode])
+    persistWorkspace(() => localStorage.setItem('minimax.workspace', JSON.stringify(workspace)))
+  }, [activeJobId, advanced, clothingPolicy, duration, experimentalSampling, firstFrame, lastFrame, liveEnabled, livePreviewMode, loraStrength, mode, movieHandoff, naturalMovement, noDialogue, persistWorkspace, prompt, refImageSize, referenceAudios, referenceImages, referenceVideos, resolution, rtxModel, sampler, scheduler, seed, selectedReferenceCharacterIds, selectedReferenceLocationIds, shiftAudio, shiftVideo, sigmaShiftMode, steps, timelineGuides, turbo, upscaleMode])
 
   useEffect(() => {
     if (!settings || mediaHydrated.current) return
@@ -184,6 +197,7 @@ export function useCreateWorkspace(options: {
     setCharacterProjects(loadCharacterProjects())
     setWardrobeProjects(loadWardrobeProjects())
     setLocationProjects(loadLocationProjects())
+    setHairStyleProjects(loadHairStyleProjects())
     const next = workspaceBindingsFor(selectedReferenceCharacterIds, selectedReferenceLocationIds)
     if (selectedReferenceCharacterIds.length || selectedReferenceLocationIds.length) await applyWorkspaceBindings(previous, next)
   }
@@ -323,7 +337,7 @@ export function useCreateWorkspace(options: {
     referenceImages, setReferenceImages, referenceVideos, setReferenceVideos, referenceAudios, setReferenceAudios,
     timelineGuides, setTimelineGuides,
     // libraries
-    characterProjects, wardrobeProjects, locationProjects,
+    characterProjects, wardrobeProjects, locationProjects, hairStyleProjects,
     selectedReferenceCharacterIds, setSelectedReferenceCharacterIds,
     selectedReferenceLocationIds, setSelectedReferenceLocationIds,
     // handoffs and reset

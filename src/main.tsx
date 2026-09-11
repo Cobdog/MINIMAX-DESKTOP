@@ -3,8 +3,13 @@ import { createRoot } from 'react-dom/client'
 import { LoaderCircle } from 'lucide-react'
 import App from './App'
 import { installWebApiClient } from './lib/apiClient'
+import { observeLongAnimationFrames } from './lib/loafObserver'
 import './styles.css'
 import './guided-studio.css'
+
+// Dev-only long-animation-frames instrumentation (b7 seam): tree-shaken from
+// production builds by the static DEV replacement.
+if (import.meta.env.DEV) observeLongAnimationFrames()
 
 // MobileApp is ~36KB of the bundle and only used on the ?mobile=1 route —
 // desktop users never pay for it (perf audit: lazy-load the route split).

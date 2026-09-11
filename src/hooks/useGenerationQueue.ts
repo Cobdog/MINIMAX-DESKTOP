@@ -6,6 +6,7 @@ import { isPastRunningDeadline, isTerminalStatus, reduceJobPoll, type PollObserv
 import { extractOutputFile, extractOutputUrl, withTiledVideoDecode } from '../lib/workflow'
 import { extractAutomatedReferenceSet, initialJobs, playableOutputUrl, recordCharacterSheetImages, recordCharacterTurntable, recordLocationWalkthrough, recordMovieOutput } from '../lib/jobRecords'
 import type { LiveProgress } from '../lib/useLivePreview'
+import { useDebouncedPersist } from './useDebouncedPersist'
 
 export type NoticeTone = 'error' | 'success' | 'neutral'
 
@@ -27,11 +28,20 @@ export function useGenerationQueue(options: {
     setJobs((current) => current.map((j) => j.promptId === id && ['running', 'queued'].includes(j.status) ? { ...j, ...update, progress: update.progress ?? j.progress, status: 'running' } : j))
   }, [])
 
+  // Persistence is debounced (1 s trailing): during a live render the poll
+  // loop and progress events update `jobs` several times per second, and each
+  // write serialized 100 records on the main thread. The write reads
+  // jobsRef.current at flush time, so it always persists the latest complete
+  // job list (never a partially-built one), and the debounce hook flushes on
+  // pagehide/beforeunload/unmount so a normal close loses nothing.
+  const persistJobs = useDebouncedPersist(1000)
   useEffect(() => {
-    // The submit graph is for in-memory retry only — never persisted.
-    const persistable = jobs.slice(0, 100).map((job) => { const rest = { ...job }; delete rest.graph; return rest })
-    localStorage.setItem('minimax.jobs', JSON.stringify(persistable))
-  }, [jobs])
+    persistJobs(() => {
+      // The submit graph is for in-memory retry only — never persisted.
+      const persistable = jobsRef.current.slice(0, 100).map((job) => { const rest = { ...job }; delete rest.graph; return rest })
+      localStorage.setItem('minimax.jobs', JSON.stringify(persistable))
+    })
+  }, [jobs, persistJobs])
 
   useEffect(() => {
     if (!settings || !pendingKey || !connected) return

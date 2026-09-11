@@ -136,7 +136,7 @@ function App() {
     livePreviewMode, setLivePreviewMode, upscaleMode, rtxModel, seed, advanced, setAdvanced,
     firstFrame, setFirstFrame, lastFrame, setLastFrame,
     referenceImages, setReferenceImages, referenceVideos, setReferenceVideos, referenceAudios, setReferenceAudios, timelineGuides, setTimelineGuides,
-    characterProjects, wardrobeProjects, locationProjects,
+    characterProjects, wardrobeProjects, locationProjects, hairStyleProjects,
     selectedReferenceCharacterIds, setSelectedReferenceCharacterIds,
     selectedReferenceLocationIds, setSelectedReferenceLocationIds,
     activeJobId, setActiveJobId, setMovieHandoff, setCharacterHandoff,
@@ -454,6 +454,7 @@ function App() {
             characters={characterProjects}
             wardrobes={wardrobeProjects}
             locations={locationProjects}
+            hairStyles={hairStyleProjects}
             selectedCharacterIds={selectedReferenceCharacterIds}
             selectedLocationIds={selectedReferenceLocationIds}
             loadCharacter={(characterId) => void loadReferenceCharacter(characterId)}

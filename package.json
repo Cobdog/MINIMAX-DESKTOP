@@ -8,7 +8,7 @@
     "dev": "vite",
     "dev:server": "pnpm build:web && pnpm start:server",
     "build": "pnpm typecheck && pnpm build:web && pnpm build:server",
-    "build:web": "vite build",
+    "build:web": "vite build && node scripts/compress-dist.cjs",
     "build:server": "tsc -p tsconfig.server.json",
     "start:server": "node dist-server/server/index.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",

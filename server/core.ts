@@ -69,6 +69,25 @@ function readGpuTelemetry(): Promise<GpuTelemetry> {
   })
 }
 
+/** Lazy sampler over readGpuTelemetry: each polling client asks every 4 s, so
+ *  a cached sample with a matching TTL answers most requests without spawning
+ *  nvidia-smi, while an idle server (nobody asking) spawns nothing at all —
+ *  no free-running interval. Concurrent misses share one in-flight probe. */
+const gpuTelemetryTtlMs = 4_000
+let gpuTelemetrySample: { at: number; value: GpuTelemetry } | null = null
+let gpuTelemetryInFlight: Promise<GpuTelemetry> | null = null
+
+function readGpuTelemetrySampled(): Promise<GpuTelemetry> {
+  if (gpuTelemetrySample && Date.now() - gpuTelemetrySample.at < gpuTelemetryTtlMs) return Promise.resolve(gpuTelemetrySample.value)
+  if (!gpuTelemetryInFlight) {
+    gpuTelemetryInFlight = readGpuTelemetry().then((value) => {
+      gpuTelemetrySample = { at: Date.now(), value }
+      return value
+    }).finally(() => { gpuTelemetryInFlight = null })
+  }
+  return gpuTelemetryInFlight
+}
+
 function runFfmpeg(executable: string, args: string[]) {
   return new Promise<void>((resolvePromise, reject) => {
     const configured = executable.trim().replace(/^(["'])|(["'])$/g, '') || 'ffmpeg'
@@ -93,14 +112,28 @@ function cleanUrl(url: string) {
   return url.trim().replace(/\/+$/, '')
 }
 
+/** Hard timeout for ComfyUI/Ollama calls: a hung engine socket must not hold
+ *  server requests open forever. 60 s because /object_info legitimately runs
+ *  slow on a cold first load. */
+const COMFY_FETCH_TIMEOUT_MS = 60_000
+
 async function comfyFetch(url: string, path: string, init?: RequestInit) {
-  const response = await fetch(`${cleanUrl(url)}${path}`, init)
-  if (!response.ok) {
-    const message = await response.text().catch(() => '')
-    throw new Error(message || `ComfyUI returned ${response.status}`)
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), COMFY_FETCH_TIMEOUT_MS)
+  try {
+    const response = await fetch(`${cleanUrl(url)}${path}`, { ...init, signal: controller.signal })
+    if (!response.ok) {
+      const message = await response.text().catch(() => '')
+      throw new Error(message || `ComfyUI returned ${response.status}`)
+    }
+    const contentType = response.headers.get('content-type') ?? ''
+    return contentType.includes('application/json') ? response.json() : response.text()
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') throw new Error(`ComfyUI request to ${path} timed out after ${Math.round(COMFY_FETCH_TIMEOUT_MS / 1000)} s.`)
+    throw error
+  } finally {
+    clearTimeout(timeout)
   }
-  const contentType = response.headers.get('content-type') ?? ''
-  return contentType.includes('application/json') ? response.json() : response.text()
 }
 
 function comfyChoices(info: Record<string, unknown>, node: string, field: string) {
@@ -312,12 +345,22 @@ export function createStudioServer(paths: StudioServerPaths) {
     return { ...defaults, ...raw, paths: { ...defaults.paths, ...raw.paths }, generationDefaults }
   }
 
+  // Settings cache: every LAN request (including each media Range seek) needs
+  // the settings, and reading + parsing settings.json per request showed up in
+  // the perf audit. The file is only ever written through saveSettings in this
+  // process, so an in-memory copy invalidated on save keeps the exact same
+  // semantics (a concurrent external edit of settings.json is not a supported
+  // flow; restart to pick one up).
+  let settingsCache: AppSettings | null = null
+
   async function loadSettings(): Promise<AppSettings> {
+    if (settingsCache) return settingsCache
     try {
-      return normalizeSettings(JSON.parse(await readFile(paths.settingsFile, 'utf8')) as Partial<AppSettings>)
+      settingsCache = normalizeSettings(JSON.parse(await readFile(paths.settingsFile, 'utf8')) as Partial<AppSettings>)
     } catch {
-      return defaultSettings()
+      settingsCache = defaultSettings()
     }
+    return settingsCache
   }
 
   async function saveSettings(settings: AppSettings) {
@@ -328,6 +371,7 @@ export function createStudioServer(paths: StudioServerPaths) {
     const staged = `${paths.settingsFile}.tmp`
     await writeFile(staged, JSON.stringify(settings, null, 2), 'utf8')
     await rename(staged, paths.settingsFile)
+    settingsCache = settings
     return settings
   }
 
@@ -565,7 +609,9 @@ export function createStudioServer(paths: StudioServerPaths) {
     return comfyFetch(comfyUrl, '/upload/image', { method: 'POST', body: form })
   }
 
-  /** HTTP (non-protocol) local file serving with Range support, for the LAN API. */
+  /** HTTP (non-protocol) local file serving with Range support, for the LAN
+   *  API. HEAD answers with the exact GET headers (Content-Length, Range
+   *  metadata) and no body, so players can probe seekability cheaply. */
   async function serveLocalMediaHttp(request: IncomingMessage, response: ServerResponse, filePath: string) {
     const details = await stat(filePath).catch(() => null)
     if (!details?.isFile() || details.size === 0) return sendJson(response, 404, { error: 'The media file is unavailable.' })
@@ -594,6 +640,7 @@ export function createStudioServer(paths: StudioServerPaths) {
     }
     if (status === 206) headers['content-range'] = `bytes ${start}-${end}/${size}`
     response.writeHead(status, headers)
+    if (request.method === 'HEAD') return response.end()
     createReadStream(filePath, { start, end }).pipe(response)
   }
 
@@ -836,7 +883,7 @@ export function createStudioServer(paths: StudioServerPaths) {
             return sendJson(response, 200, { connected: false, latencyMs: Date.now() - started, error: error instanceof Error ? error.message : String(error) })
           }
         }
-        if (url.pathname === '/api/lan/telemetry' && request.method === 'GET') return sendJson(response, 200, await readGpuTelemetry())
+        if (url.pathname === '/api/lan/telemetry' && request.method === 'GET') return sendJson(response, 200, await readGpuTelemetrySampled())
         if (url.pathname === '/api/lan/doctor' && request.method === 'GET') return sendJson(response, 200, await runSetupDoctor(settings))
         if (url.pathname === '/api/lan/free' && request.method === 'POST') {
           // Queue-hygiene soft reset: unload models and return VRAM to the pool.
@@ -956,7 +1003,9 @@ export function createStudioServer(paths: StudioServerPaths) {
             return sendJson(response, 200, { ...result, url: `/api/lan/media?source=output&path=${encodeURIComponent(result.path)}` })
           } catch (error) { return sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) }) }
         }
-        if (url.pathname === '/api/lan/media' && request.method === 'GET') {
+        // HEAD is accepted alongside GET for the output-contained path (same
+        // headers, no body); the upstream ComfyUI proxy path stays GET-only.
+        if (url.pathname === '/api/lan/media' && (request.method === 'GET' || request.method === 'HEAD')) {
           if (url.searchParams.get('source') === 'output') {
             const requested = url.searchParams.get('path') ?? ''
             const root = resolve(settings.outputDirectory)
@@ -979,8 +1028,32 @@ export function createStudioServer(paths: StudioServerPaths) {
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'content-security-policy': CONTENT_SECURITY_POLICY }); return createReadStream(fallback).pipe(response)
       }
       const mime: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' }
-      response.writeHead(200, { 'content-type': mime[extname(filePath).toLowerCase()] ?? 'application/octet-stream', 'cache-control': requested === 'index.html' ? 'no-cache' : 'public, max-age=86400', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'content-security-policy': CONTENT_SECURITY_POLICY })
-      createReadStream(filePath).pipe(response)
+      const headers: Record<string, string> = {
+        'content-type': mime[extname(filePath).toLowerCase()] ?? 'application/octet-stream',
+        // Content-hashed /assets/ files are immutable; index.html must always
+        // revalidate so a new deploy is picked up on the next reload.
+        'cache-control': requested === 'index.html' ? 'no-cache' : requested.startsWith('assets/') ? 'public, max-age=31536000, immutable' : 'public, max-age=86400',
+        'referrer-policy': 'no-referrer',
+        'x-content-type-options': 'nosniff',
+        'content-security-policy': CONTENT_SECURITY_POLICY,
+        'vary': 'Accept-Encoding',
+      }
+      // Precompressed companions (scripts/compress-dist.cjs emits .br/.gz at
+      // build time) are served when the client accepts them — zero runtime
+      // compression cost. Brotli wins over gzip; content-type stays the
+      // ORIGINAL file's.
+      let servedPath = filePath
+      const acceptEncodingHeader = request.headers['accept-encoding']
+      const encodings = (Array.isArray(acceptEncodingHeader) ? acceptEncodingHeader.join(',') : acceptEncodingHeader ?? '').toLowerCase().split(',').map((part) => part.split(';')[0].trim())
+      if (encodings.includes('br') && existsSync(`${filePath}.br`)) {
+        servedPath = `${filePath}.br`
+        headers['content-encoding'] = 'br'
+      } else if ((encodings.includes('gzip') || encodings.includes('*')) && existsSync(`${filePath}.gz`)) {
+        servedPath = `${filePath}.gz`
+        headers['content-encoding'] = 'gzip'
+      }
+      response.writeHead(200, headers)
+      createReadStream(servedPath).pipe(response)
     } catch (error) {
       sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) })
     }
