@@ -13,21 +13,27 @@ pnpm start:server
 # → http://127.0.0.1:4178  (LAN address printed on startup)
 ```
 
+**Development:** `pnpm test` (workflows, contracts, manifests — VM-harness suite), `pnpm test:e2e` (Playwright: 14-view render sweep at 1920×1080 with console-error tracking and per-view vision screenshots), `pnpm smoke:server` (routes + security guards). CI runs all of it on every push.
+
 Requirements: Node 20+, a local ComfyUI with the MiniMax H3 core nodes, and the H3 model components already on disk. FFmpeg for clip tools. Optional: local Ollama for prompt features; NVIDIA tooling for GPU telemetry.
 
 Configuration lives in `~/.minimax-studio/` (override with `MINIMAX_STUDIO_HOME`): `settings.json` holds the ComfyUI/Ollama addresses, model folders, and defaults — also editable from the app's Settings page. Default port `4178` (override with `MINIMAX_LAN_PORT`).
 
 **Security posture:** open on your LAN by default, exactly like ComfyUI itself — anyone on the same network can use the studio. For hostile networks (café Wi-Fi, shared offices), start with `--token` (or `MINIMAX_LAN_TOKEN=1`) and pass the token as `?token=…`.
 
-**Development:** `pnpm start:server` (or `pnpm dev:server` to rebuild first) serves the app on 4178; `pnpm dev` runs vite HMR on 5173 with `/api` proxied to a server already running on 4178. `pnpm test` runs the assertion suite; `pnpm smoke:server` boots the built server on a scratch port and verifies the SPA, routes, and security guards.
+`pnpm dev` runs vite HMR on 5173 with `/api` proxied to a server already running on 4178.
 
 ## Capabilities
 
 **Video generation (MiniMax H3)**
 - Text-to-video, image-to-video (first frame), first+last-frame, and mixed reference generation (up to 9 images / 3 videos / 3 audio) through the FL2VA/Ref2VA models
 - Official ComfyUI H3 graph topology and sampling defaults (`res_multistep` + `simple`), with detected FL2V 4/8-step and Ref2V 4-step turbo LoRAs
+- **Official MiniMax prompt contracts built in**: one-click scaffolds for the three-field base structure and the six-section Ref2VA format (`subject_definitions` … `non_diegetic_music`), timed `[Shot N] At MM:SS.mmm` cut insertions, inline negatives, identity-lock enumeration, and live slot-order warnings that keep `<Picture>/<Video>/<Audio>` mentions matching reference order
+- **Multiframe timeline keyframes**: pin images at exact seconds through chained `MiniMaxH3AddGuide` (official multiframe topology), with frame readouts, in-duration validation, and mirroring guide images into prompt-visible Pictures
 - Guided quality presets — Native Quality, official Turbo 8, Preview — with custom sampling isolated under an explicit Experimental disclosure
 - A fixed-seed quality diagnostic that queues matching Native and Turbo 8 renders for direct A/B comparison
+- **Reproducibility manifests** on every render (seed, model files + sizes, LoRA strength, sampler, graph-version hash) — downloadable per job or exported in bulk
+- **Queue hygiene**: a failed render automatically soft-resets the engine (`/free`) and retries once with tiled VAE decoding before surfacing the error
 - Optional verified LTX 2.5 latent 2× post-processing and explicitly experimental RTX/CUDA frame upscaling
 - Non-destructive reference video clipping: preview a source, set in/out points, create a focused 2–15 s reference MP4
 
@@ -41,8 +47,13 @@ Configuration lives in `~/.minimax-studio/` (override with `MINIMAX_STUDIO_HOME`
 - Hair, Wardrobe, Accessories, and Location studios with reusable references
 - Movie Planner: Ollama-assisted scene/shot planning with a conversational copilot, field-level diff review, and undo history
 
+**Prompt library**
+- Search Civitai's public generation metadata through the local server (pinned-host proxy, scoped to the MiniMax H3 base model by default), study its settings, and save entries with attribution into a reusable local library
+- Eight bundled technique starters distilled from fal's H3 prompting guide
+- The ten official style embeddings (bullet_time, truman_show, …) as one-click `embedding:name` insertions
+
 **Local integration**
-- Local Ollama prompt enhancement, timed shot planning, and synchronized-audio rewriting — prompt text never leaves the workstation
+- Local Ollama prompt enhancement, timed shot planning, and synchronized-audio rewriting — prompt text never leaves the workstation, and the planner instructs MiniMax's official structure and label discipline
 - Live WebSocket render progress and previews; GPU/VRAM telemetry; job queue with cancellation and bounded failure detection
 - Landscape/portrait/square output presets with automatic fitting and interactive crop preview
 
@@ -51,6 +62,11 @@ Configuration lives in `~/.minimax-studio/` (override with `MINIMAX_STUDIO_HOME`
 - Files arrive by drag-and-drop upload (or file picker) and generated outputs are browsable, previewable, and directly reusable as new inputs
 
 ## Local services
+
+**Trust & setup**
+- Setup doctor in Settings: verifies FFmpeg, HTTPS tooling, the engine device, and attention backends, with exact fixes
+- GPU-tier guidance (8/16/24 GB, Blackwell) from the community quant tiers
+- One-time model-license notice covering the MiniMax community license's reported region and commercial-use constraints
 
 - ComfyUI defaults to `http://127.0.0.1:8188`
 - Ollama defaults to `http://127.0.0.1:11434`; the app lists installed local text models and excludes embedding and cloud-backed entries
