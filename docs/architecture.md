@@ -63,6 +63,22 @@ Security posture: **open on the LAN by default** (ComfyUI-consistent; a delibera
 
 Job state transitions live in the pure reducer `src/lib/jobReducer.ts` (terminal-state guards, no-output cap, deadline), unit-tested in `scripts/test-workflows.cjs`.
 
+## Renderer structure
+
+`src/App.tsx` (~550 lines) is the composition shell — hook wiring, view routing, and handoffs between workspaces. The domain logic is layered so each feature lands in exactly one place:
+
+| Layer | Modules | What lives there |
+| --- | --- | --- |
+| `src/views/` | `CreateView`, `LibraryView`, `JobsView`, `SettingsView` | One component per nav destination + its private helpers (reference pickers, strips, modals) |
+| `src/hooks/` | `useStudioSession` | Settings load, model scanning, ComfyUI connection/object-info, Ollama list, GPU telemetry |
+| | `useGenerationQueue` | Job persistence, guarded history polling, deadline sweep, cancellation |
+| | `useCreateWorkspace` | Every persisted Create field, the character/wardrobe/location libraries, reference binding and ordering, media picking, reset |
+| | `useGenerationFlows` | Submit-side generation for every provider (H3 + upscale validation, LTX 2.5, ACE-Step, the fixed-seed diagnostic pair) |
+| `src/lib/` | `workspace`, `promptPolicies`, `h3Stack`, `jobRecords`, `format` (+ existing workflow builders) | Pure functions: persistence shapes, H3 prompt composition, validated-stack reporting, completion side effects |
+| `src/components/` | `form`, `chrome`, `media` (+ one file per workspace/studio) | Labeled fields, titlebar/nav/notice/badges, video playback and drop widgets |
+
+Adding a feature is a one-file change: a workspace field goes in `useCreateWorkspace` + `PersistedWorkspace`; a new generator goes in `useGenerationFlows` + a graph builder in `lib/`; a new view goes in `src/views/` plus a route in `App.tsx`.
+
 ## State & persistence
 
 - **Server-side:** `~/.minimax-studio/settings.json` (atomic writes), LAN token file
@@ -75,13 +91,16 @@ Job state transitions live in the pure reducer `src/lib/jobReducer.ts` (terminal
 pnpm build          # typecheck + web build + server build
 pnpm start:server   # run the app on :4178
 pnpm dev            # vite HMR on :5173 (proxies /api to :4178)
-pnpm test           # assertion suite
+pnpm test           # assertion suite (workflows, reducer, persistence, poll kernel)
 pnpm smoke:server   # boots the built server on a scratch port; verifies routes + guards
+pnpm test:e2e       # builds, then Playwright: 14-view render sweep at 1920x1080
+                    # with console-error tracking + per-view vision screenshots
+pnpm test:all       # unit + E2E + smoke
 ```
+
+CI (`.github/workflows/ci.yml`) runs typecheck, lint, unit, build, smoke, and E2E on every push and PR.
 
 ## Known debts / follow-ups
 
-- Remote browsers opening the full Studio get degraded live preview (direct WebSocket to ComfyUI assumes same-machine); the SSE bridge should become the fallback
-- `App.tsx` remains a 1,900-line God component — decomposition tracked on the board
 - Desktop/mobile generation semantics share builders but duplicate orchestration with drift
-- No CI yet; the assertion suite is wired (`pnpm test`) but nothing runs it on push
+- The Create view's primary Generate button and bottom controls are below the fold at 1080p, and six status signals contradict each other on first run — tracked as the UI polish wave (task ipmk4ci) with vision-inspection evidence
