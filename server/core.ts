@@ -789,6 +789,58 @@ export function createStudioServer(paths: StudioServerPaths) {
           }
         }
         if (url.pathname === '/api/lan/telemetry' && request.method === 'GET') return sendJson(response, 200, await readGpuTelemetry())
+        if (url.pathname === '/api/lan/prompt-library' && request.method === 'GET') {
+          // Pinned-host proxy to Civitai's public images API (withMeta=true).
+          // The host is fixed — never user-supplied — so this is a deliberate
+          // exception to the local-only service rule, and no credentials are
+          // forwarded. Allowlisted parameters only.
+          const upstream = new URL('https://civitai.com/api/v1/images')
+          upstream.searchParams.set('withMeta', 'true')
+          const text = url.searchParams.get('query') ?? ''
+          if (text) upstream.searchParams.set('query', text.slice(0, 200))
+          const limit = Number(url.searchParams.get('limit'))
+          if (Number.isInteger(limit) && limit >= 1 && limit <= 50) upstream.searchParams.set('limit', String(limit))
+          const cursor = url.searchParams.get('cursor')
+          if (cursor && cursor.length <= 200) upstream.searchParams.set('cursor', cursor)
+          const nsfw = url.searchParams.get('nsfw') === 'true'
+          upstream.searchParams.set('nsfw', nsfw ? 'true' : 'false')
+          // Scope to the H3 base model by default so harvested prompts are
+          // actually written for this engine (the community already uses
+          // MiniMax's official contract fields); 'all' opts out explicitly.
+          if (url.searchParams.get('scope') !== 'all') upstream.searchParams.set('baseModels', 'MiniMax H3')
+          const sort = url.searchParams.get('sort')
+          if (sort && ['Most Reactions', 'Most Comments', 'Newest', 'Oldest'].includes(sort)) upstream.searchParams.set('sort', sort)
+          const controller = new AbortController()
+          const timeout = setTimeout(() => controller.abort(), 12_000)
+          try {
+            const upstreamResponse = await fetch(upstream, { signal: controller.signal, headers: { accept: 'application/json' } })
+            if (!upstreamResponse.ok) return sendJson(response, 502, { error: `The prompt library is unavailable (Civitai returned ${upstreamResponse.status}).` })
+            const result = await upstreamResponse.json() as {
+              items?: Array<Record<string, unknown>>; metadata?: { nextCursor?: string }
+            }
+            const items = (result.items ?? []).map((raw) => {
+              const meta = (raw.meta ?? {}) as Record<string, unknown>
+              return {
+                id: typeof raw.id === 'number' || typeof raw.id === 'string' ? String(raw.id) : '',
+                prompt: typeof meta.prompt === 'string' ? meta.prompt : '',
+                negativePrompt: typeof meta.negativePrompt === 'string' ? meta.negativePrompt : undefined,
+                seed: typeof meta.seed === 'number' ? meta.seed : undefined,
+                sampler: typeof meta.sampler === 'string' ? meta.sampler : undefined,
+                steps: typeof meta.steps === 'number' ? meta.steps : undefined,
+                cfgScale: typeof meta.cfgScale === 'number' ? meta.cfgScale : undefined,
+                width: typeof meta.Size === 'string' ? Number(meta.Size.split('x')[0]) || undefined : undefined,
+                height: typeof meta.Size === 'string' ? Number(meta.Size.split('x')[1]) || undefined : undefined,
+                username: typeof raw.username === 'string' ? raw.username : undefined,
+                stats: typeof raw.stats === 'object' && raw.stats ? raw.stats as { voteCount?: number; commentCount?: number } : undefined,
+              }
+            }).filter((item) => item.prompt && item.prompt.length > 24 && !/^https?:\/\//i.test(item.prompt.trim())).slice(0, 50)
+            return sendJson(response, 200, { items, cursor: result.metadata?.nextCursor })
+          } catch (error) {
+            return sendJson(response, 502, { error: error instanceof Error && error.name === 'AbortError' ? 'The prompt library request timed out.' : 'The prompt library could not be reached.' })
+          } finally {
+            clearTimeout(timeout)
+          }
+        }
         if (url.pathname === '/api/lan/outputs/resolve' && request.method === 'GET') {
           const file = { filename: url.searchParams.get('filename') ?? '', subfolder: url.searchParams.get('subfolder') || undefined, type: url.searchParams.get('type') || undefined }
           const path = resolveOutputFile(settings.outputDirectory, file)

@@ -4,7 +4,7 @@ export type ModelKind = 'diffusion_models' | 'text_encoders' | 'vae' | 'loras' |
 export type MediaKind = 'image' | 'video' | 'audio'
 export type UpscaleMode = 'off' | 'ltx' | 'rtx'
 export type ReferencePurpose = 'character' | 'character-angle' | 'hair' | 'wardrobe' | 'accessory' | 'location' | 'continuity' | 'product' | 'style' | 'generic'
-export type PromptPresetCategory = 'camera' | 'shot' | 'angle' | 'lens' | 'lighting' | 'audio' | 'style' | 'movement' | 'transition' | 'character' | 'wardrobe' | 'location'
+export type PromptPresetCategory = 'camera' | 'shot' | 'angle' | 'lens' | 'lighting' | 'audio' | 'style' | 'movement' | 'transition' | 'character' | 'wardrobe' | 'location' | 'embedding'
 export type PromptPreset = { id: string; category: PromptPresetCategory; label: string; keywords: string[]; description: string; insertion: string }
 export type MovieReferenceBinding = { file: MediaFile; purpose: ReferencePurpose; label: string; characterId?: string; hairStyleId?: string; wardrobeId?: string; accessoryId?: string; locationId?: string; locationEnvironmentMode?: LocationProject['environmentMode']; source: 'character-studio' | 'hair-studio' | 'wardrobe-studio' | 'accessory-studio' | 'location-studio' | 'movie' | 'shot' | 'continuity' }
 export type ResolvedMovieShot = { preferredMode: GenerationMode; effectiveMode: GenerationMode; references: MovieReferenceBinding[]; compiledPrompt: string; routeReason: string; omittedReferences: MovieReferenceBinding[] }
@@ -314,4 +314,21 @@ export type DesktopApi = {
   generateWithOllama(url: string, model: string, prompt: string): Promise<string>
   generateStructuredWithOllama(url: string, model: string, prompt: string, schema: Record<string, unknown>): Promise<unknown>
   syncMobileCharacters(characters: unknown[]): Promise<{ synced: number }>
+  listPromptLibrary(query: { text?: string; limit?: number; cursor?: string; nsfw?: boolean; sort?: string; scope?: 'h3' | 'all' }): Promise<{ items: PromptLibraryItem[]; cursor?: string }>
+}
+
+/** One harvested community prompt (Civitai image metadata via the server's
+ *  pinned proxy route). */
+export type PromptLibraryItem = {
+  id: string
+  prompt: string
+  negativePrompt?: string
+  seed?: number
+  sampler?: string
+  steps?: number
+  cfgScale?: number
+  width?: number
+  height?: number
+  username?: string
+  stats?: { voteCount?: number; commentCount?: number }
 }

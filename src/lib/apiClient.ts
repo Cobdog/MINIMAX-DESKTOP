@@ -1,4 +1,4 @@
-import type { AppSettings, DesktopApi, MediaKind } from '../types'
+import type { AppSettings, DesktopApi, MediaKind, PromptLibraryItem } from '../types'
 
 /**
  * HTTP implementation of the DesktopApi bridge, used when the renderer runs in
@@ -204,6 +204,16 @@ export function createWebApiClient(): DesktopApi {
     },
     async syncMobileCharacters(characters: unknown[]) {
       return postJson('/api/lan/characters', { characters })
+    },
+    async listPromptLibrary(query: { text?: string; limit?: number; cursor?: string; nsfw?: boolean; sort?: string; scope?: 'h3' | 'all' }) {
+      const search = new URLSearchParams()
+      if (query.text) search.set('query', query.text)
+      if (query.limit) search.set('limit', String(query.limit))
+      if (query.cursor) search.set('cursor', query.cursor)
+      search.set('nsfw', query.nsfw ? 'true' : 'false')
+      if (query.sort) search.set('sort', query.sort)
+      if (query.scope === 'all') search.set('scope', 'all')
+      return apiFetch<{ items: PromptLibraryItem[]; cursor?: string }>(`/api/lan/prompt-library?${search}`)
     },
   }
 }

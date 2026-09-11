@@ -76,11 +76,25 @@ export const promptPresets: PromptPreset[] = [
     ['occlusion','Occlusion Transition','Hide the cut behind a full-frame obstruction.'], ['iris','Iris Transition','Open or close the visible frame through a controlled circular mask.'], ['timelapse','Time-Lapse Transition','Compress environmental change while preserving a fixed visual anchor.'],
     ['speed-ramp','Speed Ramp','Change playback energy smoothly around one motivated action beat.'], ['focus','Focus Transition','Move attention between subjects through a clean motivated focus pull.'],
   ].map(([id,label,description]) => preset('transition', id, label, description, `Transition: ${description} Preserve composition, screen direction, timing, and the intended narrative connection.`)),
+  // The ten official community style embeddings shipped in Comfy-Org's
+  // MiniMax-H3 repo (models/embeddings/*.safetensors) — used by name inline.
+  ...[
+    ['art-is-explosion','Art Is Explosion','Painted burst of color and motion.'],
+    ['blooming-flowers','Blooming Flowers','Blossoms unfurl in time-lapse-like bloom.'],
+    ['bullet-time','Bullet Time','Frozen high-speed moment with orbiting camera.'],
+    ['dark-magic','Dark Magic','Shadowy arcane energy and deep contrast.'],
+    ['fire-breath','Fire Breath','Vivid flames and ember-lit atmosphere.'],
+    ['four-seasons','Four Seasons','One shot sweeping through seasonal change.'],
+    ['kiss-camera','Kiss Camera','Romantic close confession-cam moment.'],
+    ['spiral-ascent','Spiral Ascent','Upward spiraling camera and motion.'],
+    ['storm-magic','Storm Magic','Lightning-charged tempest energy.'],
+    ['truman-show','Truman Show','Self-aware staged-reality framing.'],
+  ].map(([id,label,description]) => preset('embedding', id, `${label} · embedding`, description, `embedding:minimaxh3_${id} — combined with your scene description for its signature look. Requires the matching embedding file in ComfyUI/models/embeddings.`)),
 ]
 
 export const promptPresetCategories: Array<{ id: PromptPresetCategory; label: string }> = [
   { id: 'camera', label: 'Camera' }, { id: 'shot', label: 'Shot' }, { id: 'angle', label: 'Angle' }, { id: 'lens', label: 'Lens' },
-  { id: 'lighting', label: 'Lighting' }, { id: 'audio', label: 'Audio' }, { id: 'style', label: 'Style' }, { id: 'movement', label: 'Movement' }, { id: 'transition', label: 'Transition' }, { id: 'character', label: 'Character' }, { id: 'wardrobe', label: 'Wardrobe' }, { id: 'location', label: 'Location' },
+  { id: 'lighting', label: 'Lighting' }, { id: 'audio', label: 'Audio' }, { id: 'style', label: 'Style' }, { id: 'movement', label: 'Movement' }, { id: 'transition', label: 'Transition' }, { id: 'character', label: 'Character' }, { id: 'wardrobe', label: 'Wardrobe' }, { id: 'location', label: 'Location' }, { id: 'embedding', label: 'Style embedding' },
 ]
 
 export function searchPromptPresets(query: string) {

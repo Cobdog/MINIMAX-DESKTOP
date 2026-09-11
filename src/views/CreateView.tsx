@@ -53,6 +53,7 @@ import { locationReferences } from '../lib/locationLibrary'
 import { allocateWorkspaceReferences, composeReferenceInstructions } from '../lib/promptComposer'
 import { composeH3Prompt, resolveRenderReferenceImages } from '../lib/promptPolicies'
 import { buildBaseContractDraft, buildReferenceContractDraft, referenceOrderWarnings, suggestCutTimes } from '../lib/promptContracts'
+import { PromptLibraryBrowser } from '../components/PromptLibraryBrowser'
 import { findH3PreviewOverrideNode } from '../lib/h3Stack'
 import { frameCount } from '../lib/workflow'
 import type { LivePreview } from '../lib/useLivePreview'
@@ -147,6 +148,7 @@ export function CreateView(props: CreateViewProps) {
   const [dialogueOpen, setDialogueOpen] = useState(false)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [renderedVideoDuration, setRenderedVideoDuration] = useState(0)
+  const [libraryOpen, setLibraryOpen] = useState(false)
   const h3PreviewOverrideAvailable = Boolean(findH3PreviewOverrideNode(info))
   const selectedCharacters = selectedCharacterIds.map((id) => characters.find((character) => character.id === id)).filter(Boolean) as CharacterProject[]
   const selectedLocations = selectedLocationIds.map((id) => locations.find((location) => location.id === id)).filter(Boolean) as LocationProject[]
@@ -259,6 +261,7 @@ export function CreateView(props: CreateViewProps) {
               {mode !== 'reference' && <button type="button" title="Insert the timed [Shot N] cut scaffold with computed cut times" onClick={() => insertPromptText(timedCutsScaffold || '[Shot 1] One continuous take — no cuts needed at this duration.')}>Timed cuts</button>}
               <button type="button" title="Insert inline negative statements the model respects" onClick={() => insertPromptText('No soft dissolves, no garbled text, no watermarks, no burned-in captions or logos; do not introduce objects or people not described here.')}>Inline negatives</button>
               {identityLockLine && <button type="button" title="Insert identity-preservation enumeration for the selected cast" onClick={() => insertPromptText(identityLockLine)}>Identity lock</button>}
+              <button type="button" className="prompt-library-open" title="Search public Civitai generation metadata for reusable prompts" onClick={() => setLibraryOpen(true)}>Community library</button>
             </div>
             {orderWarnings.length > 0 && <div className="reference-order-warning" role="status">{orderWarnings.map((warning) => <span key={warning}><AlertCircle size={12} />{warning}</span>)}</div>}
             <div className="prompt-policy-toggles" aria-label="Prompt safeguards">
@@ -333,6 +336,8 @@ export function CreateView(props: CreateViewProps) {
               </section>
             </div>
           )}
+
+          {libraryOpen && <PromptLibraryBrowser onClose={() => setLibraryOpen(false)} onInsert={(prompt) => insertPromptText(prompt)} />}
 
           {dialogueOpen && mode === 'reference' && <CharacterDialogueModal
             characters={selectedCharacters}
