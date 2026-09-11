@@ -128,4 +128,4 @@ Reference downloads and node documentation are maintained by [Comfy-Org's ACE-St
 
 ## License
 
-None yet. Upstream carries no license, which means all-rights-reserved by default; treat this fork as private-use until licensing is clarified with upstream.
+**GNU AGPLv3** — see [LICENSE](LICENSE). Copyleft in both directions: use it, host it, build on it, but share your source. The fork lineage and licensing rationale are documented in [docs/PROVENANCE.md](docs/PROVENANCE.md). Content-neutral by design: no filters, no gating, no telemetry — what people create is their business, not the tool's.
