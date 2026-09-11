@@ -298,7 +298,7 @@ export type GenerationJob = {
   graph?: unknown
   /** Set after the automatic engine-reset + tiled-VAE retry. */
   retriedOnce?: boolean
-  mediaType?: 'video' | 'audio'
+  mediaType?: 'video' | 'audio' | 'image'
   movieLink?: { projectId: string; sceneId: string; shotId: string }
   characterProjectId?: string
   locationProjectId?: string

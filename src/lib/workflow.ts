@@ -294,7 +294,7 @@ export type ComfyOutputFile = { filename: string; subfolder?: string; type?: str
  *  the RTX-upscale save node ('84'), then the LTX-upscale node ('70'), then
  *  anything matching the media type. Callers use this descriptor to resolve
  *  the local output path — never a newest-file-on-disk guess. */
-export function extractOutputFile(history: Record<string, unknown>, promptId: string, mediaType: 'video' | 'audio' = 'video'): ComfyOutputFile | undefined {
+export function extractOutputFile(history: Record<string, unknown>, promptId: string, mediaType: 'video' | 'audio' | 'image' = 'video'): ComfyOutputFile | undefined {
   const entry = history[promptId] as { outputs?: Record<string, Record<string, unknown>> } | undefined
   if (!entry?.outputs) return undefined
   const candidates: ComfyOutputFile[] = []
@@ -318,11 +318,11 @@ export function extractOutputFile(history: Record<string, unknown>, promptId: st
   else if (entry.outputs['99']) visit(entry.outputs['99'])
   else if (entry.outputs['70']) visit(entry.outputs['70'])
   else visit(entry.outputs)
-  const expected = mediaType === 'audio' ? /\.(flac|wav|mp3|ogg|m4a|aac|opus)$/i : /\.(mp4|webm|mov|mkv|gif)$/i
+  const expected = mediaType === 'audio' ? /\.(flac|wav|mp3|ogg|m4a|aac|opus)$/i : mediaType === 'image' ? /\.(png|jpe?g|webp)$/i : /\.(mp4|webm|mov|mkv|gif)$/i
   return candidates.find((candidate) => expected.test(candidate.filename)) ?? candidates[0]
 }
 
-export function extractOutputUrl(history: Record<string, unknown>, promptId: string, comfyUrl: string, mediaType: 'video' | 'audio' = 'video') {
+export function extractOutputUrl(history: Record<string, unknown>, promptId: string, comfyUrl: string, mediaType: 'video' | 'audio' | 'image' = 'video') {
   const file = extractOutputFile(history, promptId, mediaType)
   if (!file) return undefined
   const query = new URLSearchParams({ filename: file.filename, subfolder: file.subfolder ?? '', type: file.type ?? 'output' })

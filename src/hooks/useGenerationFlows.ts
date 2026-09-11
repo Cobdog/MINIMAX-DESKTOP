@@ -13,6 +13,7 @@ import { diagnosticPrompt } from '../lib/h3Stack'
 import { composeH3Prompt, resolveRenderReferenceImages } from '../lib/promptPolicies'
 import { resolveMovieShot } from '../lib/promptComposer'
 import { buildMusic3Workflow } from '../lib/music3Workflow'
+import { buildContactSheetWorkflow, inferContactSheetSelection } from '../lib/contactSheet'
 import type { Music3GenerationOptions } from '../lib/music3Workflow'
 import { buildRenderManifest } from '../lib/manifest'
 import type { useStudioSession } from './useStudioSession'
@@ -459,5 +460,43 @@ export function useGenerationFlows(options: {
     }
   }
 
-  return { generate, generateLtx, generateAceStep, runH3Diagnostics, generateSceneChain, generateMusic3, submitting, ltxSubmitting, aceSubmitting, music3Submitting, diagnosticRunning }
+  /** Character sheet via H3 ContactSheet + Turnaround LoRA: five coordinated
+   *  views of the approved identity image in one pass through the H3 DiT. */
+  const generateCharacterSheet = async (project: { id: string; name: string; baseImage?: MediaFile }, contactAvailable: boolean) => {
+    if (!settings) return 'Studio settings are still loading.'
+    if (!status.connected) return 'Start ComfyUI and verify the server connection in Settings.'
+    if (!project.baseImage) return 'Approve a character identity image first.'
+    if (!contactAvailable) return 'Install the ComfyUI-H3-ContactSheet nodes and the five-view turnaround LoRA, then refresh the engine.'
+    const selection3 = inferContactSheetSelection(models, selection.ref2va, selection.textEncoder, selection.videoVae)
+    if (!selection3.turnaroundLora) return 'The five-view turnaround LoRA (minimax_h3_five_view_*) was not found in the LoRA folder.'
+    const localId = createId()
+    const job: GenerationJob = {
+      id: localId, provider: 'minimax', mediaType: 'image', mode: 'reference',
+      prompt: `Five-view character sheet of ${project.name}`,
+      createdAt: Date.now(), status: 'queued', progress: 2, progressLabel: 'Preparing contact sheet',
+      width: 0, height: 0, duration: 0, characterProjectId: project.id,
+    }
+    setJobs((current) => [job, ...current])
+    try {
+      const base = { ...project.baseImage }
+      delete base.preview
+      const uploaded = await window.minimax.uploadImageData(settings.comfyUrl, await prepareImage(project.baseImage, 1024, 1024))
+      const graph = buildContactSheetWorkflow({
+        prompt: `the camera orbits the subject of <Picture 1> ninety degrees clockwise`,
+        size: 1024, steps: 28, seed: Math.floor(Math.random() * 1_000_000_000),
+        referenceName: uploaded.name, filenamePrefix: `MiniMax_CharacterSheet_${project.id}`,
+      }, selection3)
+      const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, clientId)
+      setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: 'Rendering five coordinated views' } : item))
+      notify('success', `Contact sheet for ${project.name} queued — five coordinated views through the H3 model.`)
+      return null
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setJobs((current) => current.map((item) => item.id === localId ? { ...item, status: 'failed', error: message } : item))
+      notify('error', message)
+      return message
+    }
+  }
+
+  return { generate, generateLtx, generateAceStep, runH3Diagnostics, generateSceneChain, generateMusic3, generateCharacterSheet, submitting, ltxSubmitting, aceSubmitting, music3Submitting, diagnosticRunning }
 }

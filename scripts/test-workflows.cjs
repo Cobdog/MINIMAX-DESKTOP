@@ -611,8 +611,35 @@ assert.ok(referenceOrderWarnings('Uses <Audio 2> first, then <Audio 1>.', { imag
   assert.equal(inferred.vae, 'minimax_music3_dav.safetensors')
 }
 
+
+// ---- ContactSheet character sheets ------------------------------------------
+{
+  const cs = load('src/lib/contactSheet.ts')
+  const sel = { ref2va: 'ref2va', textEncoder: 'qwen', videoVae: 'vvae', turnaroundLora: 'minimax_h3_five_view_512_s1500.safetensors' }
+  const g = cs.buildContactSheetWorkflow({ prompt: 'orbit ninety degrees', size: 1000, steps: 28, seed: 7, referenceName: 'ref.png', filenamePrefix: 'cs' }, sel)
+  assert.equal(g['10'].class_type, 'H3ContactSheet')
+  assert.equal(g['10'].inputs.ref_image.join('|'), '4|0')
+  assert.equal(g['10'].inputs.size, 992, 'size snaps to the 32 grid')
+  assert.equal(g['12'].inputs.conditioning.join('|'), '10|0', 'guider uses the sheet conditioning')
+  assert.equal(g['15'].inputs.latent_image.join('|'), '10|1', 'sampler uses the sheet latent')
+  assert.equal(g['5'].class_type, 'LoraLoaderModelOnly')
+  assert.equal(g['5'].inputs.lora_name, 'minimax_h3_five_view_512_s1500.safetensors')
+  assert.equal(g['16'].class_type, 'H3ContactSheetDecode')
+  assert.equal(g['18'].inputs.images.join('|'), '16|0', 'views batch saved first for attribution')
+  assert.ok(String(g['18'].inputs.filename_prefix).endsWith('_views'))
+  const clamped = cs.buildContactSheetWorkflow({ prompt: 'p', size: 4096, seed: 1, referenceName: 'r', filenamePrefix: 'x' }, sel)
+  assert.equal(clamped['10'].inputs.size, 2048, 'per-view size caps at 2048')
+  // LoRA inference matches training-run naming variants.
+  const files = [
+    { name: 'minimax_h3_fl2v_turbo_8step_v1.0.safetensors', kind: 'loras', bytes: 1 },
+    { name: 'minimax_h3_five_view_512_s1500.safetensors', kind: 'loras', bytes: 1 },
+  ]
+  assert.equal(cs.inferContactSheetSelection(files, 'r2v', 'qwen', 'vvae').turnaroundLora, 'minimax_h3_five_view_512_s1500.safetensors')
+  assert.equal(cs.inferContactSheetSelection([{ name: 'other.safetensors', kind: 'loras', bytes: 1 }], 'r2v', 'qwen', 'vvae').turnaroundLora, '')
+}
+
 runKernelTests().then(() => {
-  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), and MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference)')
+  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference), and ContactSheet character sheets (topology, LoRA inference, size clamps, views-first attribution)')
 }, (error) => {
   console.error(error)
   process.exitCode = 1

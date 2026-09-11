@@ -29,6 +29,7 @@ import { MUSIC3_REQUIRED_NODES, inferMusic3Selection } from './lib/music3Workflo
 import { Music3Workspace } from './components/Music3Workspace'
 import { fitWholeCharacter } from './lib/imageCrop'
 import { inferLtx25Selections, inferSelections } from './lib/modelSelection'
+import { inferContactSheetSelection } from './lib/contactSheet'
 import { findH3PreviewOverrideNode, h3StackReport } from './lib/h3Stack'
 import { useLivePreview } from './lib/useLivePreview'
 import { ZImageWorkspace } from './components/ZImageWorkspace'
@@ -142,6 +143,7 @@ function App() {
   const ltxSelection = useMemo(() => inferLtx25Selections(models, choices(info, 'LatentUpscaleModelLoader', 'model_name')), [models, info])
   const aceSelection = useMemo(() => inferAceStepSelections(models), [models])
   const music3Selection = useMemo(() => inferMusic3Selection(models), [models])
+  const contactSheetAvailable = Boolean(info['H3ContactSheet'] && info['H3ContactSheetDecode'] && inferContactSheetSelection(models, selection.ref2va, selection.textEncoder, selection.videoVae).turnaroundLora)
   const activeModel = mode === 'reference' ? selection.ref2va : selection.fl2va
   const activeLora = mode === 'reference' ? selection.ref2vLora : selection.fl2vLora
   const requiredModels = [activeModel, selection.textEncoder, selection.videoVae, selection.audioVae]
@@ -326,7 +328,7 @@ function App() {
     notify,
     onQueued: (target) => { if (target) setView(target) },
   })
-  const { generateLtx, generateAceStep, runH3Diagnostics, generateMusic3, submitting, ltxSubmitting, aceSubmitting, music3Submitting, diagnosticRunning } = flows
+  const { generateLtx, generateAceStep, runH3Diagnostics, generateMusic3, generateCharacterSheet, submitting, ltxSubmitting, aceSubmitting, music3Submitting, diagnosticRunning } = flows
   const generate = () => flows.generate({
     mode: upscaleMode, model: upscaleModel, vae: upscaleVae, lbhModel, missingNodes: missingLtxUpscaleNodes,
   })
@@ -520,6 +522,7 @@ function App() {
         }} /></div>
         {view === 'characters' && <CharacterStudio settings={settings} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} automationJob={jobs.find((job) => job.characterProjectId)} onNotice={(tone, text) => setNotice({ tone, text })} onCreateTurntable={(project) => {
           if (!project.baseImage) return Promise.resolve('Approve a character identity image before rendering the survey.')
+          if (contactSheetAvailable) return generateCharacterSheet(project, contactSheetAvailable)
           const firstFrame = fitWholeCharacter({ ...project.baseImage }); delete firstFrame.preview
           return generateLtx({ mode: 'image', prompt: `Ten-second character identity coverage survey of ${project.name} in one continuous stabilized take. Preserve the exact identity, facial geometry, skin, hair, body proportions, clothing, and neutral studio background from the first frame. From 0 to 2 seconds hold a sharp neutral full-body front view with the entire head, hands, and feet visible. From 2 to 5 seconds make a slow stabilized camera push to a sharp head-and-shoulders close-up. From 5 to 7 seconds hold the face clearly while moving through frontal and gentle three-quarter facial angles so the eyes, nose, mouth, jawline, ears, hairline, and distinguishing marks remain readable. From 7 to 10 seconds pull back smoothly to a complete full-body view and continue a restrained orbit through three-quarter, side, and rear body angles. The character stays still with a neutral expression and unchanged pose. Even soft studio lighting, accurate anatomy, crisp individual frames, fast shutter. No cuts, no identity drift, no morphing, no pose changes, no expression changes, no clothing changes, no added objects, no motion blur, no smearing, no ghosting, no whip pans, no text, no dialogue.`, width: 768, height: 1024, duration: 10, preset: 'quality', seed: Math.floor(Math.random() * 1_000_000_000), filenamePrefix: 'MiniMax_character_identity_survey' }, firstFrame, { characterProjectId: project.id })
         }} />}

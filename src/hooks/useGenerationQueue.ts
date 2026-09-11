@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppSettings, GenerationJob } from '../types'
 import { isPastRunningDeadline, isTerminalStatus, reduceJobPoll, type PollObservation, type PollReduction } from '../lib/jobReducer'
 import { extractOutputFile, extractOutputUrl, withTiledVideoDecode } from '../lib/workflow'
-import { extractAutomatedReferenceSet, initialJobs, playableOutputUrl, recordCharacterTurntable, recordLocationWalkthrough, recordMovieOutput } from '../lib/jobRecords'
+import { extractAutomatedReferenceSet, initialJobs, playableOutputUrl, recordCharacterSheetImages, recordCharacterTurntable, recordLocationWalkthrough, recordMovieOutput } from '../lib/jobRecords'
 import type { LiveProgress } from '../lib/useLivePreview'
 
 export type NoticeTone = 'error' | 'success' | 'neutral'
@@ -101,7 +101,10 @@ export function useGenerationQueue(options: {
               recordMovieOutput(job.movieLink, remote)
               let extractionError: string | null = null
               const local = reduction.job.localOutputPath
-              if (job.characterProjectId) {
+              const imageDescriptor = job.mediaType === 'image' ? extractOutputFile(history, promptId, mediaType) : undefined
+              if (job.characterProjectId && imageDescriptor) {
+                extractionError = await recordCharacterSheetImages(job.characterProjectId, imageDescriptor, settings)
+              } else if (job.characterProjectId) {
                 recordCharacterTurntable(job.characterProjectId, local ?? remote)
                 if (local) extractionError = await extractAutomatedReferenceSet('character', job.characterProjectId, local, job.duration, settings)
               } else if (job.locationProjectId) {

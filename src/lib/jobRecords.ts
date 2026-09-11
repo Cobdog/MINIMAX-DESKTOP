@@ -2,7 +2,7 @@
  *  shots, updating character/location libraries, and loading persisted jobs. */
 import type { AppSettings, GenerationJob, MovieProject } from '../types'
 import { webMediaUrl } from './mediaUrls'
-import { updateCharacterProject } from './characterLibrary'
+import { loadCharacterProjects, updateCharacterProject } from './characterLibrary'
 import { updateLocationProject } from './locationLibrary'
 import type { MovieLink } from './workspace'
 
@@ -28,6 +28,23 @@ export function recordMovieOutput(link: MovieLink | undefined, outputUrl: string
     const next = projects.map((project) => project.id !== link.projectId ? project : { ...project, updatedAt: Date.now(), scenes: project.scenes.map((scene) => scene.id !== link.sceneId ? scene : { ...scene, shots: scene.shots.map((shot) => shot.id !== link.shotId ? shot : { ...shot, outputUrl, renderedAt: Date.now(), stage: 'rendered' as const }) }) })
     localStorage.setItem('minimax.movie-projects', JSON.stringify(next))
   } catch { /* Keep the completed generation even if legacy movie data cannot be updated. */ }
+}
+
+/** Contact-sheet completion: the five coordinated views land in the output
+ *  folder as images — save them into the character's reference set directly
+ *  (no video frames to extract). Returns an error message or null. */
+export async function recordCharacterSheetImages(characterProjectId: string | undefined, file: { filename: string; subfolder?: string; type?: string }, settings: AppSettings) {
+  if (!characterProjectId || !file.filename) return null
+  try {
+    const saved = await window.minimax.saveComfyOutputImage('', file, settings.outputDirectory)
+    const preview = await window.minimax.mediaUrl(saved.path)
+    const project = loadCharacterProjects().find((item) => item.id === characterProjectId)
+    const existing = project?.referenceImages ?? []
+    updateCharacterProject(characterProjectId, { referenceMode: 'set', referenceImages: [...existing, { path: saved.path, name: saved.name, kind: 'image' as const, preview }], selectedReferencePaths: undefined })
+    return null
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
 }
 
 export function recordCharacterTurntable(characterProjectId: string | undefined, outputUrl: string) {
