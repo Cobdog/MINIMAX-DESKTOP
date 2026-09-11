@@ -8,7 +8,7 @@
  *  view. What remains as props are the behavioral callbacks and App-level UI
  *  state (generation flows, prompt-assistant state, the live-preview
  *  metadata feed), which genuinely belong to the App. */
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   AlertCircle,
@@ -74,6 +74,8 @@ import { transientProbeEnabled } from '../state/transientProbe'
 import { SelectField, NumberField } from '../components/form'
 import { PipelineItem, StatusBadge } from '../components/chrome'
 import { VideoPlayer, VideoContinuationControls, MediaDrop } from '../components/media'
+import { StudioDialog } from '../ui/StudioDialog'
+import { StudioTab, StudioTabs } from '../ui/StudioTabs'
 
 /** Wave-2a transient-update discipline, proven on the real fabric first
  *  (wave 1): preview frames stream from the binary channel straight into the
@@ -276,6 +278,7 @@ export function CreateView(props: CreateViewProps) {
   }, [])
   const sourceMediaTriggerRef = useRef<HTMLButtonElement>(null)
   const sourceMediaCloseRef = useRef<HTMLButtonElement>(null)
+  const libraryTriggerRef = useRef<HTMLButtonElement>(null)
   const dialogueTriggerRef = useRef<HTMLButtonElement>(null)
   const [sourceMediaOpen, setSourceMediaOpen] = useState(false)
   const [dialogueOpen, setDialogueOpen] = useState(false)
@@ -290,28 +293,11 @@ export function CreateView(props: CreateViewProps) {
   const builderReferenceImages = resolveRenderReferenceImages(referenceImages, selectedBindings, clothingPolicy)
   const composedPrompt = composeH3Prompt({ prompt, mode, bindings: selectedBindings, clothingPolicy, noDialogue, naturalMovement })
   const sourceMediaCount = referenceImages.length + referenceVideos.length + referenceAudios.length
+  // Wave 2b: closing behavior (focus restore, Escape, backdrop press) is Base
+  // UI Dialog's now — see StudioDialog; only the open state remains ours.
   const closeSourceMedia = useCallback(() => {
     setSourceMediaOpen(false)
-    window.requestAnimationFrame(() => sourceMediaTriggerRef.current?.focus())
   }, [])
-  const keepSourceMediaFocus = (event: ReactKeyboardEvent<HTMLElement>) => {
-    if (event.key !== 'Tab') return
-    const controls = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), summary, select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
-    const first = controls[0]
-    const last = controls.at(-1)
-    if (!first || !last) return
-    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
-    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
-  }
-  useEffect(() => {
-    if (!sourceMediaOpen) return
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeSourceMedia()
-    }
-    window.addEventListener('keydown', closeOnEscape)
-    window.requestAnimationFrame(() => sourceMediaCloseRef.current?.focus())
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [closeSourceMedia, sourceMediaOpen])
   useEffect(() => {
     if (mode !== 'reference' && sourceMediaOpen) setSourceMediaOpen(false)
   }, [mode, sourceMediaOpen])
@@ -400,9 +386,11 @@ export function CreateView(props: CreateViewProps) {
 
       <div className="workspace-grid">
         <section className="composer-panel">
-          <div className="mode-tabs" role="tablist" aria-label="Generation mode">
-            {modeInfo.map((item) => <button key={item.id} role="tab" aria-selected={mode === item.id} className={mode === item.id ? 'selected' : ''} onClick={() => { setMode(item.id); if (item.id === 'reference' && turbo === '8') setTurbo('off') }}><item.icon size={18} /><span><strong>{item.label}</strong><small>{item.note}</small></span></button>)}
-          </div>
+          {/* Wave 2b — Base UI Tabs behavior: arrow/Home/End navigation with
+              automatic activation and a roving tabindex, same visual classes. */}
+          <StudioTabs className="mode-tabs" aria-label="Generation mode" value={mode} onChange={(next) => { const id = next as GenerationMode; setMode(id); if (id === 'reference' && turbo === '8') setTurbo('off') }}>
+            {modeInfo.map((item) => <StudioTab key={item.id} value={item.id} className={mode === item.id ? 'selected' : ''}><item.icon size={18} /><span><strong>{item.label}</strong><small>{item.note}</small></span></StudioTab>)}
+          </StudioTabs>
 
           <section className={`create-section create-direction-section ${mode === 'reference' ? 'reference-prompt-builder' : ''}`}>
             <div className="create-section-heading"><span><WandSparkles size={15} /></span><div><strong>{mode === 'reference' ? 'Prompt Builder' : 'Shot direction'}</strong><small>{mode === 'reference' ? 'Compose the scene while reference assignments and safeguards stay synchronized.' : 'Describe the subject, action, camera, lighting, and sound.'}</small></div><em className={prompt.trim() ? 'complete' : ''}>{prompt.trim() ? 'Ready' : 'Required'}</em></div>
@@ -425,7 +413,7 @@ export function CreateView(props: CreateViewProps) {
               {mode !== 'reference' && <button type="button" title="Insert the timed [Shot N] cut scaffold with computed cut times" onClick={() => insertPromptText(timedCutsScaffold || '[Shot 1] One continuous take — no cuts needed at this duration.')}>Timed cuts</button>}
               <button type="button" title="Insert inline negative statements the model respects" onClick={() => insertPromptText('No soft dissolves, no garbled text, no watermarks, no burned-in captions or logos; do not introduce objects or people not described here.')}>Inline negatives</button>
               {identityLockLine && <button type="button" title="Insert identity-preservation enumeration for the selected cast" onClick={() => insertPromptText(identityLockLine)}>Identity lock</button>}
-              <button type="button" className="prompt-library-open" title="Search public Civitai generation metadata for reusable prompts" onClick={() => setLibraryOpen(true)}>Community library</button>
+              <button ref={libraryTriggerRef} type="button" className="prompt-library-open" title="Search public Civitai generation metadata for reusable prompts" onClick={() => setLibraryOpen(true)}>Community library</button>
             </div>
             {orderWarnings.length > 0 && <div className="reference-order-warning" role="status">{orderWarnings.map((warning) => <span key={warning}><AlertCircle size={12} />{warning}</span>)}</div>}
             {mode === 'reference' && overReferenced.length > 0 && <div className="reference-order-warning" role="status"><span><AlertCircle size={12} />{overReferenced.length === 1 ? 'One character has' : `${overReferenced.length} characters have`} more than four identity pictures loaded. More images do not automatically clarify a character — each reference is scaled to a 2048px short edge, so a few sharp views usually work best.</span></div>}
@@ -485,9 +473,18 @@ export function CreateView(props: CreateViewProps) {
           )}
           </section>}
 
-          {sourceMediaOpen && mode === 'reference' && (
-            <div className="modal-backdrop source-media-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSourceMedia() }}>
-              <section className="source-media-modal" role="dialog" aria-modal="true" aria-labelledby="source-media-modal-title" aria-describedby="source-media-modal-description" onKeyDown={keepSourceMediaFocus}>
+          {mode === 'reference' && (
+            <StudioDialog
+              open={sourceMediaOpen}
+              onClose={closeSourceMedia}
+              backdropClassName="source-media-backdrop"
+              centerClassName="source-media-center"
+              popupClassName="source-media-modal"
+              labelledBy="source-media-modal-title"
+              describedBy="source-media-modal-description"
+              initialFocus={sourceMediaCloseRef}
+              finalFocus={sourceMediaTriggerRef}
+            >
                 <header>
                   <div><span><ImageIcon size={18} /></span><div><small>REFERENCE WORKSPACE</small><strong id="source-media-modal-title">Source media</strong><p id="source-media-modal-description">Build the cast, locations, look, motion, and sound for this render.</p></div></div>
                   <div className="source-media-header-actions"><em>{sourceMediaCount} loaded</em><button ref={sourceMediaCloseRef} type="button" aria-label="Close source media" onClick={closeSourceMedia}><X size={18} /></button></div>
@@ -498,11 +495,10 @@ export function CreateView(props: CreateViewProps) {
                   <section className="source-media-modal-section"><div className="source-media-section-title"><span>03</span><div><strong>Files and crops</strong><small>Add standalone pictures, motion references, and audio cues.</small></div></div><div className="reference-groups source-media-file-groups"><ReferenceRow icon={ImageIcon} label="Pictures" limit="Up to 9" kind="image" files={referenceImages} onAdd={() => void chooseReference('image')} onRemove={(index) => removeReference('image', index)} />{referenceImages.length > 0 && <div className="reference-crops">{referenceImages.map((file, i) => <details key={`${file.path}-${i}`}><summary>Picture {i + 1} · crop to output</summary><ImageCrop label={`Picture ${i + 1}`} file={file} resolution={resolution} onChange={(next) => updateReference(i, next)} /></details>)}</div>}<ReferenceRow icon={Film} label="Videos" limit="Up to 3 · trim longer sources to 2–15 seconds" kind="video" files={referenceVideos} onAdd={() => void chooseReference('video')} onEdit={editVideoReference} onRemove={(index) => removeReference('video', index)} /><ReferenceRow icon={Volume2} label="Audio" limit="Up to 3" kind="audio" files={referenceAudios} onAdd={() => void chooseReference('audio')} onRemove={(index) => removeReference('audio', index)} /><div className="timeline-guides"><div className="reference-title"><span><Clock3 size={17} /></span><div><strong>Timeline keyframes</strong><small>Pin images at exact seconds through MiniMaxH3AddGuide</small></div></div>{timelineGuides.map((guide, index) => { const warning = guideFrameWarning(guide.seconds, duration); const promptVisible = referenceImages.some((file) => file.path === guide.file.path); return <div className={`timeline-guide-row ${warning ? 'invalid' : ''}`} key={`${guide.file.path}-${index}`} title={warning ?? undefined}>{guide.file.preview ? <img src={guide.file.preview} alt="" /> : <span className="reference-choice-placeholder"><ImageIcon size={16} /></span>}<span><strong>Keyframe {index + 1}</strong><small>{guide.file.name}</small></span>{!promptVisible && <button type="button" className="timeline-guide-mirror" title="Guide-only images are not visible to the text encoder. Mirror this image into the reference Pictures so the prompt can describe it as <Picture N>." onClick={() => addReferenceImage(guide.file)}>Not prompt-visible — add as Picture</button>}<label>Seconds<input type="number" min={-15} max={duration} step={0.1} value={guide.seconds} onChange={(event) => setTimelineGuides(timelineGuides.map((item, itemIndex) => itemIndex === index ? { ...item, seconds: Number(event.target.value) } : item))} /></label><output>frame {frameIndexForSeconds(guide.seconds)}</output><button aria-label={`Remove keyframe ${index + 1}`} onClick={() => setTimelineGuides(timelineGuides.filter((_item, itemIndex) => itemIndex !== index))}><X size={14} /></button></div> })}<button className="add-reference" onClick={() => void chooseMedia('image', (file) => setTimelineGuides(timelineGuides.length < 6 ? [...timelineGuides, { file, seconds: Math.max(0.5, Math.round((duration / (timelineGuides.length + 2)) * 10) / 10) }] : timelineGuides))} disabled={timelineGuides.length >= 6}><Plus size={16} />Add keyframe</button><small className="timeline-guide-note">Keyframes pin composition at their frame but are not visible to the text encoder — also load them as Pictures when the prompt must describe their content. Negative seconds count from the clip's end.</small></div></div></section>
                 </div>
                 <footer><span>{sourceMediaCount ? `${sourceMediaCount} file${sourceMediaCount === 1 ? '' : 's'} ready for this render` : 'No standalone files added yet'}</span><button type="button" className="primary-button" onClick={closeSourceMedia}><Check size={15} />Done</button></footer>
-              </section>
-            </div>
+            </StudioDialog>
           )}
 
-          {libraryOpen && <PromptLibraryBrowser onClose={() => setLibraryOpen(false)} onInsert={(prompt) => insertPromptText(prompt)} />}
+          {libraryOpen && <PromptLibraryBrowser finalFocusRef={libraryTriggerRef} onClose={() => setLibraryOpen(false)} onInsert={(prompt) => insertPromptText(prompt)} />}
 
           {dialogueOpen && mode === 'reference' && <CharacterDialogueModal
             characters={selectedCharacters}

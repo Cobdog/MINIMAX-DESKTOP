@@ -4,15 +4,17 @@
  *  FTS5), with the legacy localStorage library as the offline fallback.
  *  Metadata (seed/sampler/steps) is imported for study; only prompt text is
  *  inserted into the composer. */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type RefObject } from 'react'
 import { AlertCircle, Bookmark, Check, LoaderCircle, Search, Sparkles, Trash2, X } from 'lucide-react'
 import type { PromptLibraryItem } from '../types'
 import { PROMPT_LIBRARY_EVENT, deletePromptEntry, loadPromptLibrary, savePromptEntry, type SavedPromptEntry } from '../lib/promptLibraryStorage'
 import { deleteServerPromptEntry, saveServerPromptEntries, searchSavedPrompts } from '../lib/serverStorage'
+import { StudioDialog } from '../ui/StudioDialog'
+import { StudioTab, StudioTabs } from '../ui/StudioTabs'
 
 const SORTS = ['Most Reactions', 'Most Comments', 'Newest', 'Oldest']
 
-export function PromptLibraryBrowser({ onClose, onInsert }: { onClose(): void; onInsert(prompt: string, item: PromptLibraryItem): void }) {
+export function PromptLibraryBrowser({ onClose, onInsert, finalFocusRef }: { onClose(): void; onInsert(prompt: string, item: PromptLibraryItem): void; finalFocusRef?: RefObject<HTMLElement | null> }) {
   const [tab, setTab] = useState<'community' | 'saved'>('community')
   const [text, setText] = useState('')
   const [nsfw, setNsfw] = useState(false)
@@ -70,11 +72,9 @@ export function PromptLibraryBrowser({ onClose, onInsert }: { onClose(): void; o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [onClose])
+  // Wave 2b: Escape handling, focus trapping and focus restore moved into
+  // StudioDialog (Base UI) — this component previously had NO focus trap at
+  // all, so Tab could escape the dialog and focus was never restored.
 
   const flash = (id: string) => {
     setInsertedId(id)
@@ -115,16 +115,15 @@ export function PromptLibraryBrowser({ onClose, onInsert }: { onClose(): void; o
     : library
 
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <section className="prompt-library-modal" role="dialog" aria-modal="true" aria-labelledby="prompt-library-title">
+    <StudioDialog open onClose={onClose} popupClassName="prompt-library-modal" labelledBy="prompt-library-title" finalFocus={finalFocusRef}>
         <header>
           <div><span><Sparkles size={18} /></span><div><small>PROMPT LIBRARY</small><strong id="prompt-library-title">Community &amp; saved prompts</strong><p>Harvest public Civitai generation metadata through the local server, study its settings, and keep what works. Technique starters included.</p></div></div>
           <button type="button" aria-label="Close prompt library" onClick={onClose}><X size={18} /></button>
         </header>
-        <div className="prompt-library-tabs" role="tablist" aria-label="Library source">
-          <button type="button" role="tab" aria-selected={tab === 'community'} className={tab === 'community' ? 'selected' : ''} onClick={() => setTab('community')}>Community</button>
-          <button type="button" role="tab" aria-selected={tab === 'saved'} className={tab === 'saved' ? 'selected' : ''} onClick={() => setTab('saved')}>Saved ({library.length})</button>
-        </div>
+        <StudioTabs className="prompt-library-tabs" aria-label="Library source" value={tab} onChange={(next) => setTab(next === 'saved' ? 'saved' : 'community')}>
+          <StudioTab value="community" className={tab === 'community' ? 'selected' : ''}>Community</StudioTab>
+          <StudioTab value="saved" className={tab === 'saved' ? 'selected' : ''}>Saved ({library.length})</StudioTab>
+        </StudioTabs>
         {tab === 'community' ? (
           <>
             <div className="prompt-library-controls">
@@ -189,7 +188,6 @@ export function PromptLibraryBrowser({ onClose, onInsert }: { onClose(): void; o
             </div>
           </>
         )}
-      </section>
-    </div>
+    </StudioDialog>
   )
 }

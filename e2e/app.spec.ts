@@ -246,3 +246,150 @@ test('transient updates paint through store.subscribe with zero React re-renders
   expect(result.renderCountAfter).toBe(result.renderCountBefore)
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
+
+// Wave 2b — the keyboard-first a11y baseline: the Create view's core flow
+// must be fully operable without a mouse. Exercises the two Base UI
+// migrations directly: arrow-key tab navigation (roving tabindex) and the
+// dialogs' focus trap / Escape / focus-restore behavior. Focus visibility is
+// asserted at each step — the token-driven :focus-visible ring must actually
+// render, not merely exist in the stylesheet.
+test('Create view core flow is fully keyboard-operable', async ({ page }) => {
+  const problems = await trackErrors(page)
+  // The workspace is SERVER-persisted (SQLite under the shared test home), so
+  // earlier runs can boot this test with a stale mode/prompt. Wait for the
+  // authoritative boot load before driving, then normalize by keyboard.
+  const workspaceLoaded = page.waitForResponse((response) => response.url().includes('/api/lan/workspace'), { timeout: 8_000 }).catch(() => null)
+  await page.goto('/')
+  await workspaceLoaded
+
+  const focusReport = () => page.evaluate(() => {
+    const element = document.activeElement
+    if (!element) return { tag: 'none', focusVisible: false, outline: 'none', boxShadow: 'none' }
+    const style = getComputedStyle(element)
+    return {
+      tag: element.tagName.toLowerCase(),
+      focusVisible: element.matches(':focus-visible'),
+      outline: `${style.outlineStyle} ${style.outlineWidth} ${style.outlineColor}`,
+      boxShadow: style.boxShadow,
+    }
+  })
+  // Walks Tab (or Shift+Tab) until the active element satisfies the
+  // predicate; fails the test if the limit is exhausted first.
+  const tabUntil = async (predicate: () => Promise<boolean>, backward = false, limit = 60) => {
+    for (let index = 0; index < limit; index += 1) {
+      if (await predicate()) return
+      await page.keyboard.press(backward ? 'Shift+Tab' : 'Tab')
+    }
+    expect(await predicate(), 'Tab walk never reached the target').toBe(true)
+  }
+  const activeIs = (selector: string) => page.evaluate((target) => Boolean(document.activeElement?.closest(target)), selector)
+
+  // 1. Focus the prompt editor by keyboard only and type (clearing whatever
+  //    a previous run persisted).
+  const prompt = page.locator('#prompt')
+  await prompt.focus()
+  await page.keyboard.press('Control+A')
+  await page.keyboard.press('Delete')
+  await page.keyboard.type('a lone drummer on a night train, windows streaked with rain')
+  await expect(prompt).toHaveValue(/lone drummer/)
+  const editorFocus = await focusReport()
+  expect(editorFocus.focusVisible).toBe(true)
+  // The composer's textarea:focus treatment is the border+glow ring (the
+  // global outline rule is overridden there) — either affordance proves the
+  // focused control renders a visible indicator.
+  expect(editorFocus.outline.includes('solid') || editorFocus.boxShadow !== 'none').toBe(true)
+
+  // 2. Backward Tab reaches the mode tabs (the strip sits directly above the
+  //    composer); arrow keys move AND activate (Base UI roving tabindex).
+  await tabUntil(() => activeIs('.mode-tabs'), true)
+  expect(await activeIs('.mode-tabs [role="tab"][aria-selected="true"]')).toBe(true)
+  const tabFocus = await focusReport()
+  expect(tabFocus.focusVisible).toBe(true)
+  expect(tabFocus.outline).toContain('rgb(198, 255, 99)')
+  // The workspace persists server-side, so a previous run may have left the
+  // mode anywhere — arrow (with wrap) to the deterministic Text start first.
+  const selectedTabName = async () => page.locator('.mode-tabs [role="tab"][aria-selected="true"]').innerText()
+  for (let index = 0; index < 5 && !/Text/i.test(await selectedTabName()); index += 1) {
+    await page.keyboard.press('ArrowRight')
+  }
+  await expect(page.locator('.mode-tabs [role="tab"][aria-selected="true"]')).toHaveAccessibleName(/Text/i)
+  await page.keyboard.press('ArrowRight')
+  await expect(page.locator('.mode-tabs [role="tab"][aria-selected="true"]')).toHaveAccessibleName(/Image/i)
+  await page.keyboard.press('ArrowRight')
+  await expect(page.locator('.mode-tabs [role="tab"][aria-selected="true"]')).toHaveAccessibleName(/First \+ last/i)
+  await page.keyboard.press('ArrowRight')
+  await expect(page.locator('.mode-tabs [role="tab"][aria-selected="true"]')).toHaveAccessibleName(/Reference/i)
+  // The prompt survived the mode switches.
+  await expect(prompt).toHaveValue(/lone drummer/)
+
+  // 3. Reference mode surfaces the source-media dialog trigger. Reach it by
+  //    Tab, open with Enter — Base UI Dialog traps focus and focuses the
+  //    close button (our initialFocus).
+  const manageButton = page.getByRole('button', { name: /manage source media/i })
+  await manageButton.waitFor({ state: 'visible' })
+  await tabUntil(() => page.evaluate(() => document.activeElement?.getAttribute('class')?.includes('source-media-manage') ?? false))
+  const manageFocus = await focusReport()
+  expect(manageFocus.focusVisible).toBe(true)
+  await page.keyboard.press('Enter')
+  const dialog = page.locator('.source-media-modal')
+  await expect(dialog).toBeVisible()
+  await expect(page.locator('.source-media-modal [aria-label="Close source media"]')).toBeFocused()
+  // Focus trap: Tab cycles inside the popup and never escapes it. The wrap
+  // past the last control redirects on the next animation frame (the focus
+  // guard's rAF), so each press settles briefly — hammering Tab faster than
+  // a frame would transit the invisible guard span mid-redirect.
+  for (let index = 0; index < 16; index += 1) {
+    await page.keyboard.press('Tab')
+    await page.waitForTimeout(60)
+  }
+  expect(await page.evaluate(() => Boolean(document.activeElement?.closest('.source-media-modal')))).toBe(true)
+  // Escape closes the dialog and restores focus to the trigger.
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(manageButton).toBeFocused()
+
+  // 4. The Community library dialog (second Base UI migration) opens and
+  //    closes by keyboard with focus restore. Its trigger sits above the
+  //    source-media section, so walk backward.
+  await tabUntil(() => page.evaluate(() => document.activeElement?.classList.contains('prompt-library-open') ?? false), true)
+  await page.keyboard.press('Enter')
+  const libraryDialog = page.locator('.prompt-library-modal')
+  await expect(libraryDialog).toBeVisible()
+  expect(await page.evaluate(() => Boolean(document.activeElement?.closest('.prompt-library-modal')))).toBe(true)
+  // Its tab strip is keyboard-navigable too (Base UI Tabs, automatic activation).
+  await tabUntil(() => activeIs('.prompt-library-tabs'))
+  await page.keyboard.press('ArrowRight')
+  await expect(page.locator('.prompt-library-tabs [role="tab"][aria-selected="true"]')).toHaveAccessibleName(/Saved/i)
+  await page.keyboard.press('Escape')
+  await expect(libraryDialog).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /community library/i })).toBeFocused()
+
+  // 5. The primary action: with the engine offline the Generate button is
+  //    correctly DISABLED — and a disabled control is skipped by Tab order,
+  //    which is correct HTML behavior, not an a11y gap. The walk instead
+  //    proves the tab order reaches the generate bar's neighborhood: the
+  //    last operable control on the panel, with a visible focus ring.
+  const advanced = page.getByRole('button', { name: /advanced controls/i })
+  await tabUntil(() => page.evaluate(() => document.activeElement?.textContent?.includes('Advanced controls') ?? false), false, 120)
+  await expect(advanced).toBeFocused()
+  const advancedFocus = await focusReport()
+  expect(advancedFocus.focusVisible).toBe(true)
+  expect(advancedFocus.outline).toContain('solid')
+  const generate = page.getByRole('button', { name: /generate video/i })
+  await expect(generate).toBeVisible()
+  await expect(generate).toBeDisabled()
+  // Cleanup: return the (server-persisted) workspace to its default state so
+  // the next run — including the screenshot loop — boots deterministic.
+  // Still keyboard-only: clear the prompt, then arrow back to Text mode.
+  await prompt.focus()
+  await page.keyboard.press('Control+A')
+  await page.keyboard.press('Delete')
+  await tabUntil(() => activeIs('.mode-tabs'), true, 120)
+  for (let index = 0; index < 5 && !/Text/i.test(await selectedTabName()); index += 1) {
+    await page.keyboard.press('ArrowRight')
+  }
+  await expect(page.locator('.mode-tabs [role="tab"][aria-selected="true"]')).toHaveAccessibleName(/Text/i)
+  // Let the debounced server save land before the context closes.
+  await page.waitForTimeout(1_200)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})

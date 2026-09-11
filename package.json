@@ -21,6 +21,7 @@
     "test:all": "pnpm test && pnpm test:e2e && pnpm test:storage && pnpm test:realtime && pnpm smoke:server"
   },
   "dependencies": {
+    "@base-ui/react": "^1.8.0",
     "better-sqlite3": "^13.0.3",
     "lucide-react": "^0.468.0",
     "pino": "^10.3.1",
