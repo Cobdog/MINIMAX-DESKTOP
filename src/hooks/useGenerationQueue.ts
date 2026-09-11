@@ -12,6 +12,7 @@ import { extractOutputFile, extractOutputUrl, withTiledVideoDecode } from '../li
 import { extractAutomatedReferenceSet, hydrateLoadedJobs, initialJobs, playableOutputUrl, recordCharacterSheetImages, recordCharacterTurntable, recordLocationWalkthrough, recordMovieOutput } from '../lib/jobRecords'
 import { fetchServerJobs, saveServerJobs, serverStorageMigrationDone } from '../lib/serverStorage'
 import type { LiveProgress } from '../lib/useLivePreview'
+import { subscribe } from '../lib/useRealtime'
 import { useDebouncedPersist } from './useDebouncedPersist'
 
 export type NoticeTone = 'error' | 'success' | 'neutral'
@@ -83,6 +84,9 @@ export function useGenerationQueue(options: {
     })
   }, [jobs, persistJobs, storageBootDone])
 
+  // The fabric resync path (below) triggers one immediate sweep through this
+  // ref; declared before the poll effect that assigns it.
+  const sweepRef = useRef<(() => void) | null>(null)
   useEffect(() => {
     if (!settings || !pendingKey || !connected) return
     // Applies a reduction only while the job is still non-terminal, so a stale
@@ -98,7 +102,7 @@ export function useGenerationQueue(options: {
         return changed ? next : current
       })
     }
-    const timer = window.setInterval(() => {
+    const sweep = () => {
       for (const job of jobsRef.current.filter((j) => j.status === 'queued' || j.status === 'running')) {
         const promptId = job.promptId
         if (!promptId) continue
@@ -167,9 +171,21 @@ export function useGenerationQueue(options: {
           applyReduction(job.id, reduction)
         }).catch(() => undefined)
       }
-    }, 1000)
-    return () => window.clearInterval(timer)
+    }
+    sweepRef.current = sweep
+    const timer = window.setInterval(sweep, 1000)
+    return () => { sweepRef.current = null; window.clearInterval(timer) }
   }, [connected, notify, pendingKey, settings])
+
+  // Realtime fabric resync (wave 1): a per-channel sequence gap means the
+  // server dropped envelopes (bounded overflow) — one immediate history sweep
+  // re-reconciles any missed progress. The 1s poll loop above STAYS untouched
+  // as the reconciliation path: its terminal-state guards remain the safety
+  // net, and demoting the poll is a LATER decision, only after the fabric
+  // proves out in real use.
+  useEffect(() => subscribe('job', (envelope) => {
+    if (envelope.type === 'resync') sweepRef.current?.()
+  }), [])
 
   // Deadline sweep, independent of ComfyUI connectivity: a job whose polls
   // stopped resolving (server died mid-render) must still reach a terminal

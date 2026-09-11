@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
+import type { JobLifecycleEvent, PreviewMime } from '../types'
 import { createId } from './createId'
 import { webMediaUrl } from './mediaUrls'
+import { onPreviewFrame, onRealtimeStatus, subscribe } from './useRealtime'
 
 export type LiveProgress = { progress?: number; label: string; currentStep?: number; totalSteps?: number }
 export type LivePreview = {
@@ -13,117 +15,113 @@ export type LivePreview = {
   totalSteps?: number
 }
 
-function previewBlob(base64: string, mime: string) {
-  const binary = atob(base64)
-  const bytes = new Uint8Array(binary.length)
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
-  return new Blob([bytes], { type: mime })
-}
-
+/**
+ * Thin adapter over the realtime fabric (wave 1). Public interface unchanged:
+ * `useLivePreview(comfyUrl, enabled, onProgress) -> { clientId, preview,
+ * connected }` — CreateView/Ltx25Workspace keep their props. Internally the
+ * transport is gone: ONE fabric connection to the app's own server carries
+ * the job channel (normalized ComfyUI lifecycle) and binary preview frames.
+ *
+ * `preview` is METADATA plus a legacy-compat object-URL feed, coalesced to
+ * one update per animation frame (newest frame only) because Ltx25Workspace
+ * still renders `<img src={preview.url}>`. CreateView paints preview frames
+ * through onPreviewFrame directly — bytes that never enter React state (the
+ * Wave-2a transient discipline); the compat feed here retires when LTX
+ * rewires to the same painter.
+ */
 export function useLivePreview(url: string | undefined, enabled: boolean, onProgress: (id: string, update: LiveProgress) => void) {
   const [clientId] = useState(createId)
   const [preview, setPreview] = useState<LivePreview | null>(null)
   const [connected, setConnected] = useState(false)
   useEffect(() => {
-    if (!url || !enabled) { setConnected(false); setPreview(null); return }
-    let stopped = false, active = '', blobUrl = ''
-    let socket: WebSocket | undefined
-    let source: EventSource | undefined
-    let timer: ReturnType<typeof setTimeout>
+    if (!enabled) { setConnected(false); setPreview(null); return }
+    let stopped = false
+    let active = ''
+    let blobUrl = ''
+    let raf = 0
+    let meta: { mime: string; animated: boolean; fps?: number; step?: number; totalSteps?: number } | null = null
+
     const replacePreview = (next: LivePreview) => {
-      if (blobUrl) URL.revokeObjectURL(blobUrl)
+      if (blobUrl && blobUrl !== next.url) URL.revokeObjectURL(blobUrl)
       blobUrl = next.url.startsWith('blob:') ? next.url : ''
       setPreview(next)
     }
-    // Direct WebSocket only works when the browser shares the ComfyUI host
-    // (workstation browsers). Remote devices — a phone on Wi-Fi — reach
-    // ComfyUI through the server's SSE bridge instead.
-    const sameHost = (() => { try { return new URL(url).hostname === window.location.hostname } catch { return false } })()
-    const processTextEvent = (raw: string) => {
-      let msg: { type: string; data: { prompt_id?: string; node?: string | null; value?: number; max?: number; image?: string; mime?: string; fps?: number; step?: number; total?: number; output?: { images?: Array<{ filename: string; subfolder?: string; type?: string }> } } }
-      try { msg = JSON.parse(raw) } catch { return }
-      const promptId = msg.data.prompt_id ?? active
-      if (msg.type === 'execution_start') {
-        active = msg.data.prompt_id ?? ''
+
+    // Legacy-compat frame feed (see the doc comment): newest frame per rAF.
+    const stopFrames = { current: null as null | (() => void) }
+    const followFrames = (promptKey: string) => {
+      stopFrames.current?.()
+      stopFrames.current = null
+      if (!promptKey) return
+      stopFrames.current = onPreviewFrame(promptKey, (bytes: ArrayBuffer, mime: PreviewMime) => {
+        if (stopped) return
+        const blob = new Blob([bytes], { type: mime })
+        if (raf) cancelAnimationFrame(raf)
+        raf = requestAnimationFrame(() => {
+          raf = 0
+          if (stopped) return
+          replacePreview({
+            promptId: promptKey,
+            url: URL.createObjectURL(blob),
+            mime,
+            animated: meta?.mime === mime ? meta.animated : mime === 'image/webp' || mime === 'video/mp4',
+            fps: meta?.fps,
+            step: meta?.step,
+            totalSteps: meta?.totalSteps,
+          })
+        })
+      })
+    }
+
+    const unsubscribeJob = subscribe('job', (envelope) => {
+      if (envelope.type === 'resync') return // the queue hook owns reconciliation
+      const event = envelope.payload as JobLifecycleEvent
+      if (!event || typeof event.type !== 'string') return
+      if (event.type === 'execution_start') {
+        active = event.promptId
+        meta = null
         if (blobUrl) URL.revokeObjectURL(blobUrl)
         blobUrl = ''
         setPreview(null)
+        followFrames(active)
         onProgress(active, { progress: 1, label: 'Starting workflow' })
+        return
       }
-      if (msg.type === 'execution_cached') onProgress(promptId, { label: 'Reusing cached model data' })
-      if (msg.type === 'executing' && msg.data.node) onProgress(promptId, { label: 'Loading or processing workflow stage' })
-      if (msg.type === 'progress' && msg.data.max) {
-        const currentStep = Math.max(0, msg.data.value ?? 0)
-        const totalSteps = msg.data.max
-        onProgress(promptId, { progress: Math.min(95, (currentStep / totalSteps) * 95), label: `Sampling · step ${currentStep} of ${totalSteps}`, currentStep, totalSteps })
+      const promptId = event.promptId || active
+      if (!promptId) return
+      // Mid-render join (page loaded while a render was already executing):
+      // start following that prompt's frames without resetting state.
+      if (promptId !== active) { active = promptId; followFrames(active) }
+      if (event.type === 'execution_cached') onProgress(promptId, { label: 'Reusing cached model data' })
+      if (event.type === 'executing' && event.node) onProgress(promptId, { label: 'Loading or processing workflow stage' })
+      if (event.type === 'progress') {
+        onProgress(promptId, { progress: Math.min(95, (event.value / event.max) * 95), label: `Sampling · step ${event.value} of ${event.max}`, currentStep: event.value, totalSteps: event.max })
       }
-      if (msg.type === 'execution_success') onProgress(promptId, { progress: 98, label: 'Finalizing saved output' })
-      if (msg.type === 'minimax_h3_preview_override' && msg.data.image && active) {
-        const mime = msg.data.mime ?? 'image/jpeg'
-        if (!/^(?:image\/(?:jpeg|png|webp)|video\/mp4)$/.test(mime)) return
-        const nextUrl = URL.createObjectURL(previewBlob(msg.data.image, mime))
-        replacePreview({
-          promptId: active,
-          url: nextUrl,
-          mime,
-          animated: mime === 'image/webp' || mime === 'video/mp4',
-          fps: msg.data.fps,
-          step: msg.data.step,
-          totalSteps: msg.data.total,
-        })
+      if (event.type === 'preview_meta') {
+        const animated = event.mime === 'image/webp' || event.mime === 'video/mp4'
+        meta = { mime: event.mime, animated, fps: event.fps, step: event.step, totalSteps: event.totalSteps }
+        setPreview((current) => current && current.promptId === promptId ? { ...current, mime: event.mime, animated, fps: event.fps, step: event.step, totalSteps: event.totalSteps } : current)
       }
-      if (msg.type === 'executed' && msg.data.output?.images?.[0]) {
-        const file = msg.data.output.images[0]
+      if (event.type === 'executed' && event.images.length > 0) {
+        const file = event.images[0]
         const query = new URLSearchParams({ filename: file.filename, subfolder: file.subfolder ?? '', type: file.type ?? 'temp' })
-        const upstream = `${url.replace(/\/+$/, '')}/view?${query}`
-        replacePreview({ promptId: msg.data.prompt_id ?? active, url: webMediaUrl(`minimax-media://comfy?url=${encodeURIComponent(upstream)}`) ?? upstream, mime: 'image/jpeg', animated: false })
+        const upstream = `${(url ?? '').replace(/\/+$/, '')}/view?${query}`
+        replacePreview({ promptId: event.promptId, url: webMediaUrl(`minimax-media://comfy?url=${encodeURIComponent(upstream)}`) ?? upstream, mime: 'image/jpeg', animated: false })
       }
+      if (event.type === 'execution_success') onProgress(promptId, { progress: 98, label: 'Finalizing saved output' })
+      if (event.type === 'execution_error') onProgress(promptId, { label: 'Execution failed — finishing up' })
+      if (event.type === 'interrupted') onProgress(promptId, { label: 'Generation interrupted' })
+    })
+    const stopStatus = onRealtimeStatus((status) => setConnected(status.connected))
+
+    return () => {
+      stopped = true
+      if (raf) cancelAnimationFrame(raf)
+      stopFrames.current?.()
+      unsubscribeJob()
+      stopStatus()
+      if (blobUrl) URL.revokeObjectURL(blobUrl)
     }
-    if (sameHost) {
-      const connect = () => {
-        const address = new URL(url)
-        address.protocol = address.protocol === 'https:' ? 'wss:' : 'ws:'
-        address.pathname = `${address.pathname.replace(/\/$/, '')}/ws`
-        address.search = new URLSearchParams({ clientId }).toString()
-        socket = new WebSocket(address)
-        socket.binaryType = 'arraybuffer'
-        socket.onopen = () => setConnected(true)
-        socket.onerror = () => setConnected(false)
-        socket.onclose = () => { setConnected(false); if (!stopped) timer = setTimeout(connect, 3000) }
-        socket.onmessage = (event) => {
-          if (typeof event.data === 'string') processTextEvent(event.data)
-          else if (event.data instanceof ArrayBuffer && event.data.byteLength > 8 && active) {
-            const header = new DataView(event.data)
-            if (header.getUint32(0) !== 1) return
-            const animatedH3Frame = event.data.byteLength > 32 && header.getUint32(4) === 1 && header.getUint32(8) === 1 && header.getUint16(32) === 0xffd8
-            const imageOffset = animatedH3Frame ? 32 : 8
-            const mime = !animatedH3Frame && header.getUint32(4) === 2 ? 'image/png' : 'image/jpeg'
-            const nextUrl = URL.createObjectURL(new Blob([event.data.slice(imageOffset)], { type: mime }))
-            replacePreview({ promptId: active, url: nextUrl, mime, animated: false })
-          }
-        }
-      }
-      try { connect() } catch { setConnected(false) }
-    } else {
-      source = new EventSource(`/api/lan/events?clientId=${encodeURIComponent(clientId)}`)
-      source.onopen = () => setConnected(true)
-      source.onerror = () => setConnected(false)
-      source.onmessage = (event) => {
-        let payload: { type?: string; mime?: string; data?: string }
-        try { payload = JSON.parse(event.data) } catch { return }
-        if (payload.type === 'preview') {
-          // A binary preview frame forwarded by the server bridge.
-          if (!active || typeof payload.data !== 'string') return
-          const mime = payload.mime ?? 'image/jpeg'
-          if (!/^(?:image\/(?:jpeg|png|webp)|video\/mp4)$/.test(mime)) return
-          const nextUrl = URL.createObjectURL(previewBlob(payload.data, mime))
-          replacePreview({ promptId: active, url: nextUrl, mime, animated: false })
-          return
-        }
-        processTextEvent(event.data)
-      }
-    }
-    return () => { stopped = true; clearTimeout(timer); socket?.close(); source?.close(); if (blobUrl) URL.revokeObjectURL(blobUrl) }
-  }, [url, clientId, enabled, onProgress])
+  }, [url, enabled, onProgress])
   return { clientId, preview, connected }
 }

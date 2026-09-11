@@ -271,6 +271,63 @@ export type GpuTelemetry = {
   vramTotalMb?: number
 }
 
+// ---- Realtime event fabric (wave 1) ---------------------------------------
+// One connection per client (WebSocket primary, SSE v2 fallback) carrying a
+// typed channel taxonomy. The JSON envelope is `{ch, type, seq, ts, payload}`
+// where `seq` is monotonic PER CHANNEL PER CONNECTION: a client that observes
+// seq > last + 1 knows events were dropped and emits a synthetic `resync`
+// notice so consumers re-fetch authoritative state (for `job`, one history
+// poll). Preview frames ride BINARY WebSocket frames instead (see
+// server/realtime.ts for the compact header) — never base64 on the WS path.
+
+export type RealtimeJsonChannel = 'job' | 'telemetry' | 'llm' | 'engine' | 'system'
+export type RealtimeChannel = RealtimeJsonChannel | 'preview'
+export type RealtimeEnvelope<T = unknown> = { ch: RealtimeChannel; type: string; seq: number; ts: number; payload: T }
+
+/** Normalized ComfyUI lifecycle on the `job` channel: normalized ONCE on the
+ *  server (from the shared upstream socket) and fanned out; consumers
+ *  correlate by promptId. `job_done` is the synthesized terminal marker. */
+export type JobLifecycleEvent =
+  | { type: 'execution_start'; promptId: string }
+  | { type: 'executing'; promptId: string; node: string | null }
+  | { type: 'progress'; promptId: string; value: number; max: number }
+  | { type: 'executed'; promptId: string; node: string; images: Array<{ filename: string; subfolder?: string; type?: string }> }
+  | { type: 'execution_cached'; promptId: string; nodes: string[] }
+  | { type: 'execution_error'; promptId: string; nodeType?: string; errorMessage?: string }
+  | { type: 'interrupted'; promptId: string }
+  | { type: 'execution_success'; promptId: string }
+  | { type: 'job_done'; promptId: string; outcome: 'success' | 'error' | 'interrupted' }
+  | { type: 'preview_meta'; promptId: string; mime: string; fps?: number; step?: number; totalSteps?: number }
+  | { type: 'queue_status'; promptId: string; queueRemaining?: number }
+
+/** Reserved for the managed ComfyUI runtime (wave 2c): lifecycle events for
+ *  the engine process itself. Typed now so the channel contract is frozen
+ *  before the sidecar lands. */
+export type EnginePhase = 'booting' | 'starting' | 'ready' | 'stopping' | 'stopped' | 'failed'
+export type EngineLifecycleEvent = { phase: EnginePhase; detail?: string; pid?: number; at: number }
+
+/** A GPU/VRAM sample pushed on the telemetry channel while at least one
+ *  subscriber is connected (the sampler stops when the last one leaves). */
+export type TelemetrySample = GpuTelemetry & { at: number }
+
+/** Request/response LLM streaming over the fabric: the client sends
+ *  `{ch:'llm', type:'generate', reqId, payload}`; tokens stream back tagged
+ *  with the same reqId until `done`/`error`. Endpoints must pass the server's
+ *  local-service (SSRF) guard — local OpenAI-compatible routers only. */
+export type LlmStreamRequest = {
+  endpoint: string
+  model: string
+  messages: Array<{ role: string; content: string }>
+  options?: Record<string, unknown>
+}
+export type LlmTokenDelta = { delta: string }
+export type LlmDonePayload = { aborted?: boolean; finishReason?: string }
+export type LlmErrorPayload = { error: string }
+
+/** Mime types the binary preview channel carries; the wire header stores the
+ *  index (0=jpeg, 1=png, 2=webp, 3=mp4 — 3 covers animated H3 override clips). */
+export type PreviewMime = 'image/jpeg' | 'image/png' | 'image/webp' | 'video/mp4'
+
 export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export type GenerationJob = {

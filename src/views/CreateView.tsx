@@ -27,6 +27,7 @@ import {
   X,
 } from 'lucide-react'
 import type { Film as FilmIcon } from 'lucide-react'
+import { onPreviewFrame } from '../lib/useRealtime'
 import type {
   CharacterProject,
   GenerationJob,
@@ -37,6 +38,7 @@ import type {
   MediaKind,
   ModelSelection,
   MovieReferenceBinding,
+  PreviewMime,
   UpscaleMode,
   WardrobeProject,
 } from '../types'
@@ -60,6 +62,68 @@ import type { LivePreview } from '../lib/useLivePreview'
 import { SelectField, NumberField } from '../components/form'
 import { PipelineItem, StatusBadge } from '../components/chrome'
 import { VideoPlayer, VideoContinuationControls, MediaDrop } from '../components/media'
+
+/** Wave-2a transient-update discipline, proven on the real fabric first
+ *  (wave 1): preview frames stream from the binary channel straight into the
+ *  <img>/<video> element — createImageBitmap-gated object URLs painted on
+ *  rAF, newest frame wins. The bytes never enter React state, so continuous
+ *  taeh3/H3 previews cannot trigger a React render per frame; only a MIME
+ *  change (e.g. jpeg stills -> an mp4 animated override) re-renders, once.
+ *  Object URLs are revoked on swap and on unmount (the existing discipline). */
+function LivePreviewFigure({ promptId, animated, fps, step, totalSteps, initialMime }: { promptId: string; animated: boolean; fps?: number; step?: number; totalSteps?: number; initialMime: string }) {
+  const imageRef = useRef<HTMLImageElement | null>(null)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const [mime, setMime] = useState(initialMime === 'video/mp4' ? 'video/mp4' : 'image/jpeg')
+  const mimeRef = useRef(mime)
+  useEffect(() => {
+    let disposed = false
+    let paintedUrl = ''
+    let raf = 0
+    const paint = (url: string) => {
+      const element = mimeRef.current === 'video/mp4' ? (videoRef.current ?? imageRef.current) : (imageRef.current ?? videoRef.current)
+      if (!element) return
+      if (paintedUrl && paintedUrl !== url) URL.revokeObjectURL(paintedUrl)
+      paintedUrl = url
+      element.setAttribute('src', url)
+    }
+    const schedule = (blob: Blob) => {
+      const url = URL.createObjectURL(blob)
+      if (raf) cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => { if (!disposed) paint(url) })
+    }
+    const stopFrames = onPreviewFrame(promptId, (bytes: ArrayBuffer, frameMime: PreviewMime) => {
+      if (frameMime !== mimeRef.current) {
+        mimeRef.current = frameMime
+        setMime(frameMime)
+      }
+      const blob = new Blob([bytes], { type: frameMime })
+      if (frameMime.startsWith('image/')) {
+        // Decode gate: a corrupt frame is dropped here instead of handed to
+        // the DOM; the decode itself happens off the render path.
+        void createImageBitmap(blob).then((bitmap) => {
+          bitmap.close()
+          if (!disposed) schedule(blob)
+        }).catch(() => undefined)
+      } else {
+        schedule(blob)
+      }
+    })
+    return () => {
+      disposed = true
+      stopFrames()
+      if (raf) cancelAnimationFrame(raf)
+      if (paintedUrl) URL.revokeObjectURL(paintedUrl)
+    }
+  }, [promptId])
+  return (
+    <figure className={`live-preview ${animated ? 'animated' : ''}`}>
+      {mime === 'video/mp4'
+        ? <video ref={videoRef} aria-label="Animated MiniMax H3 generation preview" autoPlay loop muted playsInline />
+        : <img ref={imageRef} alt={animated ? 'Animated MiniMax H3 generation preview' : 'Live generation preview'} />}
+      <figcaption>{animated ? `Animated H3 preview · 50 frames${fps ? ` · ${fps} fps` : ''}${step && totalSteps ? ` · sampler step ${step} of ${totalSteps}` : ''}` : 'Live preview · intermediate frame'}</figcaption>
+    </figure>
+  )
+}
 
 const modeInfo: Array<{ id: GenerationMode; label: string; note: string; icon: typeof FilmIcon }> = [
   { id: 'text', label: 'Text', note: 'Prompt to video', icon: WandSparkles },
@@ -383,7 +447,7 @@ export function CreateView(props: CreateViewProps) {
 
         <aside className="preview-panel" ref={previewPanelRef}>
           <div className="panel-heading"><div><span>OUTPUT</span><strong>Current workspace</strong></div>{latestJob && <StatusBadge status={latestJob.status} />}</div>
-          {liveEnabled && livePreview && livePreview.promptId === latestJob?.promptId && latestJob && ['running', 'queued'].includes(latestJob.status) && <figure className={`live-preview ${livePreview.animated ? 'animated' : ''}`}>{livePreview.mime === 'video/mp4' ? <video key={livePreview.url} src={livePreview.url} aria-label="Animated MiniMax H3 generation preview" autoPlay loop muted playsInline /> : <img key={livePreview.url} src={livePreview.url} alt={livePreview.animated ? 'Animated MiniMax H3 generation preview' : 'Live generation preview'} />}<figcaption>{livePreview.animated ? `Animated H3 preview · 50 frames${livePreview.fps ? ` · ${livePreview.fps} fps` : ''}${livePreview.step && livePreview.totalSteps ? ` · sampler step ${livePreview.step} of ${livePreview.totalSteps}` : ''}` : 'Live preview · intermediate frame'}</figcaption></figure>}
+          {liveEnabled && livePreview && livePreview.promptId === latestJob?.promptId && latestJob && ['running', 'queued'].includes(latestJob.status) && <LivePreviewFigure promptId={latestJob.promptId ?? livePreview.promptId} animated={livePreview.animated} fps={livePreview.fps} step={livePreview.step} totalSteps={livePreview.totalSteps} initialMime={livePreview.mime} />}
           <div className="preview-scroll">
           <div className="preview-stage">
             {latestJob?.outputUrl ? <VideoPlayer src={latestJob.outputUrl} onDuration={setRenderedVideoDuration} /> : latestJob && ['queued', 'running'].includes(latestJob.status) ? <div className="render-state constructing"><RenderConstruction /><strong>{latestJob.progressLabel ?? (latestJob.status === 'queued' ? 'Waiting in queue' : 'Rendering locally')}</strong><span>{latestJob.currentStep !== undefined && latestJob.totalSteps ? `Live sampler step ${latestJob.currentStep} of ${latestJob.totalSteps}` : `${latestJob.width} × ${latestJob.height} · ${latestJob.duration}s`}</span><div className="progress"><i style={{ width: `${latestJob.progress}%` }} /></div><small>{Math.round(latestJob.progress)}% · live ComfyUI status</small></div> : !connected || !modelReady ? (

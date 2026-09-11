@@ -127,6 +127,21 @@ test('mobile companion view boots alongside the studio', async ({ page }) => {
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
+// Wave 1 — the realtime event fabric: on boot the client establishes its ONE
+// fabric connection to the app's own server (WebSocket primary, SSE v2
+// fallback) and telemetry samples start flowing. Engine-independent and
+// deterministic — a sample arrives even on boxes with no GPU (flagged
+// available:false), because the server-side sampler runs without an engine.
+test('the realtime fabric connects on boot and telemetry samples flow', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await page.goto('/')
+  await page.waitForFunction(() => {
+    const diagnostics = (window as unknown as { __minimaxRealtime?: { connected: boolean; transport: string; received: Record<string, number> } }).__minimaxRealtime
+    return Boolean(diagnostics && diagnostics.connected && diagnostics.transport && (diagnostics.received.telemetry ?? 0) >= 1)
+  }, undefined, { timeout: 15_000 })
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
 // Wave 0b — the per-view error boundary: a render crash in one view must not
 // take the shell down, and the boundary's console output + fallback UI must
 // be sanitized (the injected crash message carries sentinel "prompt" words

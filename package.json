@@ -15,9 +15,10 @@
     "lint": "eslint . --max-warnings 0",
     "test": "node scripts/test-workflows.cjs",
     "test:storage": "node scripts/test-storage.cjs",
+    "test:realtime": "node scripts/test-realtime.cjs",
     "smoke:server": "node scripts/smoke-server.cjs",
     "test:e2e": "pnpm build && playwright test",
-    "test:all": "pnpm test && pnpm test:e2e && pnpm test:storage && pnpm smoke:server"
+    "test:all": "pnpm test && pnpm test:e2e && pnpm test:storage && pnpm test:realtime && pnpm smoke:server"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

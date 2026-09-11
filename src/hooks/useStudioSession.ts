@@ -1,8 +1,9 @@
 /** Studio session connection state: settings load, model scanning, ComfyUI
- *  connection/object-info, Ollama model list, and GPU telemetry polling. */
+ *  connection/object-info, Ollama model list, and GPU telemetry. */
 import { useCallback, useEffect, useState } from 'react'
-import type { AppSettings, ComfyStatus, GpuTelemetry, ModelFile, OllamaModel } from '../types'
+import type { AppSettings, ComfyStatus, GpuTelemetry, ModelFile, OllamaModel, TelemetrySample } from '../types'
 import type { ObjectInfo } from '../lib/comfyInfo'
+import { onRealtimeStatus, subscribe } from '../lib/useRealtime'
 
 export function useStudioSession() {
   const [settings, setSettings] = useState<AppSettings | null>(null)
@@ -51,15 +52,34 @@ export function useStudioSession() {
     })
   }, [checkConnection, refreshOllama, scanModels])
 
+  // GPU telemetry rides the realtime fabric (wave 1): the server pushes each
+  // sample while this client is subscribed, so the 4 s HTTP poll is gone. A
+  // degraded-mode poll runs ONLY while the fabric is disconnected — same
+  // sample source either way (the server's lazy 4 s-TTL sampler).
   useEffect(() => {
     let disposed = false
-    const refresh = () => {
-      if (document.hidden) return
-      void window.minimax.getGpuTelemetry().then((value) => { if (!disposed) setGpu(value) }).catch(() => { if (!disposed) setGpu({ available: false }) })
+    const unsubscribe = subscribe('telemetry', (envelope) => {
+      const sample = envelope.payload as TelemetrySample
+      if (sample && typeof sample.available === 'boolean') setGpu(sample)
+    })
+    let timer = 0
+    const stopFallback = () => { if (timer) { window.clearInterval(timer); timer = 0 } }
+    const startFallback = () => {
+      if (timer || document.hidden) return
+      const refresh = () => {
+        if (document.hidden) return
+        void window.minimax.getGpuTelemetry().then((value) => { if (!disposed) setGpu(value) }).catch(() => { if (!disposed) setGpu({ available: false }) })
+      }
+      refresh()
+      timer = window.setInterval(refresh, 4000)
     }
-    refresh()
-    const timer = window.setInterval(refresh, 4000)
-    return () => { disposed = true; window.clearInterval(timer) }
+    startFallback()
+    const stopStatus = onRealtimeStatus((state) => {
+      if (disposed) return
+      if (state.connected) stopFallback()
+      else startFallback()
+    })
+    return () => { disposed = true; stopFallback(); unsubscribe(); stopStatus() }
   }, [])
 
   return {

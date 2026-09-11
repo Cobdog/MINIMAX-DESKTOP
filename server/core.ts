@@ -22,6 +22,7 @@ import WebSocket from 'ws'
 import type { AppSettings, GpuTelemetry, LanStatus, ModelKind } from '../src/types'
 import { failureRef, logEvent, logFailure } from './logger'
 import { createStudioRepository, type StudioRepository } from './repo'
+import { createRealtimeHub, type RealtimeHub } from './realtime'
 
 export type StudioServerPaths = {
   settingsFile: string
@@ -245,10 +246,9 @@ function lanAddress() {
  *  directory. Attributing outputs by exact filename — instead of scanning for
  *  the newest file — is what keeps concurrent renders from being credited to
  *  the wrong job (and the wrong character library entry). */
-/** Content-Security-Policy for the SPA document. ws: is required because
- *  live preview opens a WebSocket to the user-configured ComfyUI address,
- *  which is not known ahead of time. */
-const CONTENT_SECURITY_POLICY = "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+/** Content-Security-Policy for the SPA document. ws:/wss: are required for
+ *  the realtime fabric's /ws upgrade (and, over TLS, its secure twin). */
+const CONTENT_SECURITY_POLICY = "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 
 function resolveOutputFile(outputDirectory: string, file: { filename: string; subfolder?: string; type?: string }) {
   if (!outputDirectory || !file.filename) return null
@@ -356,6 +356,20 @@ export function createStudioServer(paths: StudioServerPaths) {
     logFailure('db/open', error, undefined, 'error')
   }
 
+  // Realtime event fabric (wave 1): ONE WebSocket per client (plus an SSE v2
+  // fallback) carrying job/telemetry/llm/engine/system channels and binary
+  // preview frames, fanned out from ONE shared upstream ComfyUI socket. The
+  // auth gate reuses the HTTP routes' constant-time token check; the GPU
+  // sampler is the wave-0a lazy reader (no free-running interval without
+  // subscribers); the SSRF guard keeps LLM streaming pointed at local routers.
+  let realtimeComfyUrl = ''
+  const realtimeHub: RealtimeHub = createRealtimeHub({
+    authorize: (presented) => !lanAuthRequired() || tokenMatches(presented, lanToken),
+    comfyUrl: async () => (await loadSettings()).comfyUrl,
+    readTelemetry: () => readGpuTelemetrySampled(),
+    isLocalServiceUrl,
+  })
+
   function defaultSettings(): AppSettings {
     const root = join(paths.documentsDirectory, 'ComfyUI', 'models')
     return {
@@ -414,6 +428,12 @@ export function createStudioServer(paths: StudioServerPaths) {
     await writeFile(staged, JSON.stringify(settings, null, 2), 'utf8')
     await rename(staged, paths.settingsFile)
     settingsCache = settings
+    // A changed ComfyUI address must re-point the fabric's shared upstream on
+    // the next connect, not stay pinned to the origin from boot time.
+    if (settings.comfyUrl !== realtimeComfyUrl) {
+      realtimeComfyUrl = settings.comfyUrl
+      realtimeHub.invalidateUpstream()
+    }
     return settings
   }
 
@@ -799,7 +819,7 @@ export function createStudioServer(paths: StudioServerPaths) {
           // and <img>/<video> src on the media route). Constant-time compare.
           const header = request.headers['x-minimax-token']
           const headerToken = Array.isArray(header) ? header[0] : header
-          const queryTokenAllowed = url.pathname === '/api/lan/events' || url.pathname === '/api/lan/media'
+          const queryTokenAllowed = url.pathname === '/api/lan/events' || url.pathname === '/api/lan/realtime' || url.pathname === '/api/lan/media'
           const presented = headerToken ?? (queryTokenAllowed ? url.searchParams.get('token') ?? undefined : undefined)
           if (!tokenMatches(presented, lanToken)) return sendJson(response, 401, { error: 'This link is no longer authorized. Request a fresh link with the current access token.' })
         }
@@ -947,7 +967,15 @@ export function createStudioServer(paths: StudioServerPaths) {
           const result = await comfyFetch(settings.comfyUrl, '/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: body.prompt, client_id: clientId }) })
           return sendJson(response, 200, result)
         }
+        // LEGACY (wave 0 SSE bridge): one upstream ComfyUI WebSocket per SSE
+        // client, binary previews base64-wrapped. Kept functional through
+        // wave 1 so existing remote clients keep working; new clients use the
+        // realtime fabric (/ws + /api/lan/realtime). Retire after the fabric
+        // proves out in real use.
         if (url.pathname === '/api/lan/events' && request.method === 'GET') return streamLanEvents(request, response, url.searchParams, settings.comfyUrl)
+        // Realtime fabric — SSE v2 fallback: the typed JSON channels only
+        // (previews degrade to base64 here; WS is the primary transport).
+        if (url.pathname === '/api/lan/realtime' && request.method === 'GET') return realtimeHub.handleSse(request, response, url.searchParams)
         if (url.pathname === '/api/lan/ollama' && request.method === 'POST') {
           const body = await readJson(request, 80_000)
           const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
@@ -1207,11 +1235,15 @@ export function createStudioServer(paths: StudioServerPaths) {
     const certificate = httpsPreferred ? await ensureSelfSignedCertificate(dirname(paths.lanTokenFile), address) : null
     return new Promise<void>((resolvePromise) => {
       const handler = (request: IncomingMessage, response: ServerResponse) => void handleLanRequest(request, response)
-      lanServer = certificate
+      const server = certificate
         ? createHttpsServer({ cert: certificate.certPem, key: certificate.keyPem }, handler)
         : createHttpServer(handler)
-      lanServer.once('error', (error) => { lanStatus = { running: false, port, error: error.message, secure: false }; resolvePromise() })
-      lanServer.listen(port, '0.0.0.0', () => {
+      lanServer = server
+      server.once('error', (error) => { lanStatus = { running: false, port, error: error.message, secure: false }; resolvePromise() })
+      server.listen(port, '0.0.0.0', () => {
+        // The realtime fabric rides the SAME server (WS upgrade at /ws; SSE
+        // v2 through the /api/lan/realtime route below).
+        realtimeHub.attach(server)
         const origin = `${certificate ? 'https' : 'http'}://${address}:${port}`
         lanStatus = { running: true, port, secure: Boolean(certificate), certificateFingerprint: certificate?.fingerprint, url: `${origin}/?mobile=1`, desktopUrl: `${origin}/?desktop=1` }
         logEvent({ kind: 'lan.server', port, secure: Boolean(certificate) })
@@ -1221,6 +1253,7 @@ export function createStudioServer(paths: StudioServerPaths) {
   }
 
   function stopLanServer() {
+    realtimeHub.close()
     lanServer?.close()
     lanServer = null
     lanStatus = { running: false }
@@ -1250,6 +1283,9 @@ export function createStudioServer(paths: StudioServerPaths) {
     startLanServer,
     stopLanServer,
     lanAddress,
+    /** The realtime event fabric (wave 1): WS at /ws, SSE v2 at
+     *  /api/lan/realtime; emitEngine is the wave-2c sidecar seam. */
+    realtime: realtimeHub,
     status: () => lanStatus,
     syncCharacters: (characters: unknown[]) => { mobileCharacterLibrary = Array.isArray(characters) ? characters : []; return { synced: mobileCharacterLibrary.length } },
     rotateToken: async () => {
