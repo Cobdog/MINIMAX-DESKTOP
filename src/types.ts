@@ -4,7 +4,7 @@ export type ModelKind = 'diffusion_models' | 'text_encoders' | 'vae' | 'loras' |
 export type MediaKind = 'image' | 'video' | 'audio'
 export type UpscaleMode = 'off' | 'ltx' | 'rtx' | 'lbh2d' | 'lbh3d'
 export type ReferencePurpose = 'character' | 'character-angle' | 'hair' | 'wardrobe' | 'accessory' | 'location' | 'continuity' | 'product' | 'style' | 'generic'
-export type PromptPresetCategory = 'camera' | 'shot' | 'angle' | 'lens' | 'lighting' | 'audio' | 'style' | 'movement' | 'transition' | 'character' | 'wardrobe' | 'location' | 'embedding'
+export type PromptPresetCategory = 'camera' | 'shot' | 'angle' | 'lens' | 'lighting' | 'audio' | 'style' | 'movement' | 'transition' | 'character' | 'wardrobe' | 'location' | 'embedding' | 'looseness'
 export type PromptPreset = { id: string; category: PromptPresetCategory; label: string; keywords: string[]; description: string; insertion: string }
 export type MovieReferenceBinding = { file: MediaFile; purpose: ReferencePurpose; label: string; characterId?: string; hairStyleId?: string; wardrobeId?: string; accessoryId?: string; locationId?: string; locationEnvironmentMode?: LocationProject['environmentMode']; source: 'character-studio' | 'hair-studio' | 'wardrobe-studio' | 'accessory-studio' | 'location-studio' | 'movie' | 'shot' | 'continuity' }
 export type ResolvedMovieShot = { preferredMode: GenerationMode; effectiveMode: GenerationMode; references: MovieReferenceBinding[]; compiledPrompt: string; routeReason: string; omittedReferences: MovieReferenceBinding[] }
@@ -37,6 +37,9 @@ export type AppSettings = {
   generationDefaults: GenerationDefaults
   /** Chosen GPU tier — drives community quant/resolution guidance. */
   gpuTier?: '8' | '16' | '24' | 'blackwell'
+  /** ComfyUI version the bundled graphs were last verified against
+   *  (self-recorded on first successful connection). */
+  testedComfyVersion?: string
 }
 
 export type ClipItem = { id: string; name: string; source: string; createdAt: number; start?: number; end?: number; duration?: number }

@@ -150,6 +150,17 @@ function App() {
   const modelReady = requiredModels.every(Boolean) && (turbo === 'off' || Boolean(activeLora))
   const pendingJobs = jobs.filter((job) => job.status === 'queued' || job.status === 'running')
 
+  // Graph compatibility: self-record the ComfyUI version the bundled graph
+  // families were last verified against; Settings warns when the engine has
+  // moved past it (the community's red-nodes-on-update failure mode).
+  const comfyVersion = status.stats?.system?.comfyui_version
+  useEffect(() => {
+    if (!settings || !status.connected || !comfyVersion || settings.testedComfyVersion) return
+    const next = { ...settings, testedComfyVersion: comfyVersion }
+    session.setSettings(next)
+    void window.minimax.saveSettings(next)
+  }, [comfyVersion, session, settings, status.connected])
+
   useEffect(() => {
     if (!notice) return
     const timer = window.setTimeout(() => setNotice(null), notice.tone === 'error' ? 6500 : 4500)

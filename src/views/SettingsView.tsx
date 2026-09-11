@@ -1,6 +1,7 @@
 /** The Settings view: engine connection, validated H3 stack report,
  *  generation defaults, Ollama, model locations, and output/clip paths. */
 import { useState } from 'react'
+import { GitBranch } from 'lucide-react'
 import { Activity, AlertCircle, Check, ChevronDown, Folder, FolderOpen, Gauge, HardDrive, LoaderCircle, RefreshCw, Save, SlidersHorizontal, Sparkles, Stethoscope } from 'lucide-react'
 import type { AppSettings, ComfyStatus, ModelFile, ModelKind, OllamaModel, UpscaleMode } from '../types'
 import { choices, type ObjectInfo } from '../lib/comfyInfo'
@@ -52,6 +53,15 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
     <section className="settings-section setup-doctor-section">
       <div className="settings-heading"><div><Stethoscope size={19} /><span><strong>Setup doctor</strong><small>Verifies FFmpeg, HTTPS tooling, the engine device, and attention backends — with exact fixes.</small></span></div><button className="secondary-button" onClick={() => void runDoctor()} disabled={doctorRunning}>{doctorRunning ? <LoaderCircle size={16} className="spin" /> : <Stethoscope size={16} />}{doctorRunning ? 'Checking…' : 'Run checks'}</button></div>
       {doctor && <div className="doctor-report">{doctor.checks.map((check) => <div className={`doctor-check ${check.status}`} key={check.id}><span>{check.status === 'ok' ? <Check size={14} /> : <AlertCircle size={14} />}</span><div><strong>{check.label}</strong><small>{check.detail}</small>{check.recommendation && <p>{check.recommendation}</p>}</div></div>)}</div>}
+    </section>
+    <section className="settings-section graph-compat-section">
+      <div className="settings-heading"><div><GitBranch size={19} /><span><strong>Graph compatibility</strong><small>The ComfyUI version this studio's graph families were last verified against.</small></span></div></div>
+      {(() => {
+        const connected = status.stats?.system?.comfyui_version
+        const tested = settings.testedComfyVersion
+        const newer = Boolean(connected && tested && connected !== tested)
+        return <div className={`doctor-check ${newer ? 'warn' : 'ok'}`}><span>{newer ? <AlertCircle size={14} /> : <Check size={14} />}</span><div><strong>{newer ? 'ComfyUI updated since verification' : 'Graphs verified against this engine'}</strong><small>{connected ? `Connected engine: ${connected}. ` : 'Engine offline — version unknown. '}{tested ? `Graphs last verified against: ${tested}.` : 'No verification recorded yet; it is captured on the next successful connection.'}{newer ? ' Node changes in newer ComfyUI builds can break graphs — re-run the H3 Quality Test before trusting new renders, then the record updates on save.' : ''}</small></div></div>
+      })()}
     </section>
     <section className="settings-section gpu-tier-section">
       <div className="settings-heading"><div><Gauge size={19} /><span><strong>GPU tier guidance</strong><small>Community quant and workload recommendations per VRAM tier. Stored with settings; guidance only.</small></span></div></div>

@@ -638,8 +638,21 @@ assert.ok(referenceOrderWarnings('Uses <Audio 2> first, then <Audio 1>.', { imag
   assert.equal(cs.inferContactSheetSelection([{ name: 'other.safetensors', kind: 'loras', bytes: 1 }], 'r2v', 'qwen', 'vvae').turnaroundLora, '')
 }
 
+
+// ---- Graph family version + looseness presets -------------------------------
+{
+  const manifestModule2 = load('src/lib/manifest.ts')
+  const graph = buildMiniMaxWorkflow({ mode: 'text', prompt: 'p', width: 1344, height: 768, duration: 5, seed: 1, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', filenamePrefix: 't', referenceImages: [], referenceVideos: [], referenceAudios: [] }, models, { images: [], videos: [], audios: [] })
+  const manifest = manifestModule2.buildRenderManifest({ mode: 'text', prompt: 'p', width: 1344, height: 768, duration: 5, seed: 1, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', filenamePrefix: 't', referenceImages: [], referenceVideos: [], referenceAudios: [] }, models, [], 'http://x', graph)
+  assert.equal(manifest.graphFamily, 'studio-2026-09')
+  assert.ok(promptPresets.some((item) => item.id === 'looseness.loose-performance'))
+  assert.ok(searchPromptPresets('improvised').some((item) => item.id === 'looseness.improvised-feel'))
+  const loose = promptPresets.find((item) => item.id === 'looseness.micro-variation')
+  assert.ok(loose && loose.insertion.includes('do not interpret this as permission to change wardrobe'), 'looseness presets guard identity')
+}
+
 runKernelTests().then(() => {
-  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference), and ContactSheet character sheets (topology, LoRA inference, size clamps, views-first attribution)')
+  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference), ContactSheet character sheets (topology, LoRA inference, size clamps, views-first attribution), and graph-family versioning + looseness presets')
 }, (error) => {
   console.error(error)
   process.exitCode = 1

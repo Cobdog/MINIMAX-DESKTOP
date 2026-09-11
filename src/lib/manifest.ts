@@ -5,8 +5,13 @@
 import type { GenerationJob, ModelSelection } from '../types'
 import type { GenerationOptions } from '../types'
 
+/** Bumped whenever a graph family's topology changes intentionally; recorded
+ *  on every render beside the structural hash so old jobs stay attributable. */
+export const GRAPH_FAMILY_VERSION = 'studio-2026-09'
+
 export type RenderManifest = {
   manifestVersion: 1
+  graphFamily: string
   createdAt: number
   provider: 'minimax' | 'ltx25' | 'acestep'
   mode: string
@@ -59,6 +64,7 @@ function modelBytes(models: ModelSelection, found: Array<{ name: string; kind: s
 export function buildRenderManifest(options: GenerationOptions, models: ModelSelection, modelFiles: Array<{ name: string; kind: string; bytes: number }>, comfyUrl: string, graph: Record<string, { class_type: string; inputs: Record<string, unknown> }>): RenderManifest {
   return {
     manifestVersion: 1,
+    graphFamily: GRAPH_FAMILY_VERSION,
     createdAt: Date.now(),
     provider: 'minimax',
     mode: options.mode,

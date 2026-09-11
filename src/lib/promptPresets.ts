@@ -90,11 +90,19 @@ export const promptPresets: PromptPreset[] = [
     ['storm-magic','Storm Magic','Lightning-charged tempest energy.'],
     ['truman-show','Truman Show','Self-aware staged-reality framing.'],
   ].map(([id,label,description]) => preset('embedding', id, `${label} · embedding`, description, `embedding:minimaxh3_${id} — combined with your scene description for its signature look. Requires the matching embedding file in ComfyUI/models/embeddings.`)),
+  // Director's looseness: counter H3's strong prompt adherence, which the
+  // community links to wooden, over-literal acting.
+  ...[
+    ['loose-performance', 'Loose Performance', 'Room for natural actor behavior.'],
+    ['improvised-feel', 'Improvised Feel', 'Behavior reads discovered, not scripted.'],
+    ['micro-variation', 'Micro Variation', 'Repeat actions with tiny believable differences.'],
+    ['breathing-room', 'Breathing Room', 'Pauses, glances, and weight shifts between beats.'],
+  ].map(([id,label,description]) => preset('looseness', id, label, description, `Performance latitude: ${description.toLowerCase()} Allow spontaneous micro-adjustments, off-beat timing, and small unplanned gestures that fit the character and scene; do not interpret this as permission to change wardrobe, identity, location, or the directed action itself.`)),
 ]
 
 export const promptPresetCategories: Array<{ id: PromptPresetCategory; label: string }> = [
   { id: 'camera', label: 'Camera' }, { id: 'shot', label: 'Shot' }, { id: 'angle', label: 'Angle' }, { id: 'lens', label: 'Lens' },
-  { id: 'lighting', label: 'Lighting' }, { id: 'audio', label: 'Audio' }, { id: 'style', label: 'Style' }, { id: 'movement', label: 'Movement' }, { id: 'transition', label: 'Transition' }, { id: 'character', label: 'Character' }, { id: 'wardrobe', label: 'Wardrobe' }, { id: 'location', label: 'Location' }, { id: 'embedding', label: 'Style embedding' },
+  { id: 'lighting', label: 'Lighting' }, { id: 'audio', label: 'Audio' }, { id: 'style', label: 'Style' }, { id: 'movement', label: 'Movement' }, { id: 'transition', label: 'Transition' }, { id: 'character', label: 'Character' }, { id: 'wardrobe', label: 'Wardrobe' }, { id: 'location', label: 'Location' }, { id: 'embedding', label: 'Style embedding' }, { id: 'looseness', label: 'Looseness' },
 ]
 
 export function searchPromptPresets(query: string) {
