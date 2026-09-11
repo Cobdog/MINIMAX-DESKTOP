@@ -332,12 +332,16 @@ function App() {
         <button className="titlebar-mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open workspace menu"><Menu size={18} /></button>
         <div className="titlebar-brand"><span className="brand-mark"><Film size={16} /></span><span>MiniMax Studio</span></div>
         <div className="titlebar-drag" />
-        {(view === 'create' || view === 'ltx25' || view === 'zimage') && <button className="titlebar-action titlebar-reset" onClick={resetCurrentWorkspace} title="Reset prompts, options, media, selections, and the current preview in this workspace"><RotateCcw size={14} />Reset workspace</button>}
         <GpuMeter value={gpu} engineOnline={status.connected} />
-        <button className={`connection-chip ${status.connected ? 'online' : ''}`} onClick={() => void checkConnection(settings.comfyUrl)} title="Check ComfyUI connection">
+        <button
+          className={`connection-chip ${status.connected ? (modelReady ? 'online' : 'degraded') : ''}`}
+          onClick={() => { if (!modelReady) setView('settings'); else void checkConnection(settings.comfyUrl) }}
+          title={status.connected ? (modelReady ? 'Local engine connected — click to re-check' : 'The engine is connected but MiniMax H3 model components are missing — click to open Settings') : 'The generation engine is unreachable — click to re-check the connection'}
+        >
           {checking ? <LoaderCircle size={14} className="spin" /> : <span className="status-dot" />}
-          {status.connected ? `Local engine · ${status.latencyMs} ms` : 'Engine offline'}
+          {!status.connected ? 'Engine offline' : !modelReady ? 'Engine on · models missing' : `Local engine · ${status.latencyMs} ms`}
         </button>
+        {(view === 'create' || view === 'ltx25' || view === 'zimage') && <button className="titlebar-action titlebar-reset" onClick={resetCurrentWorkspace} title="Reset this workspace: prompts, options, media, selections, and the current preview" aria-label="Reset workspace"><RotateCcw size={14} /></button>}
       </header>
 
       {sidebarOpen && <button className="mobile-sidebar-backdrop" aria-label="Close workspace menu" onClick={() => setSidebarOpen(false)} />}
