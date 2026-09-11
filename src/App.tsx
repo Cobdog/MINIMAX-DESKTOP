@@ -424,6 +424,7 @@ function App() {
               if (kind === 'audio') setReferenceAudios((items) => items.filter((_, itemIndex) => itemIndex !== index))
             }}
             chooseReference={chooseMany}
+            addReferenceImage={(file) => { setSelectedReferenceCharacterIds([]); setSelectedReferenceLocationIds([]); setReferenceImages((current) => current.length < 9 ? [...current, file] : current) }}
             editVideoReference={(index) => void editVideoReference(index)}
             h3Validated={h3Report.validated}
             modelReady={modelReady}

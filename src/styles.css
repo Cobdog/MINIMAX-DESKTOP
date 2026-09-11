@@ -2274,3 +2274,5 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .timeline-guide-row > button { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
 .timeline-guide-row > button:hover { color: var(--danger); }
 .timeline-guide-note { color: var(--muted-2); font-size: 9px; line-height: 1.5; }
+.timeline-guide-mirror { flex: 0 1 auto; padding: 4px 8px; border: 1px solid rgba(240,188,102,.3); border-radius: 6px; background: rgba(240,188,102,.07); color: var(--warning); font-size: 9px; white-space: nowrap; cursor: pointer; }
+.timeline-guide-mirror:hover { border-color: rgba(240,188,102,.5); }
