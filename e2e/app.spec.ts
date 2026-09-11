@@ -79,6 +79,23 @@ test('captures a 1920x1080 screenshot of every view for vision inspection', asyn
   }
 })
 
+// The primary action and the render controls must be reachable without
+// scrolling at the pinned viewport — the panel scrolls internally instead.
+test('Create view keeps Generate and render controls visible at 1080p', async ({ page }) => {
+  await page.goto('/')
+  const inViewport = async (locator: ReturnType<Page['locator']>) => {
+    const box = await locator.boundingBox()
+    expect(box).not.toBeNull()
+    return box!.y >= 0 && box!.y + box!.height <= 1080
+  }
+  await expect(page.getByRole('button', { name: /generate video/i })).toBeVisible()
+  expect(await inViewport(page.getByRole('button', { name: /generate video/i }))).toBe(true)
+  await expect(page.locator('#duration')).toBeVisible()
+  expect(await inViewport(page.locator('#duration'))).toBe(true)
+  // The right panel owns an internal scroll region for its settings.
+  await expect(page.locator('.preview-scroll')).toBeAttached()
+})
+
 test('settings round-trips a change through the server API', async ({ page }) => {
   const problems = await trackErrors(page)
   await page.goto('/')

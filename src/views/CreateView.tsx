@@ -107,6 +107,7 @@ export type CreateViewProps = {
   onGenerateDialogue(draft: CharacterDialogueDraft): Promise<string>
   onUseSuggestion(): void; onDismissSuggestion(): void
   onGenerate(): void; onCancel(job: GenerationJob): void; onContinue(job: GenerationJob, position: number | 'last'): Promise<void>; latestJob?: GenerationJob
+  onOpenSettings(): void
 }
 
 export function CreateView(props: CreateViewProps) {
@@ -118,9 +119,26 @@ export function CreateView(props: CreateViewProps) {
     seed, setSeed, advanced, setAdvanced, firstFrame, lastFrame, setFirstFrame, setLastFrame, chooseMedia,
     referenceImages, referenceVideos, referenceAudios, characters, wardrobes, locations, selectedCharacterIds, selectedLocationIds, loadCharacter, loadWardrobe, loadLocation, refreshSourceMedia, removeReference, chooseReference, editVideoReference, h3Validated, modelReady, selection,
     submitting, cancelling, connected, ollamaAvailable, ollamaModel, promptSuggestion, promptingTool, dialogueGenerating,
-    onPromptTool, onGenerateDialogue, onUseSuggestion, onDismissSuggestion, onGenerate, onCancel, onContinue, latestJob,
+    onPromptTool, onGenerateDialogue, onUseSuggestion, onDismissSuggestion, onGenerate, onCancel, onContinue, latestJob, onOpenSettings,
   } = props
   const promptRef = useRef<SmartPromptEditorHandle>(null)
+  const previewPanelRef = useRef<HTMLElement>(null)
+  // Fit the preview panel to the viewport from its natural position, so the
+  // Generate bar is on screen at scroll position 0 without hard-coding the
+  // page-heading height in CSS. offsetTop is layout-stable under sticky.
+  useEffect(() => {
+    const panel = previewPanelRef.current
+    if (!panel) return
+    const fit = () => {
+      const scroller = panel.closest<HTMLElement>('.main-area')
+      const visible = scroller?.clientHeight ?? window.innerHeight
+      const gap = Math.max(panel.offsetTop, 16)
+      panel.style.setProperty('--preview-cap', `${Math.max(320, visible - gap - 16)}px`)
+    }
+    fit()
+    window.addEventListener('resize', fit)
+    return () => window.removeEventListener('resize', fit)
+  }, [])
   const sourceMediaTriggerRef = useRef<HTMLButtonElement>(null)
   const sourceMediaCloseRef = useRef<HTMLButtonElement>(null)
   const dialogueTriggerRef = useRef<HTMLButtonElement>(null)
@@ -200,7 +218,9 @@ export function CreateView(props: CreateViewProps) {
     <div className="create-page">
       <div className="page-heading">
         <div><p className="eyebrow">LOCAL VIDEO WORKSPACE</p><h1>Create with MiniMax H3</h1><p>Generate synchronized video and audio through your local ComfyUI engine.</p></div>
-        <div className="heading-state"><span className={modelReady && h3Validated ? 'ok' : 'warn'}>{modelReady && h3Validated ? <Check size={15} /> : <AlertCircle size={15} />}{!modelReady ? 'Check model paths' : h3Validated ? 'Validated H3 stack' : 'Custom H3 stack'}</span></div>
+        <div className="heading-state">{!modelReady
+          ? <button type="button" onClick={onOpenSettings} title="Open Settings to fix model paths"><AlertCircle size={15} />Check model paths</button>
+          : <span className={h3Validated ? 'ok' : 'warn'}>{h3Validated ? <Check size={15} /> : <AlertCircle size={15} />}{h3Validated ? 'Validated H3 stack' : 'Custom H3 stack'}</span>}</div>
       </div>
 
       <div className="workspace-grid">
@@ -308,11 +328,23 @@ export function CreateView(props: CreateViewProps) {
 
         </section>
 
-        <aside className="preview-panel">
+        <aside className="preview-panel" ref={previewPanelRef}>
           <div className="panel-heading"><div><span>OUTPUT</span><strong>Current workspace</strong></div>{latestJob && <StatusBadge status={latestJob.status} />}</div>
           {liveEnabled && livePreview && livePreview.promptId === latestJob?.promptId && latestJob && ['running', 'queued'].includes(latestJob.status) && <figure className={`live-preview ${livePreview.animated ? 'animated' : ''}`}>{livePreview.mime === 'video/mp4' ? <video key={livePreview.url} src={livePreview.url} aria-label="Animated MiniMax H3 generation preview" autoPlay loop muted playsInline /> : <img key={livePreview.url} src={livePreview.url} alt={livePreview.animated ? 'Animated MiniMax H3 generation preview' : 'Live generation preview'} />}<figcaption>{livePreview.animated ? `Animated H3 preview · 50 frames${livePreview.fps ? ` · ${livePreview.fps} fps` : ''}${livePreview.step && livePreview.totalSteps ? ` · sampler step ${livePreview.step} of ${livePreview.totalSteps}` : ''}` : 'Live preview · intermediate frame'}</figcaption></figure>}
+          <div className="preview-scroll">
           <div className="preview-stage">
-            {latestJob?.outputUrl ? <VideoPlayer src={latestJob.outputUrl} onDuration={setRenderedVideoDuration} /> : latestJob && ['queued', 'running'].includes(latestJob.status) ? <div className="render-state constructing"><RenderConstruction /><strong>{latestJob.progressLabel ?? (latestJob.status === 'queued' ? 'Waiting in queue' : 'Rendering locally')}</strong><span>{latestJob.currentStep !== undefined && latestJob.totalSteps ? `Live sampler step ${latestJob.currentStep} of ${latestJob.totalSteps}` : `${latestJob.width} × ${latestJob.height} · ${latestJob.duration}s`}</span><div className="progress"><i style={{ width: `${latestJob.progress}%` }} /></div><small>{Math.round(latestJob.progress)}% · live ComfyUI status</small></div> : <div className="empty-preview"><div className="preview-icon"><Film size={28} /></div><strong>Your video will appear here</strong><span>Configure a shot, then send it to the local engine.</span></div>}
+            {latestJob?.outputUrl ? <VideoPlayer src={latestJob.outputUrl} onDuration={setRenderedVideoDuration} /> : latestJob && ['queued', 'running'].includes(latestJob.status) ? <div className="render-state constructing"><RenderConstruction /><strong>{latestJob.progressLabel ?? (latestJob.status === 'queued' ? 'Waiting in queue' : 'Rendering locally')}</strong><span>{latestJob.currentStep !== undefined && latestJob.totalSteps ? `Live sampler step ${latestJob.currentStep} of ${latestJob.totalSteps}` : `${latestJob.width} × ${latestJob.height} · ${latestJob.duration}s`}</span><div className="progress"><i style={{ width: `${latestJob.progress}%` }} /></div><small>{Math.round(latestJob.progress)}% · live ComfyUI status</small></div> : !connected || !modelReady ? (
+            <div className="setup-checklist" aria-label="Studio setup steps">
+              <strong>Set up the studio</strong>
+              <span>Complete these once — then generate from any browser on your network.</span>
+              <ol>
+                <li className={connected ? 'done' : ''}>{connected ? 'ComfyUI engine connected' : 'Start ComfyUI and confirm its address in Settings'}</li>
+                <li className={modelReady ? 'done' : ''}>{modelReady ? 'MiniMax H3 models detected' : 'Point Settings at your MiniMax H3 model folders'}</li>
+                <li>Describe a shot and press Generate video</li>
+              </ol>
+              <button type="button" className="primary-button" onClick={onOpenSettings}>Open Settings</button>
+            </div>
+          ) : <div className="empty-preview"><div className="preview-icon"><Film size={28} /></div><strong>Your video will appear here</strong><span>Configure a shot, then send it to the local engine.</span></div>}
           </div>
           {latestJob?.mode === 'reference' && latestJob.status === 'completed' && latestJob.outputUrl && <VideoContinuationControls job={latestJob} duration={renderedVideoDuration || latestJob.duration} onContinue={onContinue} />}
           <div className="pipeline-summary">
@@ -331,6 +363,7 @@ export function CreateView(props: CreateViewProps) {
             {advanced && <div className="advanced-grid"><NumberField label="Full-quality steps" value={steps} min={16} max={30} onChange={setSteps} disabled={turbo !== 'off'} /><NumberField label="Seed" value={seed} min={0} max={999999999999} onChange={setSeed} /><NumberField label="LoRA strength" value={loraStrength} min={0} max={2} step={0.05} onChange={setLoraStrength} disabled={turbo === 'off'} /><label className="sampling-opt-in"><input type="checkbox" checked={experimentalSampling} onChange={(event) => setExperimentalSampling(event.target.checked)} />Use custom sampler and scheduler</label><SelectField label="Experimental Turbo override" value={turbo} onChange={(value) => setTurbo(value as 'off' | '4' | '8')} options={[["off", 'Off · native quality'], ["8", 'Official 8-step'], ["4", '4-step · preview testing']]} /><SelectField label="Sampler" value={experimentalSampling ? sampler : 'res_multistep'} onChange={setSampler} disabled={!experimentalSampling} options={[...new Set([sampler, 'res_multistep', ...choices(info, 'KSamplerSelect', 'sampler_name')])].map((value) => [value, value])} /><SelectField label="Scheduler" value={experimentalSampling ? scheduler : 'simple'} onChange={setScheduler} disabled={!experimentalSampling} options={[...new Set([scheduler, 'simple', ...choices(info, 'BasicScheduler', 'scheduler')])].map((value) => [value, value])} /><SelectField label="Sigma shifts" value={sigmaShiftMode} onChange={(value) => setSigmaShiftMode(value as 'model' | 'custom')} options={[["model", 'Model defaults · video 12 / audio 3'], ["custom", 'Custom official sigma-shift node']]} /><NumberField label="Video sigma shift" value={shiftVideo} min={0.01} max={100} step={0.01} onChange={setShiftVideo} disabled={sigmaShiftMode !== 'custom'} /><NumberField label="Audio sigma shift" value={shiftAudio} min={0.01} max={100} step={0.01} onChange={setShiftAudio} disabled={sigmaShiftMode !== 'custom'} /><p className="field-help">The published ComfyUI workflow uses <strong>res_multistep + simple</strong>, CFG 1, denoise 1, 24 fps, and the model’s native 12/3 shifts. Custom sampling—including Euler + Beta for converted Turbo LoRAs—is experimental and should be tested against the same seed.</p></div>}
             <p className="field-help render-duration">{frameCount(duration)} frames · {(frameCount(duration) / 24).toFixed(2)}s actual duration at 24 fps. Rounded up to MiniMax’s frame grid.</p>
           </section>
+          </div>
           <div className="generate-bar preview-generate-bar"><div className="generation-summary"><Gauge size={17} /><span><strong>{resolution.replace('x', ' × ')}</strong><small>{duration}s · 24 fps · {turbo === 'off' ? `${steps} steps` : `${turbo}-step turbo`}</small></span></div><div className="generate-actions">{latestJob && ['queued', 'running'].includes(latestJob.status) && <button className="danger-button" onClick={() => onCancel(latestJob)} disabled={cancelling}><CircleStop size={16} />{cancelling ? 'Stopping…' : 'Cancel generation'}</button>}<button className="primary-button generation-button" onClick={onGenerate} disabled={submitting || !connected || !modelReady}>{submitting ? <LoaderCircle size={18} className="spin" /> : <Play size={18} fill="currentColor" />}{submitting ? 'Submitting…' : 'Generate video'}</button></div></div>
         </aside>
       </div>

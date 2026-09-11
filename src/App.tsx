@@ -324,7 +324,7 @@ function App() {
         <div className="titlebar-brand"><span className="brand-mark"><Film size={16} /></span><span>MiniMax Studio</span></div>
         <div className="titlebar-drag" />
         {(view === 'create' || view === 'ltx25' || view === 'zimage') && <button className="titlebar-action titlebar-reset" onClick={resetCurrentWorkspace} title="Reset prompts, options, media, selections, and the current preview in this workspace"><RotateCcw size={14} />Reset workspace</button>}
-        <GpuMeter value={gpu} />
+        <GpuMeter value={gpu} engineOnline={status.connected} />
         <button className={`connection-chip ${status.connected ? 'online' : ''}`} onClick={() => void checkConnection(settings.comfyUrl)} title="Check ComfyUI connection">
           {checking ? <LoaderCircle size={14} className="spin" /> : <span className="status-dot" />}
           {status.connected ? `Local engine · ${status.latencyMs} ms` : 'Engine offline'}
@@ -442,6 +442,7 @@ function App() {
             onGenerateDialogue={generateCharacterDialogue}
             onUseSuggestion={() => { setPrompt(promptSuggestion); setPromptSuggestion('') }}
             onDismissSuggestion={() => setPromptSuggestion('')}
+            onOpenSettings={() => setView('settings')}
           />
         </div>
         {view === 'ltx25' && <Ltx25Workspace key={`ltx-${ltxResetKey}`}
