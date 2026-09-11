@@ -205,6 +205,12 @@ export function createWebApiClient(): DesktopApi {
     async syncMobileCharacters(characters: unknown[]) {
       return postJson('/api/lan/characters', { characters })
     },
+    async freeComfyMemory() {
+      return postJson<{ freed: boolean }>('/api/lan/free', {})
+    },
+    async runSetupDoctor() {
+      return apiFetch<Awaited<ReturnType<DesktopApi['runSetupDoctor']>>>('/api/lan/doctor')
+    },
     async listPromptLibrary(query: { text?: string; limit?: number; cursor?: string; nsfw?: boolean; sort?: string; scope?: 'h3' | 'all' }) {
       const search = new URLSearchParams()
       if (query.text) search.set('query', query.text)

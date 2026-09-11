@@ -42,6 +42,7 @@ import { AccessoryStudio } from './components/AccessoryStudio'
 import { AiChatHead } from './components/AiChatHead'
 import type { CharacterDialogueDraft } from './components/CharacterDialogueModal'
 import { GpuMeter, NavButton, Notice } from './components/chrome'
+import { LicenseNotice } from './components/LicenseNotice'
 import { CreateView } from './views/CreateView'
 import { LibraryView } from './views/LibraryView'
 import { JobsView } from './views/JobsView'
@@ -367,6 +368,7 @@ function App() {
 
       <main className="main-area">
         {notice && <Notice tone={notice.tone} text={notice.text} onClose={() => setNotice(null)} />}
+        <LicenseNotice />
         <div hidden={view !== 'create'}>
           <CreateView key={`create-${createResetKey}`}
             info={info}

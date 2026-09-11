@@ -11,6 +11,7 @@ import { inferSelections } from '../lib/modelSelection'
 import type { ObjectInfo } from '../lib/comfyInfo'
 import { diagnosticPrompt } from '../lib/h3Stack'
 import { composeH3Prompt, resolveRenderReferenceImages } from '../lib/promptPolicies'
+import { buildRenderManifest } from '../lib/manifest'
 import type { useStudioSession } from './useStudioSession'
 import type { useGenerationQueue, NoticeTone } from './useGenerationQueue'
 import type { useCreateWorkspace } from './useCreateWorkspace'
@@ -278,13 +279,22 @@ export function useGenerationFlows(options: {
         referenceAudios: referenceAudios.map((item) => item.path),
         timelineGuides: guides.length ? guides.map((guide) => ({ frameIndex: frameIndexForSeconds(guide.seconds) })) : undefined,
       }, selection, { first, last, images, videos, audios, guides: guideUploads })
+      const manifest = buildRenderManifest({
+        mode, prompt: effectivePrompt, width, height, duration, seed, steps, turbo, experimentalSampling, loraStrength,
+        sampler: experimentalSampling ? sampler : 'res_multistep', scheduler: experimentalSampling ? scheduler : 'simple',
+        refImageSize, sigmaShift: sigmaShiftMode === 'custom' ? { video: shiftVideo, audio: shiftAudio } : undefined,
+        upscale: upscale.mode === 'off' ? undefined : upscale.mode === 'ltx' ? { type: 'ltx', model: upscale.model, vae: upscale.vae } : { type: 'rtx', model: ws.rtxModel },
+        referenceImages: renderReferenceImages.map((item) => item.path), referenceVideos: referenceVideos.map((item) => item.path), referenceAudios: referenceAudios.map((item) => item.path),
+        timelineGuides: guides.length ? guides.map((guide) => ({ frameIndex: frameIndexForSeconds(guide.seconds) })) : undefined,
+        filenamePrefix: `video/MiniMax_H3_${Date.now()}`,
+      }, selection, models, settings.comfyUrl, graph)
       const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, clientId)
       if (cancellationRequests.current.has(localId)) {
         await window.minimax.cancelPrompt(settings.comfyUrl, response.prompt_id)
         setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'cancelled', error: undefined } : item))
         notify('success', 'Generation cancelled.')
       } else {
-        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: 'Waiting for ComfyUI to start' } : item))
+        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: 'Waiting for ComfyUI to start', manifest, graph } : item))
         notify('success', 'Generation added to the local ComfyUI queue.')
         ws.setCharacterHandoff(null)
       }

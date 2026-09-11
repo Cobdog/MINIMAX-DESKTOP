@@ -35,6 +35,8 @@ export type AppSettings = {
   outputDirectory: string
   ffmpegPath: string
   generationDefaults: GenerationDefaults
+  /** Chosen GPU tier — drives community quant/resolution guidance. */
+  gpuTier?: '8' | '16' | '24' | 'blackwell'
 }
 
 export type ClipItem = { id: string; name: string; source: string; createdAt: number; start?: number; end?: number; duration?: number }
@@ -284,6 +286,13 @@ export type GenerationJob = {
   height: number
   duration: number
   provider?: 'minimax' | 'ltx25' | 'acestep'
+  /** Reproducibility record attached at submit time (persisted). */
+  manifest?: Record<string, unknown>
+  /** Submit-side graph for in-memory auto-retry only — stripped before
+   *  localStorage persistence. */
+  graph?: unknown
+  /** Set after the automatic engine-reset + tiled-VAE retry. */
+  retriedOnce?: boolean
   mediaType?: 'video' | 'audio'
   movieLink?: { projectId: string; sceneId: string; shotId: string }
   characterProjectId?: string
@@ -319,6 +328,8 @@ export type DesktopApi = {
   generateStructuredWithOllama(url: string, model: string, prompt: string, schema: Record<string, unknown>): Promise<unknown>
   syncMobileCharacters(characters: unknown[]): Promise<{ synced: number }>
   listPromptLibrary(query: { text?: string; limit?: number; cursor?: string; nsfw?: boolean; sort?: string; scope?: 'h3' | 'all' }): Promise<{ items: PromptLibraryItem[]; cursor?: string }>
+  runSetupDoctor(): Promise<{ checks: Array<{ id: string; label: string; status: 'ok' | 'warn' | 'fail'; detail: string; recommendation?: string }>; ranAt: number }>
+  freeComfyMemory(url: string): Promise<{ freed: boolean }>
 }
 
 /** One harvested community prompt (Civitai image metadata via the server's

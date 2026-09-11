@@ -15,6 +15,20 @@ export function frameCount(seconds: number) {
   return base + ((5 - (base % 17) + 17) % 17)
 }
 
+/** Swaps the final video VAEDecode for the tiled variant — the standard
+ *  fallback when a full-tensor decode exhausts VRAM. */
+export function withTiledVideoDecode(graph: Record<string, { class_type: string; inputs: Record<string, unknown> }>) {
+  const next: Record<string, { class_type: string; inputs: Record<string, unknown> }> = {}
+  for (const [id, node] of Object.entries(graph)) {
+    if (node.class_type === 'VAEDecode') {
+      next[id] = { class_type: 'VAEDecodeTiled', inputs: { ...node.inputs, tile_size: 1024, overlap: 128, temporal_size: 64, temporal_overlap: 8 } }
+    } else {
+      next[id] = node
+    }
+  }
+  return next
+}
+
 /** Official frame-index convention: round(seconds * 24); negative seconds
  *  count from the end of the video. */
 export function frameIndexForSeconds(seconds: number) {

@@ -648,6 +648,53 @@ export function createStudioServer(paths: StudioServerPaths) {
     request.on('close', () => { clearInterval(heartbeat); clearTimeout(retry); socket?.close() })
   }
 
+  /** Setup doctor: verifies the local toolchain (ffmpeg, openssl), probes
+   *  ComfyUI for device/python/attention-node availability, and returns exact
+   *  recommendations. Read-only. */
+  async function runSetupDoctor(settings: AppSettings) {
+    const checks: Array<{ id: string; label: string; status: 'ok' | 'warn' | 'fail'; detail: string; recommendation?: string }> = []
+    const configuredFfmpeg = settings.ffmpegPath.trim().replace(/^(["'])|(["'])$/g, '') || 'ffmpeg'
+    const ffmpegPath = existsSync(join(configuredFfmpeg, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg')) ? join(configuredFfmpeg, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg') : configuredFfmpeg
+    const ffmpeg = await new Promise<{ found: boolean; version: string }>((resolve) => {
+      execFile(ffmpegPath, ['-version'], { windowsHide: true, timeout: 8000 }, (error, stdout) => {
+        if (error) resolve({ found: false, version: '' })
+        else resolve({ found: true, version: stdout.split(/\r?\n/, 1)[0] ?? '' })
+      })
+    })
+    checks.push(ffmpeg.found
+      ? { id: 'ffmpeg', label: 'FFmpeg', status: 'ok', detail: ffmpeg.version }
+      : { id: 'ffmpeg', label: 'FFmpeg', status: 'fail', detail: `Not found at "${settings.ffmpegPath}".`, recommendation: 'Clip tools need FFmpeg. Install it (winget/choco/apt/brew) or set the exact path to the executable in Settings.' })
+    const openssl = await new Promise<boolean>((resolve) => {
+      execFile('openssl', ['version'], { windowsHide: true, timeout: 8000 }, (error) => resolve(!error))
+    })
+    checks.push(openssl
+      ? { id: 'openssl', label: 'OpenSSL (HTTPS)', status: 'ok', detail: 'Available — the server can issue its LAN certificate.' }
+      : { id: 'openssl', label: 'OpenSSL (HTTPS)', status: 'warn', detail: 'openssl not found on PATH.', recommendation: 'Without openssl the server falls back to plain HTTP: no PWA install, and tokens would travel in cleartext on hostile networks.' })
+    try {
+      const stats = await comfyFetch(settings.comfyUrl, '/system_stats') as {
+        system?: { python_version?: string; os?: string }
+        devices?: Array<{ name?: string; vram_total?: number; vram_free?: number }>
+      }
+      const device = stats.devices?.[0]
+      checks.push({
+        id: 'comfy', label: 'ComfyUI engine', status: 'ok',
+        detail: `${device?.name ?? 'device'} · ${device?.vram_total ? `${(device.vram_total / 1024 ** 3).toFixed(1)} GB VRAM (${device?.vram_free !== undefined ? `${(device.vram_free / 1024 ** 3).toFixed(1)} GB free` : 'usage unknown'})` : 'VRAM unknown'} · Python ${stats.system?.python_version ?? '?'} on ${stats.system?.os ?? '?'}`,
+      })
+      const vramGb = (device?.vram_total ?? 0) / 1024 ** 3
+      if (device && vramGb > 0 && vramGb < 18) {
+        checks.push({ id: 'vram-tier', label: 'VRAM tier guidance', status: 'warn', detail: `${vramGb.toFixed(1)} GB detected.`, recommendation: 'Community tiers for ~16 GB cards: pruned INT8/Q4 quant of the diffusion model + INT4 text encoder, 1344×768, 5 s first; queue one render at a time and let the auto-retry handle OOM resets.' })
+      }
+      const info = await comfyFetch(settings.comfyUrl, '/object_info').catch(() => ({})) as Record<string, unknown>
+      const attentionNodes = Object.keys(info).filter((name) => /blocksparse|sage|triton|flash/i.test(name))
+      checks.push(attentionNodes.length
+        ? { id: 'attention', label: 'Attention backends', status: 'ok', detail: `Detected nodes: ${attentionNodes.slice(0, 6).join(', ')}${attentionNodes.length > 6 ? ` (+${attentionNodes.length - 6} more)` : ''}.` }
+        : { id: 'attention', label: 'Attention backends', status: 'warn', detail: 'No SageAttention/Triton/Flash-related nodes detected in ComfyUI.', recommendation: 'Optional speed-up: installing SageAttention (~2× on supported GPUs) or the Sol-Attn nodes (15–20%) shortens H3 renders. Not required for correctness.' })
+    } catch (error) {
+      checks.push({ id: 'comfy', label: 'ComfyUI engine', status: 'fail', detail: error instanceof Error ? error.message : String(error), recommendation: 'Start ComfyUI and confirm the server URL in Settings; engine-dependent checks were skipped.' })
+    }
+    return { checks, ranAt: Date.now() }
+  }
+
   async function handleLanRequest(request: IncomingMessage, response: ServerResponse) {
     try {
       const url = new URL(request.url ?? '/', 'http://minimax.local')
@@ -789,6 +836,12 @@ export function createStudioServer(paths: StudioServerPaths) {
           }
         }
         if (url.pathname === '/api/lan/telemetry' && request.method === 'GET') return sendJson(response, 200, await readGpuTelemetry())
+        if (url.pathname === '/api/lan/doctor' && request.method === 'GET') return sendJson(response, 200, await runSetupDoctor(settings))
+        if (url.pathname === '/api/lan/free' && request.method === 'POST') {
+          // Queue-hygiene soft reset: unload models and return VRAM to the pool.
+          await comfyFetch(settings.comfyUrl, '/free', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ unload_models: true, free_memory: true }) }).catch(() => undefined)
+          return sendJson(response, 200, { freed: true })
+        }
         if (url.pathname === '/api/lan/prompt-library' && request.method === 'GET') {
           // Pinned-host proxy to Civitai's public images API (withMeta=true).
           // The host is fixed — never user-supplied — so this is a deliberate

@@ -2276,3 +2276,24 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .timeline-guide-note { color: var(--muted-2); font-size: 9px; line-height: 1.5; }
 .timeline-guide-mirror { flex: 0 1 auto; padding: 4px 8px; border: 1px solid rgba(240,188,102,.3); border-radius: 6px; background: rgba(240,188,102,.07); color: var(--warning); font-size: 9px; white-space: nowrap; cursor: pointer; }
 .timeline-guide-mirror:hover { border-color: rgba(240,188,102,.5); }
+
+/* One-time model license notice. */
+.license-notice { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; padding: 10px 12px; border: 1px solid rgba(240,188,102,.25); border-radius: 9px; background: rgba(240,188,102,.05); color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+.license-notice > svg { flex: 0 0 auto; color: var(--warning); }
+.license-notice strong { color: var(--warning); }
+.license-notice span { flex: 1; min-width: 0; }
+.license-notice button { flex: 0 0 auto; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.license-notice button:hover { color: var(--text); }
+
+/* Setup doctor + GPU tiers. */
+.doctor-report { display: grid; gap: 8px; }
+.doctor-check { display: flex; gap: 9px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.doctor-check.ok > span { color: var(--accent); }
+.doctor-check.warn > span { color: var(--warning); }
+.doctor-check.fail > span { color: var(--danger); }
+.doctor-check strong { font-size: 11px; }
+.doctor-check small { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.doctor-check p { margin: 5px 0 0; color: var(--text); font-size: 10px; line-height: 1.5; }
+.gpu-tier-section .preset-row { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.gpu-tier-section .preset-row button.tier-selected { border-color: rgba(198,255,99,.45); background: var(--accent-soft); box-shadow: inset 0 0 0 1px rgba(198,255,99,.12); }
+.gpu-tier-section .preset-row small { line-height: 1.5; white-space: normal; }

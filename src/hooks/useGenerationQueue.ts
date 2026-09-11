@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppSettings, GenerationJob } from '../types'
 import { isPastRunningDeadline, isTerminalStatus, reduceJobPoll, type PollObservation, type PollReduction } from '../lib/jobReducer'
-import { extractOutputFile, extractOutputUrl } from '../lib/workflow'
+import { extractOutputFile, extractOutputUrl, withTiledVideoDecode } from '../lib/workflow'
 import { extractAutomatedReferenceSet, initialJobs, playableOutputUrl, recordCharacterTurntable, recordLocationWalkthrough, recordMovieOutput } from '../lib/jobRecords'
 import type { LiveProgress } from '../lib/useLivePreview'
 
@@ -28,7 +28,9 @@ export function useGenerationQueue(options: {
   }, [])
 
   useEffect(() => {
-    localStorage.setItem('minimax.jobs', JSON.stringify(jobs.slice(0, 100)))
+    // The submit graph is for in-memory retry only — never persisted.
+    const persistable = jobs.slice(0, 100).map((job) => { const rest = { ...job }; delete rest.graph; return rest })
+    localStorage.setItem('minimax.jobs', JSON.stringify(persistable))
   }, [jobs])
 
   useEffect(() => {
@@ -72,6 +74,22 @@ export function useGenerationQueue(options: {
             }
           } else {
             observation = { kind: 'incomplete' }
+          }
+          // Queue hygiene: a failed MiniMax render gets one automatic
+          // engine-reset + tiled-VAE retry before the error is surfaced —
+          // most H3 failures on 16 GB cards are VRAM fragmentation that a
+          // /free soft-reset clears.
+          if (observation.kind === 'executionError' && !job.retriedOnce && (job.provider ?? 'minimax') === 'minimax' && job.graph) {
+            try {
+              await window.minimax.freeComfyMemory(settings.comfyUrl)
+              const retryGraph = withTiledVideoDecode(job.graph as Record<string, { class_type: string; inputs: Record<string, unknown> }>)
+              const resubmitted = await window.minimax.submitPrompt(settings.comfyUrl, retryGraph)
+              setJobs((current) => current.map((item) => item.id === job.id
+                ? { ...item, promptId: resubmitted.prompt_id, status: 'queued', progress: 2, progressLabel: 'Auto-retrying after engine reset (tiled VAE)', error: undefined, retriedOnce: true }
+                : item))
+              notify('neutral', 'A render failed — the engine was reset and the job re-queued once with tiled VAE decoding.')
+              return
+            } catch { /* Fall through to the normal failure handling. */ }
           }
           const reduction = reduceJobPoll(job, observation, Date.now())
           if (reduction.transitionedTo === 'completed') {
