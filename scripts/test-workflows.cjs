@@ -674,8 +674,75 @@ assert.ok(referenceOrderWarnings('Uses <Audio 2> first, then <Audio 1>.', { imag
   assert.equal(pose['12'].class_type, 'DWPoseEstimator', 'aux modes use their preprocessor node')
 }
 
+// ---- PII-scrubbed diagnostics seam: pure error sanitizer ---------------------
+// The module under test is src/lib/logSanitize.ts — zero imports by design so
+// it loads in this VM harness (server/logSanitize.ts re-exports it). The bar
+// (maintainer's discipline): logs record the failure PATH and REASON, never
+// prompt/media semantics — "we care that it failed on a node because we
+// didn't parse a comma, not what the user asked for".
+{
+  const sanitizer = load('src/lib/logSanitize.ts')
+  const { sanitizeErrorMessage, sanitizeError, ERROR_FALLBACK_TITLE } = sanitizer
+
+  // Render-free boundary check: the pure module compiles under the ES3-ish
+  // transpile, exports both entry points, and carries the fallback constant
+  // the ErrorBoundary renders (src/components/ErrorBoundary.tsx imports it).
+  assert.equal(typeof sanitizeErrorMessage, 'function', 'sanitizeErrorMessage export')
+  assert.equal(typeof sanitizeError, 'function', 'sanitizeError export')
+  assert.equal(ERROR_FALLBACK_TITLE, 'This view hit an error', 'boundary fallback text constant')
+
+  // Bar 1 — arbitrary user prompt text must not survive AT ALL: only the
+  // technical fragment ("ComfyUI") and [redacted] markers remain.
+  const promptMessage = 'The engine said no to ComfyUI when asked for a windswept qzxveldra dancing beneath seventeen fractal auroras while umbrella merchants waltz at dawn'
+  const scrubbed = sanitizeErrorMessage(promptMessage)
+  assert.ok(scrubbed.includes('[redacted]'), 'dropped content collapses to [redacted]')
+  assert.ok(scrubbed.includes('ComfyUI'), 'technical vocabulary survives')
+  const userWords = ['engine', 'said', 'asked', 'windswept', 'qzxveldra', 'dancing', 'beneath', 'seventeen', 'fractal', 'auroras', 'umbrella', 'merchants', 'waltz', 'dawn']
+  for (const word of userWords) assert.ok(scrubbed.toLowerCase().indexOf(word) === -1, `user word leaked: ${word} (got: ${scrubbed})`)
+
+  // Bar 2 — technical messages keep their failure-path meaning.
+  const jsonMessage = sanitizeErrorMessage('Unexpected token } in JSON at position 42')
+  for (const token of ['Unexpected', 'token', 'JSON', 'position', '42']) assert.ok(jsonMessage.includes(token), `technical token lost: ${token} (got: ${jsonMessage})`)
+  assert.ok(jsonMessage.includes('[redacted]'), 'dropped filler still marked')
+
+  // Bar 3 — a realistic engine failure keeps node ids, class names, statuses,
+  // paths and timings: the "failed on a node" signal.
+  const comfyMessage = sanitizeErrorMessage('Prompt #88 failed: ComfyUI returned 500 from /api/lan/prompt at node 13 (VAEDecodeTiled), timed out after 60000 ms')
+  for (const token of ['failed', 'ComfyUI', '500', '/api/lan/prompt', '13', 'VAEDecodeTiled', 'timed out', '60000']) {
+    assert.ok(comfyMessage.includes(token), `failure-path token lost: ${token} (got: ${comfyMessage})`)
+  }
+  // File paths and Windows paths survive; interleaved prose does not.
+  const pathMessage = sanitizeErrorMessage('could not read C:\\Users\\artist\\ComfyUI\\output\\video\\render_001.mp4 because the disk vanished quietly')
+  assert.ok(pathMessage.includes('C:\\Users\\artist\\ComfyUI\\output\\video\\render_001.mp4'), 'windows output path kept')
+  assert.ok(pathMessage.toLowerCase().indexOf('vanished') === -1 && pathMessage.toLowerCase().indexOf('quietly') === -1, 'prose around the path dropped')
+
+  // sanitizeError: name/reason from a HOST-realm Error (duck-typed — instanceof
+  // must not be relied on across realms), path from the first stack frame.
+  const boom = new Error('bad thing happened to node 84 in VAEDecodeTiled')
+  const detail = sanitizeError(boom)
+  assert.equal(detail.name, 'Error', 'error name kept')
+  assert.ok(detail.reason.includes('node'), 'sanitized reason keeps technical signal')
+  assert.ok(/test-workflows\.cjs:\d+/.test(detail.path), `first stack frame extracted as file:line (got: ${detail.path})`)
+
+  // Non-Error input (a thrown string is a real pattern in this codebase).
+  const thrown = sanitizeError('a plain string about moonlit qzxveldra umbrellas')
+  assert.equal(thrown.name, 'string', 'plain string classified')
+  assert.ok(thrown.reason.includes('[redacted]') && !thrown.reason.includes('umbrellas'), 'thrown string sanitized')
+  assert.equal(thrown.path, '', 'no stack → empty path')
+
+  // Length cap: a corrupted multi-megabyte message cannot flood a log line
+  // (or the boundary fallback) — output is capped regardless of input size.
+  const numbers = []
+  for (let index = 0; index < 900; index += 1) numbers.push(String(index))
+  const longInput = 'error ' + numbers.join(' ')
+  assert.ok(sanitizeErrorMessage(longInput).length <= 200, 'sanitizeErrorMessage capped at ~200 chars')
+  assert.ok(sanitizeError(new Error(longInput)).reason.length <= 200, 'sanitizeError reason capped at ~200 chars')
+  assert.ok(sanitizeErrorMessage(longInput).includes('error'), 'cap keeps the leading signal')
+}
+
+
 runKernelTests().then(() => {
-  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference), ContactSheet character sheets (topology, LoRA inference, size clamps, views-first attribution), graph-family versioning + looseness presets, and the Z-Image ControlNet Union graph (pin names, native canny, aux preprocessors, mask, image-sized latent)')
+  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference), ContactSheet character sheets (topology, LoRA inference, size clamps, views-first attribution), graph-family versioning + looseness presets, the Z-Image ControlNet Union graph (pin names, native canny, aux preprocessors, mask, image-sized latent), and the pure error sanitizer (prompt-text redaction bar, technical-message preservation, stack-path extraction, length cap, fallback constant)')
 }, (error) => {
   console.error(error)
   process.exitCode = 1

@@ -20,6 +20,7 @@ import { networkInterfaces, tmpdir } from 'node:os'
 import { Readable } from 'node:stream'
 import WebSocket from 'ws'
 import type { AppSettings, GpuTelemetry, LanStatus, ModelKind } from '../src/types'
+import { failureRef, logEvent, logFailure } from './logger'
 
 export type StudioServerPaths = {
   settingsFile: string
@@ -357,7 +358,12 @@ export function createStudioServer(paths: StudioServerPaths) {
     if (settingsCache) return settingsCache
     try {
       settingsCache = normalizeSettings(JSON.parse(await readFile(paths.settingsFile, 'utf8')) as Partial<AppSettings>)
-    } catch {
+    } catch (error) {
+      // First run (no file yet) or a corrupted settings.json — either way we
+      // fall back to defaults; the debug line records which, because a
+      // silently discarded settings file is exactly the comma-we-didn't-parse
+      // class of failure the diagnostics seam exists for.
+      logFailure('settings/load', error, undefined, 'debug')
       settingsCache = defaultSettings()
     }
     return settingsCache
@@ -686,7 +692,7 @@ export function createStudioServer(paths: StudioServerPaths) {
           try { forward(JSON.parse(text)) } catch { forward(text) }
         }
       })
-      socket.on('error', () => { socket?.close() })
+      socket.on('error', (error: Error) => { logFailure('events/socket', error, undefined, 'debug'); socket?.close() })
       // A ComfyUI restart must not freeze every connected stream: reconnect
       // the upstream while the SSE client is still here.
       socket.on('close', () => { if (!response.writableEnded) retry = setTimeout(connect, 3000) })
@@ -732,7 +738,7 @@ export function createStudioServer(paths: StudioServerPaths) {
       if (device && vramGb > 0 && vramGb < 18) {
         checks.push({ id: 'vram-tier', label: 'VRAM tier guidance', status: 'warn', detail: `${vramGb.toFixed(1)} GB detected.`, recommendation: 'Community tiers for ~16 GB cards: pruned INT8/Q4 quant of the diffusion model + INT4 text encoder, 1344×768, 5 s first; queue one render at a time and let the auto-retry handle OOM resets.' })
       }
-      const info = await comfyFetch(settings.comfyUrl, '/object_info').catch(() => ({})) as Record<string, unknown>
+      const info = await comfyFetch(settings.comfyUrl, '/object_info').catch((error: unknown) => { logFailure('doctor/object-info', error, undefined, 'debug'); return {} }) as Record<string, unknown>
       const attentionNodes = Object.keys(info).filter((name) => /blocksparse|sage|triton|flash/i.test(name))
       checks.push(attentionNodes.length
         ? { id: 'attention', label: 'Attention backends', status: 'ok', detail: `Detected nodes: ${attentionNodes.slice(0, 6).join(', ')}${attentionNodes.length > 6 ? ` (+${attentionNodes.length - 6} more)` : ''}.` }
@@ -744,8 +750,12 @@ export function createStudioServer(paths: StudioServerPaths) {
   }
 
   async function handleLanRequest(request: IncomingMessage, response: ServerResponse) {
+    // Route (pathname only — never the query, which can carry user text) for
+    // the structural 500 body and the log stage if anything below throws.
+    let route = 'unknown'
     try {
       const url = new URL(request.url ?? '/', 'http://minimax.local')
+      route = url.pathname
       if (url.pathname.startsWith('/api/lan/')) {
         if (lanAuthRequired()) {
           // Header token for fetch-able routes; the query parameter is only
@@ -763,13 +773,13 @@ export function createStudioServer(paths: StudioServerPaths) {
           const started = Date.now()
           try {
             await comfyFetch(settings.comfyUrl, '/system_stats')
-            const info = await comfyFetch(settings.comfyUrl, '/object_info').catch(() => ({})) as Record<string, unknown>
+            const info = await comfyFetch(settings.comfyUrl, '/object_info').catch((error: unknown) => { logFailure('bootstrap/object-info', error, undefined, 'debug'); return {} }) as Record<string, unknown>
             const upscalers = comfyChoices(info, 'UpscaleModelLoader', 'model_name')
             const latentUpscalers = comfyChoices(info, 'LatentUpscaleModelLoader', 'model_name')
             const vaes = comfyChoices(info, 'VAELoader', 'vae_name')
             const ltxUpscaleMissing = ltxUpscaleRequiredNodes.filter((node) => !info[node])
             const ltxNativeMissing = ltxNativeRequiredNodes.filter((node) => !info[node])
-            const ollama = await comfyFetch(settings.ollamaUrl, '/api/tags').catch(() => ({ models: [] })) as { models?: Array<{ name?: string; size?: number; remote_model?: string }> }
+            const ollama = await comfyFetch(settings.ollamaUrl, '/api/tags').catch((error: unknown) => { logFailure('bootstrap/ollama', error, undefined, 'debug'); return { models: [] } }) as { models?: Array<{ name?: string; size?: number; remote_model?: string }> }
             const ollamaModels = (ollama.models ?? []).filter((item) => item.name && !item.remote_model && item.size !== 342).map((item) => item.name as string)
             // Model paths are stripped: the renderer matches by name and kind, and
             // full filesystem paths are a recon leak to anyone who can reach the API.
@@ -887,7 +897,7 @@ export function createStudioServer(paths: StudioServerPaths) {
         if (url.pathname === '/api/lan/doctor' && request.method === 'GET') return sendJson(response, 200, await runSetupDoctor(settings))
         if (url.pathname === '/api/lan/free' && request.method === 'POST') {
           // Queue-hygiene soft reset: unload models and return VRAM to the pool.
-          await comfyFetch(settings.comfyUrl, '/free', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ unload_models: true, free_memory: true }) }).catch(() => undefined)
+          await comfyFetch(settings.comfyUrl, '/free', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ unload_models: true, free_memory: true }) }).catch((error: unknown) => { logFailure('comfy/free', error, undefined, 'debug') })
           return sendJson(response, 200, { freed: true })
         }
         if (url.pathname === '/api/lan/prompt-library' && request.method === 'GET') {
@@ -1055,7 +1065,19 @@ export function createStudioServer(paths: StudioServerPaths) {
       response.writeHead(200, headers)
       createReadStream(servedPath).pipe(response)
     } catch (error) {
-      sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) })
+      // Last-resort handler: the client gets a STRUCTURAL body (fixed
+      // message + route + ref) — raw internals never cross the wire. The
+      // sanitized failure path/reason lands server-side, keyed by the same
+      // ref the client saw.
+      const ref = failureRef()
+      logFailure(route, error, { method: request.method ?? '', ref })
+      if (response.headersSent) {
+        // Mid-stream failure (SSE/media pipe): the status line is gone, so
+        // the only honest signal is cutting the connection.
+        response.destroy()
+        return
+      }
+      sendJson(response, 500, { error: 'Request failed.', stage: route, ref })
     }
   }
 
@@ -1078,6 +1100,7 @@ export function createStudioServer(paths: StudioServerPaths) {
       lanServer.listen(port, '0.0.0.0', () => {
         const origin = `${certificate ? 'https' : 'http'}://${address}:${port}`
         lanStatus = { running: true, port, secure: Boolean(certificate), certificateFingerprint: certificate?.fingerprint, url: `${origin}/?mobile=1`, desktopUrl: `${origin}/?desktop=1` }
+        logEvent({ kind: 'lan.server', port, secure: Boolean(certificate) })
         resolvePromise()
       })
     })

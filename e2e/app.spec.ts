@@ -126,3 +126,67 @@ test('mobile companion view boots alongside the studio', async ({ page }) => {
   await expect(page.locator('.mobile-app, main').first()).toBeVisible()
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
+
+// Wave 0b — the per-view error boundary: a render crash in one view must not
+// take the shell down, and the boundary's console output + fallback UI must
+// be sanitized (the injected crash message carries sentinel "prompt" words
+// that may never survive anywhere). The crash is forced by wrapping the
+// window.minimax bridge at install time: getSettings hands the app a settings
+// object whose `gpuTier` getter throws — only SettingsView reads that field
+// during render, so the shell and every other view stay healthy.
+// `testedComfyVersion` is pinned so the App-level version-recording effect
+// never spreads the object (a spread would not observe the poison either way,
+// but pinning keeps the poisoned instance in state deterministically).
+test('a crashing view is contained by its error boundary without leaking prompt text', async ({ page }) => {
+  const consoleErrors: string[] = []
+  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()) })
+  await page.addInitScript(() => {
+    let installed: unknown
+    Object.defineProperty(window, 'minimax', {
+      configurable: true,
+      get: () => installed,
+      set: (client: unknown) => {
+        installed = new Proxy(client, {
+          get(target, property, receiver) {
+            const value = Reflect.get(target, property, receiver)
+            if (property !== 'getSettings' || typeof value !== 'function') return value
+            return async () => {
+              const settings = await (value as () => Promise<Record<string, unknown>>)()
+              const poisoned = { ...settings, testedComfyVersion: 'e2e-pinned' }
+              Object.defineProperty(poisoned, 'gpuTier', {
+                enumerable: true,
+                get: () => { throw new Error('settings.gpuTier render failed: moonlit qzxveldra umbrella merchants waltzing') },
+              })
+              return poisoned
+            }
+          },
+        })
+      },
+    })
+  })
+  await page.goto('/')
+  await expect(page.locator('.sidebar')).toBeVisible()
+  await page.getByRole('button', { name: /settings/i }).first().click()
+  // The per-view boundary shows the sanitized fallback — the shell survives.
+  await expect(page.getByText('This view hit an error')).toBeVisible()
+  await expect(page.locator('.sidebar')).toBeVisible()
+  // The rendered summary is sanitized: sentinel words never reach the DOM.
+  const summary = page.locator('.error-boundary-summary')
+  await expect(summary).toBeVisible()
+  await expect(summary).toContainText('[redacted]')
+  expect((await summary.innerText()).toLowerCase()).not.toContain('umbrella')
+  // Navigation still works: switching views remounts a healthy view.
+  await page.getByRole('button', { name: /library/i }).first().click()
+  await expect(page.getByText('This view hit an error')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: /video library/i })).toBeVisible()
+  // The boundary logged (with its ref + [redacted]) and NOTHING logged or
+  // rendered carries the raw injected message.
+  expect(consoleErrors.length).toBeGreaterThan(0)
+  for (const entry of consoleErrors) {
+    expect(entry.includes('qzxveldra')).toBe(false)
+    expect(entry.includes('umbrella')).toBe(false)
+    expect(entry.includes('waltzing')).toBe(false)
+  }
+  expect(consoleErrors.some((entry) => entry.includes('boundary:settings'))).toBe(true)
+  expect(consoleErrors.some((entry) => entry.includes('[redacted]'))).toBe(true)
+})

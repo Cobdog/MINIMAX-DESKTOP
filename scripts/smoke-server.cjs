@@ -71,8 +71,27 @@ async function main() {
   const subfolder = await fetch(`${base}/api/lan/media?filename=x.mp4&subfolder=${encodeURIComponent('../../etc')}`)
   if (subfolder.status !== 400) fail(`media proxy subfolder traversal not rejected (${subfolder.status})`)
 
+  // Wave 0b: unexpected failures return a STRUCTURAL 500 — a fixed body
+  // (message + stage + ref) with the sanitized detail only in the server log,
+  // never in the response. Forced deterministically with an oversize body
+  // (readJson throws before any engine contact).
+  const oversize = await fetch(`${base}/api/lan/settings`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { comfyUrl: 'http://127.0.0.1:8188', outputDirectory: '/tmp', filler: 'x'.repeat(250_000) } }),
+  })
+  if (oversize.status !== 500) fail(`oversize settings POST did not hit the structural 500 (${oversize.status})`)
+  const structural = await oversize.json()
+  if (structural.error !== 'Request failed.' || structural.stage !== '/api/lan/settings' || typeof structural.ref !== 'string' || structural.ref.length < 6) {
+    fail('structural 500 body missing error/stage/ref shape')
+  }
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  if (!output.includes('"stage":"/api/lan/settings"') || !output.includes('"reason"')) {
+    fail('structural 500 was not recorded through the pino seam (no failure line with stage+reason on stdout)')
+  }
+
   child.kill()
-  console.log('PASS: standalone TLS server boots, serves the SPA, and rejects SSRF / concat-injection / traversal probes; CSP present; no path leaks')
+  console.log('PASS: standalone TLS server boots, serves the SPA, and rejects SSRF / concat-injection / traversal probes; CSP present; no path leaks; unexpected failures answer with a structural 500 (error/stage/ref) logged through the pino seam')
 }
 
 void main()

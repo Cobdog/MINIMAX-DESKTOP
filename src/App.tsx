@@ -40,6 +40,7 @@ import { VideoReferenceClipper } from './components/VideoReferenceClipper'
 import { AiChatHead } from './components/AiChatHead'
 import type { CharacterDialogueDraft } from './components/CharacterDialogueModal'
 import { GpuMeter, NavButton, Notice } from './components/chrome'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { LicenseNotice } from './components/LicenseNotice'
 import { CreateView } from './views/CreateView'
 import { LibraryView } from './views/LibraryView'
@@ -412,6 +413,7 @@ function App() {
         {notice && <Notice tone={notice.tone} text={notice.text} onClose={() => setNotice(null)} />}
         <LicenseNotice />
         <div hidden={view !== 'create'}>
+          <ErrorBoundary label="create">
           <CreateView key={`create-${createResetKey}`}
             info={info}
             sampler={sampler} setSampler={ws.setSampler} scheduler={scheduler} setScheduler={ws.setScheduler}
@@ -492,8 +494,9 @@ function App() {
             onDismissSuggestion={() => setPromptSuggestion('')}
             onOpenSettings={() => setView('settings')}
           />
+          </ErrorBoundary>
         </div>
-        {view === 'ltx25' && <Ltx25Workspace key={`ltx-${ltxResetKey}`}
+        {view === 'ltx25' && <ErrorBoundary label="ltx25"><Ltx25Workspace key={`ltx-${ltxResetKey}`}
           settings={settings}
           models={ltxSelection}
           pipelineReady={LTX_NATIVE_REQUIRED_NODES.every((node) => Boolean(info[node]))}
@@ -508,8 +511,8 @@ function App() {
           onChooseImage={chooseLtxImage}
           onGenerate={(options, file) => void generateLtx(options, file)}
           onCancel={(job) => void cancelJob(job)}
-        />}
-        {view === 'music' && <AceStepWorkspace
+        /></ErrorBoundary>}
+        {view === 'music' && <ErrorBoundary label="music"><AceStepWorkspace
           settings={settings}
           models={aceSelection}
           connected={status.connected}
@@ -521,8 +524,8 @@ function App() {
           ollamaAvailable={ollamaModels.length > 0}
           onGenerate={(options) => void generateAceStep(options)}
           onCancel={(job) => void cancelJob(job)}
-        />}
-        {view === 'music3' && <Music3Workspace
+        /></ErrorBoundary>}
+        {view === 'music3' && <ErrorBoundary label="music3"><Music3Workspace
           settings={settings}
           models={music3Selection}
           connected={status.connected}
@@ -535,20 +538,20 @@ function App() {
           onGenerate={(options) => void generateMusic3(options, music3Selection)}
           onCancel={(job: GenerationJob) => void cancelJob(job)}
           onNotice={(tone: 'error' | 'success' | 'neutral', text: string) => setNotice({ tone, text })}
-        />}
-        <div hidden={view !== 'zimage'}><ZImageWorkspace key={`first-frame-${zImageResetKey}`} url={settings.comfyUrl} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} ollamaUrl={settings.ollamaUrl} ollamaModel={settings.ollamaModel} outputDirectory={settings.outputDirectory} onUse={(file, frameResolution) => {
+        /></ErrorBoundary>}
+        <div hidden={view !== 'zimage'}><ErrorBoundary label="zimage"><ZImageWorkspace key={`first-frame-${zImageResetKey}`} url={settings.comfyUrl} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} ollamaUrl={settings.ollamaUrl} ollamaModel={settings.ollamaModel} outputDirectory={settings.outputDirectory} onUse={(file, frameResolution) => {
           setFirstFrame(file); ws.setResolution(frameResolution); setMode('image'); setActiveJobId(null); setView('create'); notify('success', 'Z-Image frame loaded into the MiniMax I2V workspace.')
-        }} /></div>
-        {view === 'characters' && <Suspense fallback={viewFallback}><CharacterStudio settings={settings} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} automationJob={jobs.find((job) => job.characterProjectId)} onNotice={(tone, text) => setNotice({ tone, text })} onCreateTurntable={(project) => {
+        }} /></ErrorBoundary></div>
+        {view === 'characters' && <ErrorBoundary label="characters"><Suspense fallback={viewFallback}><CharacterStudio settings={settings} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} automationJob={jobs.find((job) => job.characterProjectId)} onNotice={(tone, text) => setNotice({ tone, text })} onCreateTurntable={(project) => {
           if (!project.baseImage) return Promise.resolve('Approve a character identity image before rendering the survey.')
           if (contactSheetAvailable) return generateCharacterSheet(project, contactSheetAvailable)
           const firstFrame = fitWholeCharacter({ ...project.baseImage }); delete firstFrame.preview
           return generateLtx({ mode: 'image', prompt: `Ten-second character identity coverage survey of ${project.name} in one continuous stabilized take. Preserve the exact identity, facial geometry, skin, hair, body proportions, clothing, and neutral studio background from the first frame. From 0 to 2 seconds hold a sharp neutral full-body front view with the entire head, hands, and feet visible. From 2 to 5 seconds make a slow stabilized camera push to a sharp head-and-shoulders close-up. From 5 to 7 seconds hold the face clearly while moving through frontal and gentle three-quarter facial angles so the eyes, nose, mouth, jawline, ears, hairline, and distinguishing marks remain readable. From 7 to 10 seconds pull back smoothly to a complete full-body view and continue a restrained orbit through three-quarter, side, and rear body angles. The character stays still with a neutral expression and unchanged pose. Even soft studio lighting, accurate anatomy, crisp individual frames, fast shutter. No cuts, no identity drift, no morphing, no pose changes, no expression changes, no clothing changes, no added objects, no motion blur, no smearing, no ghosting, no whip pans, no text, no dialogue.`, width: 768, height: 1024, duration: 10, preset: 'quality', seed: Math.floor(Math.random() * 1_000_000_000), filenamePrefix: 'MiniMax_character_identity_survey' }, firstFrame, { characterProjectId: project.id })
-        }} /></Suspense>}
-        {view === 'hair' && <Suspense fallback={viewFallback}><HairStudio settings={settings} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} onNotice={(tone, text) => setNotice({ tone, text })} /></Suspense>}
-        {view === 'wardrobes' && <Suspense fallback={viewFallback}><WardrobeStudio settings={settings} info={info} connected={status.connected} onNotice={(tone, text) => setNotice({ tone, text })} /></Suspense>}
-        {view === 'accessories' && <Suspense fallback={viewFallback}><AccessoryStudio settings={settings} info={info} connected={status.connected} onNotice={(tone, text) => setNotice({ tone, text })} /></Suspense>}
-        {view === 'locations' && <Suspense fallback={viewFallback}><LocationStudio settings={settings} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} automationJob={jobs.find((job) => job.locationProjectId)} onNotice={(tone, text) => setNotice({ tone, text })} onCreateWalkthrough={(project: LocationProject, options?: { duration: number; cameraLanguage: string }) => {
+        }} /></Suspense></ErrorBoundary>}
+        {view === 'hair' && <ErrorBoundary label="hair"><Suspense fallback={viewFallback}><HairStudio settings={settings} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} onNotice={(tone, text) => setNotice({ tone, text })} /></Suspense></ErrorBoundary>}
+        {view === 'wardrobes' && <ErrorBoundary label="wardrobes"><Suspense fallback={viewFallback}><WardrobeStudio settings={settings} info={info} connected={status.connected} onNotice={(tone, text) => setNotice({ tone, text })} /></Suspense></ErrorBoundary>}
+        {view === 'accessories' && <ErrorBoundary label="accessories"><Suspense fallback={viewFallback}><AccessoryStudio settings={settings} info={info} connected={status.connected} onNotice={(tone, text) => setNotice({ tone, text })} /></Suspense></ErrorBoundary>}
+        {view === 'locations' && <ErrorBoundary label="locations"><Suspense fallback={viewFallback}><LocationStudio settings={settings} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} automationJob={jobs.find((job) => job.locationProjectId)} onNotice={(tone, text) => setNotice({ tone, text })} onCreateWalkthrough={(project: LocationProject, options?: { duration: number; cameraLanguage: string }) => {
           if (!project.baseImage) return Promise.resolve('Approve a location image before rendering the walkthrough.')
           const firstFrame = { ...project.baseImage }; delete firstFrame.preview
           const walkthroughDirection = project.environmentMode === 'nature'
@@ -558,8 +561,8 @@ function App() {
           const cameraLanguage = options?.cameraLanguage ?? 'Use only wide and extra-wide shots with an 18–24mm lens. Begin with a complete establishing view, then move slowly and smoothly to reveal the environment’s spatial relationships. Never use close-ups.'
           const clarityDirection = 'Maintain crisp, sharp frames with a fast shutter and slow stabilized camera movement. No motion blur, temporal smearing, ghosting, rolling-shutter distortion, speed ramps, whip pans, or rapid camera movement.'
           return generateLtx({ mode: 'image', prompt: `${walkthroughDirection} Location description: ${locationProfile} Camera language: ${cameraLanguage} Image clarity: ${clarityDirection} No cuts, no teleporting, no layout changes, no duplicated objects, no people as focal subjects, no dialogue, no text, no logos.`, width: 1344, height: 768, duration: Math.max(5, Math.min(20, options?.duration ?? 10)), preset: 'quality', seed: Math.floor(Math.random() * 1_000_000_000), filenamePrefix: 'MiniMax_location_walkthrough' }, firstFrame, { locationProjectId: project.id })
-        }} /></Suspense>}
-        {view === 'movie' && <Suspense fallback={viewFallback}><MoviePlanner settings={settings} ollamaAvailable={ollamaModels.length > 0} ollamaModel={settings.ollamaModel} chainAvailable={chainAvailable} onRenderChain={(project, scene) => { void flows.generateSceneChain(project, scene, characterProjects, chainAvailable).then((message) => { if (message) setNotice({ tone: 'error', text: message }) }) }} onNotice={(tone, text) => setNotice({ tone, text })} onOpenShot={async (shot: MovieShot, aspectRatio: MovieProject['aspectRatio'], resolved: ResolvedMovieShot, context: { projectId: string; sceneId: string; continuationSource?: string }) => {
+        }} /></Suspense></ErrorBoundary>}
+        {view === 'movie' && <ErrorBoundary label="movie"><Suspense fallback={viewFallback}><MoviePlanner settings={settings} ollamaAvailable={ollamaModels.length > 0} ollamaModel={settings.ollamaModel} chainAvailable={chainAvailable} onRenderChain={(project, scene) => { void flows.generateSceneChain(project, scene, characterProjects, chainAvailable).then((message) => { if (message) setNotice({ tone: 'error', text: message }) }) }} onNotice={(tone, text) => setNotice({ tone, text })} onOpenShot={async (shot: MovieShot, aspectRatio: MovieProject['aspectRatio'], resolved: ResolvedMovieShot, context: { projectId: string; sceneId: string; continuationSource?: string }) => {
           setCharacterHandoff(null)
           setSelectedReferenceCharacterIds([])
           setSelectedReferenceLocationIds([])
@@ -584,17 +587,17 @@ function App() {
           setActiveJobId(null); setView('create')
           const inputNote = resolved.effectiveMode === 'reference' ? ` Loaded ${resolvedImages.length} semantically resolved reference image${resolvedImages.length === 1 ? '' : 's'}.` : inheritedFrame ? ' The previous scene’s last frame was loaded automatically for continuous I2V.' : resolved.effectiveMode === 'image' ? ' Add the approved first frame before rendering.' : resolved.effectiveMode === 'frames' ? ' Add the approved first and last frames before rendering.' : ''
           notify('success', `${shot.title} loaded into Create.${inputNote}`)
-        }} /></Suspense>}
-        {view === 'queue' && <JobsView title="Queue" note="Running and recent local generations" jobs={jobs} empty="No generations have been queued." cancellingIds={cancellingIds} onCancel={cancelJob} />}
-        {view === 'library' && <LibraryView jobs={jobs.filter((job) => job.status === 'completed')} settings={settings} onEdit={() => setView('editor')} onUseLtx={useStartFrameInLtx} onNotice={(tone, text) => setNotice({ tone, text })} />}
-        {view === 'editor' && <ClipEditor settings={settings} jobs={jobs} onNotice={(tone, text) => setNotice({ tone, text })} onUseFrame={(file, target, clip) => {
+        }} /></Suspense></ErrorBoundary>}
+        {view === 'queue' && <ErrorBoundary label="queue"><JobsView title="Queue" note="Running and recent local generations" jobs={jobs} empty="No generations have been queued." cancellingIds={cancellingIds} onCancel={cancelJob} /></ErrorBoundary>}
+        {view === 'library' && <ErrorBoundary label="library"><LibraryView jobs={jobs.filter((job) => job.status === 'completed')} settings={settings} onEdit={() => setView('editor')} onUseLtx={useStartFrameInLtx} onNotice={(tone, text) => setNotice({ tone, text })} /></ErrorBoundary>}
+        {view === 'editor' && <ErrorBoundary label="editor"><ClipEditor settings={settings} jobs={jobs} onNotice={(tone, text) => setNotice({ tone, text })} onUseFrame={(file, target, clip) => {
           if (target === 'reference') { setSelectedReferenceCharacterIds([]); setSelectedReferenceLocationIds([]); setReferenceImages((items) => [...items, file].slice(0, 9)); setMode('reference') }
           else if (target === 'last') { setLastFrame(file); setMode('frames') }
           else { setFirstFrame(file); setMode(target === 'first' ? 'frames' : 'image') }
           setActiveJobId(null); setView('create')
           notify('success', target === 'i2v' ? `Frame loaded from ${clip.name} as the I2V first frame. The new render will remain a separate video until you add and export it in Clip Editor.` : 'Extracted frame loaded into Create.')
-        }} />}
-        {view === 'settings' && <SettingsView settings={settings} setSettings={session.setSettings} info={info} models={models} h3Report={h3Report} scanning={session.scanning} status={status} checking={checking} diagnosticRunning={diagnosticRunning} ollamaModels={ollamaModels} onRefreshOllama={() => void refreshOllama(settings)} onScan={() => void scanModels(settings)} onCheck={() => void checkConnection(settings.comfyUrl)} onSave={() => void saveAppSettings()} onApplyDefaults={applyGenerationDefaults} onRunDiagnostics={() => void runH3Diagnostics()} />}
+        }} /></ErrorBoundary>}
+        {view === 'settings' && <ErrorBoundary label="settings"><SettingsView settings={settings} setSettings={session.setSettings} info={info} models={models} h3Report={h3Report} scanning={session.scanning} status={status} checking={checking} diagnosticRunning={diagnosticRunning} ollamaModels={ollamaModels} onRefreshOllama={() => void refreshOllama(settings)} onScan={() => void scanModels(settings)} onCheck={() => void checkConnection(settings.comfyUrl)} onSave={() => void saveAppSettings()} onApplyDefaults={applyGenerationDefaults} onRunDiagnostics={() => void runH3Diagnostics()} /></ErrorBoundary>}
       </main>
       <AiChatHead available={ollamaModels.length > 0} ollamaUrl={settings.ollamaUrl} ollamaModel={settings.ollamaModel} onUseImage={(imagePrompt) => {
         setView('zimage')
