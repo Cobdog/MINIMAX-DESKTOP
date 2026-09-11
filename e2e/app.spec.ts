@@ -12,6 +12,14 @@ async function trackErrors(page: Page) {
   return problems
 }
 
+// Environmental noise, not renderer defects: fetch failures against the
+// (absent) configured engine, and the browser's own log line when the app's
+// live-preview WebSocket cannot reach ComfyUI. The app surfaces both as
+// designed "Engine offline" UI.
+const environmental = (entry: string) =>
+  entry.includes('Failed to load resource')
+  || /WebSocket connection to .* failed/.test(entry)
+
 test.beforeEach(async ({ page }) => {
   page.on('pageerror', (error) => {
     throw new Error(`Uncaught renderer error during navigation: ${error.message}`)
@@ -41,7 +49,7 @@ test('boots to the Create view with the studio shell', async ({ page }) => {
   await expect(page.locator('#root')).toBeAttached()
   await expect(page.getByRole('button', { name: /create/i }).first()).toBeVisible()
   await expect(page.locator('.app-shell, .studio, main, [class*="sidebar"]').first()).toBeVisible()
-  await expect(problems).toEqual([])
+  await expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
 test('every view renders without renderer errors', async ({ page }) => {
@@ -55,7 +63,7 @@ test('every view renders without renderer errors', async ({ page }) => {
     const main = page.locator('main, [class*="view"], [class*="page"]').first()
     await expect(main).toBeVisible()
   }
-  expect(problems.filter((entry) => !entry.includes('Failed to load resource'))).toEqual([])
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
 test('captures a 1920x1080 screenshot of every view for vision inspection', async ({ page }) => {
@@ -90,7 +98,7 @@ test('settings round-trips a change through the server API', async ({ page }) =>
   await outputInput.fill(original)
   await page.getByRole('button', { name: /save/i }).first().click()
   await page.waitForTimeout(400)
-  expect(problems.filter((entry) => !entry.includes('Failed to load resource'))).toEqual([])
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
   void target
 })
 
@@ -98,5 +106,5 @@ test('mobile companion view boots alongside the studio', async ({ page }) => {
   const problems = await trackErrors(page)
   await page.goto('/?mobile=1')
   await expect(page.locator('.mobile-app, main').first()).toBeVisible()
-  expect(problems.filter((entry) => !entry.includes('Failed to load resource'))).toEqual([])
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
