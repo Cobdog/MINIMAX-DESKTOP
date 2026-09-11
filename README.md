@@ -32,6 +32,7 @@ Configuration lives in `~/.minimax-studio/` (override with `MINIMAX_STUDIO_HOME`
 - **Multiframe timeline keyframes**: pin images at exact seconds through chained `MiniMaxH3AddGuide` (official multiframe topology), with frame readouts, in-duration validation, and mirroring guide images into prompt-visible Pictures
 - Guided quality presets — Native Quality, official Turbo 8, Preview — with custom sampling isolated under an explicit Experimental disclosure
 - A fixed-seed quality diagnostic that queues matching Native and Turbo 8 renders for direct A/B comparison
+- **Latent scene chaining**: render a Movie Planner scene as one continuous sequence — each segment pins the previous clip's tail as never-denoised conditioning (ComfyUI-H3-Motion-Context), so motion and audio carry across clips at the latent level. Segments cap at 15 s; joins read as true continuation rather than re-synthesis. The Clip Editor's frame-accurate pixel concat remains the manual fallback when you want explicit control
 - **Reproducibility manifests** on every render (seed, model files + sizes, LoRA strength, sampler, graph-version hash) — downloadable per job or exported in bulk
 - **Queue hygiene**: a failed render automatically soft-resets the engine (`/free`) and retries once with tiled VAE decoding before surfacing the error
 - Optional verified LTX 2.5 latent 2× post-processing and explicitly experimental RTX/CUDA frame upscaling

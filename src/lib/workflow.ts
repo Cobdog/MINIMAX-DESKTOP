@@ -172,6 +172,23 @@ export function buildMiniMaxWorkflow(
     })
   }
 
+  // Latent chaining (ComfyUI-H3-Motion-Context): segment N pins clip N-1's
+  // tail as never-denoised conditioning rows feeding the guider, so motion
+  // and audio continue from real sampled frames instead of a single still.
+  if (options.chain && options.chain.index > 0) {
+    prompt['24'] = { class_type: 'MiniMaxH3MotionContextLoadLatent', inputs: { latent_path: options.chain.folder, clip_index: options.chain.index - 1 } }
+    prompt['25'] = {
+      class_type: 'MiniMaxH3MotionContext',
+      inputs: {
+        conditioning: conditioningSource,
+        vae: ['3', 0],
+        latent: ['24', 0],
+        context_length: options.chain.contextLength ?? '22',
+        audio_context_length: options.chain.audioContextLength ?? 24,
+      },
+    }
+    conditioningSource = ['25', 0]
+  }
   prompt['11'] = { class_type: 'RandomNoise', inputs: { noise_seed: options.seed } }
   prompt['12'] = { class_type: 'BasicGuider', inputs: { model: modelLink, conditioning: conditioningSource } }
   const sampler = options.experimentalSampling ? options.sampler : OFFICIAL_H3_SAMPLER
@@ -185,15 +202,30 @@ export function buildMiniMaxWorkflow(
     class_type: 'SamplerCustomAdvanced',
     inputs: { noise: ['11', 0], guider: ['12', 0], sampler: ['13', 0], sigmas: ['14', 0], latent_image: ['10', 1] },
   }
+  // Latent chaining (ComfyUI-H3-Motion-Context): every segment saves its
+  // sampler latent as <folder><index>.latent under the output directory;
+  // segment 0 is the chain start (LoadLatent with clip_index 0 never reads),
+  // segment N pins clip N-1's tail as never-denoised conditioning rows and
+  // trims the overlap from the delivered output so audio and motion stay
+  // continuous across clips.
+  if (options.chain) {
+    prompt['28'] = { class_type: 'MiniMaxH3MotionContextSaveLatent', inputs: { latent: ['15', 0], filename_prefix: options.chain.folder, clip_index: options.chain.index } }
+  }
   prompt['16'] = { class_type: 'VAEDecode', inputs: { samples: ['15', 0], vae: ['3', 0] } }
   prompt['17'] = { class_type: 'VAEDecodeAudio', inputs: { samples: ['15', 0], vae: ['4', 0] } }
-  prompt['18'] = {
-    class_type: 'CreateVideo',
-    inputs: { images: ['16', 0], audio: ['17', 0], fps: 24, bit_depth: 8, color_space: 'sRGB' },
+  if (options.chain && options.chain.index > 0) {
+    prompt['26'] = { class_type: 'MiniMaxH3MotionContextTrim', inputs: { images: ['16', 0], audio: ['17', 0], trim_frames: ['25', 1] } }
+    prompt['27'] = { class_type: 'CreateVideo', inputs: { images: ['26', 0], audio: ['26', 1], fps: 24, bit_depth: 8, color_space: 'sRGB' } }
+  } else {
+    prompt['18'] = {
+      class_type: 'CreateVideo',
+      inputs: { images: ['16', 0], audio: ['17', 0], fps: 24, bit_depth: 8, color_space: 'sRGB' },
+    }
   }
+  const videoSource: Link = options.chain && options.chain.index > 0 ? ['27', 0] : ['18', 0]
   prompt['19'] = {
     class_type: 'SaveVideo',
-    inputs: { video: ['18', 0], filename_prefix: options.filenamePrefix, format: 'auto', codec: 'auto' },
+    inputs: { video: videoSource, filename_prefix: options.filenamePrefix, format: 'auto', codec: 'auto' },
   }
   // Always publish one standard ComfyUI preview frame. This works even when the
   // server was launched without latent preview decoding enabled.

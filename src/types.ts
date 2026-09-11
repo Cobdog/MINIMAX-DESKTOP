@@ -224,6 +224,11 @@ export type GenerationOptions = {
    *  MiniMaxH3AddGuide nodes at these frame indices (round(seconds*24);
    *  negative counts from the end). */
   timelineGuides?: Array<{ frameIndex: number }>
+  /** Latent chaining (ComfyUI-H3-Motion-Context): every segment saves its
+   *  sampler latent as <folder><index>; segment 0 never loads (chain start),
+   *  segment N loads clip N-1 and pins its tail as never-denoised
+   *  conditioning, trimming the overlap from the delivered output. */
+  chain?: { index: number; folder: string; contextLength?: '5' | '22' | '39' | '56'; audioContextLength?: number }
 }
 
 export type ComfyStatus = {

@@ -113,6 +113,8 @@ function App() {
   const lbh3dChoices = choices(info, 'MinimaxH3LatentUpscaler3D', 'model_name')
   const lbhModel = lbh3dChoices.find((name) => !name.startsWith('(')) ?? lbh2dChoices.find((name) => !name.startsWith('(')) ?? ''
   const lbh2dAvailable = Boolean(lbh2dChoices.length && lbhModel)
+  // Latent chaining availability (ComfyUI-H3-Motion-Context node set).
+  const chainAvailable = ['MiniMaxH3MotionContext', 'MiniMaxH3MotionContextLoadLatent', 'MiniMaxH3MotionContextSaveLatent', 'MiniMaxH3MotionContextTrim'].every((node) => Boolean(info[node]))
 
   // Create workspace: every composed field, libraries, and reference binding.
   const ws = useCreateWorkspace({ settings, rtxModels, notify, setVideoClipDraft })
@@ -507,7 +509,7 @@ function App() {
           const clarityDirection = 'Maintain crisp, sharp frames with a fast shutter and slow stabilized camera movement. No motion blur, temporal smearing, ghosting, rolling-shutter distortion, speed ramps, whip pans, or rapid camera movement.'
           return generateLtx({ mode: 'image', prompt: `${walkthroughDirection} Location description: ${locationProfile} Camera language: ${cameraLanguage} Image clarity: ${clarityDirection} No cuts, no teleporting, no layout changes, no duplicated objects, no people as focal subjects, no dialogue, no text, no logos.`, width: 1344, height: 768, duration: Math.max(5, Math.min(20, options?.duration ?? 10)), preset: 'quality', seed: Math.floor(Math.random() * 1_000_000_000), filenamePrefix: 'MiniMax_location_walkthrough' }, firstFrame, { locationProjectId: project.id })
         }} />}
-        {view === 'movie' && <MoviePlanner settings={settings} ollamaAvailable={ollamaModels.length > 0} ollamaModel={settings.ollamaModel} onNotice={(tone, text) => setNotice({ tone, text })} onOpenShot={async (shot: MovieShot, aspectRatio: MovieProject['aspectRatio'], resolved: ResolvedMovieShot, context: { projectId: string; sceneId: string; continuationSource?: string }) => {
+        {view === 'movie' && <MoviePlanner settings={settings} ollamaAvailable={ollamaModels.length > 0} ollamaModel={settings.ollamaModel} chainAvailable={chainAvailable} onRenderChain={(project, scene) => { void flows.generateSceneChain(project, scene, characterProjects, chainAvailable).then((message) => { if (message) setNotice({ tone: 'error', text: message }) }) }} onNotice={(tone, text) => setNotice({ tone, text })} onOpenShot={async (shot: MovieShot, aspectRatio: MovieProject['aspectRatio'], resolved: ResolvedMovieShot, context: { projectId: string; sceneId: string; continuationSource?: string }) => {
           setCharacterHandoff(null)
           setSelectedReferenceCharacterIds([])
           setSelectedReferenceLocationIds([])

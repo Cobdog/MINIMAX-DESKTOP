@@ -11,11 +11,12 @@ import { inferSelections } from '../lib/modelSelection'
 import type { ObjectInfo } from '../lib/comfyInfo'
 import { diagnosticPrompt } from '../lib/h3Stack'
 import { composeH3Prompt, resolveRenderReferenceImages } from '../lib/promptPolicies'
+import { resolveMovieShot } from '../lib/promptComposer'
 import { buildRenderManifest } from '../lib/manifest'
 import type { useStudioSession } from './useStudioSession'
 import type { useGenerationQueue, NoticeTone } from './useGenerationQueue'
 import type { useCreateWorkspace } from './useCreateWorkspace'
-import type { AceStepGenerationOptions, GenerationJob, Ltx25GenerationOptions, MediaFile, ModelSelection, UpscaleMode } from '../types'
+import type { AceStepGenerationOptions, CharacterProject, GenerationJob, Ltx25GenerationOptions, MediaFile, ModelSelection, MovieProject, UpscaleMode } from '../types'
 
 const LTX_NATIVE_REQUIRED_NODES = [
   'LTXVConditioning', 'LTXVEmptyLatentAudio', 'EmptyLTXVLatentVideo',
@@ -352,5 +353,71 @@ export function useGenerationFlows(options: {
     onQueued('queue')
   }
 
-  return { generate, generateLtx, generateAceStep, runH3Diagnostics, submitting, ltxSubmitting, aceSubmitting, diagnosticRunning }
+  /** Renders a Movie Planner scene as one latent-chained episode (ComfyUI-H3
+   *  Motion-Context): every shot's graph saves its sampler latent; segment N
+   *  continues from N-1's tail with never-denoised conditioning, so motion and
+   *  audio stay continuous. ComfyUI's own queue provides execution order. */
+  const generateSceneChain = async (project: MovieProject, scene: MovieProject['scenes'][number], library: CharacterProject[], motionContextReady: boolean) => {
+    if (!settings) return 'Studio settings are still loading.'
+    if (!status.connected) return 'Start ComfyUI and verify the server connection in Settings.'
+    if (!modelReady) return 'One or more required MiniMax H3 model components are missing.'
+    if (!motionContextReady) return 'Install the ComfyUI-H3-Motion-Context custom nodes first, then refresh the engine.'
+    const shots = scene.shots.filter((shot) => shot.prompt.trim())
+    if (shots.length < 2) return 'A chain needs at least two shots with prompts.'
+    const chainId = createId()
+    const folder = `h3_context/${chainId}/clip`
+    const [width, height] = project.aspectRatio === '9:16' ? [768, 1344] : project.aspectRatio === '1:1' ? [768, 768] : [1344, 768]
+    const defaults = settings.generationDefaults
+    const chainJobs: GenerationJob[] = []
+    for (const [index, shot] of shots.entries()) {
+      const resolved = resolveMovieShot(project, scene, shot, library)
+      if (resolved.references.length > 9) return `Shot ${index + 1} (${shot.title}) has ${resolved.references.length} references — chains are limited to 9 per segment.`
+      const job: GenerationJob = {
+        id: createId(), provider: 'minimax', mode: resolved.effectiveMode, prompt: resolved.compiledPrompt,
+        createdAt: Date.now() + index, status: 'queued', progress: 2,
+        progressLabel: `Chain ${index + 1}/${shots.length} · ${shot.title}`,
+        width, height, duration: shot.duration,
+        movieLink: { projectId: project.id, sceneId: scene.id, shotId: shot.id },
+      }
+      chainJobs.push(job)
+    }
+    setJobs((current) => [...chainJobs, ...current])
+    notify('neutral', `Rendering ${shots.length}-shot continuous chain for “${scene.title}”…`)
+    let queuedCount = 0
+    for (const [index, shot] of shots.entries()) {
+      const resolved = resolveMovieShot(project, scene, shot, library)
+      const upload = async (file: MediaFile) => file.kind === 'image' && Boolean(file.crop)
+        ? window.minimax.uploadImageData(settings.comfyUrl, await prepareImage(file, width, height))
+        : window.minimax.uploadInput(settings.comfyUrl, file.path)
+      try {
+        const images = await Promise.all(resolved.effectiveMode === 'reference' ? resolved.references.map((binding) => upload(binding.file)) : [])
+        const videos = await Promise.all(resolved.effectiveMode === 'reference' ? (shot.referenceVideos ?? []).map((file) => upload(file)) : [])
+        const audios = await Promise.all(resolved.effectiveMode === 'reference' ? (shot.referenceAudios ?? []).map((file) => upload(file)) : [])
+        const graph = buildMiniMaxWorkflow({
+          mode: resolved.effectiveMode, prompt: resolved.compiledPrompt, width, height, duration: shot.duration,
+          seed: Math.floor(Math.random() * 1_000_000_000), steps: defaults.steps, turbo: defaults.turbo,
+          experimentalSampling: defaults.experimentalSampling, loraStrength: defaults.loraStrength,
+          sampler: defaults.sampler, scheduler: defaults.scheduler, refImageSize: defaults.refImageSize,
+          filenamePrefix: `video/Chain_${chainId}_${String(index + 1).padStart(2, '0')}`,
+          referenceImages: resolved.effectiveMode === 'reference' ? resolved.references.map((binding) => binding.file.path) : [],
+          referenceVideos: resolved.effectiveMode === 'reference' ? (shot.referenceVideos ?? []).map((file) => file.path) : [],
+          referenceAudios: resolved.effectiveMode === 'reference' ? (shot.referenceAudios ?? []).map((file) => file.path) : [],
+          chain: { index, folder },
+        }, selection, { images, videos, audios })
+        const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, clientId)
+        queuedCount += 1
+        setJobs((current) => current.map((item) => item.id === chainJobs[index].id ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4 } : item))
+      } catch (error) {
+        setJobs((current) => current.map((item) => item.id === chainJobs[index].id ? { ...item, status: 'failed', error: error instanceof Error ? error.message : String(error) } : item))
+      }
+    }
+    const message = queuedCount === shots.length
+      ? `${shots.length}-shot chain queued — segments render in order with continuous latent motion and audio.`
+      : `Only ${queuedCount} of ${shots.length} chain segments could be queued. Check the failed Queue entries.`
+    notify(queuedCount === shots.length ? 'success' : 'error', message)
+    onQueued('queue')
+    return null
+  }
+
+  return { generate, generateLtx, generateAceStep, runH3Diagnostics, generateSceneChain, submitting, ltxSubmitting, aceSubmitting, diagnosticRunning }
 }
