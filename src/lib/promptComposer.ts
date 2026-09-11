@@ -152,12 +152,17 @@ export function compileMovieShotPrompt(project: MovieProject, scene: MovieScene,
 export function buildPromptAssistantRequest(tool: PromptAssistantTool, draft: string, context: { duration: number; mode: GenerationMode; referenceMap?: string[]; noDialogue?: boolean }) {
   const preservation = 'Preserve named characters, exact quoted dialogue, specified camera and lens choices, timing, negative constraints, continuity instructions, and every existing <Picture N>, <Video N>, and <Audio N> assignment. Never rename characters, invent replacement wardrobe, remove reference tags, add unnecessary cuts, or turn one continuous shot into a montage.'
   const order = 'Write natural production language in this order when relevant: subject/identity, starting state, environment, literal chronological action, shot size, camera angle, lens/depth of field, camera movement, lighting, visual treatment, continuity, dialogue, ambient sound/effects, and reference assignments.'
+  const officialStructure = tool === 'timeline'
+    ? `Follow MiniMax's official timed structure: [Shot 1] opens with style and initial composition and carries no timestamp; every later shot begins "[Shot N] At MM:SS.mmm," with strictly increasing cut times inside the ${context.duration}-second duration.`
+    : context.mode === 'reference' && tool === 'enhance'
+      ? "Follow MiniMax's official reference discipline: keep one stable label per person, place, or prop; cite source files (<Picture N>, <Video N>, <Audio N>) only inside definitions or whole-asset relationships; never leave a label unresolved, and keep label order identical everywhere it appears."
+      : ''
   const task = tool === 'enhance'
     ? `Rewrite the draft as one polished MiniMax H3 ${context.mode === 'reference' ? 'reference-to-video' : context.mode === 'image' ? 'image-to-video' : context.mode === 'frames' ? 'first/last-frame' : 'text-to-video'} prompt. ${order}`
     : tool === 'timeline'
       ? `Rewrite the draft as a readable chronological action plan lasting exactly ${context.duration} seconds. Use 0–2s style beats. For clips of 6 seconds or less, use only two or three meaningful beats and keep it one continuous shot. ${order}`
       : `Preserve the visual direction and strengthen synchronized dialogue/vocal intent, ambience, sound effects, spatial placement, timing, and clean transitions. State no music when a score is not requested. ${order}`
-  return [task, preservation, context.noDialogue ? 'Audio constraint: no spoken dialogue, narration, voice-over, singing, lip-sync, subtitles, captions, or text overlays. Preserve ambient sound effects only.' : '', `Effective duration: ${context.duration} seconds`, `Effective generation route: ${context.mode}`, context.referenceMap?.length ? `Reference map: ${context.referenceMap.join('; ')}` : '', 'Return only the finished prompt, with no analysis, preface, Markdown fence, or alternatives.', `DRAFT:\n${draft.trim()}`].filter(Boolean).join('\n\n')
+  return [task, officialStructure, preservation, context.noDialogue ? 'Audio constraint: no spoken dialogue, narration, voice-over, singing, lip-sync, subtitles, captions, or text overlays. Preserve ambient sound effects only.' : '', `Effective duration: ${context.duration} seconds`, `Effective generation route: ${context.mode}`, context.referenceMap?.length ? `Reference map: ${context.referenceMap.join('; ')}` : '', 'Return only the finished prompt, with no analysis, preface, Markdown fence, or alternatives.', `DRAFT:\n${draft.trim()}`].filter(Boolean).join('\n\n')
 }
 
 export function resolveMovieShot(project: MovieProject, scene: MovieScene, shot: MovieShot, library: CharacterProject[], continuityFrame?: MediaFile): ResolvedMovieShot {

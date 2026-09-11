@@ -371,8 +371,52 @@ async function runKernelTests() {
   }
 }
 
+
+// ---- Official MiniMax prompt contracts --------------------------------------
+const { BASE_CONTRACT_SECTIONS, REFERENCE_CONTRACT_SECTIONS, buildBaseContractDraft, buildReferenceContractDraft, validateContract, referenceOrderWarnings, formatCutTime, suggestCutTimes, keyframeAlignmentInstruction } = load('src/lib/promptContracts.ts')
+assert.equal(BASE_CONTRACT_SECTIONS.map((section) => section.key).join('|'), 'integrated_multimodal_description|overall_soundscape|non_diegetic_music')
+assert.equal(REFERENCE_CONTRACT_SECTIONS.map((section) => section.key).join('|'), 'subject_definitions|summary|retention_analysis|detailed_description|overall_soundscape|non_diegetic_music')
+assert.equal(formatCutTime(3.5), '00:03.500')
+assert.equal(formatCutTime(65.25), '01:05.250')
+assert.equal(suggestCutTimes(10, 2).join('|'), '00:03.333|00:06.667')
+assert.equal(suggestCutTimes(5, 0).length, 0)
+assert.equal(keyframeAlignmentInstruction('image', 5), 'For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.')
+assert.ok(keyframeAlignmentInstruction('frames', 8).includes('8.00 seconds'))
+assert.equal(keyframeAlignmentInstruction('text', 5), '')
+
+const baseDraft = buildBaseContractDraft({ mode: 'image', duration: 8, prompt: 'A baker shapes dough.' })
+for (const section of BASE_CONTRACT_SECTIONS) assert.ok(baseDraft.includes(`${section.key}:`), `base draft missing ${section.key}`)
+assert.ok(baseDraft.includes('fully referenced'), 'I2VA alignment line missing from base draft')
+assert.ok(baseDraft.includes('[Shot 1] A baker shapes dough.'))
+assert.equal(validateContract(baseDraft, { duration: 8, referenceMode: false }).warnings.length, 0, 'base draft should validate clean')
+
+const bindings = [
+  { label: 'Character: Ada / identity', purpose: 'character', file: { path: '/a.png', name: 'ada.png', kind: 'image' } },
+  { label: 'Wardrobe: Red coat for Ada', purpose: 'wardrobe', file: { path: '/coat.png', name: 'coat.png', kind: 'image' } },
+]
+const refDraft = buildReferenceContractDraft({ bindings, referenceVideos: [{ path: '/v.mp4', name: 'walk.mp4', kind: 'video' }], referenceAudios: [], duration: 6, prompt: 'Ada crosses the square.' })
+for (const section of REFERENCE_CONTRACT_SECTIONS) assert.ok(refDraft.includes(`${section.key}:`), `ref draft missing ${section.key}`)
+assert.ok(refDraft.includes('<Subject 1> is the identity of Ada'))
+assert.ok(refDraft.includes('<Video 1> is walk.mp4'))
+assert.ok(refDraft.includes('[reference generation]'))
+const refCheck = validateContract(refDraft, { duration: 6, referenceMode: true, definedSubjects: ['Subject 1', 'Subject 2'] })
+assert.equal(refCheck.warnings.length, 0, 'ref draft should validate clean')
+
+assert.ok(validateContract('integrated_multimodal_description: x', { duration: 5, referenceMode: false }).warnings.some((warning) => warning.includes('overall_soundscape')), 'missing-section warning expected')
+const badCuts = 'integrated_multimodal_description: [Shot 1] x\n[Shot 2] At 00:06.000, y\n[Shot 3] At 00:04.000, z\noverall_soundscape: a\nnon_diegetic_music: N/A'
+const cutWarnings = validateContract(badCuts, { duration: 5, referenceMode: false }).warnings
+assert.ok(cutWarnings.some((warning) => warning.includes('not strictly increasing')), 'non-increasing cut expected')
+assert.ok(cutWarnings.some((warning) => warning.includes('beyond the 5s duration')), 'cut beyond duration expected')
+assert.ok(validateContract('subject_definitions: <Subject 1> is Ada.\nsummary: [reference generation] x\nretention_analysis: <Subject 1>: fully_preserved\ndetailed_description: <Subject 2> appears.\noverall_soundscape: a\nnon_diegetic_music: N/A', { duration: 5, referenceMode: true, definedSubjects: ['Subject 1'] }).warnings.some((warning) => warning.includes('<Subject 2> is used but not defined')), 'unresolved subject expected')
+
+assert.equal(referenceOrderWarnings('Uses <Picture 1> then <Picture 2>.', { images: 2, videos: 0, audios: 0 }).length, 0)
+assert.ok(referenceOrderWarnings('Uses <Picture 2> before <Picture 1>.', { images: 2, videos: 0, audios: 0 }).some((warning) => warning.includes('mentioned before')), 'slot-order mismatch expected')
+assert.ok(referenceOrderWarnings('Uses <Picture 5>.', { images: 2, videos: 0, audios: 0 }).some((warning) => warning.includes('only 2 pictures are loaded')), 'unloaded reference expected')
+assert.ok(referenceOrderWarnings('No tags here.', { images: 3, videos: 0, audios: 0 }).some((warning) => warning.includes('none mentioned')), 'unmentioned pictures expected')
+assert.ok(referenceOrderWarnings('Uses <Audio 2> first, then <Audio 1>.', { images: 0, videos: 0, audios: 2 }).some((warning) => warning.includes('<Audio 2> is mentioned before')), 'audio order mismatch expected')
+
 runKernelTests().then(() => {
-  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, and poll-loop kernel (tolerance/deadline/cancel)')
+  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), and the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline)')
 }, (error) => {
   console.error(error)
   process.exitCode = 1

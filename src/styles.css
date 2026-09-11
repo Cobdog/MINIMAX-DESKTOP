@@ -2215,3 +2215,10 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .setup-checklist .primary-button { margin-top: 4px; }
 .heading-state > button { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid rgba(240,188,102,.2); border-radius: 8px; background: rgba(240,188,102,.06); color: var(--warning); font-size: 11px; white-space: nowrap; cursor: pointer; }
 .heading-state > button:hover { border-color: rgba(240,188,102,.4); }
+
+/* Official prompt-contract helper buttons + reference-order warnings. */
+.contract-helper { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+.contract-helper button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); color: var(--muted); font-size: 10px; cursor: pointer; }
+.contract-helper button:hover { border-color: var(--line-strong); color: var(--text); }
+.reference-order-warning { display: grid; gap: 5px; margin-top: 9px; padding: 9px 11px; border: 1px solid rgba(240,188,102,.25); border-radius: 8px; background: rgba(240,188,102,.06); color: var(--warning); font-size: 10.5px; line-height: 1.45; }
+.reference-order-warning span { display: flex; align-items: center; gap: 6px; }

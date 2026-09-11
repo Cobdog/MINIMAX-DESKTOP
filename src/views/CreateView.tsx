@@ -52,6 +52,7 @@ import { wardrobeReferences } from '../lib/wardrobeLibrary'
 import { locationReferences } from '../lib/locationLibrary'
 import { allocateWorkspaceReferences, composeReferenceInstructions } from '../lib/promptComposer'
 import { composeH3Prompt, resolveRenderReferenceImages } from '../lib/promptPolicies'
+import { buildBaseContractDraft, buildReferenceContractDraft, referenceOrderWarnings, suggestCutTimes } from '../lib/promptContracts'
 import { findH3PreviewOverrideNode } from '../lib/h3Stack'
 import { frameCount } from '../lib/workflow'
 import type { LivePreview } from '../lib/useLivePreview'
@@ -204,8 +205,7 @@ export function CreateView(props: CreateViewProps) {
   })
   const smartWardrobeOptions = wardrobes.filter((wardrobe) => wardrobeReferences(wardrobe).length > 0).map((wardrobe) => { const files = wardrobeReferences(wardrobe).slice(0, 9); const tags = files.map((_, index) => `<Picture ${index + 1}>`).join(', ').replace(/, ([^,]+)$/, ' and $1'); return { id: `wardrobe.${wardrobe.id}`, category: 'wardrobe' as const, label: wardrobe.name, description: wardrobe.description || 'Approved Wardrobe Studio outfit', insertion: `Wardrobe: apply the approved ${wardrobe.name} outfit from ${tags}; preserve its garments, materials, colors, fit, and accessories.`, thumbnail: files[0]?.preview, meta: `${files.length} approved`, onSelect: (nextPrompt: string) => { setPrompt(nextPrompt); loadWardrobe(wardrobe.id) } } })
   const smartLocationOptions = locations.filter((location) => locationReferences(location).length > 0).map((location) => { const files = locationReferences(location); const projected = selectedLocationIds.includes(location.id) ? selectedLocations : [...selectedLocations, location]; const projectedBindings = allocateWorkspaceReferences(selectedCharacters.map((character) => ({ id: character.id, name: character.name, identity: characterReferences(character), hairStyleIds: character.hairStyleIds, wardrobeIds: character.wardrobeIds, accessoryIds: character.accessoryIds })), wardrobes, projected.map((item) => ({ id: item.id, name: item.name, images: locationReferences(item), environmentMode: item.environmentMode }))); return { id: `location.${location.id}`, category: 'location' as const, label: location.name, description: location.description || 'Approved Location Studio environment', insertion: `Location: ${location.name}.`, thumbnail: files[0]?.preview, meta: `${projectedBindings.filter((binding) => binding.locationId === location.id).length} allocated view${projectedBindings.filter((binding) => binding.locationId === location.id).length === 1 ? '' : 's'}`, onSelect: (nextPrompt: string) => { setPrompt(nextPrompt); loadLocation(location.id) } } })
-  const applyCreatePreset = (preset: 'quality' | 'turbo' | 'preview') => {
-    const [width, height] = resolution.split('x').map(Number)
+  const applyCreatePreset = (preset: 'quality' | 'turbo' | 'preview') => {    const [width, height] = resolution.split('x').map(Number)
     const portrait = height > width
     const square = height === width
     const base = preset === 'preview' ? square ? '640x640' : portrait ? '480x864' : '864x480' : square ? '768x768' : portrait ? '768x1344' : '1344x768'
@@ -214,6 +214,15 @@ export function CreateView(props: CreateViewProps) {
     setSteps(30); setSampler('res_multistep'); setScheduler('simple'); setExperimentalSampling(false)
     setSigmaShiftMode('model'); setShiftVideo(12); setShiftAudio(3); setLoraStrength(1); setUpscaleMode('off')
   }
+  const timedCutsScaffold = suggestCutTimes(duration, duration > 6 ? 2 : duration > 3 ? 1 : 0)
+    .map((time, index) => `[Shot ${index + 2}] At ${time}, `)
+    .join('\n')
+  const identityLockLine = selectedCharacters.length
+    ? `Identity lock: preserve ${selectedCharacters.map((character) => `${character.name}'s exact face, proportions, skin, hairline, and distinguishing marks`).join('; and ')}. Never exchange faces, bodies, garments, or accessories between characters.`
+    : ''
+  const orderWarnings = mode === 'reference'
+    ? referenceOrderWarnings(prompt, { images: builderReferenceImages.length, videos: referenceVideos.length, audios: referenceAudios.length })
+    : []
   return (
     <div className="create-page">
       <div className="page-heading">
@@ -243,6 +252,15 @@ export function CreateView(props: CreateViewProps) {
             </>}
             <div className="field-label"><label htmlFor="prompt">{mode === 'reference' ? 'Scene prompt' : 'Prompt'}</label><span>{prompt.length.toLocaleString()} characters</span></div>
             <SmartPromptEditor ref={promptRef} id="prompt" value={prompt} onChange={setPrompt} options={[...smartCharacterOptions, ...smartWardrobeOptions, ...smartLocationOptions]} placeholder={mode === 'reference' ? 'Describe the scene and references. Type // for production presets…' : 'Describe the shot, subject, movement, camera, lighting, and audio…'} />
+            <div className="contract-helper" aria-label="Official MiniMax H3 prompt structures">
+              <button type="button" title="Insert the official MiniMax prompt scaffold for this mode" onClick={() => insertPromptText(mode === 'reference'
+                ? buildReferenceContractDraft({ bindings: selectedBindings, referenceVideos, referenceAudios, duration, prompt })
+                : buildBaseContractDraft({ mode, duration, prompt }))}>Official {mode === 'reference' ? 'six-section' : 'three-field'} structure</button>
+              {mode !== 'reference' && <button type="button" title="Insert the timed [Shot N] cut scaffold with computed cut times" onClick={() => insertPromptText(timedCutsScaffold || '[Shot 1] One continuous take — no cuts needed at this duration.')}>Timed cuts</button>}
+              <button type="button" title="Insert inline negative statements the model respects" onClick={() => insertPromptText('No soft dissolves, no garbled text, no watermarks, no burned-in captions or logos; do not introduce objects or people not described here.')}>Inline negatives</button>
+              {identityLockLine && <button type="button" title="Insert identity-preservation enumeration for the selected cast" onClick={() => insertPromptText(identityLockLine)}>Identity lock</button>}
+            </div>
+            {orderWarnings.length > 0 && <div className="reference-order-warning" role="status">{orderWarnings.map((warning) => <span key={warning}><AlertCircle size={12} />{warning}</span>)}</div>}
             <div className="prompt-policy-toggles" aria-label="Prompt safeguards">
               <label className="no-dialogue-toggle" title={`Adds a render instruction that blocks spoken words, narration, singing, lip-sync, captions, and text overlays${mode === 'reference' ? ' in this Reference render' : ''}.`}><input type="checkbox" checked={noDialogue} onChange={(event) => setNoDialogue(event.target.checked)} /><span><strong>{mode === 'reference' ? 'No dialogue · Reference mode' : 'No dialogue'}</strong><small>{noDialogue ? 'Ambient sound only' : 'Dialogue and lip-sync allowed'}</small></span></label>
               <label className="no-dialogue-toggle natural-movement-toggle" title="Adds restrained breathing, blinking, eye movement, and posture adjustment without changing the requested action, pose, camera, identity, wardrobe, or scene."><input type="checkbox" checked={naturalMovement} onChange={(event) => setNaturalMovement(event.target.checked)} /><span><strong>Natural movement</strong><small>{naturalMovement ? 'Subtle subject motion' : 'No added motion direction'}</small></span></label>
