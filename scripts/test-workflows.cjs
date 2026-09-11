@@ -651,8 +651,31 @@ assert.ok(referenceOrderWarnings('Uses <Audio 2> first, then <Audio 1>.', { imag
   assert.ok(loose && loose.insertion.includes('do not interpret this as permission to change wardrobe'), 'looseness presets guard identity')
 }
 
+
+// ---- Z-Image ControlNet Union ------------------------------------------------
+{
+  const zc = load('src/lib/zImageControlnet.ts')
+  const sel = { model: 'z_image_turbo_bf16.safetensors', encoder: 'qwen_3_4b.safetensors', vae: 'ae.safetensors', controlnet: 'Z-Image-Turbo-Fun-Controlnet-Union.safetensors' }
+  const g = zc.buildZImageControlnet({ prompt: 'a stone bridge', seed: 5, controlImageName: 'sketch.png', mode: 'canny', filenamePrefix: 'zc' }, sel)
+  assert.equal(g['14'].class_type, 'QwenImageDiffsynthControlnet')
+  assert.equal(g['14'].inputs.model_patch.join('|'), '13|0')
+  assert.equal(g['14'].inputs.image.join('|'), '12|0')
+  assert.equal(g['14'].inputs.strength, 1)
+  assert.equal(g['12'].class_type, 'Canny', 'canny is the native preprocessor')
+  assert.equal(g['12'].inputs.low_threshold, 0.1)
+  assert.equal(g['16'].class_type, 'GetImageSize')
+  assert.equal(g['6'].inputs.width.join('|'), '16|0', 'latent sized by the control image')
+  assert.equal(g['8'].inputs.model.join('|'), '15|0', 'AuraFlow shift wraps the controlnet-wrapped model')
+  assert.equal(g['8'].inputs.steps, 8)
+  const masked = zc.buildZImageControlnet({ prompt: 'p', seed: 1, controlImageName: 'i.png', mode: 'canny', maskName: 'm.png', filenamePrefix: 'x' }, sel)
+  assert.equal(masked['14'].inputs.mask.join('|'), '17|0', 'union inpaint mask wired when provided')
+  assert.equal(masked['17'].class_type, 'LoadImage')
+  const pose = zc.buildZImageControlnet({ prompt: 'p', seed: 1, controlImageName: 'i.png', mode: 'pose', filenamePrefix: 'x' }, sel)
+  assert.equal(pose['12'].class_type, 'DWPoseEstimator', 'aux modes use their preprocessor node')
+}
+
 runKernelTests().then(() => {
-  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference), ContactSheet character sheets (topology, LoRA inference, size clamps, views-first attribution), and graph-family versioning + looseness presets')
+  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference), ContactSheet character sheets (topology, LoRA inference, size clamps, views-first attribution), graph-family versioning + looseness presets, and the Z-Image ControlNet Union graph (pin names, native canny, aux preprocessors, mask, image-sized latent)')
 }, (error) => {
   console.error(error)
   process.exitCode = 1

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertCircle, Check, CircleStop, Dices, Gauge, ImagePlus, LoaderCircle, Sparkles, WandSparkles } from 'lucide-react'
+import { AlertCircle, Check, CircleStop, Dices, Gauge, ImagePlus, LoaderCircle, PenTool, Sparkles, WandSparkles } from 'lucide-react'
 import { buildZImage, type ZImageVariant } from '../lib/zimage'
+import { CONTROL_PREPROCESSORS, buildZImageControlnet, type ZImageControlMode } from '../lib/zImageControlnet'
 import { startPollLoop } from '../lib/promptWatch'
 import { choices, type ObjectInfo } from '../lib/comfyInfo'
 import { RenderSize } from './RenderSize'
@@ -17,6 +18,8 @@ type StoredWorkspace = {
   seed: number
   steps: number
   guidance: number
+  controlMode: boolean
+  controlKind: ZImageControlMode
 }
 
 const defaults: StoredWorkspace = {
@@ -30,12 +33,14 @@ const defaults: StoredWorkspace = {
   seed: Math.floor(Math.random() * 1_000_000_000),
   steps: 8,
   guidance: 1,
+  controlMode: false,
+  controlKind: 'canny',
 }
 
 function readWorkspace(): StoredWorkspace {
   try {
     const saved = JSON.parse(localStorage.getItem('minimax.zimage-workspace') ?? '{}') as Partial<StoredWorkspace>
-    return { ...defaults, ...saved, variant: saved.variant === 'base' ? 'base' : 'turbo' }
+    return { ...defaults, ...saved, variant: saved.variant === 'base' ? 'base' : 'turbo', controlMode: saved.controlMode === true, controlKind: (['canny', 'depth', 'pose', 'hed', 'mlsd'] as const).includes(saved.controlKind as ZImageControlMode) ? saved.controlKind as ZImageControlMode : 'canny' }
   }
   catch { return defaults }
 }
@@ -69,6 +74,9 @@ export function ZImageWorkspace({
   const [seed, setSeed] = useState(initial.seed)
   const [steps, setSteps] = useState(initial.steps)
   const [guidance, setGuidance] = useState(initial.guidance)
+  const [controlMode, setControlMode] = useState(initial.controlMode)
+  const [controlKind, setControlKind] = useState<ZImageControlMode>(initial.controlKind)
+  const [controlImage, setControlImage] = useState<MediaFile | null>(null)
   const [job, setJob] = useState<{ id: string; url: string } | null>(null)
   const [result, setResult] = useState<MediaFile | null>(null)
   const [busy, setBusy] = useState(false)
@@ -86,8 +94,8 @@ export function ZImageWorkspace({
   }, [])
 
   useEffect(() => {
-    localStorage.setItem('minimax.zimage-workspace', JSON.stringify({ prompt, negativePrompt, resolution, variant, model, encoder, vae, seed, steps, guidance }))
-  }, [encoder, guidance, model, negativePrompt, prompt, resolution, seed, steps, vae, variant])
+    localStorage.setItem('minimax.zimage-workspace', JSON.stringify({ prompt, negativePrompt, resolution, variant, model, encoder, vae, seed, steps, guidance, controlMode, controlKind }))
+  }, [controlKind, controlMode, encoder, guidance, model, negativePrompt, prompt, resolution, seed, steps, vae, variant])
 
   useEffect(() => {
     if (!job) return
@@ -130,6 +138,12 @@ export function ZImageWorkspace({
   const available = installedModels.includes(model) && modelMatchesVariant
     && choices(info, 'CLIPLoader', 'clip_name').includes(encoder)
     && choices(info, 'VAELoader', 'vae_name').includes(vae)
+  const controlnetChoices = choices(info, 'ModelPatchLoader', 'model_name')
+  const unionControlnet = controlnetChoices.find((name) => /fun.*controlnet.*union|controlnet.*union/i.test(name)) ?? ''
+  const controlNodesReady = Boolean(info['QwenImageDiffsynthControlnet'] && info['ModelPatchLoader'] && info['GetImageSize'])
+  const controlKindReady = (mode: ZImageControlMode) => Boolean(info[CONTROL_PREPROCESSORS[mode].node])
+  const controlAvailable = controlNodesReady && Boolean(unionControlnet) && controlKindReady(controlKind)
+
   const switchVariant = (next: ZImageVariant) => {
     if (busy || next === variant) return
     setVariant(next)
@@ -145,12 +159,27 @@ export function ZImageWorkspace({
     { label: 'Image VAE', value: vae, set: setVae, node: 'VAELoader', field: 'vae_name' },
   ]
 
+  const pickControlImage = async () => {
+    const picked = await window.minimax.chooseMedia('image')
+    if (!picked) return
+    setControlImage({ ...picked, kind: 'image', preview: await window.minimax.mediaUrl(picked.path) })
+    setError(false)
+  }
+
   const create = async () => {
     if (!connected || !available || !prompt.trim()) return
-    setBusy(true); setResult(null); setError(false); setMessage(`Submitting ${variant === 'turbo' ? 'Z-Image Turbo' : 'Original Z-Image'} workflow…`)
+    if (controlMode && (!controlAvailable || !controlImage)) return
+    setBusy(true); setResult(null); setError(false); setMessage(controlMode ? 'Submitting Z-Image Control workflow…' : `Submitting ${variant === 'turbo' ? 'Z-Image Turbo' : 'Original Z-Image'} workflow…`)
     try {
-      const [width, height] = resolution.split('x').map(Number)
-      const response = await window.minimax.submitPrompt(url, buildZImage(prompt.trim(), width, height, seed, model, encoder, vae, steps, guidance, variant, variant === 'base' ? negativePrompt.trim() : ''))
+      const response = controlMode
+        ? await window.minimax.submitPrompt(url, buildZImageControlnet({
+            prompt: prompt.trim(), seed, controlImageName: controlImage!.name, mode: controlKind,
+            filenamePrefix: 'MiniMax_first_frames/ZImageControl',
+          }, { model, encoder, vae, controlnet: unionControlnet }))
+        : await window.minimax.submitPrompt(url, (() => {
+            const [width, height] = resolution.split('x').map(Number)
+            return buildZImage(prompt.trim(), width, height, seed, model, encoder, vae, steps, guidance, variant, variant === 'base' ? negativePrompt.trim() : '')
+          })())
       setJob({ id: response.prompt_id, url })
     } catch (caught) {
       setMessage(caught instanceof Error ? caught.message : String(caught)); setError(true); setBusy(false)
@@ -190,7 +219,13 @@ export function ZImageWorkspace({
           <legend>Generation mode</legend>
           <label className={variant === 'turbo' ? 'selected' : ''}><input type="radio" name="zimage-variant" checked={variant === 'turbo'} onChange={() => switchVariant('turbo')} /><Gauge size={18} /><span><strong>Z-Image Turbo</strong><small>Fast preview and everyday creation · 8 steps</small></span><em className={turboInstalled ? 'installed' : ''}>{turboInstalled ? 'Installed' : 'Model needed'}</em></label>
           <label className={variant === 'base' ? 'selected' : ''}><input type="radio" name="zimage-variant" checked={variant === 'base'} onChange={() => switchVariant('base')} /><Sparkles size={18} /><span><strong>Original Z-Image</strong><small>Full-capacity detail and stronger prompt control · 40 steps</small></span><em className={baseInstalled ? 'installed' : ''}>{baseInstalled ? 'Installed' : 'Model needed'}</em></label>
+          <label className={controlMode ? 'selected' : ''}><input type="radio" name="zimage-variant" checked={controlMode} onChange={() => { if (busy) return; setControlMode(true); setVariant('turbo'); setModel(preferredModel(installedModels, 'turbo')); setSteps(8); setGuidance(1); setMessage('Control mode: guide the structure with a sketch, edge map, depth map, or pose.') ; setError(false) }} /><PenTool size={18} /><span><strong>Control sketch</strong><small>Structure-guided stills through Fun ControlNet Union · 8 steps</small></span><em className={controlNodesReady && unionControlnet ? 'installed' : ''}>{controlNodesReady && unionControlnet ? 'Installed' : 'Union LoRA needed'}</em></label>
         </fieldset>
+        {controlMode && <div className="zimage-control-panel">
+          <div className="field-label"><label>Control image</label><span>{controlImage ? controlImage.name : 'Required'}</span></div>
+          <div className={`media-drop ${controlImage ? 'has-file' : ''}`}>{controlImage?.preview ? <img src={controlImage.preview} alt="" /> : null}<div className="media-drop-content"><span className="upload-icon"><ImagePlus size={19} /></span><strong>{controlImage?.name ?? 'Sketch, edge map, or photo to derive structure from'}</strong><small>{controlImage ? 'Ready to use' : 'The output size follows this image'}</small><button onClick={() => void pickControlImage()} disabled={busy}>{controlImage ? 'Replace' : 'Choose image'}</button></div>{controlImage && <button className="remove-media" onClick={() => setControlImage(null)} aria-label="Remove control image">✕</button>}</div>
+          <div className="field-group"><label>Structure type</label><div className="select-wrap"><select value={controlKind} disabled={busy} onChange={(event) => setControlKind(event.target.value as ZImageControlMode)}>{(Object.keys(CONTROL_PREPROCESSORS) as ZImageControlMode[]).map((mode) => <option key={mode} value={mode} disabled={!controlKindReady(mode)}>{CONTROL_PREPROCESSORS[mode].label}{controlKindReady(mode) ? '' : ' · nodes needed'}</option>)}</select></div><p className="field-help">{CONTROL_PREPROCESSORS[controlKind].note}{unionControlnet ? '' : ' Install Z-Image-Turbo-Fun-Controlnet-Union.safetensors into models/model_patch, then refresh.'}</p></div>
+        </div>}
         <div className="field-group">
           <div className="field-label"><label htmlFor="zimage-prompt">Image prompt</label><span>{prompt.length.toLocaleString()} characters</span></div>
           <textarea id="zimage-prompt" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Describe the subject, environment, composition, lens, lighting, color, and opening-frame details…" disabled={busy} />
@@ -199,7 +234,7 @@ export function ZImageWorkspace({
 
         {variant === 'base' && <div className="field-group zimage-negative-prompt"><div className="field-label"><label htmlFor="zimage-negative-prompt">Negative prompt <small>Optional</small></label><span>{negativePrompt.length.toLocaleString()} characters</span></div><textarea id="zimage-negative-prompt" value={negativePrompt} onChange={(event) => setNegativePrompt(event.target.value)} placeholder="Describe artifacts or unwanted elements to suppress…" disabled={busy} /></div>}
 
-        <RenderSize value={resolution} onChange={setResolution} provider="zimage" />
+        {!controlMode && <RenderSize value={resolution} onChange={setResolution} provider="zimage" />}
         <div className="zimage-seed-row"><label>Seed<input type="number" min="0" max="999999999999" value={seed} disabled={busy} onChange={(event) => setSeed(Number(event.target.value))} /></label><button className="secondary-button" disabled={busy} onClick={() => setSeed(Math.floor(Math.random() * 1_000_000_000))}><Dices size={15} />Randomize</button></div>
 
         <details className="zimage-model-settings">
@@ -211,7 +246,7 @@ export function ZImageWorkspace({
         </details>
 
         {message && <div className={`zimage-message ${error ? 'error' : ''}`} role={error ? 'alert' : 'status'}>{busy && <LoaderCircle size={16} className="spin" />}<span>{message}</span></div>}
-        <div className="zimage-generate-bar">{busy && <button className="danger-button" onClick={() => void cancel()}><CircleStop size={16} />Cancel</button>}<button className="primary-button" disabled={busy || !connected || !available || !prompt.trim()} onClick={() => void create()}>{busy ? <LoaderCircle size={18} className="spin" /> : <Sparkles size={18} />}{busy ? 'Creating image…' : 'Create image'}</button></div>
+        <div className="zimage-generate-bar">{busy && <button className="danger-button" onClick={() => void cancel()}><CircleStop size={16} />Cancel</button>}<button className="primary-button" disabled={busy || !connected || !available || !prompt.trim() || (controlMode && (!controlAvailable || !controlImage))} onClick={() => void create()}>{busy ? <LoaderCircle size={18} className="spin" /> : <Sparkles size={18} />}{busy ? 'Creating image…' : 'Create image'}</button></div>
       </section>
 
       <aside className="zimage-preview-panel">

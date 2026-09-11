@@ -2321,3 +2321,7 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .music3-tiled input { margin-top: 3px; accent-color: var(--accent); }
 .music3-result { width: 100%; margin-top: 4px; }
 @media (max-width: 1320px) { .music3-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* Z-Image control-sketch panel. */
+.zimage-control-panel { display: grid; gap: 11px; margin-top: 12px; padding: 13px; border: 1px dashed var(--line-strong); border-radius: 10px; }
+.zimage-control-panel .remove-media { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
