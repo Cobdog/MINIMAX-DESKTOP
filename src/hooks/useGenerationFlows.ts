@@ -15,7 +15,7 @@ import { buildRenderManifest } from '../lib/manifest'
 import type { useStudioSession } from './useStudioSession'
 import type { useGenerationQueue, NoticeTone } from './useGenerationQueue'
 import type { useCreateWorkspace } from './useCreateWorkspace'
-import type { AceStepGenerationOptions, GenerationJob, Ltx25GenerationOptions, MediaFile, ModelSelection } from '../types'
+import type { AceStepGenerationOptions, GenerationJob, Ltx25GenerationOptions, MediaFile, ModelSelection, UpscaleMode } from '../types'
 
 const LTX_NATIVE_REQUIRED_NODES = [
   'LTXVConditioning', 'LTXVEmptyLatentAudio', 'EmptyLTXVLatentVideo',
@@ -155,9 +155,10 @@ export function useGenerationFlows(options: {
   }
 
   const generate = async (upscale: {
-    mode: 'off' | 'ltx' | 'rtx'
+    mode: UpscaleMode
     model: string
     vae: string
+    lbhModel: string
     missingNodes: readonly string[]
   }) => {
     if (!settings) return
@@ -172,6 +173,10 @@ export function useGenerationFlows(options: {
     }
     if (upscale.mode === 'rtx' && !ws.rtxModel) {
       notify('error', 'Choose an AI upscale model installed in ComfyUI first.')
+      return
+    }
+    if ((upscale.mode === 'lbh2d' || upscale.mode === 'lbh3d') && !upscale.lbhModel) {
+      notify('error', 'Install an H3 latent upscaler model into ComfyUI/models/latent_upscale_models (LBH-123-AI release), then refresh the engine.')
       return
     }
     if (upscale.mode === 'rtx' && !window.confirm('RTX/CUDA upscale processes every frame independently and can amplify MiniMax noise or temporal shimmer. Continue with this experimental post-process?')) return
@@ -267,7 +272,7 @@ export function useGenerationFlows(options: {
         loraStrength,
         sampler: experimentalSampling ? sampler : 'res_multistep',
         scheduler: experimentalSampling ? scheduler : 'simple',
-        upscale: upscale.mode === 'ltx' ? { type: 'ltx', model: upscale.model, vae: upscale.vae } : upscale.mode === 'rtx' ? { type: 'rtx', model: ws.rtxModel } : undefined,
+        upscale: upscale.mode === 'ltx' ? { type: 'ltx', model: upscale.model, vae: upscale.vae } : upscale.mode === 'rtx' ? { type: 'rtx', model: ws.rtxModel } : upscale.mode === 'lbh2d' || upscale.mode === 'lbh3d' ? { type: upscale.mode, model: upscale.lbhModel } : undefined,
         refImageSize,
         sigmaShift: sigmaShiftMode === 'custom' ? { video: shiftVideo, audio: shiftAudio } : undefined,
         previewOverride: liveEnabled && livePreviewMode === 'h3-override' && h3PreviewOverrideNode ? { frames: 50, fps: 12, nodeType: h3PreviewOverrideNode, vaeName: selection.previewVae, jpegQuality: 85 } : undefined,

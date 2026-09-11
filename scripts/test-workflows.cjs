@@ -491,8 +491,65 @@ assert.ok(referenceOrderWarnings('Uses <Audio 2> first, then <Audio 1>.', { imag
   assert.equal(guideFrameWarning(-6, 5) !== null, true, 'before start warns')
 }
 
+
+// ---- Trust layer: manifest + tiled-VAE fallback -----------------------------
+{
+  const manifestModule = load('src/lib/manifest.ts')
+  const graph = buildMiniMaxWorkflow({ mode: 'text', prompt: 'repro test', width: 1344, height: 768, duration: 5, seed: 424242, steps: 30, turbo: '8', sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', loraStrength: 0.9, filenamePrefix: 't', referenceImages: [], referenceVideos: [], referenceAudios: [] }, models, { images: [], videos: [], audios: [] })
+  const manifest = manifestModule.buildRenderManifest({ mode: 'text', prompt: 'repro test', width: 1344, height: 768, duration: 5, seed: 424242, steps: 30, turbo: '8', loraStrength: 0.9, sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', filenamePrefix: 't', referenceImages: [], referenceVideos: [], referenceAudios: [] }, models, [{ name: 'fl2va', kind: 'diffusion_models', bytes: 12345 }], 'http://127.0.0.1:8188', graph)
+  assert.equal(manifest.seed, 424242)
+  assert.equal(manifest.models.diffusion.name, 'fl2va')
+  assert.equal(manifest.models.diffusion.bytes, 12345)
+  assert.equal(manifest.sampler, 'res_multistep')
+  assert.equal(manifest.upscale, 'off')
+  assert.ok(manifest.graphVersion.startsWith('fnv1a-'))
+  // Graph version is topology-sensitive but prompt/seed-insensitive.
+  const otherSeed = buildMiniMaxWorkflow({ mode: 'text', prompt: 'repro test', width: 1344, height: 768, duration: 5, seed: 999, steps: 30, turbo: '8', sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', filenamePrefix: 't', referenceImages: [], referenceVideos: [], referenceAudios: [] }, models, { images: [], videos: [], audios: [] })
+  assert.equal(manifestModule.graphVersionHash(otherSeed), manifest.graphVersion, 'same topology must hash identically')
+  const guideGraph = buildMiniMaxWorkflow({ mode: 'reference', prompt: 'p', width: 1344, height: 768, duration: 5, seed: 1, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', filenamePrefix: 't', referenceImages: ['a.png'], referenceVideos: [], referenceAudios: [], timelineGuides: [{ frameIndex: 36 }] }, models, { images: [{ name: 'a.png' }], videos: [], audios: [], guides: [{ name: 'g.png' }] })
+  assert.notEqual(manifestModule.graphVersionHash(guideGraph), manifest.graphVersion, 'topology change must change the hash')
+  // Tiled fallback swaps only the video decode node.
+  const tiled = workflowModule.withTiledVideoDecode(graph)
+  assert.equal(tiled['16'].class_type, 'VAEDecodeTiled')
+  assert.equal(tiled['16'].inputs.tile_size, 1024)
+  assert.equal(tiled['16'].inputs.samples.join('|'), graph['16'].inputs.samples.join('|'), 'decode input preserved')
+  assert.equal(tiled['17'].class_type, 'VAEDecodeAudio', 'audio decode untouched')
+  assert.equal(tiled['13'].class_type, graph['13'].class_type, 'sampler untouched')
+}
+
+
+// ---- LBH latent upscaler presets (two-stage hires-fix) ----------------------
+{
+  const lbhGraph = buildMiniMaxWorkflow({ mode: 'text', prompt: 'p', width: 1344, height: 768, duration: 5, seed: 1, steps: 30, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', filenamePrefix: 't', referenceImages: [], referenceVideos: [], referenceAudios: [], upscale: { type: 'lbh3d', model: 'minimax_h3_latent_upscaler_3d_fp16.safetensors' } }, models, { images: [], videos: [], audios: [] })
+  assert.equal(lbhGraph['90'].class_type, 'SplitSigmas')
+  assert.equal(lbhGraph['90'].inputs.split_index, 15, 'quality preset splits at half of 30 steps')
+  assert.equal(lbhGraph['15'].inputs.sigmas.join('|'), '90|0', 'stage-1 sampler takes the split schedule')
+  assert.equal(lbhGraph['91'].class_type, 'LTXVSeparateAVLatent')
+  assert.equal(lbhGraph['92'].class_type, 'MinimaxH3LatentUpscaler3D')
+  assert.equal(lbhGraph['92'].inputs.model_name, 'minimax_h3_latent_upscaler_3d_fp16.safetensors')
+  assert.equal(lbhGraph['92'].inputs.width, 2688)
+  assert.equal(lbhGraph['92'].inputs.height, 1536)
+  assert.equal(lbhGraph['93'].class_type, 'LTXVConcatAVLatent')
+  assert.equal(lbhGraph['93'].inputs.video_latent.join('|'), '92|0')
+  assert.equal(lbhGraph['93'].inputs.audio_latent.join('|'), '91|1', 'audio latent bypasses the upscaler')
+  assert.equal(lbhGraph['94'].class_type, 'ManualSigmas')
+  assert.ok(String(lbhGraph['94'].inputs.sigmas).startsWith('0.9035'))
+  assert.equal(lbhGraph['95'].inputs.latent_image.join('|'), '93|0')
+  assert.equal(lbhGraph['96'].class_type, 'VAEDecodeTiled')
+  assert.equal(lbhGraph['99'].class_type, 'SaveVideo')
+  assert.ok(String(lbhGraph['99'].inputs.filename_prefix).endsWith('_LBH_2x'))
+  // 2D variant uses the classic node with scale.
+  const lbh2dGraph = buildMiniMaxWorkflow({ mode: 'text', prompt: 'p', width: 1344, height: 768, duration: 5, seed: 1, steps: 30, turbo: '8', sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', filenamePrefix: 't', referenceImages: [], referenceVideos: [], referenceAudios: [], upscale: { type: 'lbh2d', model: 'upscaler_2d.safetensors' } }, models, { images: [], videos: [], audios: [] })
+  assert.equal(lbh2dGraph['92'].class_type, 'MinimaxH3LatentUpscalerNode2D')
+  assert.equal(lbh2dGraph['92'].inputs.scale, 2)
+  assert.equal(lbh2dGraph['90'].inputs.split_index, 4, 'turbo 8 splits at 4 per the example workflow')
+  // Output attribution prefers the LBH branch output.
+  const history = { pid: { outputs: { 99: [{ filename: 'lbh.mp4', subfolder: 'video', type: 'output' }], 19: [{ filename: 'base.mp4', subfolder: 'video', type: 'output' }] } } }
+  assert.equal(extractOutputFile(history, 'pid', 'video')?.filename, 'lbh.mp4')
+}
+
 runKernelTests().then(() => {
-  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the local prompt library storage (technique corpus + save/delete round-trip), and multiframe AddGuide chaining (topology, frame indices, classic-graph invariance)')
+  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), and the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution)')
 }, (error) => {
   console.error(error)
   process.exitCode = 1

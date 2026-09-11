@@ -107,6 +107,12 @@ function App() {
   const missingLtxUpscaleNodes = LTX_UPSCALE_REQUIRED_NODES.filter((node) => !info[node])
   const ltxUpscaleReady = Boolean(upscaleModel && upscaleVae && missingLtxUpscaleNodes.length === 0)
   const rtxModels = choices(info, 'UpscaleModelLoader', 'model_name')
+  // LBH-123-AI community latent upscaler availability + first usable model
+  // (the combo carries a "(...)" placeholder until models are installed).
+  const lbh2dChoices = choices(info, 'MinimaxH3LatentUpscalerNode2D', 'model_name')
+  const lbh3dChoices = choices(info, 'MinimaxH3LatentUpscaler3D', 'model_name')
+  const lbhModel = lbh3dChoices.find((name) => !name.startsWith('(')) ?? lbh2dChoices.find((name) => !name.startsWith('(')) ?? ''
+  const lbh2dAvailable = Boolean(lbh2dChoices.length && lbhModel)
 
   // Create workspace: every composed field, libraries, and reference binding.
   const ws = useCreateWorkspace({ settings, rtxModels, notify, setVideoClipDraft })
@@ -311,7 +317,7 @@ function App() {
   })
   const { generateLtx, generateAceStep, runH3Diagnostics, submitting, ltxSubmitting, aceSubmitting, diagnosticRunning } = flows
   const generate = () => flows.generate({
-    mode: upscaleMode, model: upscaleModel, vae: upscaleVae, missingNodes: missingLtxUpscaleNodes,
+    mode: upscaleMode, model: upscaleModel, vae: upscaleVae, lbhModel, missingNodes: missingLtxUpscaleNodes,
   })
 
   if (!settings) {
@@ -382,7 +388,7 @@ function App() {
             shiftVideo={shiftVideo} setShiftVideo={ws.setShiftVideo} shiftAudio={shiftAudio} setShiftAudio={ws.setShiftAudio}
             loraStrength={loraStrength} setLoraStrength={ws.setLoraStrength}
             liveEnabled={liveEnabled} setLiveEnabled={setLiveEnabled} livePreviewMode={livePreviewMode} setLivePreviewMode={setLivePreviewMode} liveConnected={live.connected} livePreview={live.preview}
-            upscaleMode={upscaleMode} setUpscaleMode={ws.setUpscaleMode} ltxAvailable={ltxUpscaleReady} ltxMissingNodes={missingLtxUpscaleNodes}
+            upscaleMode={upscaleMode} setUpscaleMode={ws.setUpscaleMode} ltxAvailable={ltxUpscaleReady} ltxMissingNodes={missingLtxUpscaleNodes} lbh2dAvailable={lbh2dAvailable} lbh3dAvailable={Boolean(lbh3dChoices.length && lbhModel)}
             rtxModels={rtxModels} rtxModel={rtxModel} setRtxModel={ws.setRtxModel}
             updateReference={(index, file) => setReferenceImages((items) => items.map((item, i) => i === index ? file : item))}
             mode={mode}

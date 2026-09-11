@@ -222,6 +222,27 @@ export function buildMiniMaxWorkflow(
     prompt['68'] = { class_type: 'ImageFromBatch', inputs: { image: ['67', 0], batch_index: 0, length: frames } }
     prompt['69'] = { class_type: 'CreateVideo', inputs: { images: ['68', 0], audio: ['17', 0], fps: 24, bit_depth: 8, color_space: 'sRGB' } }
     prompt['70'] = { class_type: 'SaveVideo', inputs: { video: ['69', 0], filename_prefix: `${options.filenamePrefix}_LTX25_2x`, format: 'auto', codec: 'auto' } }
+  } else if (options.upscale?.type === 'lbh2d' || options.upscale?.type === 'lbh3d') {
+    // Community two-stage hires-fix (LBH-123-AI latent upscaler): the first
+    // sampler runs a split sigma schedule at base resolution, the video
+    // latent is separated and upscaled by the learned H3 upscaler, re-joined
+    // with the untouched audio latent, then refined by a short manual sigma
+    // pass. Topology and sigma schedules verified against the repo's example
+    // workflow (SplitSigmas 4/8; refinement 0.9035…0.0000).
+    const stageOneSteps = options.turbo === 'off' ? options.steps : Number(options.turbo)
+    prompt['90'] = { class_type: 'SplitSigmas', inputs: { sigmas: ['14', 0], split_index: Math.max(1, Math.round(stageOneSteps / 2)) } }
+    prompt['15'].inputs.sigmas = ['90', 0]
+    prompt['91'] = { class_type: 'LTXVSeparateAVLatent', inputs: { av_latent: ['15', 0] } }
+    prompt['92'] = options.upscale.type === 'lbh2d'
+      ? { class_type: 'MinimaxH3LatentUpscalerNode2D', inputs: { latent: ['91', 0], model_name: options.upscale.model, scale: 2, device: 'cuda', precision: 'fp16' } }
+      : { class_type: 'MinimaxH3LatentUpscaler3D', inputs: { latent: ['91', 0], model_name: options.upscale.model, mode: 'target dimensions', width: options.width * 2, height: options.height * 2, align: 32, enable_temporal_chunking: true, force_unload: true, device: 'cuda', precision: 'fp16' } }
+    prompt['93'] = { class_type: 'LTXVConcatAVLatent', inputs: { video_latent: ['92', 0], audio_latent: ['91', 1] } }
+    prompt['94'] = { class_type: 'ManualSigmas', inputs: { sigmas: '0.9035, 0.8000, 0.6316, 0.3158, 0.0000' } }
+    prompt['95'] = { class_type: 'SamplerCustomAdvanced', inputs: { noise: ['11', 0], guider: ['12', 0], sampler: ['13', 0], sigmas: ['94', 0], latent_image: ['93', 0] } }
+    prompt['96'] = { class_type: 'VAEDecodeTiled', inputs: { samples: ['95', 0], vae: ['3', 0], tile_size: 512, overlap: 64, temporal_size: 64, temporal_overlap: 8 } }
+    prompt['97'] = { class_type: 'VAEDecodeAudio', inputs: { samples: ['95', 0], vae: ['4', 0] } }
+    prompt['98'] = { class_type: 'CreateVideo', inputs: { images: ['96', 0], audio: ['97', 0], fps: 24, bit_depth: 8, color_space: 'sRGB' } }
+    prompt['99'] = { class_type: 'SaveVideo', inputs: { video: ['98', 0], filename_prefix: `${options.filenamePrefix}_LBH_2x`, format: 'auto', codec: 'auto' } }
   } else if (options.upscale?.type === 'rtx') {
     // Frame-based AI upscaling runs through ComfyUI's CUDA/PyTorch device. It is
     // independent of LTX and is normalized to an exact 2x output even when the
@@ -262,6 +283,7 @@ export function extractOutputFile(history: Record<string, unknown>, promptId: st
     Object.values(object).forEach(visit)
   }
   if (entry.outputs['84']) visit(entry.outputs['84'])
+  else if (entry.outputs['99']) visit(entry.outputs['99'])
   else if (entry.outputs['70']) visit(entry.outputs['70'])
   else visit(entry.outputs)
   const expected = mediaType === 'audio' ? /\.(flac|wav|mp3|ogg|m4a|aac|opus)$/i : /\.(mp4|webm|mov|mkv|gif)$/i

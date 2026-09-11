@@ -2,7 +2,7 @@ export type View = 'create' | 'ltx25' | 'music' | 'zimage' | 'characters' | 'hai
 export type GenerationMode = 'text' | 'image' | 'frames' | 'reference'
 export type ModelKind = 'diffusion_models' | 'text_encoders' | 'vae' | 'loras' | 'vae_approx' | 'clip_vision'
 export type MediaKind = 'image' | 'video' | 'audio'
-export type UpscaleMode = 'off' | 'ltx' | 'rtx'
+export type UpscaleMode = 'off' | 'ltx' | 'rtx' | 'lbh2d' | 'lbh3d'
 export type ReferencePurpose = 'character' | 'character-angle' | 'hair' | 'wardrobe' | 'accessory' | 'location' | 'continuity' | 'product' | 'style' | 'generic'
 export type PromptPresetCategory = 'camera' | 'shot' | 'angle' | 'lens' | 'lighting' | 'audio' | 'style' | 'movement' | 'transition' | 'character' | 'wardrobe' | 'location' | 'embedding'
 export type PromptPreset = { id: string; category: PromptPresetCategory; label: string; keywords: string[]; description: string; insertion: string }
@@ -214,7 +214,7 @@ export type GenerationOptions = {
   refImageSize: 'match' | 'max'
   sigmaShift?: { video: number; audio: number }
   filenamePrefix: string
-  upscale?: { type: 'ltx'; model: string; vae: string } | { type: 'rtx'; model: string }
+  upscale?: { type: 'ltx'; model: string; vae: string } | { type: 'rtx'; model: string } | { type: 'lbh2d' | 'lbh3d'; model: string }
   firstFrame?: string
   lastFrame?: string
   referenceImages: string[]

@@ -137,6 +137,7 @@ function historyOutput(history: Record<string, unknown>, promptId: string, kind:
     Object.values(item).forEach(visit)
   }
   if (entry?.outputs?.['84']) visit(entry.outputs['84'])
+  else if (entry?.outputs?.['99']) visit(entry.outputs['99'])
   else if (entry?.outputs?.['70']) visit(entry.outputs['70'])
   else if (entry?.outputs) visit(entry.outputs)
   return files.find((file) => kind === 'image' ? /\.(png|jpe?g|webp)$/i.test(file.filename) : /\.(mp4|webm|mov|mkv)$/i.test(file.filename))
