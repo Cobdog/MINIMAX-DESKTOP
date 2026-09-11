@@ -30,6 +30,7 @@ const VIEW_HEADINGS: Array<[label: string, heading: RegExp]> = [
   ['Create', /MiniMax H3|Create/i],
   ['LTX 2.5', /LTX/i],
   ['Music', /ACE|Music/i],
+  ['Music 3', /Music 3/i],
   ['Create Image', /Z-Image|Image/i],
   ['Characters', /Character/i],
   ['Hair', /Hair/i],

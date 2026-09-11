@@ -10,6 +10,7 @@ import {
   LoaderCircle,
   MapPin,
   Menu,
+  AudioLines,
   Music2,
   PanelLeftClose,
   RotateCcw,
@@ -24,6 +25,8 @@ import { STORAGE_ERROR_EVENT } from './lib/libraryStorage'
 import { choices } from './lib/comfyInfo'
 import { outputFileFromUrl } from './lib/workflow'
 import { ACE_STEP_REQUIRED_NODES, inferAceStepSelections } from './lib/aceStepWorkflow'
+import { MUSIC3_REQUIRED_NODES, inferMusic3Selection } from './lib/music3Workflow'
+import { Music3Workspace } from './components/Music3Workspace'
 import { fitWholeCharacter } from './lib/imageCrop'
 import { inferLtx25Selections, inferSelections } from './lib/modelSelection'
 import { findH3PreviewOverrideNode, h3StackReport } from './lib/h3Stack'
@@ -138,6 +141,7 @@ function App() {
   const h3Report = useMemo(() => h3StackReport(models), [models])
   const ltxSelection = useMemo(() => inferLtx25Selections(models, choices(info, 'LatentUpscaleModelLoader', 'model_name')), [models, info])
   const aceSelection = useMemo(() => inferAceStepSelections(models), [models])
+  const music3Selection = useMemo(() => inferMusic3Selection(models), [models])
   const activeModel = mode === 'reference' ? selection.ref2va : selection.fl2va
   const activeLora = mode === 'reference' ? selection.ref2vLora : selection.fl2vLora
   const requiredModels = [activeModel, selection.textEncoder, selection.videoVae, selection.audioVae]
@@ -285,6 +289,11 @@ function App() {
       notify('success', 'LTX 2.5 reset. Its prompt, first frame, options, and current preview were cleared.')
       return
     }
+    if (view === 'music3') {
+      localStorage.removeItem('minimax.music3-workspace')
+      setNotice({ tone: 'success', text: 'Music 3 reset. Its caption, lyrics, and settings were cleared.' })
+      return
+    }
     if (view === 'zimage') {
       localStorage.removeItem('minimax.zimage-workspace')
       setZImageResetKey((value) => value + 1)
@@ -317,7 +326,7 @@ function App() {
     notify,
     onQueued: (target) => { if (target) setView(target) },
   })
-  const { generateLtx, generateAceStep, runH3Diagnostics, submitting, ltxSubmitting, aceSubmitting, diagnosticRunning } = flows
+  const { generateLtx, generateAceStep, runH3Diagnostics, generateMusic3, submitting, ltxSubmitting, aceSubmitting, music3Submitting, diagnosticRunning } = flows
   const generate = () => flows.generate({
     mode: upscaleMode, model: upscaleModel, vae: upscaleVae, lbhModel, missingNodes: missingLtxUpscaleNodes,
   })
@@ -341,7 +350,7 @@ function App() {
           {checking ? <LoaderCircle size={14} className="spin" /> : <span className="status-dot" />}
           {!status.connected ? 'Engine offline' : !modelReady ? 'Engine on · models missing' : `Local engine · ${status.latencyMs} ms`}
         </button>
-        {(view === 'create' || view === 'ltx25' || view === 'zimage') && <button className="titlebar-action titlebar-reset" onClick={resetCurrentWorkspace} title="Reset this workspace: prompts, options, media, selections, and the current preview" aria-label="Reset workspace"><RotateCcw size={14} /></button>}
+        {(view === 'create' || view === 'ltx25' || view === 'zimage' || view === 'music3') && <button className="titlebar-action titlebar-reset" onClick={resetCurrentWorkspace} title="Reset this workspace: prompts, options, media, selections, and the current preview" aria-label="Reset workspace"><RotateCcw size={14} /></button>}
       </header>
 
       {sidebarOpen && <button className="mobile-sidebar-backdrop" aria-label="Close workspace menu" onClick={() => setSidebarOpen(false)} />}
@@ -354,6 +363,7 @@ function App() {
             <NavButton active={view === 'create'} icon={WandSparkles} label="Create" onClick={() => { setCharacterHandoff(null); setView('create') }} />
             <NavButton active={view === 'ltx25'} icon={Aperture} label="LTX 2.5" onClick={() => setView('ltx25')} />
             <NavButton active={view === 'music'} icon={Music2} label="Music" onClick={() => setView('music')} />
+            <NavButton active={view === 'music3'} icon={AudioLines} label="Music 3" onClick={() => setView('music3')} />
           </div>
           <div className="nav-group"><span className="nav-section-label">Plan</span>
             <NavButton active={view === 'zimage'} icon={ImageIcon} label="Create Image" onClick={() => setView('zimage')} />
@@ -490,6 +500,20 @@ function App() {
           ollamaAvailable={ollamaModels.length > 0}
           onGenerate={(options) => void generateAceStep(options)}
           onCancel={(job) => void cancelJob(job)}
+        />}
+        {view === 'music3' && <Music3Workspace
+          settings={settings}
+          models={music3Selection}
+          connected={status.connected}
+          pipelineReady={MUSIC3_REQUIRED_NODES.every((node) => Boolean(info[node]))}
+          missingNodes={MUSIC3_REQUIRED_NODES.filter((node) => !info[node])}
+          latestJob={jobs.find((job) => job.provider === 'music3')}
+          submitting={music3Submitting}
+          cancelling={Boolean(jobs.find((job) => job.provider === 'music3' && ['queued', 'running'].includes(job.status)) && cancellingIds.has(jobs.find((job) => job.provider === 'music3' && ['queued', 'running'].includes(job.status))!.id))}
+          ollamaAvailable={ollamaModels.length > 0}
+          onGenerate={(options) => void generateMusic3(options, music3Selection)}
+          onCancel={(job: GenerationJob) => void cancelJob(job)}
+          onNotice={(tone: 'error' | 'success' | 'neutral', text: string) => setNotice({ tone, text })}
         />}
         <div hidden={view !== 'zimage'}><ZImageWorkspace key={`first-frame-${zImageResetKey}`} url={settings.comfyUrl} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} ollamaUrl={settings.ollamaUrl} ollamaModel={settings.ollamaModel} outputDirectory={settings.outputDirectory} onUse={(file, frameResolution) => {
           setFirstFrame(file); ws.setResolution(frameResolution); setMode('image'); setActiveJobId(null); setView('create'); notify('success', 'Z-Image frame loaded into the MiniMax I2V workspace.')

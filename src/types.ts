@@ -1,4 +1,4 @@
-export type View = 'create' | 'ltx25' | 'music' | 'zimage' | 'characters' | 'hair' | 'wardrobes' | 'accessories' | 'locations' | 'movie' | 'queue' | 'library' | 'editor' | 'settings'
+export type View = 'create' | 'ltx25' | 'music' | 'music3' | 'zimage' | 'characters' | 'hair' | 'wardrobes' | 'accessories' | 'locations' | 'movie' | 'queue' | 'library' | 'editor' | 'settings'
 export type GenerationMode = 'text' | 'image' | 'frames' | 'reference'
 export type ModelKind = 'diffusion_models' | 'text_encoders' | 'vae' | 'loras' | 'vae_approx' | 'clip_vision'
 export type MediaKind = 'image' | 'video' | 'audio'
@@ -290,7 +290,7 @@ export type GenerationJob = {
   width: number
   height: number
   duration: number
-  provider?: 'minimax' | 'ltx25' | 'acestep'
+  provider?: 'minimax' | 'ltx25' | 'acestep' | 'music3'
   /** Reproducibility record attached at submit time (persisted). */
   manifest?: Record<string, unknown>
   /** Submit-side graph for in-memory auto-retry only — stripped before

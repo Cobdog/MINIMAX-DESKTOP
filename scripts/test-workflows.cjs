@@ -573,8 +573,46 @@ assert.ok(referenceOrderWarnings('Uses <Audio 2> first, then <Audio 1>.', { imag
   assert.equal(contGraph['28'].inputs.clip_index, 2)
 }
 
+
+// ---- MiniMax Music 3 ---------------------------------------------------------
+{
+  const m3 = load('src/lib/music3Workflow.ts')
+  const models3 = { diffusion: 'minimax_music3_dit_int8_convrot.safetensors', textEncoder: 'minimax_music3_text_encoder_pruned_int8_convrot.safetensors', vae: 'minimax_music3_dav.safetensors' }
+  const g = m3.buildMusic3Workflow({ caption: 'Global Metadata: lo-fi. 78 BPM.', lyrics: '[Verse]\nhello', duration: 90, seed: 42, tiledDecode: true, filenamePrefix: 'audio/m3' }, models3)
+  assert.equal(g['4'].class_type, 'MiniMaxMusic3TextEncode')
+  assert.equal(g['4'].inputs.caption, 'Global Metadata: lo-fi. 78 BPM.')
+  assert.equal(g['4'].inputs.lyrics.includes('[Verse]'), true)
+  assert.equal(g['4'].inputs.max_duration, 90)
+  assert.equal(g['4'].inputs.cfg_scale, 1.7)
+  assert.equal(g['6'].inputs.seconds.join('|'), '4|1', 'empty latent is sized by the encoder seconds output')
+  assert.equal(g['7'].class_type, 'KSampler')
+  assert.equal(g['7'].inputs.sampler_name, 'euler')
+  assert.equal(g['7'].inputs.positive.join('|'), '4|0')
+  assert.equal(g['7'].inputs.negative.join('|'), '5|0', 'negative is the zeroed-out conditioning')
+  assert.equal(g['8'].class_type, 'VAEDecodeAudioTiled')
+  assert.equal(g['8'].inputs.tile_size, 1536)
+  assert.equal(g['9'].class_type, 'SaveAudioAdvanced')
+  assert.equal(g['9'].inputs.format, 'mp3')
+  const full = m3.buildMusic3Workflow({ caption: 'x', lyrics: '', duration: 60, seed: 1, tiledDecode: false, filenamePrefix: 'a' }, models3)
+  assert.equal(full['8'].class_type, 'VAEDecodeAudio', 'tiled decode is optional')
+  // Duration clamped to the 5-minute ceiling; caption sections omitted when blank.
+  assert.equal(m3.buildMusic3Workflow({ caption: 'x', lyrics: '', duration: 999, seed: 1, tiledDecode: true, filenamePrefix: 'a' }, models3)['4'].inputs.max_duration, 300)
+  assert.equal(m3.buildMusic3Caption({ globalMetadata: 'lofi', vocalDetails: '', arrangement: 'keys' }).includes('Vocal Details'), false)
+  assert.ok(m3.buildMusic3Caption({ globalMetadata: 'lofi', vocalDetails: 'female', arrangement: '' }).startsWith('Global Metadata:'))
+  // Model inference prefers INT8 and matches the official filenames.
+  const files = [
+    { name: 'minimax_music3_dit_fp16.safetensors', kind: 'diffusion_models', bytes: 1 },
+    { name: 'minimax_music3_dit_int8_convrot.safetensors', kind: 'diffusion_models', bytes: 1 },
+    { name: 'minimax_music3_text_encoder_pruned_int8_convrot.safetensors', kind: 'text_encoders', bytes: 1 },
+    { name: 'minimax_music3_dav.safetensors', kind: 'vae', bytes: 1 },
+  ]
+  const inferred = m3.inferMusic3Selection(files)
+  assert.equal(inferred.diffusion, 'minimax_music3_dit_int8_convrot.safetensors')
+  assert.equal(inferred.vae, 'minimax_music3_dav.safetensors')
+}
+
 runKernelTests().then(() => {
-  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), and Motion-Context latent chaining (save/load indices, conditioning wrap, trim)')
+  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), and MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference)')
 }, (error) => {
   console.error(error)
   process.exitCode = 1

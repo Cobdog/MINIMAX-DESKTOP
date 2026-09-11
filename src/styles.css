@@ -2303,3 +2303,21 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .create-presets button.selected { border-color: rgba(198,255,99,.5); background: var(--accent-soft); box-shadow: inset 0 0 0 1px rgba(198,255,99,.15); }
 .create-presets button.selected strong::after { content: ' ✓'; color: var(--accent); }
 .titlebar-reset.icon-only { width: 30px; padding-inline: 0; justify-content: center; }
+
+/* Music 3 workspace. */
+.music3-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(300px, .75fr); gap: 16px; align-items: start; }
+.music3-composer, .music3-controls { display: grid; gap: 14px; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.music3-section > span, .music3-lyrics > span, .music3-controls > label > span:first-child { display: grid; gap: 3px; margin-bottom: 6px; font-size: 11px; font-weight: 600; }
+.music3-section small, .music3-lyrics small, .music3-controls label small { color: var(--muted-2); font-size: 9px; font-weight: 400; }
+.music3-section textarea, .music3-lyrics textarea { min-height: 74px; padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-2); color: var(--text); font-size: 12px; line-height: 1.5; resize: vertical; }
+.music3-lyrics textarea { min-height: 150px; }
+.music3-rewrite { display: flex; gap: 8px; }
+.music3-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.music3-tags button { padding: 5px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); color: var(--muted); font-size: 10px; cursor: pointer; }
+.music3-tags button:hover { color: var(--text); border-color: var(--line-strong); }
+.music3-controls > label { display: grid; gap: 6px; font-size: 11px; font-weight: 600; }
+.music3-controls input[type='number'] { min-height: 36px; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface-2); color: var(--text); }
+.music3-tiled { grid-template-columns: auto 1fr !important; align-items: start; gap: 9px !important; }
+.music3-tiled input { margin-top: 3px; accent-color: var(--accent); }
+.music3-result { width: 100%; margin-top: 4px; }
+@media (max-width: 1320px) { .music3-grid { grid-template-columns: minmax(0, 1fr); } }

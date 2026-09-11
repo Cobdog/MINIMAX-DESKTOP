@@ -12,6 +12,8 @@ import type { ObjectInfo } from '../lib/comfyInfo'
 import { diagnosticPrompt } from '../lib/h3Stack'
 import { composeH3Prompt, resolveRenderReferenceImages } from '../lib/promptPolicies'
 import { resolveMovieShot } from '../lib/promptComposer'
+import { buildMusic3Workflow } from '../lib/music3Workflow'
+import type { Music3GenerationOptions } from '../lib/music3Workflow'
 import { buildRenderManifest } from '../lib/manifest'
 import type { useStudioSession } from './useStudioSession'
 import type { useGenerationQueue, NoticeTone } from './useGenerationQueue'
@@ -419,5 +421,43 @@ export function useGenerationFlows(options: {
     return null
   }
 
-  return { generate, generateLtx, generateAceStep, runH3Diagnostics, generateSceneChain, submitting, ltxSubmitting, aceSubmitting, diagnosticRunning }
+  const [music3Submitting, setMusic3Submitting] = useState(false)
+
+  /** MiniMax Music 3: complete songs through the official template graph. */
+  const generateMusic3 = async (options: Music3GenerationOptions, models3: { diffusion: string; textEncoder: string; vae: string }) => {
+    if (!settings) return
+    if (!status.connected) { notify('error', 'Start ComfyUI and verify the server connection in Settings.'); return }
+    if (!options.caption.trim()) { notify('error', 'Write at least one caption section before generating.'); return }
+    if (!models3.diffusion || !models3.textEncoder || !models3.vae) { notify('error', 'The Music 3 diffusion model, text encoder, and DAV VAE are required. Install them, then rescan in Settings.'); return }
+    const localId = createId()
+    const job: GenerationJob = {
+      id: localId, provider: 'music3', mediaType: 'audio', mode: 'text', prompt: options.caption,
+      createdAt: Date.now(), status: 'queued', progress: 2, progressLabel: 'Preparing Music 3 workflow',
+      width: 0, height: 0, duration: options.duration,
+    }
+    setJobs((current) => [job, ...current])
+    setMusic3Submitting(true)
+    notify('neutral', 'Preparing the official MiniMax Music 3 ComfyUI graph…')
+    try {
+      const graph = buildMusic3Workflow(options, models3)
+      const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, clientId)
+      if (cancellationRequests.current.has(localId)) {
+        await window.minimax.cancelPrompt(settings.comfyUrl, response.prompt_id)
+        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'cancelled' } : item))
+      } else {
+        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: 'Composing locally' } : item))
+        notify('success', 'MiniMax Music 3 song generation added to ComfyUI.')
+      }
+    } catch (error) {
+      const cancelled = cancellationRequests.current.has(localId)
+      setJobs((current) => current.map((item) => item.id === localId ? { ...item, status: cancelled ? 'cancelled' : 'failed', error: cancelled ? undefined : error instanceof Error ? error.message : String(error) } : item))
+      if (cancelled) notify('success', 'Music generation cancelled.')
+      else notify('error', error instanceof Error ? error.message : String(error))
+    } finally {
+      cancellationRequests.current.delete(localId)
+      setMusic3Submitting(false)
+    }
+  }
+
+  return { generate, generateLtx, generateAceStep, runH3Diagnostics, generateSceneChain, generateMusic3, submitting, ltxSubmitting, aceSubmitting, music3Submitting, diagnosticRunning }
 }
