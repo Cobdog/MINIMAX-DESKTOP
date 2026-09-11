@@ -49,22 +49,29 @@ export const workspaceDefaults: PersistedWorkspace = {
   lastFrame: null, referenceImages: [], referenceVideos: [], referenceAudios: [], timelineGuides: [], selectedReferenceCharacterIds: [], selectedReferenceLocationIds: [], activeJobId: null, movieHandoff: null,
 }
 
+/** Normalizes a persisted workspace (localStorage snapshot or server copy)
+ *  over the defaults, applying the same compatibility fixes regardless of
+ *  where the bytes came from. */
+export function normalizeWorkspace(stored: Partial<PersistedWorkspace>): PersistedWorkspace {
+  const workspace = { ...workspaceDefaults, ...stored }
+  // Existing installs predate the explicit experimental opt-in. Migrate them
+  // back to the official ComfyUI sampling pair to prevent stale combinations
+  // such as heun+karras from continuing to produce surprising output.
+  if (!stored.experimentalSampling) {
+    workspace.sampler = 'res_multistep'
+    workspace.scheduler = 'simple'
+    workspace.experimentalSampling = false
+  }
+  if (workspace.mode === 'reference' && workspace.turbo === '8') workspace.turbo = 'off'
+  workspace.steps = Math.max(16, Math.min(30, Number(workspace.steps) || 30))
+  if (stored.steps === 20) workspace.steps = 30
+  return workspace
+}
+
 export function readWorkspace(): PersistedWorkspace {
   try {
     const stored = JSON.parse(localStorage.getItem('minimax.workspace') ?? '{}') as Partial<PersistedWorkspace>
-    const workspace = { ...workspaceDefaults, ...stored }
-    // Existing installs predate the explicit experimental opt-in. Migrate them
-    // back to the official ComfyUI sampling pair to prevent stale combinations
-    // such as heun+karras from continuing to produce surprising output.
-    if (!stored.experimentalSampling) {
-      workspace.sampler = 'res_multistep'
-      workspace.scheduler = 'simple'
-      workspace.experimentalSampling = false
-    }
-    if (workspace.mode === 'reference' && workspace.turbo === '8') workspace.turbo = 'off'
-    workspace.steps = Math.max(16, Math.min(30, Number(workspace.steps) || 30))
-    if (stored.steps === 20) workspace.steps = 30
-    return workspace
+    return normalizeWorkspace(stored && typeof stored === 'object' ? stored : {})
   } catch {
     return workspaceDefaults
   }

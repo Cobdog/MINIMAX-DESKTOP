@@ -11,7 +11,8 @@ import { HAIR_LIBRARY_EVENT, loadHairStyleProjects } from '../lib/hairLibrary'
 import { allocateWorkspaceReferences, composeReferenceInstructions } from '../lib/promptComposer'
 import { fitWholeCharacter } from '../lib/imageCrop'
 import { syncReferencePrompt } from '../lib/promptPolicies'
-import { readWorkspace, withoutPreview, workspaceDefaults, type MovieLink, type PersistedWorkspace } from '../lib/workspace'
+import { normalizeWorkspace, readWorkspace, withoutPreview, workspaceDefaults, type MovieLink, type PersistedWorkspace } from '../lib/workspace'
+import { fetchServerWorkspace, saveServerWorkspace } from '../lib/serverStorage'
 import type { NoticeTone } from './useGenerationQueue'
 import { useDebouncedPersist } from './useDebouncedPersist'
 
@@ -25,6 +26,7 @@ export function useCreateWorkspace(options: {
 }) {
   const { settings, rtxModels, notify, setVideoClipDraft } = options
   const persisted = useState(readWorkspace)[0]
+  const [storageBootDone, setStorageBootDone] = useState(false)
   const [mode, setMode] = useState<GenerationMode>(persisted.mode)
   const [prompt, setPrompt] = useState(persisted.prompt)
   const [duration, setDuration] = useState(persisted.duration)
@@ -104,12 +106,47 @@ export function useCreateWorkspace(options: {
     return () => { disposed = true }
   }, [characterProjects, wardrobeProjects])
 
+  // Boot load (wave 1): the server's SQLite workspace is authoritative. The
+  // localStorage snapshot above paints instantly (and remains correct on a
+  // pre-migration first boot); the server answer replaces it once it lands.
+  // A missing server workspace (fresh install, copy not yet run) keeps the
+  // local state, and a fetch failure keeps the app working offline. The
+  // 3 s fail-safe unblocks persistence even if the request hangs.
+  useEffect(() => {
+    let disposed = false
+    const failSafe = window.setTimeout(() => { if (!disposed) setStorageBootDone(true) }, 3000)
+    void fetchServerWorkspace()
+      .then((loaded) => {
+        if (disposed || !loaded) return
+        const next = normalizeWorkspace(loaded)
+        setMode(next.mode); setPrompt(next.prompt); setDuration(next.duration); setResolution(next.resolution); setTurbo(next.turbo)
+        setSteps(next.steps); setSampler(next.sampler); setScheduler(next.scheduler); setExperimentalSampling(next.experimentalSampling)
+        setRefImageSize(next.refImageSize); setNoDialogue(next.noDialogue); setNaturalMovement(next.naturalMovement); setClothingPolicy(next.clothingPolicy)
+        setSigmaShiftMode(next.sigmaShiftMode); setShiftVideo(next.shiftVideo); setShiftAudio(next.shiftAudio); setLoraStrength(next.loraStrength)
+        setSeed(next.seed); setAdvanced(next.advanced); setLiveEnabled(next.liveEnabled); setLivePreviewMode(next.livePreviewMode)
+        setUpscaleMode(next.upscaleMode); setRtxModel(next.rtxModel); setFirstFrame(next.firstFrame); setLastFrame(next.lastFrame)
+        setReferenceImages(next.referenceImages); setReferenceVideos(next.referenceVideos); setReferenceAudios(next.referenceAudios)
+        setTimelineGuides(next.timelineGuides); setSelectedReferenceCharacterIds(next.selectedReferenceCharacterIds)
+        setSelectedReferenceLocationIds(next.selectedReferenceLocationIds); setActiveJobId(next.activeJobId); setMovieHandoff(next.movieHandoff)
+      })
+      .catch(() => undefined)
+      .finally(() => { if (!disposed) setStorageBootDone(true) })
+    return () => { disposed = true; window.clearTimeout(failSafe) }
+  }, [])
+
   // Persistence is debounced (300 ms trailing): this effect fires on every
-  // keystroke via `prompt`, and the write serializes the whole workspace
-  // synchronously. The debounce hook flushes the latest pending write on
-  // pagehide/beforeunload/unmount, so a normal close loses nothing.
+  // keystroke via `prompt`, and the write serializes the whole workspace.
+  // The debounce hook flushes the latest pending write on
+  // pagehide/beforeunload/unmount, so a normal close loses nothing. Writes
+  // wait for the boot load so a stale local snapshot cannot overwrite the
+  // server's newer workspace before it has been read.
+  //
+  // Multi-tab model: whole-workspace last-write-wins at the server (the
+  // newest complete document wins). True cross-tab live sync arrives with
+  // the realtime fabric.
   const persistWorkspace = useDebouncedPersist(300)
   useEffect(() => {
+    if (!storageBootDone) return
     const workspace: PersistedWorkspace = {
       mode, prompt, duration, resolution, turbo, steps, sampler, scheduler, experimentalSampling, refImageSize, noDialogue, naturalMovement, clothingPolicy,
       sigmaShiftMode, shiftVideo, shiftAudio, loraStrength, seed, advanced, liveEnabled, livePreviewMode,
@@ -120,8 +157,14 @@ export function useCreateWorkspace(options: {
       timelineGuides: timelineGuides.map((guide) => ({ file: withoutPreview(guide.file)!, seconds: guide.seconds })),
       selectedReferenceCharacterIds, selectedReferenceLocationIds, activeJobId, movieHandoff,
     }
-    persistWorkspace(() => localStorage.setItem('minimax.workspace', JSON.stringify(workspace)))
-  }, [activeJobId, advanced, clothingPolicy, duration, experimentalSampling, firstFrame, lastFrame, liveEnabled, livePreviewMode, loraStrength, mode, movieHandoff, naturalMovement, noDialogue, persistWorkspace, prompt, refImageSize, referenceAudios, referenceImages, referenceVideos, resolution, rtxModel, sampler, scheduler, seed, selectedReferenceCharacterIds, selectedReferenceLocationIds, shiftAudio, shiftVideo, sigmaShiftMode, steps, timelineGuides, turbo, upscaleMode])
+    persistWorkspace(() => {
+      void saveServerWorkspace(workspace).catch(() => {
+        // Degraded mode: mirror to the legacy store so a boot while the API
+        // is unreachable still finds the workspace.
+        try { localStorage.setItem('minimax.workspace', JSON.stringify(workspace)) } catch { /* Quota: the next debounced write retries. */ }
+      })
+    })
+  }, [activeJobId, advanced, clothingPolicy, duration, experimentalSampling, firstFrame, lastFrame, liveEnabled, livePreviewMode, loraStrength, mode, movieHandoff, naturalMovement, noDialogue, persistWorkspace, prompt, refImageSize, referenceAudios, referenceImages, referenceVideos, resolution, rtxModel, sampler, scheduler, seed, selectedReferenceCharacterIds, selectedReferenceLocationIds, shiftAudio, shiftVideo, sigmaShiftMode, storageBootDone, steps, timelineGuides, turbo, upscaleMode])
 
   useEffect(() => {
     if (!settings || mediaHydrated.current) return

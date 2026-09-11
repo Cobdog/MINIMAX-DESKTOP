@@ -425,8 +425,9 @@ assert.ok(referenceOrderWarnings('Uses <Audio 2> first, then <Audio 1>.', { imag
     setItem: (key, value) => { store.set(key, String(value)) },
     removeItem: (key) => { store.delete(key) },
   }
-  // Two-file loader: promptLibraryStorage imports ./libraryStorage, so the
-  // VM context needs a require that resolves and transpiles that dependency.
+  // Multi-file loader: promptLibraryStorage imports ./libraryStorage and
+  // ./promptCorpus, so the VM context needs a require that resolves and
+  // transpiles those dependencies.
   const cache = {}
   const transpileFile = (file) => ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
   const libRequire = (name) => {
@@ -436,6 +437,13 @@ assert.ok(referenceOrderWarnings('Uses <Audio 2> first, then <Audio 1>.', { imag
         vm.runInNewContext(transpileFile('src/lib/libraryStorage.ts'), { exports: cache.libraryStorage, require, console, localStorage: localStorageStub, window: { dispatchEvent: () => undefined, CustomEvent: class {}, addEventListener: () => undefined } })
       }
       return cache.libraryStorage
+    }
+    if (name === './promptCorpus') {
+      if (!cache.promptCorpus) {
+        cache.promptCorpus = {}
+        vm.runInNewContext(transpileFile('src/lib/promptCorpus.ts'), { exports: cache.promptCorpus, require, console })
+      }
+      return cache.promptCorpus
     }
     return require(name)
   }

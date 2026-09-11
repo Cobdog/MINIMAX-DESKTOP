@@ -12,10 +12,16 @@ export function playableOutputUrl(value?: string) {
   return webMediaUrl(value)
 }
 
+/** Hydrates persisted jobs (localStorage snapshot or server store) for
+ *  display: every playable output URL flows through the media routes. */
+export function hydrateLoadedJobs(stored: GenerationJob[]): GenerationJob[] {
+  return stored.map((job) => ({ ...job, outputUrl: playableOutputUrl(job.outputUrl) }))
+}
+
 export const initialJobs = (): GenerationJob[] => {
   try {
     const stored = JSON.parse(localStorage.getItem('minimax.jobs') ?? '[]') as GenerationJob[]
-    return stored.map((job) => ({ ...job, outputUrl: playableOutputUrl(job.outputUrl) }))
+    return hydrateLoadedJobs(Array.isArray(stored) ? stored : [])
   } catch {
     return []
   }

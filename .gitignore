@@ -10,3 +10,5 @@ dist-server/
 test-home/
 test-results/
 playwright-report/
+# Studio database files (and WAL/SHM companions) wherever they land.
+studio.db*

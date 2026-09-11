@@ -21,6 +21,7 @@ import { Readable } from 'node:stream'
 import WebSocket from 'ws'
 import type { AppSettings, GpuTelemetry, LanStatus, ModelKind } from '../src/types'
 import { failureRef, logEvent, logFailure } from './logger'
+import { createStudioRepository, type StudioRepository } from './repo'
 
 export type StudioServerPaths = {
   settingsFile: string
@@ -158,6 +159,29 @@ async function readJson(request: IncomingMessage, maximumBytes = 36_000_000) {
     chunks.push(buffer)
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as Record<string, unknown>
+}
+
+/** Shape-first validation for persisted job records (wave 1 storage): the
+ *  scalar projection columns must be present with the right primitive types;
+ *  everything else rides inside params_json untouched. Mirrors GenerationJob. */
+function isStoredJobShape(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const job = value as Record<string, unknown>
+  return typeof job.id === 'string' && job.id.length > 0 && job.id.length <= 200
+    && typeof job.mode === 'string' && typeof job.status === 'string' && typeof job.prompt === 'string'
+    && typeof job.createdAt === 'number' && Number.isFinite(job.createdAt)
+    && typeof job.width === 'number' && Number.isFinite(job.width)
+    && typeof job.height === 'number' && Number.isFinite(job.height)
+    && typeof job.duration === 'number' && Number.isFinite(job.duration)
+}
+
+/** Minimal shape check for saved-prompt entries: id + prompt text; the
+ *  repository coerces the optional metadata fields. */
+function isPromptEntryShape(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const entry = value as Record<string, unknown>
+  return typeof entry.id === 'string' && entry.id.length > 0 && entry.id.length <= 200
+    && typeof entry.prompt === 'string' && entry.prompt.length > 0 && entry.prompt.length <= 50_000
 }
 
 function historyOutput(history: Record<string, unknown>, promptId: string, kind: 'video' | 'image' = 'video') {
@@ -319,6 +343,18 @@ export function createStudioServer(paths: StudioServerPaths) {
   let mobileCharacterLibrary: unknown[] = []
   let lanServer: Server | null = null
   let lanStatus: LanStatus = { running: false }
+
+  // Studio database (wave 1 storage): better-sqlite3 with FTS5 in the same
+  // home as settings.json. An open failure is DEGRADED, not fatal — the
+  // storage routes below answer 503 with a logged reason while everything
+  // else (SPA, settings, engine proxy) keeps working.
+  let studioRepo: StudioRepository | null = null
+  try {
+    studioRepo = createStudioRepository(join(dirname(paths.settingsFile), 'studio.db'))
+    logEvent({ kind: 'db.ready', file: 'studio.db' })
+  } catch (error) {
+    logFailure('db/open', error, undefined, 'error')
+  }
 
   function defaultSettings(): AppSettings {
     const root = join(paths.documentsDirectory, 'ComfyUI', 'models')
@@ -794,6 +830,84 @@ export function createStudioServer(paths: StudioServerPaths) {
           const body = await readJson(request, 36_000_000)
           mobileCharacterLibrary = Array.isArray(body.characters) ? body.characters : []
           return sendJson(response, 200, { synced: mobileCharacterLibrary.length })
+        }
+        // ---- Studio storage (wave 1): jobs / projects / workspace / FTS ---
+        // SQLite-backed persistence for the renderer's durable state. All
+        // POST bodies are validated shape-first like the sibling routes; all
+        // writes are upserts keyed by id (never whole-store replaces).
+        if (url.pathname === '/api/lan/jobs' && request.method === 'GET') {
+          if (!studioRepo) return sendJson(response, 503, { error: 'The studio database is unavailable; job history cannot be read.' })
+          return sendJson(response, 200, { jobs: studioRepo.listJobs(100) })
+        }
+        if (url.pathname === '/api/lan/jobs' && request.method === 'POST') {
+          if (!studioRepo) return sendJson(response, 503, { error: 'The studio database is unavailable; job history cannot be saved.' })
+          const body = await readJson(request, 12_000_000)
+          const jobs = Array.isArray(body.jobs) ? body.jobs : []
+          if (jobs.length < 1 || jobs.length > 100) return sendJson(response, 400, { error: 'Provide between 1 and 100 jobs per request.' })
+          if (!jobs.every((job) => isStoredJobShape(job))) return sendJson(response, 400, { error: 'Each job needs id, mode, status, prompt, createdAt, width, height, and duration.' })
+          return sendJson(response, 200, { saved: studioRepo.upsertJobs(jobs) })
+        }
+        if (url.pathname === '/api/lan/projects' && request.method === 'GET') {
+          if (!studioRepo) return sendJson(response, 503, { error: 'The studio database is unavailable; projects cannot be read.' })
+          return sendJson(response, 200, { projects: studioRepo.listProjects() })
+        }
+        if (url.pathname === '/api/lan/projects' && request.method === 'POST') {
+          if (!studioRepo) return sendJson(response, 503, { error: 'The studio database is unavailable; projects cannot be saved.' })
+          const body = await readJson(request, 8_000_000)
+          const projects = Array.isArray(body.projects) ? body.projects : []
+          if (projects.length < 1 || projects.length > 200) return sendJson(response, 400, { error: 'Provide between 1 and 200 projects per request.' })
+          for (const project of projects) {
+            const record = project as Record<string, unknown>
+            if (!record || typeof record !== 'object' || Array.isArray(record)) return sendJson(response, 400, { error: 'Each project needs id, name, and a data object.' })
+            if (typeof record.id !== 'string' || !record.id || record.id.length > 200 || typeof record.name !== 'string' || !record.data || typeof record.data !== 'object' || Array.isArray(record.data)) {
+              return sendJson(response, 400, { error: 'Each project needs id, name, and a data object.' })
+            }
+            studioRepo.upsertProject({ id: record.id, name: record.name, kind: typeof record.kind === 'string' && record.kind ? record.kind.slice(0, 40) : 'movie', data: record.data as Record<string, unknown> })
+          }
+          return sendJson(response, 200, { saved: projects.length })
+        }
+        if (url.pathname === '/api/lan/projects/delete' && request.method === 'POST') {
+          if (!studioRepo) return sendJson(response, 503, { error: 'The studio database is unavailable; projects cannot be deleted.' })
+          const body = await readJson(request, 10_000)
+          const id = typeof body.id === 'string' ? body.id : ''
+          if (!id || id.length > 200) return sendJson(response, 400, { error: 'A project id is required.' })
+          return sendJson(response, 200, { deleted: studioRepo.deleteProject(id) })
+        }
+        if (url.pathname === '/api/lan/workspace' && request.method === 'GET') {
+          if (!studioRepo) return sendJson(response, 503, { error: 'The studio database is unavailable; the workspace cannot be read.' })
+          return sendJson(response, 200, { workspace: studioRepo.getWorkspace() })
+        }
+        if (url.pathname === '/api/lan/workspace' && request.method === 'POST') {
+          if (!studioRepo) return sendJson(response, 503, { error: 'The studio database is unavailable; the workspace cannot be saved.' })
+          const body = await readJson(request, 2_000_000)
+          if (!body.workspace || typeof body.workspace !== 'object' || Array.isArray(body.workspace)) return sendJson(response, 400, { error: 'A workspace object is required.' })
+          studioRepo.saveWorkspace(body.workspace as Record<string, unknown>)
+          return sendJson(response, 200, { saved: true })
+        }
+        // FTS5 search over the saved prompt library. The user query is
+        // sanitized into a quoted-prefix MATCH expression inside the repo —
+        // FTS5 syntax injection through MATCH is real and never reaches the
+        // parser untreated.
+        if (url.pathname === '/api/lan/search/prompts' && request.method === 'GET') {
+          if (!studioRepo) return sendJson(response, 503, { error: 'The studio database is unavailable; prompts cannot be searched.' })
+          const query = url.searchParams.get('q') ?? ''
+          const limit = Number(url.searchParams.get('limit'))
+          return sendJson(response, 200, { entries: studioRepo.searchPrompts(query.slice(0, 400), Number.isInteger(limit) && limit >= 1 && limit <= 500 ? limit : 100) })
+        }
+        if (url.pathname === '/api/lan/prompts' && request.method === 'POST') {
+          if (!studioRepo) return sendJson(response, 503, { error: 'The studio database is unavailable; prompts cannot be saved.' })
+          const body = await readJson(request, 4_000_000)
+          const entries = Array.isArray(body.entries) ? body.entries : []
+          if (entries.length < 1 || entries.length > 200) return sendJson(response, 400, { error: 'Provide between 1 and 200 prompt entries per request.' })
+          if (!entries.every((entry) => isPromptEntryShape(entry))) return sendJson(response, 400, { error: 'Each prompt entry needs an id and a prompt.' })
+          return sendJson(response, 200, { saved: studioRepo.upsertPrompts(entries) })
+        }
+        if (url.pathname === '/api/lan/prompts/delete' && request.method === 'POST') {
+          if (!studioRepo) return sendJson(response, 503, { error: 'The studio database is unavailable; prompts cannot be deleted.' })
+          const body = await readJson(request, 10_000)
+          const id = typeof body.id === 'string' ? body.id : ''
+          if (!id || id.length > 200) return sendJson(response, 400, { error: 'A prompt id is required.' })
+          return sendJson(response, 200, { deleted: studioRepo.deletePrompt(id) })
         }
         if (url.pathname === '/api/lan/upload-output' && request.method === 'POST') {
           const body = await readJson(request, 10_000)

@@ -31,6 +31,8 @@ import { fitWholeCharacter } from './lib/imageCrop'
 import { inferLtx25Selections, inferSelections } from './lib/modelSelection'
 import { inferContactSheetSelection } from './lib/contactSheet'
 import { findH3PreviewOverrideNode, h3StackReport } from './lib/h3Stack'
+import { migrateLocalData } from './lib/serverStorage'
+import { PROMPT_LIBRARY_EVENT } from './lib/promptLibraryStorage'
 import { useLivePreview } from './lib/useLivePreview'
 import { ZImageWorkspace } from './components/ZImageWorkspace'
 import { ClipEditor } from './components/ClipEditor'
@@ -108,6 +110,20 @@ function App() {
   // Job queue: persistence, ComfyUI polling, deadline sweep, cancellation.
   const queue = useGenerationQueue({ settings, connected: status.connected, notify })
   const { jobs, cancellingIds, cancelJob, onLiveProgress } = queue
+
+  // Wave 1 storage migration: once settings have loaded, COPY (never
+  // destroy) the four legacy localStorage stores into the server's SQLite
+  // database, verify the copy, and mark it done. Failures set no marker and
+  // retry on the next boot. A successful copy refreshes any mounted prompt
+  // library listeners so the Saved tab reflects the server store.
+  useEffect(() => {
+    if (!settings) return
+    void migrateLocalData()
+      .then((outcome) => {
+        if (outcome.migrated) window.dispatchEvent(new CustomEvent(PROMPT_LIBRARY_EVENT))
+      })
+      .catch(() => undefined)
+  }, [settings])
 
   // Keep the lightweight ComfyUI event socket active even when image previews
   // are hidden so queue, node, and sampler-step progress remain real-time.

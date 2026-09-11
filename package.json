@@ -14,11 +14,13 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
     "lint": "eslint . --max-warnings 0",
     "test": "node scripts/test-workflows.cjs",
+    "test:storage": "node scripts/test-storage.cjs",
     "smoke:server": "node scripts/smoke-server.cjs",
     "test:e2e": "pnpm build && playwright test",
-    "test:all": "pnpm test && pnpm test:e2e && pnpm smoke:server"
+    "test:all": "pnpm test && pnpm test:e2e && pnpm test:storage && pnpm smoke:server"
   },
   "dependencies": {
+    "better-sqlite3": "^13.0.3",
     "lucide-react": "^0.468.0",
     "pino": "^10.3.1",
     "react": "^19.3.0",
@@ -29,6 +31,7 @@
     "@eslint/js": "^9.17.0",
     "@playwright/test": "^1.63.0",
     "@rollup/rollup-win32-x64-msvc": "4.63.1",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.10.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

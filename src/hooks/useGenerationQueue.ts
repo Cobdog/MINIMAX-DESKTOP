@@ -1,10 +1,16 @@
 /** The generation job queue: persistence, the ComfyUI history poll loop with
- *  terminal-state guards, the offline deadline sweep, and cancellation. */
+ *  terminal-state guards, the offline deadline sweep, and cancellation.
+ *
+ *  Wave 1: durable storage lives in the server's SQLite database (POST
+ *  /api/lan/jobs per-job upserts). The localStorage snapshot still paints
+ *  instantly at boot and serves as the degraded-mode fallback write when the
+ *  API is unreachable. */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppSettings, GenerationJob } from '../types'
 import { isPastRunningDeadline, isTerminalStatus, reduceJobPoll, type PollObservation, type PollReduction } from '../lib/jobReducer'
 import { extractOutputFile, extractOutputUrl, withTiledVideoDecode } from '../lib/workflow'
-import { extractAutomatedReferenceSet, initialJobs, playableOutputUrl, recordCharacterSheetImages, recordCharacterTurntable, recordLocationWalkthrough, recordMovieOutput } from '../lib/jobRecords'
+import { extractAutomatedReferenceSet, hydrateLoadedJobs, initialJobs, playableOutputUrl, recordCharacterSheetImages, recordCharacterTurntable, recordLocationWalkthrough, recordMovieOutput } from '../lib/jobRecords'
+import { fetchServerJobs, saveServerJobs, serverStorageMigrationDone } from '../lib/serverStorage'
 import type { LiveProgress } from '../lib/useLivePreview'
 import { useDebouncedPersist } from './useDebouncedPersist'
 
@@ -17,11 +23,32 @@ export function useGenerationQueue(options: {
 }) {
   const { settings, connected, notify } = options
   const [jobs, setJobs] = useState<GenerationJob[]>(initialJobs)
+  const [storageBootDone, setStorageBootDone] = useState(false)
   const [cancellingIds, setCancellingIds] = useState<Set<string>>(() => new Set())
   const cancellationRequests = useRef(new Set<string>())
   const jobsRef = useRef(jobs)
   jobsRef.current = jobs
   const pendingKey = jobs.filter((job) => job.status === 'queued' || job.status === 'running').map((job) => job.id).join(',')
+
+  // Boot load: the server store is authoritative. The localStorage snapshot
+  // (already in state) paints instantly for a pre-migration first boot; the
+  // server answer then replaces it. An empty server answer only clears the
+  // list when the migration marker proves the copy already happened —
+  // otherwise the local list stands until the migration POSTs land. A fetch
+  // failure (server down) keeps the local list so the app keeps working.
+  useEffect(() => {
+    let disposed = false
+    const failSafe = window.setTimeout(() => { if (!disposed) setStorageBootDone(true) }, 3000)
+    void fetchServerJobs()
+      .then((loaded) => {
+        if (disposed) return
+        if (loaded.length > 0) setJobs(hydrateLoadedJobs(loaded))
+        else if (serverStorageMigrationDone()) setJobs([])
+      })
+      .catch(() => undefined)
+      .finally(() => { if (!disposed) setStorageBootDone(true) })
+    return () => { disposed = true; window.clearTimeout(failSafe) }
+  }, [])
 
   const onLiveProgress = useCallback((id: string, update: LiveProgress) => {
     if (!id) return
@@ -29,19 +56,32 @@ export function useGenerationQueue(options: {
   }, [])
 
   // Persistence is debounced (1 s trailing): during a live render the poll
-  // loop and progress events update `jobs` several times per second, and each
-  // write serialized 100 records on the main thread. The write reads
-  // jobsRef.current at flush time, so it always persists the latest complete
-  // job list (never a partially-built one), and the debounce hook flushes on
-  // pagehide/beforeunload/unmount so a normal close loses nothing.
+  // loop and progress events update `jobs` several times per second. The
+  // write reads jobsRef.current at flush time, so it always persists the
+  // latest complete job list (never a partially-built one), and the debounce
+  // hook flushes on pagehide/beforeunload/unmount so a normal close loses
+  // nothing. Writes wait for the boot load so a stale local snapshot cannot
+  // overwrite the server's newer state before we have read it.
+  //
+  // Multi-tab model: per-job upsert, latest-write-wins PER JOB ID at the
+  // server — two tabs POST overlapping sets and each job keeps whichever
+  // write landed last (the whole-list replace of the localStorage era is
+  // gone, so one tab can no longer erase another tab's jobs). True
+  // cross-tab live sync arrives with the realtime fabric.
   const persistJobs = useDebouncedPersist(1000)
   useEffect(() => {
+    if (!storageBootDone) return
     persistJobs(() => {
       // The submit graph is for in-memory retry only — never persisted.
       const persistable = jobsRef.current.slice(0, 100).map((job) => { const rest = { ...job }; delete rest.graph; return rest })
-      localStorage.setItem('minimax.jobs', JSON.stringify(persistable))
+      void saveServerJobs(persistable).catch(() => {
+        // Degraded mode: mirror to the legacy store so a boot while the API
+        // is unreachable still finds the history (the boot loader reads it
+        // when the server answer fails).
+        try { localStorage.setItem('minimax.jobs', JSON.stringify(persistable)) } catch { /* Quota: the next debounced write retries. */ }
+      })
     })
-  }, [jobs, persistJobs])
+  }, [jobs, persistJobs, storageBootDone])
 
   useEffect(() => {
     if (!settings || !pendingKey || !connected) return

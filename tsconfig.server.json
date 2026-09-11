@@ -10,5 +10,5 @@
     "types": ["node"],
     "sourceMap": true
   },
-  "include": ["server/**/*.ts", "src/types.ts"]
+  "include": ["server/**/*.ts", "src/types.ts", "src/lib/promptCorpus.ts"]
 }

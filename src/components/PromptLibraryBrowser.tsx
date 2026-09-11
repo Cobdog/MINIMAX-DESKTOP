@@ -1,12 +1,14 @@
 /** Community + saved prompt library. The Community tab searches Civitai's
  *  public generation metadata (withMeta) through the server's pinned proxy;
- *  the Saved tab holds the local reusable library — entries saved from the
- *  harvest plus the bundled technique corpus. Metadata (seed/sampler/steps)
- *  is imported for study; only prompt text is inserted into the composer. */
+ *  the Saved tab lists from the server's SQLite store (saved_prompts +
+ *  FTS5), with the legacy localStorage library as the offline fallback.
+ *  Metadata (seed/sampler/steps) is imported for study; only prompt text is
+ *  inserted into the composer. */
 import { useCallback, useEffect, useState } from 'react'
 import { AlertCircle, Bookmark, Check, LoaderCircle, Search, Sparkles, Trash2, X } from 'lucide-react'
 import type { PromptLibraryItem } from '../types'
 import { PROMPT_LIBRARY_EVENT, deletePromptEntry, loadPromptLibrary, savePromptEntry, type SavedPromptEntry } from '../lib/promptLibraryStorage'
+import { deleteServerPromptEntry, saveServerPromptEntries, searchSavedPrompts } from '../lib/serverStorage'
 
 const SORTS = ['Most Reactions', 'Most Comments', 'Newest', 'Oldest']
 
@@ -25,10 +27,19 @@ export function PromptLibraryBrowser({ onClose, onInsert }: { onClose(): void; o
   const [library, setLibrary] = useState<SavedPromptEntry[]>(loadPromptLibrary)
   const [savedFilter, setSavedFilter] = useState('')
 
+  // Saved library: server store first (techniques are seeded server-side);
+  // the localStorage library keeps the tab working when the API is down.
   const refreshSaved = useCallback(() => {
-    const next = loadPromptLibrary()
-    setLibrary(next)
-    setSavedIds(new Set(next.filter((entry) => entry.source?.kind === 'civitai').map((entry) => entry.source!.itemId)))
+    void searchSavedPrompts('', 500)
+      .then((entries) => {
+        setLibrary(entries)
+        setSavedIds(new Set(entries.filter((entry) => entry.source?.kind === 'civitai').map((entry) => entry.source!.itemId)))
+      })
+      .catch(() => {
+        const next = loadPromptLibrary()
+        setLibrary(next)
+        setSavedIds(new Set(next.filter((entry) => entry.source?.kind === 'civitai').map((entry) => entry.source!.itemId)))
+      })
   }, [])
 
   useEffect(() => {
@@ -76,7 +87,7 @@ export function PromptLibraryBrowser({ onClose, onInsert }: { onClose(): void; o
   }
 
   const study = (item: PromptLibraryItem) => {
-    savePromptEntry({
+    const entry: Omit<SavedPromptEntry, 'savedAt'> = {
       id: `civitai.${item.id}`,
       label: item.prompt.slice(0, 60).replace(/\s+/g, ' '),
       prompt: item.prompt,
@@ -86,8 +97,17 @@ export function PromptLibraryBrowser({ onClose, onInsert }: { onClose(): void; o
       steps: item.steps,
       cfgScale: item.cfgScale,
       source: { kind: 'civitai', itemId: item.id, username: item.username },
-    })
+    }
+    void saveServerPromptEntries([{ ...entry, savedAt: Date.now() }])
+      .then(refreshSaved)
+      .catch(() => savePromptEntry(entry)) // Offline fallback: the legacy store (and its change event) refresh the list.
     flash(`save-${item.id}`)
+  }
+
+  const removeEntry = (entry: SavedPromptEntry) => {
+    void deleteServerPromptEntry(entry.id)
+      .then(refreshSaved)
+      .catch(() => deletePromptEntry(entry.id)) // Offline fallback.
   }
 
   const filteredLibrary = savedFilter.trim()
@@ -161,7 +181,7 @@ export function PromptLibraryBrowser({ onClose, onInsert }: { onClose(): void; o
                     {entry.cfgScale !== undefined && <span>CFG {entry.cfgScale}</span>}
                   </div>
                   <div className="prompt-library-item-actions">
-                    {!entry.technique && <button type="button" className="icon-button" aria-label={`Remove ${entry.label}`} onClick={() => deletePromptEntry(entry.id)}><Trash2 size={14} /></button>}
+                    {!entry.technique && <button type="button" className="icon-button" aria-label={`Remove ${entry.label}`} onClick={() => removeEntry(entry)}><Trash2 size={14} /></button>}
                     <button type="button" className={insertedId === entry.id ? 'primary-button inserted' : 'primary-button'} onClick={() => { onInsert(entry.prompt, { id: entry.id, prompt: entry.prompt }); flash(entry.id) }}>{insertedId === entry.id ? <><Check size={14} />Inserted</> : 'Insert prompt'}</button>
                   </div>
                 </article>

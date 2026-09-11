@@ -6,6 +6,9 @@ packages:
 allowBuilds:
   electron: set this to true or false
   esbuild: true
+  # better-sqlite3 ships prebuilt binaries for common ABIs; the postinstall
+  # (prebuild-install) only compiles from source on unusual platforms.
+  better-sqlite3: true
 
 overrides:
   # pnpm 11 blocks git-resolved subdeps (blockExoticSubdeps). @electron/rebuild
