@@ -15,11 +15,12 @@
     "lint": "eslint . --max-warnings 0",
     "test": "node scripts/test-workflows.cjs",
     "test:storage": "node scripts/test-storage.cjs",
+    "test:filmstrip": "node scripts/test-filmstrip.cjs",
     "test:realtime": "node scripts/test-realtime.cjs",
     "test:engine": "node scripts/test-engine-process.cjs",
     "smoke:server": "node scripts/smoke-server.cjs",
     "test:e2e": "pnpm build && playwright test",
-    "test:all": "pnpm test && pnpm test:e2e && pnpm test:storage && pnpm test:realtime && pnpm test:engine && pnpm smoke:server"
+    "test:all": "pnpm test && pnpm test:e2e && pnpm test:storage && pnpm test:filmstrip && pnpm test:realtime && pnpm test:engine && pnpm smoke:server"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

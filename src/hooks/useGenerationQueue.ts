@@ -20,6 +20,7 @@ import { isPastRunningDeadline, isTerminalStatus, reduceJobPoll, type PollObserv
 import { extractOutputFile, extractOutputUrl, withTiledVideoDecode } from '../lib/workflow'
 import { extractAutomatedReferenceSet, hydrateLoadedJobs, playableOutputUrl, recordCharacterSheetImages, recordCharacterTurntable, recordLocationWalkthrough, recordMovieOutput } from '../lib/jobRecords'
 import { fetchServerJobs, saveServerJobs, serverStorageMigrationDone } from '../lib/serverStorage'
+import { registerOutputAsset } from '../media/httpPreview'
 import type { LiveProgress } from '../lib/useLivePreview'
 import { subscribe } from '../lib/useRealtime'
 import { useJobsStore } from '../state/jobsStore'
@@ -167,6 +168,13 @@ export function useGenerationQueue(options: {
               recordMovieOutput(job.movieLink, remote)
               let extractionError: string | null = null
               const local = reduction.job.localOutputPath
+              // Output attribution (wave 2d): the moment a video lands a
+              // local path, register the frame-indexed asset record and
+              // warm-start its filmstrip sheet — fire-and-forget, so a
+              // thumbnail problem can never surface on the completion path.
+              if (local && mediaType === 'video') {
+                registerOutputAsset({ path: local, width: job.width, height: job.height, duration: job.duration })
+              }
               const imageDescriptor = job.mediaType === 'image' ? extractOutputFile(history, promptId, mediaType) : undefined
               if (job.characterProjectId && imageDescriptor) {
                 extractionError = await recordCharacterSheetImages(job.characterProjectId, imageDescriptor, settings)

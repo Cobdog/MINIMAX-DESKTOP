@@ -23,5 +23,13 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: pnpm smoke:server
+      # ffmpeg is required by the filmstrip capability (wave 2d: server-side
+      # sprite-sheet thumbnails + the e2e video fixture). ubuntu-latest does
+      # NOT ship it by default. Decision: install it rather than let the
+      # tests skip on CI — the filmstrip route and the 11th e2e test then run
+      # for real, and future benchmark work needs ffmpeg too. Runners without
+      # ffmpeg still SKIP gracefully with a logged reason (test-side guard).
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: pnpm test:filmstrip
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e

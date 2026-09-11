@@ -17,7 +17,10 @@ import type { AppSettings, DesktopApi, MediaKind, PromptLibraryItem } from '../t
 
 const TOKEN_PARAM = 'token'
 
-function authToken() {
+/** The LAN access token from the launch link, when the server requires one.
+ *  Shared with the media-preview modules (filmstrip <img> sources cannot set
+ *  headers, same rule as mediaUrl below). */
+export function authToken() {
   return new URLSearchParams(window.location.search).get(TOKEN_PARAM) ?? ''
 }
 

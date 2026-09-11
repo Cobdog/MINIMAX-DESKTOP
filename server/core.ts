@@ -19,6 +19,7 @@ import { createServer as createHttpsServer } from 'node:https'
 import { networkInterfaces, tmpdir } from 'node:os'
 import { Readable } from 'node:stream'
 import WebSocket from 'ws'
+import { FILMSTRIP_CELL_WIDTH, FILMSTRIP_FPS, filmstripLayout } from '../src/media/filmstripLayout'
 import type { AppSettings, GpuTelemetry, LanStatus, ModelKind } from '../src/types'
 import { failureRef, logEvent, logFailure } from './logger'
 import { createStudioRepository, type StudioRepository } from './repo'
@@ -102,6 +103,25 @@ function runFfmpeg(executable: string, args: string[]) {
     child.stderr.on('data', (chunk) => { errorText += String(chunk) })
     child.on('error', (error) => reject(new Error(`FFmpeg could not be started. Install FFmpeg or set its location in Settings.\n${error.message}`)))
     child.on('close', (code) => { if (code === 0) resolvePromise(); else reject(new Error(errorText.trim() || `FFmpeg exited with code ${code}.`)) })
+  })
+}
+
+/** Probes a media file's duration with ffprobe (ffprobe ships next to ffmpeg
+ *  in every standard install; the path is derived from the configured ffmpeg
+ *  location). Any failure resolves null — callers fall back to their own
+ *  duration hint. */
+function probeMediaDurationSeconds(ffmpegExecutable: string, input: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const configured = ffmpegExecutable.trim().replace(/^(["'])|(["'])$/g, '') || 'ffmpeg'
+    const probeName = process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe'
+    const inConfiguredFolder = join(configured, probeName)
+    const besideBinary = join(dirname(configured), probeName)
+    const executable = existsSync(inConfiguredFolder) ? inConfiguredFolder : existsSync(besideBinary) ? besideBinary : probeName
+    execFile(executable, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', input], { windowsHide: true, timeout: 15_000 }, (error, stdout) => {
+      if (error) return resolve(null)
+      const parsed = Number.parseFloat(String(stdout).trim().split(/\r?\n/)[0] ?? '')
+      resolve(Number.isFinite(parsed) && parsed > 0 ? parsed : null)
+    })
   })
 }
 
@@ -652,6 +672,59 @@ export function createStudioServer(paths: StudioServerPaths) {
     return { path: output, name: basename(output) }
   }
 
+  // ---- Filmstrip sprite sheets (wave 2d) -----------------------------------
+  // One server-generated PNG per output video — the thumbnail substrate for
+  // Library cards, Queue rows, and the ClipEditor bin/timeline, replacing a
+  // <video> mount per item (the HTTP/1.1 6-connection ceiling). The layout
+  // math is shared with the client through src/media/filmstripLayout.ts so
+  // cols/rows/frameCount agree on both sides. Sheets are cached in a
+  // dot-folder next to the existing frames directory (nothing user-visible),
+  // content-addressed by the source's path hash, invalidated when the source
+  // is newer than the sheet, and single-flown: concurrent first requests
+  // share ONE ffmpeg run through the in-flight map.
+  type FilmstripSheet = { path: string; cols: number; rows: number; frameCount: number; sourceMtimeMs: number; sourceBytes: number }
+  let filmstripGenerationCount = 0
+  const filmstripsInFlight = new Map<string, Promise<FilmstripSheet>>()
+
+  async function generateFilmstripSheet(input: string, outputDirectory: string, ffmpegPath: string, durationHint: number | null): Promise<FilmstripSheet> {
+    const root = resolve(outputDirectory)
+    const source = await stat(input)
+    if (!source.isFile()) throw new Error('The media file is unavailable.')
+    const duration = durationHint && durationHint > 0 ? durationHint : (await probeMediaDurationSeconds(ffmpegPath, input)) ?? 5
+    const layout = filmstripLayout(duration)
+    const cacheDirectory = join(root, 'MiniMax Studio Frames', '.filmstrips')
+    await mkdir(cacheDirectory, { recursive: true })
+    const sourceKey = createHash('sha256').update(relative(root, input) || basename(input)).digest('hex').slice(0, 12)
+    const sheetPath = join(cacheDirectory, `${basename(input, extname(input))}.${sourceKey}.${layout.cols}x${layout.rows}.png`)
+    const cached = await stat(sheetPath).catch(() => null)
+    if (cached?.isFile() && cached.size > 0 && cached.mtimeMs >= source.mtimeMs) {
+      return { path: sheetPath, cols: layout.cols, rows: layout.rows, frameCount: layout.frameCount, sourceMtimeMs: source.mtimeMs, sourceBytes: source.size }
+    }
+    filmstripGenerationCount += 1
+    logEvent({ kind: 'filmstrip.generate', file: basename(sheetPath), cols: layout.cols, rows: layout.rows })
+    await runFfmpeg(ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error',
+      '-ss', '0', '-i', input, '-map', '0:v:0',
+      '-vf', `fps=${layout.fps},scale=${FILMSTRIP_CELL_WIDTH}:-2,tile=${layout.cols}x${layout.rows}`,
+      '-frames:v', '1', '-y', sheetPath,
+    ])
+    const generated = await stat(sheetPath).catch(() => null)
+    if (!generated?.size) throw new Error('FFmpeg completed without producing a filmstrip sheet. Check that the clip contains a video stream.')
+    return { path: sheetPath, cols: layout.cols, rows: layout.rows, frameCount: layout.frameCount, sourceMtimeMs: source.mtimeMs, sourceBytes: source.size }
+  }
+
+  /** Single-flight wrapper: concurrent requests for the same input path
+   *  (three cards thumbnailing the same render, or the attribution warm
+   *  start racing the first GET) share one generation promise. */
+  function getFilmstripSheet(input: string, outputDirectory: string, ffmpegPath: string, durationHint: number | null): Promise<FilmstripSheet> {
+    const pending = filmstripsInFlight.get(input)
+    if (pending) return pending
+    const run = generateFilmstripSheet(input, outputDirectory, ffmpegPath, durationHint)
+      .finally(() => { filmstripsInFlight.delete(input) })
+    filmstripsInFlight.set(input, run)
+    return run
+  }
+
   async function cancelPromptAt(comfyUrl: string, promptId: string) {
     if (!promptId) throw new Error('A ComfyUI prompt ID is required to cancel a generation.')
     const queue = await comfyFetch(comfyUrl, '/queue') as { queue_running?: unknown[][]; queue_pending?: unknown[][] }
@@ -827,7 +900,9 @@ export function createStudioServer(paths: StudioServerPaths) {
           // and <img>/<video> src on the media route). Constant-time compare.
           const header = request.headers['x-minimax-token']
           const headerToken = Array.isArray(header) ? header[0] : header
-          const queryTokenAllowed = url.pathname === '/api/lan/events' || url.pathname === '/api/lan/realtime' || url.pathname === '/api/lan/media'
+          // The filmstrip GET joins the browser-native group: <img> posters
+          // cannot set headers either. Query tokens stay GET-only there.
+          const queryTokenAllowed = url.pathname === '/api/lan/events' || url.pathname === '/api/lan/realtime' || url.pathname === '/api/lan/media' || (url.pathname === '/api/lan/assets/filmstrip' && request.method === 'GET')
           const presented = headerToken ?? (queryTokenAllowed ? url.searchParams.get('token') ?? undefined : undefined)
           if (!tokenMatches(presented, lanToken)) return sendJson(response, 401, { error: 'This link is no longer authorized. Request a fresh link with the current access token.' })
         }
@@ -1162,6 +1237,89 @@ export function createStudioServer(paths: StudioServerPaths) {
             const result = await joinVideosAt(inputs, clips, settings.outputDirectory, settings.ffmpegPath)
             return sendJson(response, 200, { ...result, url: `/api/lan/media?source=output&path=${encodeURIComponent(result.path)}` })
           } catch (error) { return sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) }) }
+        }
+        // Filmstrip sheets (wave 2d): GET/HEAD serves the sprite PNG for an
+        // output-contained video, generating it lazily on first request.
+        // Long cache with a content-derived ETag (source mtime+size): a
+        // re-render changes the ETag and regenerates the sheet. The layout
+        // and generation-count headers are debug/test affordances.
+        if (url.pathname === '/api/lan/assets/filmstrip' && (request.method === 'GET' || request.method === 'HEAD')) {
+          const requested = url.searchParams.get('path') ?? ''
+          const durationParam = Number(url.searchParams.get('duration'))
+          const root = resolve(settings.outputDirectory)
+          const candidate = requested ? resolve(requested) : root
+          const containment = relative(root, candidate)
+          if (!requested || containment.startsWith('..') || isAbsolute(containment)) return sendJson(response, 403, { error: 'Filmstrips are generated only for files inside the output directory.' })
+          if (!existsSync(candidate)) return sendJson(response, 404, { error: 'The media file is unavailable.' })
+          if (!mediaExtensions.has(extname(candidate).toLowerCase())) return sendJson(response, 400, { error: 'Filmstrips are generated for video files.' })
+          try {
+            const sheet = await getFilmstripSheet(candidate, settings.outputDirectory, settings.ffmpegPath, Number.isFinite(durationParam) && durationParam > 0 ? durationParam : null)
+            const etag = `"fs-${Math.round(sheet.sourceMtimeMs)}-${sheet.sourceBytes}"`
+            const headers: Record<string, string> = {
+              'content-type': 'image/png',
+              'cache-control': 'private, max-age=86400',
+              etag,
+              'x-minimax-filmstrip-cols': String(sheet.cols),
+              'x-minimax-filmstrip-rows': String(sheet.rows),
+              'x-minimax-filmstrip-frame-count': String(sheet.frameCount),
+              'x-minimax-filmstrip-generations': String(filmstripGenerationCount),
+            }
+            const ifNoneMatch = request.headers['if-none-match']
+            if ((Array.isArray(ifNoneMatch) ? ifNoneMatch[0] : ifNoneMatch) === etag) {
+              response.writeHead(304, headers)
+              return response.end()
+            }
+            const details = await stat(sheet.path)
+            headers['content-length'] = String(details.size)
+            response.writeHead(200, headers)
+            if (request.method === 'HEAD') return response.end()
+            return createReadStream(sheet.path).pipe(response)
+          } catch (error) {
+            return sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) })
+          }
+        }
+        // Filmstrip attribution hook: the queue calls this the moment a video
+        // job lands a local output path. Registers the frame-indexed asset
+        // record (fps 24 / frame_count = duration × 24 — an APPROXIMATION
+        // from the job record until real probing lands) and warm-starts the
+        // sheet. Registration is best-effort; generation failure never fails
+        // the call.
+        if (url.pathname === '/api/lan/assets/filmstrip' && request.method === 'POST') {
+          const body = await readJson(request, 10_000)
+          const requested = typeof body.path === 'string' ? body.path : ''
+          const root = resolve(settings.outputDirectory)
+          const candidate = requested ? resolve(requested) : root
+          const containment = relative(root, candidate)
+          if (!requested || containment.startsWith('..') || isAbsolute(containment)) return sendJson(response, 403, { error: 'Assets are registered only for files inside the output directory.' })
+          if (!existsSync(candidate)) return sendJson(response, 404, { error: 'The media file is unavailable.' })
+          if (!mediaExtensions.has(extname(candidate).toLowerCase())) return sendJson(response, 400, { error: 'Only video outputs can be registered.' })
+          const details = await stat(candidate)
+          if (!details.isFile()) return sendJson(response, 404, { error: 'The media file is unavailable.' })
+          const duration = typeof body.duration === 'number' && Number.isFinite(body.duration) && body.duration > 0
+            ? body.duration
+            : (await probeMediaDurationSeconds(settings.ffmpegPath, candidate)) ?? 0
+          const frameCount = Math.max(0, Math.round(duration * FILMSTRIP_FPS))
+          if (studioRepo) {
+            try {
+              studioRepo.upsertAsset({
+                id: candidate,
+                kind: 'video',
+                path: candidate,
+                mime: mediaMimeTypes[extname(candidate).toLowerCase()] ?? 'video/mp4',
+                bytes: details.size,
+                width: typeof body.width === 'number' && Number.isFinite(body.width) ? body.width : undefined,
+                height: typeof body.height === 'number' && Number.isFinite(body.height) ? body.height : undefined,
+                durationMs: Math.round(duration * 1000),
+                fps: FILMSTRIP_FPS,
+                frameCount,
+              })
+            } catch (error) {
+              logFailure('assets/register', error, { file: basename(candidate) }, 'warn')
+            }
+          }
+          void getFilmstripSheet(candidate, settings.outputDirectory, settings.ffmpegPath, duration > 0 ? duration : null)
+            .catch((error: unknown) => { logFailure('filmstrip/generate', error, { file: basename(candidate) }, 'debug') })
+          return sendJson(response, 200, { path: candidate, registered: Boolean(studioRepo), fps: FILMSTRIP_FPS, frameCount, duration })
         }
         // HEAD is accepted alongside GET for the output-contained path (same
         // headers, no body); the upstream ComfyUI proxy path stays GET-only.

@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, FolderOpen, GripVertical, Image, LoaderCircle, Magnet, Plus, Save, Scissors, Trash2, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, FolderOpen, Film, GripVertical, Image, LoaderCircle, Magnet, Plus, Save, Scissors, Trash2, X } from 'lucide-react'
 import type { AppSettings, ClipItem, ClipProject, GenerationJob, MediaFile } from '../types'
+import { FilmstripPoster } from './PooledVideoCard'
+import { outputPathFromMediaUrl } from '../media/httpPreview'
+import { useFilmstrip } from '../media/useFilmstrip'
+import { usePooledVideo } from '../media/usePooledVideo'
 import { createId } from '../lib/createId'
 
 type DragItem = { origin: 'bin' | 'timeline'; clip: ClipItem }
@@ -160,7 +164,7 @@ export function ClipEditor({ settings, jobs, onUseFrame, onNotice }: {
       <aside className="media-bin" aria-label="Project media bin">
         <div className="editor-pane-heading"><div><strong>Media bin</strong><span>{project.media.length + completed.length} available clips</span></div><button onClick={() => void chooseLocal()} aria-label="Import video"><Plus size={15} /></button></div>
         <div className="media-bin-list">
-          {project.media.map((clip) => <MediaBinItem key={clip.id} clip={clip} onPreview={setPreview} onAdd={addToTimeline} onDrag={(item) => setDragged({ origin: 'bin', clip: item })} onDuration={(duration) => update((value) => ({ ...value, media: value.media.map((item) => item.id === clip.id ? { ...item, duration } : item) }))} />)}
+          {project.media.map((clip) => <MediaBinItem key={clip.id} clip={clip} onPreview={setPreview} onAdd={addToTimeline} onDrag={(item) => setDragged({ origin: 'bin', clip: item })} />)}
           {completed.map((job) => {
             const clip = { id: `job-${job.id}`, name: shorten(job.prompt), source: job.outputUrl!, duration: job.duration, createdAt: job.createdAt }
             return <MediaBinItem key={clip.id} clip={clip} meta={`${job.width} × ${job.height}`} onPreview={setPreview} onAdd={addToTimeline} onDrag={(item) => setDragged({ origin: 'bin', clip: item })} />
@@ -172,7 +176,7 @@ export function ClipEditor({ settings, jobs, onUseFrame, onNotice }: {
       <div className="editor-main-column">
         <section className="program-monitor">
           <div className="editor-pane-heading"><div><strong>Preview</strong><span>{programClip ? programClip.name : 'Select a clip from the bin or timeline'}</span></div>{exportUrl && <span className="export-chip">Latest export</span>}</div>
-          <div className="program-stage">{programClip ? <ProgramPlayback key={`${programClip.id}:${programClip.source}`} clip={programClip} /> : <div><Scissors size={30} /><strong>No clip selected</strong><span>Choose media to preview it here.</span></div>}</div>
+          <div className="program-stage">{programClip ? <ProgramPlayback key={`${programClip.id}:${programClip.source}:${programClip.start ?? 0}:${programClip.end ?? 'end'}`} clip={programClip} paused={Boolean(selected)} /> : <div><Scissors size={30} /><strong>No clip selected</strong><span>Choose media to preview it here.</span></div>}</div>
         </section>
 
         <section className="timeline-panel">
@@ -181,7 +185,7 @@ export function ClipEditor({ settings, jobs, onUseFrame, onNotice }: {
           {project.clips.length === 0 ? <div className={`timeline-empty ${dragged ? 'drop-ready' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); drop() }}><Scissors size={24} /><strong>Drop clips here</strong><span>Clips snap together in timeline order.</span></div> : <div className={`clip-timeline ${dragged ? 'drag-active' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); drop() }}>
             {project.clips.map((clip, index) => <article className={`timeline-clip ${programClip?.id === clip.id ? 'active' : ''}`} style={{ flexBasis: `${Math.max(165, Math.min(360, clipLength(clip) * 28))}px` }} key={clip.id} draggable onDragStart={() => setDragged({ origin: 'timeline', clip })} onDragEnd={() => setDragged(null)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); drop(clip.id) }} onClick={() => setPreview(clip)} onDoubleClick={() => open(clip)} onContextMenu={(event) => { event.preventDefault(); open(clip) }}>
               <div className="clip-grip"><GripVertical size={14} /><span>{index + 1}</span></div>
-              <video src={clip.source} muted preload="metadata" onLoadedMetadata={(event) => { const duration = event.currentTarget.duration; if (Number.isFinite(duration) && !clip.duration) update((value) => ({ ...value, clips: value.clips.map((item) => item.id === clip.id ? { ...item, duration } : item) })) }} />
+              <TimelineClipPoster clip={clip} />
               <div className="timeline-clip-copy"><strong title={clip.name}>{clip.name}</strong><small>{formatTime(clipLength(clip))} · {formatTime(clip.start ?? 0)} in</small></div>
               <div className="clip-actions"><button onClick={(event) => { event.stopPropagation(); move(clip, -1) }} disabled={!index} aria-label="Move clip left"><ChevronLeft size={14} /></button><button onClick={(event) => { event.stopPropagation(); move(clip, 1) }} disabled={index === project.clips.length - 1} aria-label="Move clip right"><ChevronRight size={14} /></button><button onClick={(event) => { event.stopPropagation(); open(clip) }}>Edit</button></div>
             </article>)}
@@ -192,7 +196,7 @@ export function ClipEditor({ settings, jobs, onUseFrame, onNotice }: {
 
     {selected && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelected(null) }}><section className="clip-modal" role="dialog" aria-modal="true" aria-labelledby="clip-title">
       <header><div><span>CLIP OPTIONS</span><strong id="clip-title">{selected.name}</strong></div><button onClick={() => setSelected(null)} aria-label="Close"><X size={18} /></button></header>
-      <video src={selected.source} controls preload="metadata" onLoadedMetadata={(event) => { const duration = event.currentTarget.duration; if (!end) setEnd(duration); if (!selected.duration && Number.isFinite(duration)) setSelected({ ...selected, duration }) }} />
+      <ClipModalVideo selected={selected} onMetadata={(duration) => { if (!end) setEnd(duration); if (!selected.duration && Number.isFinite(duration)) setSelected({ ...selected, duration }) }} />
       <div className="trim-fields"><label>Start (seconds)<input type="number" min="0" max={selected.duration} step="0.04" value={start} onChange={(event) => setStart(Number(event.target.value))} /></label><label>End (seconds)<input type="number" min="0.04" max={selected.duration} step="0.04" value={end} onChange={(event) => setEnd(Number(event.target.value))} /></label><button className="secondary-button" onClick={saveTrim}><Scissors size={15} />Set start / end</button></div>
       <div className="frame-grab-actions"><button type="button" className="secondary-button" onClick={() => void grab('first')} disabled={busy === 'frame'}>{frameEdge === 'first' ? <LoaderCircle className="spin" size={15} /> : <Image size={15} />}{frameEdge === 'first' ? 'Extracting start…' : 'Grab start frame'}</button><button type="button" className="secondary-button" onClick={() => void grab('last')} disabled={busy === 'frame'}>{frameEdge === 'last' ? <LoaderCircle className="spin" size={15} /> : <Image size={15} />}{frameEdge === 'last' ? 'Extracting end…' : 'Grab end frame'}</button>{busy === 'frame' && <span role="status">Decoding one frame with FFmpeg…</span>}</div>
       {frame && <div className="frame-route"><img src={frame.preview} alt="Extracted frame" /><div><strong>How should this frame be used?</strong><small>The next render remains separate until you add it to this timeline and export.</small><button onClick={() => onUseFrame(frame, 'i2v', selected)}>Use as I2V first frame</button><button onClick={() => onUseFrame(frame, 'first', selected)}>First + last: first</button><button onClick={() => onUseFrame(frame, 'last', selected)}>First + last: last</button><button onClick={() => onUseFrame(frame, 'reference', selected)}>Reference picture</button></div></div>}
@@ -201,39 +205,63 @@ export function ClipEditor({ settings, jobs, onUseFrame, onNotice }: {
   </div>
 }
 
-function MediaBinItem({ clip, meta, onPreview, onAdd, onDrag, onDuration }: { clip: ClipItem; meta?: string; onPreview(clip: ClipItem): void; onAdd(clip: ClipItem): void; onDrag(clip: ClipItem): void; onDuration?(duration: number): void }) {
+function MediaBinItem({ clip, meta, onPreview, onAdd, onDrag }: { clip: ClipItem; meta?: string; onPreview(clip: ClipItem): void; onAdd(clip: ClipItem): void; onDrag(clip: ClipItem): void }) {
+  // Static poster (wave 2d): bin items never mount a <video> — duration is
+  // learned from the job record or when the clip is opened for trimming.
+  const filmstrip = useFilmstrip(outputPathFromMediaUrl(clip.source), clip.duration)
   return <article className="media-bin-item" draggable onDragStart={() => onDrag(clip)} onClick={() => onPreview(clip)}>
-    <video src={clip.source} muted preload="metadata" onLoadedMetadata={(event) => { if (!clip.duration && Number.isFinite(event.currentTarget.duration)) onDuration?.(event.currentTarget.duration) }} />
+    <FilmstripPoster filmstrip={filmstrip} mode="frame" label={clip.name}><Film size={15} /></FilmstripPoster>
     <div><strong title={clip.name}>{clip.name}</strong><small>{meta ?? formatTime(clip.duration ?? 0)}</small></div>
     <button onClick={(event) => { event.stopPropagation(); onAdd(clip) }} aria-label={`Add ${clip.name} to timeline`}><Plus size={14} /></button>
   </article>
 }
 
-function ProgramPlayback({ clip }: { clip: ClipItem }) {
+/** Timeline strips: static filmstrip frame — the strip previously mounted a
+ *  <video> per clip purely as a thumbnail (wave 2d). Clip duration still
+ *  backfills through the trim modal's lease when a clip is opened. */
+function TimelineClipPoster({ clip }: { clip: ClipItem }) {
+  const filmstrip = useFilmstrip(outputPathFromMediaUrl(clip.source), clip.duration)
+  return <FilmstripPoster filmstrip={filmstrip} mode="frame" label={clip.name}><Film size={15} /></FilmstripPoster>
+}
+
+/** The trim modal's player: a pooled lease (controls). The lease is released
+ *  on unmount, on preemption, or after the idle-pause window. */
+function ClipModalVideo({ selected, onMetadata }: { selected: ClipItem; onMetadata(duration: number): void }) {
+  const { containerRef, live, resume } = usePooledVideo({ src: selected.source, controls: true, onLoadedMetadata: (video) => { if (Number.isFinite(video.duration) && video.duration > 0) onMetadata(video.duration) } })
+  return <div className="pooled-video-slot">
+    <div ref={containerRef} />
+    {!live && <button className="secondary-button pooled-video-resume" onClick={resume}>Resume preview</button>}
+  </div>
+}
+
+/** The program monitor: a pooled lease with the same in/out behavior the
+ *  direct element had (seek to start, rewind before replay, pause at end).
+ *  `paused` releases the lease (e.g. while the trim modal is open) so the
+ *  editor view never holds more than one element. */
+function ProgramPlayback({ clip, paused }: { clip: ClipItem; paused: boolean }) {
   const [failed, setFailed] = useState(false)
   const startAt = Math.max(0, clip.start ?? 0)
   const endAt = clip.end && clip.end > startAt ? clip.end : undefined
-  if (failed) return <div className="playback-error"><strong>Preview unavailable</strong><span>The file may have moved or use a codec this Windows installation cannot decode.</span></div>
-  return <video
-    key={`${clip.id}:${clip.source}:${startAt}:${endAt ?? 'end'}`}
-    src={clip.source}
-    controls
-    playsInline
-    preload="auto"
-    onError={() => setFailed(true)}
-    onLoadedMetadata={(event) => {
-      const video = event.currentTarget
+  const { containerRef, live, resume } = usePooledVideo({
+    src: clip.source,
+    active: !paused,
+    controls: true,
+    onError: () => setFailed(true),
+    onLoadedMetadata: (video) => {
       if (Number.isFinite(startAt) && startAt < video.duration) video.currentTime = startAt
-    }}
-    onPlay={(event) => {
-      const video = event.currentTarget
+    },
+    onPlay: (video) => {
       if (endAt && video.currentTime >= endAt - .04) video.currentTime = startAt
-    }}
-    onTimeUpdate={(event) => {
-      const video = event.currentTarget
+    },
+    onTimeUpdate: (video) => {
       if (endAt && video.currentTime >= endAt) { video.pause(); video.currentTime = endAt }
-    }}
-  />
+    },
+  })
+  if (failed) return <div className="playback-error"><strong>Preview unavailable</strong><span>The file may have moved or use a codec this Windows installation cannot decode.</span></div>
+  return <div className="pooled-video-slot">
+    <div ref={containerRef} />
+    {!live && !paused && <div className="pooled-video-idle"><span>Preview paused to save connections.</span><button className="secondary-button" onClick={resume}>Resume preview</button></div>}
+  </div>
 }
 
 function clipLength(clip: ClipItem) { return Math.max(0, (clip.end ?? clip.duration ?? 0) - (clip.start ?? 0)) }

@@ -1,2 +1,4 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# The committed e2e fixture is a binary — never normalize it.
+*.mp4 binary

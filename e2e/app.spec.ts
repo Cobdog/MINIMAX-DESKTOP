@@ -1,3 +1,6 @@
+import { spawn } from 'node:child_process'
+import fs from 'node:fs'
+import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 
 // Every test attaches the console/page-error guard — the decomposition
@@ -392,4 +395,117 @@ test('Create view core flow is fully keyboard-operable', async ({ page }) => {
   // Let the debounced server save land before the context closes.
   await page.waitForTimeout(1_200)
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+// Wave 2d — filmstrip posters + the video element pool, proven at the view
+// level. The OLD Library mounted one <video controls preload="metadata"> per
+// card; 12 completed jobs meant 12 range-request-holding elements against
+// the browser's 6-connections-per-origin ceiling. Now cards are static
+// sprite-sheet posters and a pooled element exists only while playing.
+// Engine-independent: jobs are seeded straight through the storage API and
+// the filmstrip route needs only ffmpeg (installed on CI via apt; runners
+// without it skip this test with a logged reason).
+test('library cards render filmstrip posters and pool their video playback', async ({ page }) => {
+  const ffmpegAvailable = await new Promise<boolean>((resolve) => {
+    const probe = spawn('ffmpeg', ['-version'])
+    probe.on('error', () => resolve(false))
+    probe.on('close', (code) => resolve(code === 0))
+  })
+  test.skip(!ffmpegAvailable, 'ffmpeg is not installed on this runner — the filmstrip capability needs it (CI installs it; see .github/workflows/ci.yml)')
+
+  const base = 'http://127.0.0.1:4199'
+  const outputDirectory = path.resolve('test-home/e2e-filmstrip-output')
+  const settingsResponse = await fetch(`${base}/api/lan/settings`)
+  const originalSettings = ((await settingsResponse.json()) as { settings: Record<string, unknown> }).settings
+  const postSettings = (settings: Record<string, unknown>) => fetch(`${base}/api/lan/settings`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings }),
+  })
+
+  // Stage the shared fixture 12 times under a deterministic output directory
+  // (the settings are restored afterwards so later runs stay clean), then
+  // seed 12 completed jobs pointing at those copies through the storage API.
+  fs.mkdirSync(outputDirectory, { recursive: true })
+  const fixture = path.resolve(__dirname, 'fixtures/sample-clip.mp4')
+  const seedCount = 12
+  const jobs = Array.from({ length: seedCount }, (_, index) => {
+    const name = `e2e-filmstrip-${String(index + 1).padStart(2, '0')}.mp4`
+    const filePath = path.join(outputDirectory, name)
+    fs.copyFileSync(fixture, filePath)
+    return {
+      id: `e2e-filmstrip-${String(index + 1).padStart(2, '0')}`,
+      mode: 'text',
+      status: 'completed',
+      prompt: `wave 2d pooled clip number ${index + 1}`,
+      createdAt: Date.now() - (index + 1) * 60_000,
+      progress: 100,
+      width: 320,
+      height: 180,
+      duration: 3,
+      provider: 'minimax',
+      mediaType: 'video',
+      outputUrl: `/api/lan/media?source=output&path=${encodeURIComponent(filePath)}`,
+      localOutputPath: filePath,
+    }
+  })
+  await postSettings({ ...originalSettings, outputDirectory })
+  const seeded = await fetch(`${base}/api/lan/jobs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jobs }),
+  })
+  expect(seeded.ok, 'seeding jobs through the storage API must succeed').toBe(true)
+
+  try {
+    const problems = await trackErrors(page)
+    await page.goto('/')
+    await page.getByRole('button', { name: /library/i }).first().click()
+    await expect(page.getByRole('heading', { name: /video library/i })).toBeVisible()
+
+    // Exact card lookup: card text runs together ("number 1" + "320 × 180"),
+    // and "number 1" is a substring of "number 10" — so match the prompt's
+    // own <strong> element by its exact text.
+    const cardFor = (index: number) => page.locator('.library-card').filter({ has: page.getByText(`wave 2d pooled clip number ${index}`, { exact: true }) })
+    await expect(cardFor(1)).toBeVisible({ timeout: 15_000 })
+    expect(await page.locator('.library-card').count()).toBeGreaterThanOrEqual(seedCount)
+
+    // Filmstrip posters: every card ends up with a loaded sprite-sheet <img>
+    // (each first load triggers one server-side ffmpeg generation — poll,
+    // twelve sheets take a moment to generate on first view).
+    await expect(page.locator('.library-card img.filmstrip-poster').first()).toBeVisible({ timeout: 30_000 })
+    await expect.poll(() => page.evaluate(() => Array.from(document.querySelectorAll<HTMLImageElement>('.library-card img.filmstrip-poster')).filter((image) => image.complete && image.naturalWidth > 0).length), { timeout: 30_000 }).toBeGreaterThanOrEqual(seedCount)
+
+    // The pool bound: no <video> is mounted for posters — the whole document
+    // holds at most 4 (the pool size) at any moment, versus one per card
+    // before the rewire. Pooled elements live detached until leased, so a
+    // static grid contributes ZERO.
+    expect(await page.evaluate(() => document.querySelectorAll('video').length)).toBeLessThanOrEqual(4)
+
+    // Click a card → its pooled video plays (controls, exclusive).
+    await cardFor(1).locator('.play-overlay').click()
+    await page.waitForFunction(() => {
+      const video = document.querySelector('video')
+      return Boolean(video && !video.paused && video.readyState >= 2)
+    }, undefined, { timeout: 15_000 })
+    expect(await page.evaluate(() => document.querySelectorAll('video').length)).toBe(1)
+
+    // Click another card → the first lease is released (poster back, its
+    // connection dropped) and exactly one video — the NEW card's — plays.
+    await cardFor(2).locator('.play-overlay').click()
+    await page.waitForFunction(() => {
+      const videos = document.querySelectorAll('video')
+      if (videos.length !== 1) return false
+      const video = videos[0]
+      return Boolean(!video.paused && video.readyState >= 2)
+    }, undefined, { timeout: 15_000 })
+    const playingSource = await page.evaluate(() => document.querySelector('video')?.getAttribute('src') ?? '')
+    expect(playingSource).toContain('e2e-filmstrip-02')
+    await expect(cardFor(1).locator('.play-overlay')).toBeVisible()
+
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    // Restore the pre-test settings so the shared e2e home stays clean.
+    await postSettings(originalSettings)
+  }
 })

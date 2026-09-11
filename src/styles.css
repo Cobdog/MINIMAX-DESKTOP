@@ -846,6 +846,22 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .timeline-clip:hover { border-color: var(--line-strong); }
 .timeline-clip.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px rgba(190,255,69,.15); }
 .timeline-clip video { display: block; width: 100%; height: 52px; min-height: 0; background:var(--color-surface-abyss); object-fit: cover; pointer-events: none; }
+/* Wave 2d — filmstrip posters + pooled video leases: thumbnails are static
+   sprite-sheet images; a <video> only exists while a pooled lease is live. */
+.pooled-video-card { position: relative; display: grid; aspect-ratio: 16 / 9; overflow: hidden; background: var(--color-surface-abyss); }
+.pooled-video-card video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.pooled-video-card .play-overlay { position: absolute; left: 50%; top: 50%; translate: -50% -50%; display: grid; place-items: center; width: 46px; height: 46px; padding: 0; border: 1px solid rgba(190,255,69,.4); border-radius: 999px; background: color-mix(in srgb, var(--color-surface-abyss) 72%, transparent); color: var(--accent); cursor: pointer; transition: scale .12s ease, background .12s ease; }
+.pooled-video-card .play-overlay:hover { scale: 1.06; background: color-mix(in srgb, var(--color-surface-abyss) 45%, transparent); }
+.filmstrip-poster { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: var(--color-surface-abyss); }
+.filmstrip-poster-frame { display: grid; place-items: center; overflow: hidden; background: var(--color-surface-abyss); background-repeat: no-repeat; color: var(--muted-2); }
+.filmstrip-poster-empty { display: grid; place-items: center; }
+.job-thumbnail .filmstrip-poster-frame { width: 100%; height: 100%; }
+.media-bin-item .filmstrip-poster-frame { width: 68px; aspect-ratio: 16 / 9; border-radius: 5px; pointer-events: none; }
+.timeline-clip .filmstrip-poster-frame { display: block; width: 100%; height: 52px; min-height: 0; pointer-events: none; }
+.pooled-video-slot { display: grid; place-items: center; width: 100%; height: 100%; min-height: 0; }
+.pooled-video-slot video { display: block; width: 100%; height: 100%; max-height: 470px; object-fit: contain; background: #000; }
+.clip-modal .pooled-video-slot video { max-height: 52vh; }
+.pooled-video-idle { display: grid; place-items: center; gap: 8px; color: var(--muted); font-size: var(--text-sm); text-align: center; }
 .clip-grip { display: flex; align-items: center; gap: 5px; padding: 0 7px; background: var(--surface-2); color: var(--muted); cursor: grab; }
 .clip-grip:active { cursor: grabbing; }
 .clip-grip span { display: grid; place-items: center; min-width: 18px; height: 16px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); font-size:var(--text-xs); font-weight: 700; }
