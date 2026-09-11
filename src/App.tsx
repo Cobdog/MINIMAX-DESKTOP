@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { createId } from './lib/createId'
 import {
   Aperture,
   Clapperboard,
@@ -21,13 +20,13 @@ import {
   Watch,
   WandSparkles,
 } from 'lucide-react'
-import { buildMiniMaxWorkflow, outputFileFromUrl } from './lib/workflow'
 import { STORAGE_ERROR_EVENT } from './lib/libraryStorage'
-import { buildLtx25Workflow } from './lib/ltx25Workflow'
-import { ACE_STEP_REQUIRED_NODES, buildAceStepWorkflow, inferAceStepSelections } from './lib/aceStepWorkflow'
-import { fitWholeCharacter, prepareImage } from './lib/imageCrop'
-import { inferLtx25Selections, inferSelections } from './lib/modelSelection'
 import { choices } from './lib/comfyInfo'
+import { outputFileFromUrl } from './lib/workflow'
+import { ACE_STEP_REQUIRED_NODES, inferAceStepSelections } from './lib/aceStepWorkflow'
+import { fitWholeCharacter } from './lib/imageCrop'
+import { inferLtx25Selections, inferSelections } from './lib/modelSelection'
+import { findH3PreviewOverrideNode, h3StackReport } from './lib/h3Stack'
 import { useLivePreview } from './lib/useLivePreview'
 import { ZImageWorkspace } from './components/ZImageWorkspace'
 import { ClipEditor } from './components/ClipEditor'
@@ -50,14 +49,11 @@ import { SettingsView } from './views/SettingsView'
 import { useStudioSession } from './hooks/useStudioSession'
 import { useGenerationQueue } from './hooks/useGenerationQueue'
 import { useCreateWorkspace, type VideoClipDraft } from './hooks/useCreateWorkspace'
+import { useGenerationFlows } from './hooks/useGenerationFlows'
 import { buildPromptAssistantRequest } from './lib/promptComposer'
 import { buildCharacterDialogueRequest } from './lib/dialogPolicy'
-import { diagnosticPrompt, findH3PreviewOverrideNode, h3StackReport } from './lib/h3Stack'
-import { composeH3Prompt, resolveRenderReferenceImages } from './lib/promptPolicies'
 import type {
-  AceStepGenerationOptions,
   GenerationJob,
-  Ltx25GenerationOptions,
   LocationProject,
   MediaFile,
   MovieProject,
@@ -85,10 +81,6 @@ function App() {
   const [ltxResetKey, setLtxResetKey] = useState(0)
   const [zImageResetKey, setZImageResetKey] = useState(0)
   const [ltxResetAt, setLtxResetAt] = useState(0)
-  const [submitting, setSubmitting] = useState(false)
-  const [ltxSubmitting, setLtxSubmitting] = useState(false)
-  const [aceSubmitting, setAceSubmitting] = useState(false)
-  const [diagnosticRunning, setDiagnosticRunning] = useState(false)
   const [notice, setNotice] = useState<{ tone: 'error' | 'success' | 'neutral'; text: string } | null>(null)
   const [promptSuggestion, setPromptSuggestion] = useState('')
   const [promptingTool, setPromptingTool] = useState<'enhance' | 'timeline' | 'audio' | null>(null)
@@ -102,7 +94,7 @@ function App() {
 
   // Job queue: persistence, ComfyUI polling, deadline sweep, cancellation.
   const queue = useGenerationQueue({ settings, connected: status.connected, notify })
-  const { jobs, setJobs, cancellingIds, setCancellingIds, cancellationRequests, cancelJob, onLiveProgress } = queue
+  const { jobs, cancellingIds, cancelJob, onLiveProgress } = queue
 
   // Keep the lightweight ComfyUI event socket active even when image previews
   // are hidden so queue, node, and sampler-step progress remain real-time.
@@ -127,7 +119,7 @@ function App() {
     characterProjects, wardrobeProjects, locationProjects,
     selectedReferenceCharacterIds, setSelectedReferenceCharacterIds,
     selectedReferenceLocationIds, setSelectedReferenceLocationIds,
-    activeJobId, setActiveJobId, movieHandoff, setMovieHandoff, characterHandoff, setCharacterHandoff,
+    activeJobId, setActiveJobId, setMovieHandoff, setCharacterHandoff,
     createResetKey, resetCreateWorkspace: resetWorkspaceFields,
     chooseMedia, chooseMany, editVideoReference, refreshSourceMedia,
     workspaceBindingsFor, loadReferenceCharacter, loadReferenceLocation, loadReferenceWardrobe,
@@ -309,283 +301,17 @@ function App() {
     notify('success', `${file.name} loaded as the LTX 2.5 image-to-video starting frame.`)
   }
 
-  const generateLtx = async (options: Ltx25GenerationOptions, input: MediaFile | null, handoff?: { characterProjectId?: string; locationProjectId?: string }) => {
-    if (!settings) return 'Studio settings are still loading.'
-    if (!status.connected) {
-      const message = 'Start ComfyUI and verify the server connection in Settings.'
-      notify('error', message)
-      return message
-    }
-    if (!options.prompt) {
-      const message = 'Add an LTX prompt before generating.'
-      notify('error', message)
-      return message
-    }
-    if (options.mode === 'image' && !input) {
-      const message = 'Choose a first frame for LTX image-to-video.'
-      notify('error', message)
-      return message
-    }
-    if (!ltxSelection.diffusion || !ltxSelection.textEncoder || !ltxSelection.videoVae || !ltxSelection.audioVae || !ltxSelection.latentUpscaler) {
-      const message = 'The LTX‑2.5 distilled transformer, Gemma encoder, video/audio VAEs, or latent spatial upscaler is missing.'
-      notify('error', message)
-      return message
-    }
-    const missingNodes = LTX_NATIVE_REQUIRED_NODES.filter((node) => !info[node])
-    if (missingNodes.length) {
-      const message = `Update ComfyUI before using LTX‑2.5. Missing core nodes: ${missingNodes.join(', ')}.`
-      notify('error', message)
-      return message
-    }
-
-    const localId = createId()
-    const job: GenerationJob = { id: localId, provider: 'ltx25', mode: options.mode, prompt: options.prompt, createdAt: Date.now(), status: 'queued', progress: 2, progressLabel: input ? 'Preparing first frame' : 'Preparing workflow', width: options.width, height: options.height, duration: options.duration, characterProjectId: handoff?.characterProjectId ?? characterHandoff ?? undefined, locationProjectId: handoff?.locationProjectId }
-    setJobs((current) => [job, ...current])
-    setActiveJobId(localId)
-    setLtxSubmitting(true)
-    notify('neutral', 'Preparing the official LTX‑2.5 ComfyUI graph…')
-    try {
-      const uploaded = input ? await window.minimax.uploadImageData(settings.comfyUrl, await prepareImage(input, options.width, options.height)) : undefined
-      if (cancellationRequests.current.has(localId)) throw new Error('Generation cancelled before submission.')
-      const graph = buildLtx25Workflow(options, ltxSelection, uploaded)
-      const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, live.clientId)
-      if (cancellationRequests.current.has(localId)) {
-        await window.minimax.cancelPrompt(settings.comfyUrl, response.prompt_id)
-        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'cancelled' } : item))
-        return 'The LTX 2.5 survey was cancelled before it started.'
-      } else {
-        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: 'Waiting for ComfyUI to start' } : item))
-        notify('success', `${options.preset === 'quality' ? 'Two-stage quality' : 'Single-stage Turbo'} LTX‑2.5 generation added to ComfyUI.`)
-        if (!handoff) setCharacterHandoff(null)
-        return null
-      }
-    } catch (error) {
-      const cancelled = cancellationRequests.current.has(localId)
-      const message = cancelled ? 'LTX generation cancelled.' : error instanceof Error ? error.message : String(error)
-      setJobs((current) => current.map((item) => item.id === localId ? { ...item, status: cancelled ? 'cancelled' : 'failed', error: cancelled ? undefined : error instanceof Error ? error.message : String(error) } : item))
-      notify(cancelled ? 'success' : 'error', message)
-      return message
-    } finally {
-      cancellationRequests.current.delete(localId)
-      setLtxSubmitting(false)
-    }
-  }
-
-  const generateAceStep = async (options: AceStepGenerationOptions) => {
-    if (!settings) return
-    if (!status.connected) {
-      notify('error', 'Start ComfyUI and verify the server connection in Settings.')
-      return
-    }
-    const selectedModel = options.model === 'sft' ? aceSelection.sft : aceSelection.base
-    if (!selectedModel || !aceSelection.vae || !aceSelection.textEncoderSmall || !aceSelection.textEncoderLarge) {
-      notify('error', `The ACE-Step ${options.model.toUpperCase()} model, audio VAE, and both Qwen ACE text encoders are required.`)
-      return
-    }
-    const missingNodes = ACE_STEP_REQUIRED_NODES.filter((node) => !info[node])
-    if (missingNodes.length) {
-      notify('error', `Update ComfyUI before using ACE-Step 1.5. Missing core nodes: ${missingNodes.join(', ')}.`)
-      return
-    }
-    const localId = createId()
-    const job: GenerationJob = {
-      id: localId, provider: 'acestep', mediaType: 'audio', mode: 'text', prompt: options.tags,
-      createdAt: Date.now(), status: 'queued', progress: 2, progressLabel: 'Preparing ACE-Step workflow',
-      width: 0, height: 0, duration: options.duration,
-    }
-    setJobs((current) => [job, ...current])
-    setAceSubmitting(true)
-    notify('neutral', `Preparing the official ACE-Step XL ${options.model.toUpperCase()} ComfyUI graph…`)
-    try {
-      const graph = buildAceStepWorkflow(options, aceSelection)
-      const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, live.clientId)
-      if (cancellationRequests.current.has(localId)) {
-        await window.minimax.cancelPrompt(settings.comfyUrl, response.prompt_id)
-        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'cancelled' } : item))
-      } else {
-        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: 'Waiting for ComfyUI to start' } : item))
-        notify('success', `ACE-Step XL ${options.model.toUpperCase()} music generation added to ComfyUI.`)
-      }
-    } catch (error) {
-      const cancelled = cancellationRequests.current.has(localId)
-      setJobs((current) => current.map((item) => item.id === localId ? { ...item, status: cancelled ? 'cancelled' : 'failed', error: cancelled ? undefined : error instanceof Error ? error.message : String(error) } : item))
-      if (cancelled) notify('success', 'Music generation cancelled.')
-      else notify('error', error instanceof Error ? error.message : String(error))
-    } finally {
-      cancellationRequests.current.delete(localId)
-      setAceSubmitting(false)
-    }
-  }
-
-  const generate = async () => {
-    if (!settings) return
-    if (upscaleMode === 'ltx' && (!upscaleModel || !upscaleVae)) {
-      notify('error', 'LTX 2.5 spatial upscaler and video VAE must be available in ComfyUI.')
-      return
-    }
-    if (upscaleMode === 'ltx' && missingLtxUpscaleNodes.length) {
-      notify('error', `Update ComfyUI before using LTX 2× upscale. Missing nodes: ${missingLtxUpscaleNodes.join(', ')}.`)
-      return
-    }
-    if (upscaleMode === 'rtx' && !rtxModel) {
-      notify('error', 'Choose an AI upscale model installed in ComfyUI first.')
-      return
-    }
-    if (upscaleMode === 'rtx' && !window.confirm('RTX/CUDA upscale processes every frame independently and can amplify MiniMax noise or temporal shimmer. Continue with this experimental post-process?')) return
-    if (!prompt.trim()) {
-      notify('error', 'Add a prompt before generating.')
-      return
-    }
-    if (!status.connected) {
-      notify('error', 'Start ComfyUI and verify the server connection in Settings.')
-      return
-    }
-    if (!modelReady) {
-      notify('error', 'One or more required MiniMax H3 model components are missing.')
-      return
-    }
-    if (liveEnabled && livePreviewMode === 'h3-override' && !h3PreviewOverrideNode) {
-      notify('error', 'MiniMax H3 animated preview is selected, but its Preview Override node was not detected. Install or enable the custom node, restart ComfyUI, then click the Local engine status to refresh.')
-      return
-    }
-    if (liveEnabled && livePreviewMode === 'h3-override' && !selection.previewVae) {
-      notify('error', 'MiniMax H3 animated preview requires taeh3_decoder.safetensors in ComfyUI/models/vae_approx. Refresh the Local engine after adding it.')
-      return
-    }
-    if ((mode === 'image' || mode === 'frames') && !firstFrame) {
-      notify('error', 'Choose a first frame for this mode.')
-      return
-    }
-    if (mode === 'frames' && !lastFrame) {
-      notify('error', 'Choose a last frame for first-and-last-frame generation.')
-      return
-    }
-    if (mode === 'reference' && referenceImages.length + referenceVideos.length + referenceAudios.length === 0) {
-      notify('error', 'Add at least one reference image, video, or audio file.')
-      return
-    }
-    if (mode === 'reference' && (referenceImages.length > 9 || referenceVideos.length > 3 || referenceAudios.length > 3)) {
-      notify('error', 'Reference limits are 9 pictures, 3 videos, and 3 audio files. Remove extras before rendering.')
-      return
-    }
-
-    setSubmitting(true)
-    notify('neutral', 'Uploading inputs and preparing the ComfyUI graph…')
-    const workspaceBindings = workspaceBindingsFor(selectedReferenceCharacterIds, selectedReferenceLocationIds)
-    const renderReferenceImages = resolveRenderReferenceImages(referenceImages, workspaceBindings, clothingPolicy)
-    const effectivePrompt = composeH3Prompt({ prompt, mode, bindings: workspaceBindings, clothingPolicy, noDialogue, naturalMovement })
-    const [width, height] = resolution.split('x').map(Number)
-    const localId = createId()
-    const job: GenerationJob = {
-      id: localId,
-      mode,
-      prompt: effectivePrompt,
-      createdAt: Date.now(),
-      status: 'queued',
-      progress: 2,
-      progressLabel: 'Preparing and uploading inputs',
-      width: width * (upscaleMode === 'off' ? 1 : 2),
-      height: height * (upscaleMode === 'off' ? 1 : 2),
-      duration,
-      movieLink: movieHandoff ?? undefined,
-      characterProjectId: characterHandoff ?? undefined,
-    }
-    setJobs((current) => [job, ...current])
-    setActiveJobId(localId)
-    try {
-      const upload = async (file: MediaFile, fitToOutput = false) => file.kind === 'image' && (fitToOutput || Boolean(file.crop))
-        ? window.minimax.uploadImageData(settings.comfyUrl, await prepareImage(file, width, height))
-        : window.minimax.uploadInput(settings.comfyUrl, file.path)
-      const [first, last, images, videos, audios] = await Promise.all([
-        firstFrame && (mode === 'image' || mode === 'frames') ? upload(firstFrame, true) : undefined,
-        lastFrame && mode === 'frames' ? upload(lastFrame, true) : undefined,
-        Promise.all(mode === 'reference' ? renderReferenceImages.map((file) => upload(file)) : []),
-        Promise.all(mode === 'reference' ? referenceVideos.map((file) => upload(file)) : []),
-        Promise.all(mode === 'reference' ? referenceAudios.map((file) => upload(file)) : []),
-      ])
-      if (cancellationRequests.current.has(localId)) throw new Error('Generation cancelled before submission.')
-      const graph = buildMiniMaxWorkflow({
-        mode,
-        prompt: effectivePrompt,
-        width,
-        height,
-        duration,
-        seed,
-        steps,
-        turbo,
-        experimentalSampling,
-        loraStrength,
-        sampler: experimentalSampling ? sampler : 'res_multistep',
-        scheduler: experimentalSampling ? scheduler : 'simple',
-        upscale: upscaleMode === 'ltx' ? { type: 'ltx', model: upscaleModel, vae: upscaleVae } : upscaleMode === 'rtx' ? { type: 'rtx', model: rtxModel } : undefined,
-        refImageSize,
-        sigmaShift: sigmaShiftMode === 'custom' ? { video: shiftVideo, audio: shiftAudio } : undefined,
-        previewOverride: liveEnabled && livePreviewMode === 'h3-override' && h3PreviewOverrideNode ? { frames: 50, fps: 12, nodeType: h3PreviewOverrideNode, vaeName: selection.previewVae, jpegQuality: 85 } : undefined,
-        filenamePrefix: `video/MiniMax_H3_${Date.now()}`,
-        firstFrame: firstFrame?.path,
-        lastFrame: lastFrame?.path,
-        referenceImages: renderReferenceImages.map((item) => item.path),
-        referenceVideos: referenceVideos.map((item) => item.path),
-        referenceAudios: referenceAudios.map((item) => item.path),
-      }, selection, { first, last, images, videos, audios })
-      const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, live.clientId)
-      if (cancellationRequests.current.has(localId)) {
-        await window.minimax.cancelPrompt(settings.comfyUrl, response.prompt_id)
-        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'cancelled', error: undefined } : item))
-        notify('success', 'Generation cancelled.')
-      } else {
-        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: 'Waiting for ComfyUI to start' } : item))
-        notify('success', 'Generation added to the local ComfyUI queue.')
-        setCharacterHandoff(null)
-      }
-      ws.setSeed(Math.floor(Math.random() * 1_000_000_000))
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      const cancelled = cancellationRequests.current.has(localId)
-      setJobs((current) => current.map((item) => item.id === localId ? cancelled ? { ...item, status: 'cancelled', error: undefined } : { ...item, status: 'failed', error: message } : item))
-      notify(cancelled ? 'success' : 'error', cancelled ? 'Generation cancelled.' : message)
-    } finally {
-      cancellationRequests.current.delete(localId)
-      setCancellingIds((current) => { const next = new Set(current); next.delete(localId); return next })
-      setSubmitting(false)
-    }
-  }
-
-  const runH3Diagnostics = async () => {
-    if (!settings || diagnosticRunning) return
-    if (!status.connected) return notify('error', 'Connect ComfyUI before running the H3 diagnostic.')
-    const qualityModels = inferSelections(models, 'off')
-    const turboModels = inferSelections(models, '8')
-    if (![qualityModels.fl2va, qualityModels.textEncoder, qualityModels.videoVae, qualityModels.audioVae, turboModels.fl2vLora].every(Boolean)) {
-      return notify('error', 'The FL2VA base stack and official 8-step Turbo LoRA are required for the diagnostic.')
-    }
-    const tests = [
-      { name: 'Native quality', turbo: 'off' as const, selection: qualityModels, filenamePrefix: 'video/MiniMax_DIAGNOSTIC_NATIVE' },
-      { name: 'Official Turbo 8', turbo: '8' as const, selection: turboModels, filenamePrefix: 'video/MiniMax_DIAGNOSTIC_TURBO8' },
-    ]
-    setDiagnosticRunning(true)
-    notify('neutral', 'Queuing the fixed-seed Native and Turbo 8 diagnostic pair…')
-    let queuedCount = 0
-    for (const [index, test] of tests.entries()) {
-      const id = createId()
-      const job: GenerationJob = { id, provider: 'minimax', mode: 'text', prompt: `[H3 diagnostic · ${test.name}] ${diagnosticPrompt}`, createdAt: Date.now() + index, status: 'queued', progress: 2, progressLabel: 'Preparing diagnostic workflow', width: 1344, height: 768, duration: 5 }
-      setJobs((current) => [job, ...current])
-      try {
-        const graph = buildMiniMaxWorkflow({ mode: 'text', prompt: diagnosticPrompt, width: 1344, height: 768, duration: 5, seed: 12345, steps: 20, turbo: test.turbo, sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', filenamePrefix: test.filenamePrefix, referenceImages: [], referenceVideos: [], referenceAudios: [] }, test.selection, { images: [], videos: [], audios: [] })
-        const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, live.clientId)
-        queuedCount += 1
-        setJobs((current) => current.map((item) => item.id === id ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: index === 0 ? 'Native test queued' : 'Turbo 8 test queued behind Native' } : item))
-        if (index === tests.length - 1) setActiveJobId(id)
-      } catch (error) {
-        setJobs((current) => current.map((item) => item.id === id ? { ...item, status: 'failed', error: error instanceof Error ? error.message : String(error) } : item))
-      }
-    }
-    setDiagnosticRunning(false)
-    notify(queuedCount === 2 ? 'success' : 'error', queuedCount === 2
-      ? 'H3 diagnostic pair queued with identical prompt, seed, resolution, duration, and official sampling.'
-      : queuedCount ? 'Only one diagnostic render could be queued. Check the failed Queue entry.' : 'The diagnostic renders could not be queued. Check ComfyUI and try again.')
-    setView('queue')
-  }
+  // Generation flows: validation, uploads, graph submission for all providers.
+  const flows = useGenerationFlows({
+    session, queue, ws, clientId: live.clientId, info, modelReady,
+    selection, ltxSelection, aceSelection, h3PreviewOverrideNode,
+    notify,
+    onQueued: (target) => { if (target) setView(target) },
+  })
+  const { generateLtx, generateAceStep, runH3Diagnostics, submitting, ltxSubmitting, aceSubmitting, diagnosticRunning } = flows
+  const generate = () => flows.generate({
+    mode: upscaleMode, model: upscaleModel, vae: upscaleVae, missingNodes: missingLtxUpscaleNodes,
+  })
 
   if (!settings) {
     return <div className="boot"><LoaderCircle className="spin" /><span>Opening MiniMax Studio…</span></div>
