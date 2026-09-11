@@ -415,8 +415,48 @@ assert.ok(referenceOrderWarnings('Uses <Picture 5>.', { images: 2, videos: 0, au
 assert.ok(referenceOrderWarnings('No tags here.', { images: 3, videos: 0, audios: 0 }).some((warning) => warning.includes('none mentioned')), 'unmentioned pictures expected')
 assert.ok(referenceOrderWarnings('Uses <Audio 2> first, then <Audio 1>.', { images: 0, videos: 0, audios: 2 }).some((warning) => warning.includes('<Audio 2> is mentioned before')), 'audio order mismatch expected')
 
+
+// ---- Local prompt library storage -------------------------------------------
+{
+  const store = new Map()
+  const localStorageStub = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => { store.set(key, String(value)) },
+    removeItem: (key) => { store.delete(key) },
+  }
+  // Two-file loader: promptLibraryStorage imports ./libraryStorage, so the
+  // VM context needs a require that resolves and transpiles that dependency.
+  const cache = {}
+  const transpileFile = (file) => ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
+  const libRequire = (name) => {
+    if (name === './libraryStorage') {
+      if (!cache.libraryStorage) {
+        cache.libraryStorage = {}
+        vm.runInNewContext(transpileFile('src/lib/libraryStorage.ts'), { exports: cache.libraryStorage, require, console, localStorage: localStorageStub, window: { dispatchEvent: () => undefined, CustomEvent: class {}, addEventListener: () => undefined } })
+      }
+      return cache.libraryStorage
+    }
+    return require(name)
+  }
+  const exports2 = {}
+  const CustomEventStub = class { constructor(type, init) { this.type = type; this.detail = init?.detail } }
+  vm.runInNewContext(transpileFile('src/lib/promptLibraryStorage.ts'), { exports: exports2, require: libRequire, console, CustomEvent: CustomEventStub, window: { dispatchEvent: () => undefined, CustomEvent: CustomEventStub }, localStorage: localStorageStub })
+  const storage = exports2
+  const initial = storage.loadPromptLibrary()
+  assert.equal(initial.length, 8, 'bundled technique corpus expected')
+  assert.ok(initial.every((entry) => entry.technique), 'starter entries are techniques')
+  assert.ok(initial.some((entry) => entry.id === 'technique.timed-beats'))
+  storage.savePromptEntry({ id: 'civitai.42', label: 'City run', prompt: 'A courier sprints through neon rain, timed beats throughout.', steps: 30, sampler: 'res_multistep', source: { kind: 'civitai', itemId: '42', username: 'ada' } })
+  const saved = storage.loadPromptLibrary()
+  assert.equal(saved.length, 9)
+  const entry = saved.find((item) => item.id === 'civitai.42')
+  assert.ok(entry && entry.source.username === 'ada' && entry.steps === 30, 'saved entry round-trips metadata')
+  storage.deletePromptEntry('civitai.42')
+  assert.equal(storage.loadPromptLibrary().length, 8, 'delete restores corpus-only state')
+}
+
 runKernelTests().then(() => {
-  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), and the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline)')
+  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), and the local prompt library storage (technique corpus + save/delete round-trip)')
 }, (error) => {
   console.error(error)
   process.exitCode = 1
