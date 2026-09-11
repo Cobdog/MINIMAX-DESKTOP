@@ -17,11 +17,18 @@ if (import.meta.env.DEV) observeLongAnimationFrames()
 // desktop users never pay for it (perf audit: lazy-load the route split).
 const MobileApp = lazy(() => import('./MobileApp'))
 
+// Wave 3 — the UI-direction decision prototypes live behind ?proto= and are
+// their own lazy chunk (app + css); every normal app route is untouched.
+const PrototypeShell = lazy(() => import('./prototypes/PrototypeShell'))
+
 // The renderer always runs in a browser against the app's own web server
 // (server/index.ts); the HTTP client is the only bridge.
 installWebApiClient()
 
-const mobile = new URLSearchParams(location.search).get('mobile') === '1'
+const params = new URLSearchParams(location.search)
+const mobile = params.get('mobile') === '1'
+const proto = params.get('proto')
+const protoRoute = proto === 'bench' || proto === 'stage' || proto === 'score'
 document.documentElement.classList.toggle('mobile-route', mobile)
 
 const viewFallback = <div className="boot"><LoaderCircle className="spin" /><span>Loading…</span></div>
@@ -39,9 +46,11 @@ const onCaughtError = (error: unknown) => {
 createRoot(document.getElementById('root')!, { onCaughtError }).render(
   <StrictMode>
     <ErrorBoundary label="root">
-      {mobile
-        ? <Suspense fallback={viewFallback}><MobileApp /></Suspense>
-        : <App />}
+      {protoRoute
+        ? <Suspense fallback={viewFallback}><PrototypeShell /></Suspense>
+        : mobile
+          ? <Suspense fallback={viewFallback}><MobileApp /></Suspense>
+          : <App />}
     </ErrorBoundary>
   </StrictMode>,
 )
