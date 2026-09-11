@@ -52,6 +52,7 @@ import { useStudioSession } from './hooks/useStudioSession'
 import { useGenerationQueue } from './hooks/useGenerationQueue'
 import { useCreateWorkspace, type VideoClipDraft } from './hooks/useCreateWorkspace'
 import { useGenerationFlows } from './hooks/useGenerationFlows'
+import { useWorkspaceStore } from './state/workspaceStore'
 import { buildPromptAssistantRequest } from './lib/promptComposer'
 import { buildCharacterDialogueRequest } from './lib/dialogPolicy'
 import type {
@@ -133,34 +134,34 @@ function App() {
   const upscaleModel = choices(info, 'LatentUpscaleModelLoader', 'model_name').find((n) => /ltx-2\.5.*spatial.*x2/i.test(n)) ?? ''
   const upscaleVae = choices(info, 'VAELoader', 'vae_name').find((n) => /ltx-2\.5.*video.*vae/i.test(n)) ?? ''
   const missingLtxUpscaleNodes = LTX_UPSCALE_REQUIRED_NODES.filter((node) => !info[node])
-  const ltxUpscaleReady = Boolean(upscaleModel && upscaleVae && missingLtxUpscaleNodes.length === 0)
   const rtxModels = choices(info, 'UpscaleModelLoader', 'model_name')
-  // LBH-123-AI community latent upscaler availability + first usable model
-  // (the combo carries a "(...)" placeholder until models are installed).
+  // LBH-123-AI community latent upscaler first usable model (the choices
+  // carry a "(...)" placeholder until models are installed).
   const lbh2dChoices = choices(info, 'MinimaxH3LatentUpscalerNode2D', 'model_name')
   const lbh3dChoices = choices(info, 'MinimaxH3LatentUpscaler3D', 'model_name')
   const lbhModel = lbh3dChoices.find((name) => !name.startsWith('(')) ?? lbh2dChoices.find((name) => !name.startsWith('(')) ?? ''
-  const lbh2dAvailable = Boolean(lbh2dChoices.length && lbhModel)
   // Latent chaining availability (ComfyUI-H3-Motion-Context node set).
   const chainAvailable = ['MiniMaxH3MotionContext', 'MiniMaxH3MotionContextLoadLatent', 'MiniMaxH3MotionContextSaveLatent', 'MiniMaxH3MotionContextTrim'].every((node) => Boolean(info[node]))
 
   // Create workspace: every composed field, libraries, and reference binding.
+  // Wave 2a: the values live in the workspace store — App selects only the
+  // few slices its own render consumes, so editing the workspace (typing a
+  // prompt, dragging duration) no longer re-renders the App root and the
+  // whole mounted tree with it. Callbacks that need a field at CALL time
+  // read `useWorkspaceStore.getState()` so they always see the latest edit.
   const ws = useCreateWorkspace({ settings, rtxModels, notify, setVideoClipDraft })
   const {
-    mode, setMode, prompt, setPrompt, duration, resolution, turbo, steps, sampler, scheduler,
-    experimentalSampling, refImageSize, noDialogue, naturalMovement, clothingPolicy,
-    sigmaShiftMode, shiftVideo, shiftAudio, loraStrength, liveEnabled, setLiveEnabled,
-    livePreviewMode, setLivePreviewMode, upscaleMode, rtxModel, seed, advanced, setAdvanced,
-    firstFrame, setFirstFrame, lastFrame, setLastFrame,
-    referenceImages, setReferenceImages, referenceVideos, setReferenceVideos, referenceAudios, setReferenceAudios, timelineGuides, setTimelineGuides,
-    characterProjects, wardrobeProjects, locationProjects, hairStyleProjects,
-    selectedReferenceCharacterIds, setSelectedReferenceCharacterIds,
-    selectedReferenceLocationIds, setSelectedReferenceLocationIds,
-    activeJobId, setActiveJobId, setMovieHandoff, setCharacterHandoff,
-    createResetKey, resetCreateWorkspace: resetWorkspaceFields,
+    setMode, setPrompt, setFirstFrame, setLastFrame,
+    setReferenceImages, setReferenceVideos, setReferenceAudios,
+    setSelectedReferenceCharacterIds, setSelectedReferenceLocationIds,
+    setActiveJobId, setMovieHandoff, setCharacterHandoff,
+    resetCreateWorkspace: resetWorkspaceFields,
     chooseMedia, chooseMany, editVideoReference, refreshSourceMedia,
     workspaceBindingsFor, loadReferenceCharacter, loadReferenceLocation, loadReferenceWardrobe,
   } = ws
+  const mode = useWorkspaceStore((state) => state.mode)
+  const turbo = useWorkspaceStore((state) => state.turbo)
+  const createResetKey = useWorkspaceStore((state) => state.createResetKey)
 
   const selection = useMemo(() => inferSelections(models, turbo), [models, turbo])
   const h3Report = useMemo(() => h3StackReport(models), [models])
@@ -243,13 +244,13 @@ function App() {
     const defaults = settings.generationDefaults
     ws.setResolution(defaults.resolution)
     ws.setDuration(defaults.duration)
-    ws.setTurbo(mode === 'reference' && defaults.turbo === '8' ? 'off' : defaults.turbo)
+    ws.setTurbo(useWorkspaceStore.getState().mode === 'reference' && defaults.turbo === '8' ? 'off' : defaults.turbo)
     ws.setSteps(defaults.steps)
     ws.setSampler(defaults.sampler)
     ws.setScheduler(defaults.scheduler)
     ws.setExperimentalSampling(defaults.experimentalSampling)
     ws.setRefImageSize(defaults.refImageSize)
-    setLiveEnabled(defaults.livePreview)
+    ws.setLiveEnabled(defaults.livePreview)
     ws.setSigmaShiftMode(defaults.sigmaShiftMode)
     ws.setShiftVideo(defaults.shiftVideo)
     ws.setShiftAudio(defaults.shiftAudio)
@@ -259,6 +260,9 @@ function App() {
   }
 
   const runPromptTool = async (tool: 'enhance' | 'timeline' | 'audio') => {
+    // Read the workspace at call time — typing no longer re-renders App, so
+    // captured values would be one edit behind the editor.
+    const { prompt, mode, duration, noDialogue, referenceImages, referenceVideos, referenceAudios, selectedReferenceCharacterIds, selectedReferenceLocationIds } = useWorkspaceStore.getState()
     if (!settings || !prompt.trim()) {
       notify('error', 'Write a rough prompt first, then ask the local assistant to refine it.')
       return
@@ -297,6 +301,8 @@ function App() {
     if (!settings || !settings.ollamaModel || ollamaModels.length === 0) throw new Error('No local Ollama text model is available. Check Ollama in Settings.')
     setDialogueGenerating(true)
     try {
+      // Call-time read — see runPromptTool.
+      const { prompt, duration } = useWorkspaceStore.getState()
       return await window.minimax.generateWithOllama(settings.ollamaUrl, settings.ollamaModel, buildCharacterDialogueRequest({
         characterName: draft.character.name,
         characterDescription: draft.character.description,
@@ -365,7 +371,7 @@ function App() {
   })
   const { generateLtx, generateAceStep, runH3Diagnostics, generateMusic3, generateCharacterSheet, submitting, ltxSubmitting, aceSubmitting, music3Submitting, diagnosticRunning } = flows
   const generate = () => flows.generate({
-    mode: upscaleMode, model: upscaleModel, vae: upscaleVae, lbhModel, missingNodes: missingLtxUpscaleNodes,
+    mode: useWorkspaceStore.getState().upscaleMode, model: upscaleModel, vae: upscaleVae, lbhModel, missingNodes: missingLtxUpscaleNodes,
   })
 
   if (!settings) {
@@ -430,77 +436,14 @@ function App() {
         <LicenseNotice />
         <div hidden={view !== 'create'}>
           <ErrorBoundary label="create">
+          {/* Wave 2a: every workspace/session/job value is selected inside
+              CreateView from the stores — what remains here are the App-level
+              behavioral callbacks and UI state (generation flows, prompt
+              assistant, live-preview feed). */}
           <CreateView key={`create-${createResetKey}`}
-            info={info}
-            sampler={sampler} setSampler={ws.setSampler} scheduler={scheduler} setScheduler={ws.setScheduler}
-            experimentalSampling={experimentalSampling} setExperimentalSampling={ws.setExperimentalSampling}
-            refImageSize={refImageSize} setRefImageSize={ws.setRefImageSize}
-            noDialogue={noDialogue} setNoDialogue={ws.setNoDialogue}
-            naturalMovement={naturalMovement} setNaturalMovement={ws.setNaturalMovement}
-            clothingPolicy={clothingPolicy} setClothingPolicy={ws.setClothingPolicy}
-            sigmaShiftMode={sigmaShiftMode} setSigmaShiftMode={ws.setSigmaShiftMode}
-            shiftVideo={shiftVideo} setShiftVideo={ws.setShiftVideo} shiftAudio={shiftAudio} setShiftAudio={ws.setShiftAudio}
-            loraStrength={loraStrength} setLoraStrength={ws.setLoraStrength}
-            liveEnabled={liveEnabled} setLiveEnabled={setLiveEnabled} livePreviewMode={livePreviewMode} setLivePreviewMode={setLivePreviewMode} liveConnected={live.connected} livePreview={live.preview}
-            upscaleMode={upscaleMode} setUpscaleMode={ws.setUpscaleMode} ltxAvailable={ltxUpscaleReady} ltxMissingNodes={missingLtxUpscaleNodes} lbh2dAvailable={lbh2dAvailable} lbh3dAvailable={Boolean(lbh3dChoices.length && lbhModel)}
-            rtxModels={rtxModels} rtxModel={rtxModel} setRtxModel={ws.setRtxModel}
-            updateReference={(index, file) => setReferenceImages((items) => items.map((item, i) => i === index ? file : item))}
-            mode={mode}
-            setMode={setMode}
-            prompt={prompt}
-            setPrompt={setPrompt}
-            duration={duration}
-            setDuration={ws.setDuration}
-            resolution={resolution}
-            setResolution={ws.setResolution}
-            turbo={turbo}
-            setTurbo={ws.setTurbo}
-            steps={steps}
-            setSteps={ws.setSteps}
-            seed={seed}
-            setSeed={ws.setSeed}
-            advanced={advanced}
-            setAdvanced={setAdvanced}
-            firstFrame={firstFrame}
-            lastFrame={lastFrame}
-            setFirstFrame={setFirstFrame}
-            setLastFrame={setLastFrame}
-            chooseMedia={chooseMedia}
-            referenceImages={referenceImages}
-            timelineGuides={timelineGuides}
-            setTimelineGuides={setTimelineGuides}
-            characters={characterProjects}
-            wardrobes={wardrobeProjects}
-            locations={locationProjects}
-            hairStyles={hairStyleProjects}
-            selectedCharacterIds={selectedReferenceCharacterIds}
-            selectedLocationIds={selectedReferenceLocationIds}
-            loadCharacter={(characterId) => void loadReferenceCharacter(characterId)}
-            loadWardrobe={(wardrobeId) => void loadReferenceWardrobe(wardrobeId)}
-            loadLocation={(locationId) => void loadReferenceLocation(locationId)}
-            refreshSourceMedia={refreshSourceMedia}
-            referenceVideos={referenceVideos}
-            referenceAudios={referenceAudios}
-            removeReference={(kind, index) => {
-              if (kind === 'image') { setSelectedReferenceCharacterIds([]); setSelectedReferenceLocationIds([]); setReferenceImages((items) => items.filter((_, itemIndex) => itemIndex !== index)) }
-              if (kind === 'video') setReferenceVideos((items) => items.filter((_, itemIndex) => itemIndex !== index))
-              if (kind === 'audio') setReferenceAudios((items) => items.filter((_, itemIndex) => itemIndex !== index))
-            }}
-            chooseReference={chooseMany}
-            addReferenceImage={(file) => { setSelectedReferenceCharacterIds([]); setSelectedReferenceLocationIds([]); setReferenceImages((current) => current.length < 9 ? [...current, file] : current) }}
-            editVideoReference={(index) => void editVideoReference(index)}
-            h3Validated={h3Report.validated}
-            modelReady={modelReady}
-            selection={selection}
+            liveConnected={live.connected}
+            livePreview={live.preview}
             submitting={submitting}
-            cancelling={Boolean(activeJobId && cancellingIds.has(activeJobId))}
-            connected={status.connected}
-            onGenerate={() => void generate()}
-            latestJob={activeJobId ? jobs.find((job) => job.id === activeJobId) : undefined}
-            onCancel={(job) => void cancelJob(job)}
-            onContinue={continueFromRenderedVideo}
-            ollamaAvailable={ollamaModels.length > 0}
-            ollamaModel={settings.ollamaModel}
             promptSuggestion={promptSuggestion}
             promptingTool={promptingTool}
             dialogueGenerating={dialogueGenerating}
@@ -508,7 +451,24 @@ function App() {
             onGenerateDialogue={generateCharacterDialogue}
             onUseSuggestion={() => { setPrompt(promptSuggestion); setPromptSuggestion('') }}
             onDismissSuggestion={() => setPromptSuggestion('')}
+            onGenerate={() => void generate()}
+            onCancel={(job) => void cancelJob(job)}
+            onContinue={continueFromRenderedVideo}
             onOpenSettings={() => setView('settings')}
+            chooseMedia={chooseMedia}
+            chooseReference={chooseMany}
+            removeReference={(kind, index) => {
+              if (kind === 'image') { setSelectedReferenceCharacterIds([]); setSelectedReferenceLocationIds([]); setReferenceImages((items) => items.filter((_, itemIndex) => itemIndex !== index)) }
+              if (kind === 'video') setReferenceVideos((items) => items.filter((_, itemIndex) => itemIndex !== index))
+              if (kind === 'audio') setReferenceAudios((items) => items.filter((_, itemIndex) => itemIndex !== index))
+            }}
+            addReferenceImage={(file) => { setSelectedReferenceCharacterIds([]); setSelectedReferenceLocationIds([]); setReferenceImages((current) => current.length < 9 ? [...current, file] : current) }}
+            updateReference={(index, file) => setReferenceImages((items) => items.map((item, i) => i === index ? file : item))}
+            editVideoReference={(index) => void editVideoReference(index)}
+            loadCharacter={(characterId) => void loadReferenceCharacter(characterId)}
+            loadWardrobe={(wardrobeId) => void loadReferenceWardrobe(wardrobeId)}
+            loadLocation={(locationId) => void loadReferenceLocation(locationId)}
+            refreshSourceMedia={refreshSourceMedia}
           />
           </ErrorBoundary>
         </div>
@@ -578,7 +538,7 @@ function App() {
           const clarityDirection = 'Maintain crisp, sharp frames with a fast shutter and slow stabilized camera movement. No motion blur, temporal smearing, ghosting, rolling-shutter distortion, speed ramps, whip pans, or rapid camera movement.'
           return generateLtx({ mode: 'image', prompt: `${walkthroughDirection} Location description: ${locationProfile} Camera language: ${cameraLanguage} Image clarity: ${clarityDirection} No cuts, no teleporting, no layout changes, no duplicated objects, no people as focal subjects, no dialogue, no text, no logos.`, width: 1344, height: 768, duration: Math.max(5, Math.min(20, options?.duration ?? 10)), preset: 'quality', seed: Math.floor(Math.random() * 1_000_000_000), filenamePrefix: 'MiniMax_location_walkthrough' }, firstFrame, { locationProjectId: project.id })
         }} /></Suspense></ErrorBoundary>}
-        {view === 'movie' && <ErrorBoundary label="movie"><Suspense fallback={viewFallback}><MoviePlanner settings={settings} ollamaAvailable={ollamaModels.length > 0} ollamaModel={settings.ollamaModel} chainAvailable={chainAvailable} onRenderChain={(project, scene) => { void flows.generateSceneChain(project, scene, characterProjects, chainAvailable).then((message) => { if (message) setNotice({ tone: 'error', text: message }) }) }} onNotice={(tone, text) => setNotice({ tone, text })} onOpenShot={async (shot: MovieShot, aspectRatio: MovieProject['aspectRatio'], resolved: ResolvedMovieShot, context: { projectId: string; sceneId: string; continuationSource?: string }) => {
+        {view === 'movie' && <ErrorBoundary label="movie"><Suspense fallback={viewFallback}><MoviePlanner settings={settings} ollamaAvailable={ollamaModels.length > 0} ollamaModel={settings.ollamaModel} chainAvailable={chainAvailable} onRenderChain={(project, scene) => { void flows.generateSceneChain(project, scene, useWorkspaceStore.getState().characterProjects, chainAvailable).then((message) => { if (message) setNotice({ tone: 'error', text: message }) }) }} onNotice={(tone, text) => setNotice({ tone, text })} onOpenShot={async (shot: MovieShot, aspectRatio: MovieProject['aspectRatio'], resolved: ResolvedMovieShot, context: { projectId: string; sceneId: string; continuationSource?: string }) => {
           setCharacterHandoff(null)
           setSelectedReferenceCharacterIds([])
           setSelectedReferenceLocationIds([])

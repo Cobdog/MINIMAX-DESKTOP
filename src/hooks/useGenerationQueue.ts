@@ -4,15 +4,25 @@
  *  Wave 1: durable storage lives in the server's SQLite database (POST
  *  /api/lan/jobs per-job upserts). The localStorage snapshot still paints
  *  instantly at boot and serves as the degraded-mode fallback write when the
- *  API is unreachable. */
+ *  API is unreachable.
+ *
+ *  Wave 2a: `jobs` and `cancellingIds` live in `useJobsStore` (zustand) —
+ *  every setJobs call site kept its exact value/updater form, and the store
+ *  actions are stable references (safe for flows to capture). The poll loop,
+ *  deadline sweep, retry, and persistence logic below are UNCHANGED; only
+ *  where the state lives moved. `jobsRef` still mirrors the list for the
+ *  interval-driven loops — via a store subscription rather than a render
+ *  assignment, so the loops always read the latest list even when no
+ *  component re-rendered in between. */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppSettings, GenerationJob } from '../types'
 import { isPastRunningDeadline, isTerminalStatus, reduceJobPoll, type PollObservation, type PollReduction } from '../lib/jobReducer'
 import { extractOutputFile, extractOutputUrl, withTiledVideoDecode } from '../lib/workflow'
-import { extractAutomatedReferenceSet, hydrateLoadedJobs, initialJobs, playableOutputUrl, recordCharacterSheetImages, recordCharacterTurntable, recordLocationWalkthrough, recordMovieOutput } from '../lib/jobRecords'
+import { extractAutomatedReferenceSet, hydrateLoadedJobs, playableOutputUrl, recordCharacterSheetImages, recordCharacterTurntable, recordLocationWalkthrough, recordMovieOutput } from '../lib/jobRecords'
 import { fetchServerJobs, saveServerJobs, serverStorageMigrationDone } from '../lib/serverStorage'
 import type { LiveProgress } from '../lib/useLivePreview'
 import { subscribe } from '../lib/useRealtime'
+import { useJobsStore } from '../state/jobsStore'
 import { useDebouncedPersist } from './useDebouncedPersist'
 
 export type NoticeTone = 'error' | 'success' | 'neutral'
@@ -23,12 +33,14 @@ export function useGenerationQueue(options: {
   notify(tone: NoticeTone, text: string): void
 }) {
   const { settings, connected, notify } = options
-  const [jobs, setJobs] = useState<GenerationJob[]>(initialJobs)
+  const jobs = useJobsStore((state) => state.jobs)
+  const cancellingIds = useJobsStore((state) => state.cancellingIds)
+  // Stable store actions — captured once, never go stale.
+  const { setJobs, setCancellingIds } = useJobsStore.getState()
   const [storageBootDone, setStorageBootDone] = useState(false)
-  const [cancellingIds, setCancellingIds] = useState<Set<string>>(() => new Set())
   const cancellationRequests = useRef(new Set<string>())
   const jobsRef = useRef(jobs)
-  jobsRef.current = jobs
+  useEffect(() => useJobsStore.subscribe((state) => { jobsRef.current = state.jobs }), [])
   const pendingKey = jobs.filter((job) => job.status === 'queued' || job.status === 'running').map((job) => job.id).join(',')
 
   // Boot load: the server store is authoritative. The localStorage snapshot
@@ -49,12 +61,12 @@ export function useGenerationQueue(options: {
       .catch(() => undefined)
       .finally(() => { if (!disposed) setStorageBootDone(true) })
     return () => { disposed = true; window.clearTimeout(failSafe) }
-  }, [])
+  }, [setJobs])
 
   const onLiveProgress = useCallback((id: string, update: LiveProgress) => {
     if (!id) return
     setJobs((current) => current.map((j) => j.promptId === id && ['running', 'queued'].includes(j.status) ? { ...j, ...update, progress: update.progress ?? j.progress, status: 'running' } : j))
-  }, [])
+  }, [setJobs])
 
   // Persistence is debounced (1 s trailing): during a live render the poll
   // loop and progress events update `jobs` several times per second. The
@@ -175,7 +187,7 @@ export function useGenerationQueue(options: {
     sweepRef.current = sweep
     const timer = window.setInterval(sweep, 1000)
     return () => { sweepRef.current = null; window.clearInterval(timer) }
-  }, [connected, notify, pendingKey, settings])
+  }, [connected, notify, pendingKey, setJobs, settings])
 
   // Realtime fabric resync (wave 1): a per-channel sequence gap means the
   // server dropped envelopes (bounded overflow) — one immediate history sweep
@@ -199,7 +211,7 @@ export function useGenerationQueue(options: {
       }
     }, 30_000)
     return () => window.clearInterval(timer)
-  }, [])
+  }, [setJobs])
 
   const cancelJob = useCallback(async (job: GenerationJob) => {
     if (!settings) return
@@ -225,7 +237,7 @@ export function useGenerationQueue(options: {
     } finally {
       setCancellingIds((current) => { const next = new Set(current); next.delete(job.id); return next })
     }
-  }, [cancellingIds, notify, settings])
+  }, [cancellingIds, notify, setCancellingIds, setJobs, settings])
 
   return { jobs, setJobs, jobsRef, cancellingIds, setCancellingIds, cancellationRequests, cancelJob, onLiveProgress }
 }

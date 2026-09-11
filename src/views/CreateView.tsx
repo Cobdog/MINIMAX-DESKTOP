@@ -1,6 +1,15 @@
 /** The MiniMax H3 Create workspace: mode tabs, prompt composer with reference
- *  binding, source-media modal, live preview, and the output/quality panel. */
+ *  binding, source-media modal, live preview, and the output/quality panel.
+ *
+ *  Wave 2a: this view no longer receives ~60 state props drilled from the App
+ *  root — every workspace/session/job VALUE it renders is selected from the
+ *  zustand stores below, so a prompt keystroke re-renders this view (it reads
+ *  the prompt) without re-rendering the App root, the sidebar, or any sibling
+ *  view. What remains as props are the behavioral callbacks and App-level UI
+ *  state (generation flows, prompt-assistant state, the live-preview
+ *  metadata feed), which genuinely belong to the App. */
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import {
   AlertCircle,
   Aperture,
@@ -36,14 +45,13 @@ import type {
   LocationProject,
   MediaFile,
   MediaKind,
-  ModelSelection,
   MovieReferenceBinding,
   PreviewMime,
-  UpscaleMode,
   WardrobeProject,
 } from '../types'
-import type { ObjectInfo } from '../lib/comfyInfo'
 import { choices } from '../lib/comfyInfo'
+import { inferSelections } from '../lib/modelSelection'
+import { findH3PreviewOverrideNode, h3StackReport } from '../lib/h3Stack'
 import { RenderSize } from '../components/RenderSize'
 import { ImageCrop } from '../components/ImageCrop'
 import { RenderConstruction } from '../components/RenderConstruction'
@@ -56,9 +64,13 @@ import { allocateWorkspaceReferences, composeReferenceInstructions } from '../li
 import { composeH3Prompt, resolveRenderReferenceImages } from '../lib/promptPolicies'
 import { buildBaseContractDraft, buildReferenceContractDraft, referenceOrderWarnings, suggestCutTimes } from '../lib/promptContracts'
 import { PromptLibraryBrowser } from '../components/PromptLibraryBrowser'
-import { findH3PreviewOverrideNode } from '../lib/h3Stack'
 import { frameCount, frameIndexForSeconds, guideFrameWarning } from '../lib/workflow'
 import type { LivePreview } from '../lib/useLivePreview'
+import { useJobsStore } from '../state/jobsStore'
+import { useSessionStore } from '../state/sessionStore'
+import { useWorkspaceStore } from '../state/workspaceStore'
+import { TransientProbe } from '../state/TransientProbe'
+import { transientProbeEnabled } from '../state/transientProbe'
 import { SelectField, NumberField } from '../components/form'
 import { PipelineItem, StatusBadge } from '../components/chrome'
 import { VideoPlayer, VideoContinuationControls, MediaDrop } from '../components/media'
@@ -132,62 +144,118 @@ const modeInfo: Array<{ id: GenerationMode; label: string; note: string; icon: t
   { id: 'reference', label: 'Reference', note: 'Images, video, audio', icon: Sparkles },
 ]
 
+// Mirrors App's LTX_UPSCALE_REQUIRED_NODES (the graph-family contract is
+// defined per consumer in this codebase — see useGenerationFlows' own copy of
+// LTX_NATIVE_REQUIRED_NODES).
+const LTX_UPSCALE_REQUIRED_NODES = [
+  'VAEEncodeTiled', 'LatentUpscaleModelLoader', 'LTXVLatentUpsampler',
+  'VAEDecodeTiled', 'ImageFromBatch', 'RepeatImageBatch', 'ImageBatch',
+] as const
+
+/** Wave-2a shape: behavioral callbacks and App-level UI state only — every
+ *  workspace/session/job VALUE is selected from the stores inside the view. */
 export type CreateViewProps = {
-  info: ObjectInfo
-  sampler: string; setSampler(value: string): void; scheduler: string; setScheduler(value: string): void
-  experimentalSampling: boolean; setExperimentalSampling(value: boolean): void
-  refImageSize: 'match' | 'max'; setRefImageSize(value: 'match' | 'max'): void
-  sigmaShiftMode: 'model' | 'custom'; setSigmaShiftMode(value: 'model' | 'custom'): void
-  shiftVideo: number; setShiftVideo(value: number): void; shiftAudio: number; setShiftAudio(value: number): void
-  loraStrength: number; setLoraStrength(value: number): void
-  liveEnabled: boolean; setLiveEnabled(value: boolean): void; livePreviewMode: 'standard' | 'h3-override'; setLivePreviewMode(value: 'standard' | 'h3-override'): void; liveConnected: boolean; livePreview: LivePreview | null
-  upscaleMode: UpscaleMode; setUpscaleMode(value: UpscaleMode): void; ltxAvailable: boolean; ltxMissingNodes: readonly string[]; lbh2dAvailable: boolean; lbh3dAvailable: boolean
-  noDialogue: boolean; setNoDialogue(value: boolean): void
-  naturalMovement: boolean; setNaturalMovement(value: boolean): void
-  clothingPolicy: 'wardrobe' | 'underwear' | 'unrestricted'; setClothingPolicy(value: 'wardrobe' | 'underwear' | 'unrestricted'): void
-  rtxModels: string[]; rtxModel: string; setRtxModel(value: string): void
-  updateReference(index: number, file: MediaFile): void
-  mode: GenerationMode; setMode(value: GenerationMode): void
-  prompt: string; setPrompt(value: string): void
-  duration: number; setDuration(value: number): void
-  resolution: string; setResolution(value: string): void
-  turbo: 'off' | '4' | '8'; setTurbo(value: 'off' | '4' | '8'): void
-  steps: number; setSteps(value: number): void
-  seed: number; setSeed(value: number): void
-  advanced: boolean; setAdvanced(value: boolean): void
-  firstFrame: MediaFile | null; lastFrame: MediaFile | null
-  setFirstFrame(value: MediaFile | null): void; setLastFrame(value: MediaFile | null): void
-  chooseMedia(kind: MediaKind, setter: (file: MediaFile) => void): Promise<void>
-  referenceImages: MediaFile[]; referenceVideos: MediaFile[]; referenceAudios: MediaFile[]; timelineGuides: Array<{ file: MediaFile; seconds: number }>; setTimelineGuides(value: Array<{ file: MediaFile; seconds: number }>): void
-  characters: CharacterProject[]; wardrobes: WardrobeProject[]; locations: LocationProject[]; hairStyles: HairStyleProject[]; selectedCharacterIds: string[]; selectedLocationIds: string[]; loadCharacter(characterId: string): void; loadWardrobe(wardrobeId: string): void; loadLocation(locationId: string): void
-  refreshSourceMedia(): Promise<void>
-  removeReference(kind: MediaKind, index: number): void
-  addReferenceImage(file: MediaFile): void
-  chooseReference(kind: MediaKind): Promise<void>
-  editVideoReference(index: number): void
-  h3Validated: boolean
-  modelReady: boolean; selection: ModelSelection; submitting: boolean; cancelling: boolean; connected: boolean
-  ollamaAvailable: boolean; ollamaModel: string; promptSuggestion: string
+  liveConnected: boolean
+  livePreview: LivePreview | null
+  submitting: boolean
+  promptSuggestion: string
   promptingTool: 'enhance' | 'timeline' | 'audio' | null
   dialogueGenerating: boolean
   onPromptTool(tool: 'enhance' | 'timeline' | 'audio'): void
   onGenerateDialogue(draft: CharacterDialogueDraft): Promise<string>
-  onUseSuggestion(): void; onDismissSuggestion(): void
-  onGenerate(): void; onCancel(job: GenerationJob): void; onContinue(job: GenerationJob, position: number | 'last'): Promise<void>; latestJob?: GenerationJob
+  onUseSuggestion(): void
+  onDismissSuggestion(): void
+  onGenerate(): void
+  onCancel(job: GenerationJob): void
+  onContinue(job: GenerationJob, position: number | 'last'): Promise<void>
   onOpenSettings(): void
+  chooseMedia(kind: MediaKind, setter: (file: MediaFile) => void): Promise<void>
+  chooseReference(kind: MediaKind): Promise<void>
+  removeReference(kind: MediaKind, index: number): void
+  addReferenceImage(file: MediaFile): void
+  updateReference(index: number, file: MediaFile): void
+  editVideoReference(index: number): void
+  loadCharacter(characterId: string): void
+  loadWardrobe(wardrobeId: string): void
+  loadLocation(locationId: string): void
+  refreshSourceMedia(): Promise<void>
 }
 
 export function CreateView(props: CreateViewProps) {
   const {
-    info, sampler, setSampler, scheduler, setScheduler, experimentalSampling, setExperimentalSampling, refImageSize, setRefImageSize,
-    sigmaShiftMode, setSigmaShiftMode, shiftVideo, setShiftVideo, shiftAudio, setShiftAudio, loraStrength, setLoraStrength, liveEnabled, setLiveEnabled, livePreviewMode, setLivePreviewMode, liveConnected, livePreview,
-    upscaleMode, setUpscaleMode, ltxAvailable, ltxMissingNodes, lbh2dAvailable, lbh3dAvailable, noDialogue, setNoDialogue, naturalMovement, setNaturalMovement, clothingPolicy, setClothingPolicy, rtxModels, rtxModel, setRtxModel, updateReference,
-    mode, setMode, prompt, setPrompt, duration, setDuration, resolution, setResolution, turbo, setTurbo, steps, setSteps,
-    seed, setSeed, advanced, setAdvanced, firstFrame, lastFrame, setFirstFrame, setLastFrame, chooseMedia,
-    referenceImages, referenceVideos, referenceAudios, timelineGuides, setTimelineGuides, addReferenceImage, characters, wardrobes, locations, hairStyles, selectedCharacterIds, selectedLocationIds, loadCharacter, loadWardrobe, loadLocation, refreshSourceMedia, removeReference, chooseReference, editVideoReference, h3Validated, modelReady, selection,
-    submitting, cancelling, connected, ollamaAvailable, ollamaModel, promptSuggestion, promptingTool, dialogueGenerating,
-    onPromptTool, onGenerateDialogue, onUseSuggestion, onDismissSuggestion, onGenerate, onCancel, onContinue, latestJob, onOpenSettings,
+    liveConnected, livePreview, submitting, promptSuggestion, promptingTool, dialogueGenerating,
+    onPromptTool, onGenerateDialogue, onUseSuggestion, onDismissSuggestion, onGenerate, onCancel, onContinue, onOpenSettings,
+    chooseMedia, chooseReference, removeReference, addReferenceImage, updateReference, editVideoReference,
+    loadCharacter, loadWardrobe, loadLocation, refreshSourceMedia,
   } = props
+  // ---- store selectors (wave 2a) -------------------------------------------
+  // One shallow-compared read of every workspace slice this view renders:
+  // a change to any of them re-renders the view; a change to none of them
+  // (e.g. a job progress tick) does not re-render the App root either.
+  const {
+    mode, prompt, duration, resolution, turbo, steps, sampler, scheduler, experimentalSampling,
+    refImageSize, noDialogue, naturalMovement, clothingPolicy, sigmaShiftMode, shiftVideo, shiftAudio,
+    loraStrength, liveEnabled, livePreviewMode, upscaleMode, rtxModel, seed, advanced,
+    firstFrame, lastFrame, referenceImages, referenceVideos, referenceAudios, timelineGuides,
+    characters, wardrobes, locations, hairStyles,
+    selectedCharacterIds, selectedLocationIds, activeJobId,
+  } = useWorkspaceStore(useShallow((state) => ({
+    mode: state.mode, prompt: state.prompt, duration: state.duration, resolution: state.resolution, turbo: state.turbo,
+    steps: state.steps, sampler: state.sampler, scheduler: state.scheduler, experimentalSampling: state.experimentalSampling,
+    refImageSize: state.refImageSize, noDialogue: state.noDialogue, naturalMovement: state.naturalMovement, clothingPolicy: state.clothingPolicy,
+    sigmaShiftMode: state.sigmaShiftMode, shiftVideo: state.shiftVideo, shiftAudio: state.shiftAudio, loraStrength: state.loraStrength,
+    liveEnabled: state.liveEnabled, livePreviewMode: state.livePreviewMode, upscaleMode: state.upscaleMode, rtxModel: state.rtxModel,
+    seed: state.seed, advanced: state.advanced, firstFrame: state.firstFrame, lastFrame: state.lastFrame,
+    referenceImages: state.referenceImages, referenceVideos: state.referenceVideos, referenceAudios: state.referenceAudios,
+    timelineGuides: state.timelineGuides,
+    characters: state.characterProjects, wardrobes: state.wardrobeProjects, locations: state.locationProjects, hairStyles: state.hairStyleProjects,
+    selectedCharacterIds: state.selectedReferenceCharacterIds, selectedLocationIds: state.selectedReferenceLocationIds,
+    activeJobId: state.activeJobId,
+  })))
+  // Store actions are stable references — captured once, never re-subscribed.
+  const {
+    setMode, setPrompt, setDuration, setResolution, setTurbo, setSteps, setSampler, setScheduler,
+    setExperimentalSampling, setRefImageSize, setNoDialogue, setNaturalMovement, setClothingPolicy,
+    setSigmaShiftMode, setShiftVideo, setShiftAudio, setLoraStrength, setLiveEnabled, setLivePreviewMode,
+    setUpscaleMode, setRtxModel, setSeed, setAdvanced, setFirstFrame, setLastFrame, setTimelineGuides,
+  } = useWorkspaceStore.getState()
+  const info = useSessionStore((state) => state.info)
+  const models = useSessionStore((state) => state.models)
+  const connected = useSessionStore((state) => state.status.connected)
+  const ollamaAvailable = useSessionStore((state) => state.ollamaModels.length > 0)
+  const ollamaModel = useSessionStore((state) => state.settings?.ollamaModel ?? '')
+  const latestJob = useJobsStore((state) => state.jobs.find((job) => job.id === activeJobId) ?? undefined)
+  const cancelling = useJobsStore((state) => Boolean(activeJobId && state.cancellingIds.has(activeJobId)))
+  // The wave-0a projections, re-keyed on store selectors (models/info change
+  // on engine rescan/recheck; turbo/mode on user edits).
+  const selection = useMemo(() => inferSelections(models, turbo), [models, turbo])
+  const h3Validated = useMemo(() => h3StackReport(models).validated, [models])
+  const rtxModels = useMemo(() => choices(info, 'UpscaleModelLoader', 'model_name'), [info])
+  const modelReady = useMemo(() => {
+    const activeModel = mode === 'reference' ? selection.ref2va : selection.fl2va
+    const activeLora = mode === 'reference' ? selection.ref2vLora : selection.fl2vLora
+    return [activeModel, selection.textEncoder, selection.videoVae, selection.audioVae].every(Boolean) && (turbo === 'off' || Boolean(activeLora))
+  }, [mode, selection, turbo])
+  const ltxUpscale = useMemo(() => {
+    const upscaleModel = choices(info, 'LatentUpscaleModelLoader', 'model_name').find((name) => /ltx-2\.5.*spatial.*x2/i.test(name)) ?? ''
+    const upscaleVae = choices(info, 'VAELoader', 'vae_name').find((name) => /ltx-2\.5.*video.*vae/i.test(name)) ?? ''
+    const missingNodes = LTX_UPSCALE_REQUIRED_NODES.filter((node) => !info[node])
+    return { available: Boolean(upscaleModel && upscaleVae && missingNodes.length === 0), missingNodes }
+  }, [info])
+  const ltxAvailable = ltxUpscale.available
+  const ltxMissingNodes = ltxUpscale.missingNodes
+  const lbh2dAvailable = useMemo(() => {
+    const lbh2dChoices = choices(info, 'MinimaxH3LatentUpscalerNode2D', 'model_name')
+    const lbh3dChoices = choices(info, 'MinimaxH3LatentUpscaler3D', 'model_name')
+    const lbhModel = lbh3dChoices.find((name) => !name.startsWith('(')) ?? lbh2dChoices.find((name) => !name.startsWith('(')) ?? ''
+    return Boolean(lbh2dChoices.length && lbhModel)
+  }, [info])
+  const lbh3dAvailable = useMemo(() => {
+    const lbh3dChoices = choices(info, 'MinimaxH3LatentUpscaler3D', 'model_name')
+    const lbh2dChoices = choices(info, 'MinimaxH3LatentUpscalerNode2D', 'model_name')
+    const lbhModel = lbh3dChoices.find((name) => !name.startsWith('(')) ?? lbh2dChoices.find((name) => !name.startsWith('(')) ?? ''
+    return Boolean(lbh3dChoices.length && lbhModel)
+  }, [info])
   const promptRef = useRef<SmartPromptEditorHandle>(null)
   const previewPanelRef = useRef<HTMLElement>(null)
   // Fit the preview panel to the viewport from its natural position, so the
@@ -320,6 +388,9 @@ export function CreateView(props: CreateViewProps) {
     : []
   return (
     <div className="create-page">
+      {/* Wave-2a transient-update discipline probe — mounted only with
+          ?probe=transient (see src/state/transientProbe.tsx). */}
+      {transientProbeEnabled && <TransientProbe />}
       <div className="page-heading">
         <div><p className="eyebrow">LOCAL VIDEO WORKSPACE</p><h1>Create with MiniMax H3</h1><p>Generate synchronized video and audio through your local ComfyUI engine.</p></div>
         <div className="heading-state">{!modelReady

@@ -1,9 +1,22 @@
 /** The MiniMax Create workspace domain: every persisted creation field, the
  *  character/wardrobe/location libraries it binds references from, reference
  *  selection and ordering, media picking, and workspace reset. Generation
- *  submission itself stays in App — this hook owns what is being composed. */
-import { useEffect, useRef, useState } from 'react'
-import type { AppSettings, CharacterProject, GenerationMode, HairStyleProject, LocationProject, MediaFile, MediaKind, MovieReferenceBinding, UpscaleMode, WardrobeProject } from '../types'
+ *  submission itself stays in App — this hook owns what is being composed.
+ *
+ *  Wave 2a: the VALUES live in `useWorkspaceStore` (zustand); this hook is
+ *  the facade that keeps every effect (library event syncs, boot load,
+ *  persistence, media hydration, reference binding). The return shape is
+ *  UNCHANGED so existing consumers compile untouched — but consumers that
+ *  need live per-field values (CreateView, App render paths, generation
+ *  flows) select from the store directly: the state fields on this facade
+ *  are a snapshot from this hook's last render. The facade subscribes ONLY
+ *  to the slices its effects consume (libraries, selections, picked media,
+ *  rtx model — all low-frequency); the high-frequency editing fields (prompt,
+ *  duration, steps, seed, sigma shifts…) no longer re-render the App root
+ *  that hosts this hook. */
+import { useEffect, useRef } from 'react'
+import { useShallow } from 'zustand/react/shallow'
+import type { AppSettings, CharacterProject, LocationProject, MediaFile, MediaKind, MovieReferenceBinding } from '../types'
 import { CHARACTER_LIBRARY_EVENT, characterReferences, loadCharacterProjects } from '../lib/characterLibrary'
 import { loadWardrobeProjects, wardrobeReferences, WARDROBE_LIBRARY_EVENT } from '../lib/wardrobeLibrary'
 import { loadLocationProjects, locationReferences, LOCATION_LIBRARY_EVENT } from '../lib/locationLibrary'
@@ -11,8 +24,9 @@ import { HAIR_LIBRARY_EVENT, loadHairStyleProjects } from '../lib/hairLibrary'
 import { allocateWorkspaceReferences, composeReferenceInstructions } from '../lib/promptComposer'
 import { fitWholeCharacter } from '../lib/imageCrop'
 import { syncReferencePrompt } from '../lib/promptPolicies'
-import { normalizeWorkspace, readWorkspace, withoutPreview, workspaceDefaults, type MovieLink, type PersistedWorkspace } from '../lib/workspace'
+import { normalizeWorkspace, workspaceDefaults } from '../lib/workspace'
 import { fetchServerWorkspace, saveServerWorkspace } from '../lib/serverStorage'
+import { persistedWorkspaceChanged, useWorkspaceStore, workspaceSnapshot } from '../state/workspaceStore'
 import type { NoticeTone } from './useGenerationQueue'
 import { useDebouncedPersist } from './useDebouncedPersist'
 
@@ -25,69 +39,52 @@ export function useCreateWorkspace(options: {
   setVideoClipDraft(dispatch: (value: VideoClipDraft | null) => VideoClipDraft | null): void
 }) {
   const { settings, rtxModels, notify, setVideoClipDraft } = options
-  const persisted = useState(readWorkspace)[0]
-  const [storageBootDone, setStorageBootDone] = useState(false)
-  const [mode, setMode] = useState<GenerationMode>(persisted.mode)
-  const [prompt, setPrompt] = useState(persisted.prompt)
-  const [duration, setDuration] = useState(persisted.duration)
-  const [resolution, setResolution] = useState(persisted.resolution)
-  const [turbo, setTurbo] = useState<'off' | '4' | '8'>(persisted.turbo)
-  const [steps, setSteps] = useState(persisted.steps)
-  const [sampler, setSampler] = useState(persisted.sampler)
-  const [scheduler, setScheduler] = useState(persisted.scheduler)
-  const [experimentalSampling, setExperimentalSampling] = useState(persisted.experimentalSampling)
-  const [refImageSize, setRefImageSize] = useState<'match' | 'max'>(persisted.refImageSize)
-  const [noDialogue, setNoDialogue] = useState(persisted.noDialogue)
-  const [naturalMovement, setNaturalMovement] = useState(persisted.naturalMovement)
-  const [clothingPolicy, setClothingPolicy] = useState<'wardrobe' | 'underwear' | 'unrestricted'>(persisted.clothingPolicy)
-  const [sigmaShiftMode, setSigmaShiftMode] = useState<'model' | 'custom'>(persisted.sigmaShiftMode)
-  const [shiftVideo, setShiftVideo] = useState(persisted.shiftVideo)
-  const [shiftAudio, setShiftAudio] = useState(persisted.shiftAudio)
-  const [loraStrength, setLoraStrength] = useState(persisted.loraStrength)
-  const [liveEnabled, setLiveEnabled] = useState(persisted.liveEnabled)
-  const [livePreviewMode, setLivePreviewMode] = useState<'standard' | 'h3-override'>(persisted.livePreviewMode)
-  const [upscaleMode, setUpscaleMode] = useState<UpscaleMode>(persisted.upscaleMode)
-  const [rtxModel, setRtxModel] = useState(persisted.rtxModel)
-  const [seed, setSeed] = useState(persisted.seed)
-  const [advanced, setAdvanced] = useState(persisted.advanced)
-  const [firstFrame, setFirstFrame] = useState<MediaFile | null>(persisted.firstFrame)
-  const [lastFrame, setLastFrame] = useState<MediaFile | null>(persisted.lastFrame)
-  const [referenceImages, setReferenceImages] = useState<MediaFile[]>(persisted.referenceImages)
-  const [referenceVideos, setReferenceVideos] = useState<MediaFile[]>(persisted.referenceVideos)
-  const [referenceAudios, setReferenceAudios] = useState<MediaFile[]>(persisted.referenceAudios)
-  const [timelineGuides, setTimelineGuides] = useState<Array<{ file: MediaFile; seconds: number }>>(persisted.timelineGuides)
-  const [characterProjects, setCharacterProjects] = useState<CharacterProject[]>(loadCharacterProjects)
-  const [wardrobeProjects, setWardrobeProjects] = useState<WardrobeProject[]>(loadWardrobeProjects)
-  const [locationProjects, setLocationProjects] = useState<LocationProject[]>(loadLocationProjects)
-  const [hairStyleProjects, setHairStyleProjects] = useState<HairStyleProject[]>(loadHairStyleProjects)
-  const [selectedReferenceCharacterIds, setSelectedReferenceCharacterIds] = useState<string[]>(persisted.selectedReferenceCharacterIds)
-  const [selectedReferenceLocationIds, setSelectedReferenceLocationIds] = useState<string[]>(persisted.selectedReferenceLocationIds)
-  const [activeJobId, setActiveJobId] = useState<string | null>(persisted.activeJobId)
-  const [movieHandoff, setMovieHandoff] = useState<MovieLink | null>(persisted.movieHandoff)
-  const [characterHandoff, setCharacterHandoff] = useState<string | null>(null)
-  const [createResetKey, setCreateResetKey] = useState(0)
+  // The effect-consumed slices (see the module doc). useShallow so a library
+  // event that returns an equal-by-reference list does not re-render.
+  const {
+    characterProjects, wardrobeProjects, locationProjects,
+    selectedReferenceCharacterIds, selectedReferenceLocationIds,
+    firstFrame, lastFrame, referenceImages, rtxModel,
+  } = useWorkspaceStore(useShallow((state) => ({
+    characterProjects: state.characterProjects,
+    wardrobeProjects: state.wardrobeProjects,
+    locationProjects: state.locationProjects,
+    selectedReferenceCharacterIds: state.selectedReferenceCharacterIds,
+    selectedReferenceLocationIds: state.selectedReferenceLocationIds,
+    firstFrame: state.firstFrame,
+    lastFrame: state.lastFrame,
+    referenceImages: state.referenceImages,
+    rtxModel: state.rtxModel,
+  })))
+  // Stable store actions — captured once, never go stale.
+  const {
+    patch, setMode, setPrompt, setRefImageSize, setClothingPolicy, setRtxModel, setFirstFrame, setLastFrame,
+    setReferenceImages, setReferenceAudios, setSelectedReferenceCharacterIds, setSelectedReferenceLocationIds,
+    setCharacterHandoff, setCharacterProjects, setWardrobeProjects, setLocationProjects, setHairStyleProjects,
+    setStorageBootDone, bumpCreateResetKey,
+  } = useWorkspaceStore.getState()
   const mediaHydrated = useRef(false)
 
   useEffect(() => {
     const refresh = () => setCharacterProjects(loadCharacterProjects())
     window.addEventListener(CHARACTER_LIBRARY_EVENT, refresh)
     return () => window.removeEventListener(CHARACTER_LIBRARY_EVENT, refresh)
-  }, [])
+  }, [setCharacterProjects])
   useEffect(() => {
     const refresh = () => setWardrobeProjects(loadWardrobeProjects())
     window.addEventListener(WARDROBE_LIBRARY_EVENT, refresh)
     return () => window.removeEventListener(WARDROBE_LIBRARY_EVENT, refresh)
-  }, [])
+  }, [setWardrobeProjects])
   useEffect(() => {
     const refresh = () => setLocationProjects(loadLocationProjects())
     window.addEventListener(LOCATION_LIBRARY_EVENT, refresh)
     return () => window.removeEventListener(LOCATION_LIBRARY_EVENT, refresh)
-  }, [])
+  }, [setLocationProjects])
   useEffect(() => {
     const refresh = () => setHairStyleProjects(loadHairStyleProjects())
     window.addEventListener(HAIR_LIBRARY_EVENT, refresh)
     return () => window.removeEventListener(HAIR_LIBRARY_EVENT, refresh)
-  }, [])
+  }, [setHairStyleProjects])
 
   useEffect(() => {
     let disposed = false
@@ -118,45 +115,32 @@ export function useCreateWorkspace(options: {
     void fetchServerWorkspace()
       .then((loaded) => {
         if (disposed || !loaded) return
-        const next = normalizeWorkspace(loaded)
-        setMode(next.mode); setPrompt(next.prompt); setDuration(next.duration); setResolution(next.resolution); setTurbo(next.turbo)
-        setSteps(next.steps); setSampler(next.sampler); setScheduler(next.scheduler); setExperimentalSampling(next.experimentalSampling)
-        setRefImageSize(next.refImageSize); setNoDialogue(next.noDialogue); setNaturalMovement(next.naturalMovement); setClothingPolicy(next.clothingPolicy)
-        setSigmaShiftMode(next.sigmaShiftMode); setShiftVideo(next.shiftVideo); setShiftAudio(next.shiftAudio); setLoraStrength(next.loraStrength)
-        setSeed(next.seed); setAdvanced(next.advanced); setLiveEnabled(next.liveEnabled); setLivePreviewMode(next.livePreviewMode)
-        setUpscaleMode(next.upscaleMode); setRtxModel(next.rtxModel); setFirstFrame(next.firstFrame); setLastFrame(next.lastFrame)
-        setReferenceImages(next.referenceImages); setReferenceVideos(next.referenceVideos); setReferenceAudios(next.referenceAudios)
-        setTimelineGuides(next.timelineGuides); setSelectedReferenceCharacterIds(next.selectedReferenceCharacterIds)
-        setSelectedReferenceLocationIds(next.selectedReferenceLocationIds); setActiveJobId(next.activeJobId); setMovieHandoff(next.movieHandoff)
+        patch(normalizeWorkspace(loaded))
       })
       .catch(() => undefined)
       .finally(() => { if (!disposed) setStorageBootDone(true) })
     return () => { disposed = true; window.clearTimeout(failSafe) }
-  }, [])
+  }, [patch, setStorageBootDone])
 
-  // Persistence is debounced (300 ms trailing): this effect fires on every
-  // keystroke via `prompt`, and the write serializes the whole workspace.
-  // The debounce hook flushes the latest pending write on
-  // pagehide/beforeunload/unmount, so a normal close loses nothing. Writes
-  // wait for the boot load so a stale local snapshot cannot overwrite the
-  // server's newer workspace before it has been read.
+  // Persistence is debounced (300 ms trailing) and now driven by a store
+  // subscription instead of a render-keyed effect: the old effect re-ran on
+  // every keystroke through the App root; this listener fires on exactly the
+  // same set of changes (any persisted field, plus the boot-done flip) with
+  // zero React involvement. Semantics are identical — the write serializes
+  // the complete workspace snapshot captured when the change was scheduled,
+  // the debounce hook replaces the pending write on each change and flushes
+  // the latest on pagehide/beforeunload/unmount, and writes wait for the
+  // boot load so a stale local snapshot cannot overwrite the server's newer
+  // workspace before it has been read.
   //
   // Multi-tab model: whole-workspace last-write-wins at the server (the
   // newest complete document wins). True cross-tab live sync arrives with
   // the realtime fabric.
   const persistWorkspace = useDebouncedPersist(300)
-  useEffect(() => {
-    if (!storageBootDone) return
-    const workspace: PersistedWorkspace = {
-      mode, prompt, duration, resolution, turbo, steps, sampler, scheduler, experimentalSampling, refImageSize, noDialogue, naturalMovement, clothingPolicy,
-      sigmaShiftMode, shiftVideo, shiftAudio, loraStrength, seed, advanced, liveEnabled, livePreviewMode,
-      upscaleMode, rtxModel, firstFrame: withoutPreview(firstFrame), lastFrame: withoutPreview(lastFrame),
-      referenceImages: referenceImages.map((file) => withoutPreview(file)!),
-      referenceVideos: referenceVideos.map((file) => withoutPreview(file)!),
-      referenceAudios: referenceAudios.map((file) => withoutPreview(file)!),
-      timelineGuides: timelineGuides.map((guide) => ({ file: withoutPreview(guide.file)!, seconds: guide.seconds })),
-      selectedReferenceCharacterIds, selectedReferenceLocationIds, activeJobId, movieHandoff,
-    }
+  useEffect(() => useWorkspaceStore.subscribe((state, previous) => {
+    const bootCompleted = !previous.storageBootDone && state.storageBootDone
+    if (!state.storageBootDone || (!bootCompleted && !persistedWorkspaceChanged(previous, state))) return
+    const workspace = workspaceSnapshot(state)
     persistWorkspace(() => {
       void saveServerWorkspace(workspace).catch(() => {
         // Degraded mode: mirror to the legacy store so a boot while the API
@@ -164,7 +148,7 @@ export function useCreateWorkspace(options: {
         try { localStorage.setItem('minimax.workspace', JSON.stringify(workspace)) } catch { /* Quota: the next debounced write retries. */ }
       })
     })
-  }, [activeJobId, advanced, clothingPolicy, duration, experimentalSampling, firstFrame, lastFrame, liveEnabled, livePreviewMode, loraStrength, mode, movieHandoff, naturalMovement, noDialogue, persistWorkspace, prompt, refImageSize, referenceAudios, referenceImages, referenceVideos, resolution, rtxModel, sampler, scheduler, seed, selectedReferenceCharacterIds, selectedReferenceLocationIds, shiftAudio, shiftVideo, sigmaShiftMode, storageBootDone, steps, timelineGuides, turbo, upscaleMode])
+  }), [persistWorkspace])
 
   useEffect(() => {
     if (!settings || mediaHydrated.current) return
@@ -177,11 +161,11 @@ export function useCreateWorkspace(options: {
       setFirstFrame(first); setLastFrame(last)
     })
     void Promise.all(referenceImages.map(hydrate)).then((files) => setReferenceImages(files.filter(Boolean) as MediaFile[]))
-  }, [firstFrame, lastFrame, referenceImages, settings])
+  }, [firstFrame, lastFrame, referenceImages, setFirstFrame, setLastFrame, setReferenceImages, settings])
 
   useEffect(() => {
     if (!rtxModel && rtxModels.length) setRtxModel(rtxModels[0])
-  }, [rtxModel, rtxModels])
+  }, [rtxModel, rtxModels, setRtxModel])
 
   // Keep selected library assets authoritative. Character Studio and Wardrobe
   // Studio can change a link while this workspace (and even its modal) remains
@@ -206,7 +190,7 @@ export function useCreateWorkspace(options: {
       setPrompt((current) => syncReferencePrompt(current, [], next))
     })
     return () => { disposed = true }
-  }, [characterProjects, locationProjects, selectedReferenceCharacterIds, selectedReferenceLocationIds, wardrobeProjects])
+  }, [characterProjects, locationProjects, selectedReferenceCharacterIds, selectedReferenceLocationIds, setPrompt, setReferenceImages, wardrobeProjects])
 
   const workspaceBindingsFor = (characterIds: string[], locationIds: string[]) => {
     // Resolve every linked record from storage at selection time. A Character
@@ -318,7 +302,9 @@ export function useCreateWorkspace(options: {
   }
 
   const editVideoReference = async (index: number) => {
-    const file = referenceVideos[index]
+    // Read through the store: reference videos can change without this
+    // facade re-rendering, and the closure must never act on a stale list.
+    const file = useWorkspaceStore.getState().referenceVideos[index]
     if (!file) return
     const sourcePath = file.clip?.sourcePath ?? file.path
     const preview = await window.minimax.mediaUrl(sourcePath)
@@ -327,69 +313,76 @@ export function useCreateWorkspace(options: {
 
   const resetCreateWorkspace = () => {
     const defaults = settings?.generationDefaults
-    setMode('text')
-    setPrompt('')
-    setDuration(defaults?.duration ?? workspaceDefaults.duration)
-    setResolution(defaults?.resolution ?? workspaceDefaults.resolution)
-    setTurbo(defaults?.turbo ?? workspaceDefaults.turbo)
-    setSteps(defaults?.steps ?? workspaceDefaults.steps)
-    setSampler(defaults?.sampler ?? workspaceDefaults.sampler)
-    setScheduler(defaults?.scheduler ?? workspaceDefaults.scheduler)
-    setExperimentalSampling(defaults?.experimentalSampling ?? workspaceDefaults.experimentalSampling)
-    setRefImageSize(defaults?.refImageSize ?? workspaceDefaults.refImageSize)
-    setNoDialogue(true)
-    setClothingPolicy('wardrobe')
-    setSigmaShiftMode(defaults?.sigmaShiftMode ?? workspaceDefaults.sigmaShiftMode)
-    setShiftVideo(defaults?.shiftVideo ?? workspaceDefaults.shiftVideo)
-    setShiftAudio(defaults?.shiftAudio ?? workspaceDefaults.shiftAudio)
-    setLoraStrength(defaults?.loraStrength ?? workspaceDefaults.loraStrength)
-    setLiveEnabled(defaults?.livePreview ?? workspaceDefaults.liveEnabled)
-    setLivePreviewMode('standard')
-    setUpscaleMode(defaults?.upscaleMode ?? workspaceDefaults.upscaleMode)
-    setRtxModel('')
-    setSeed(Math.floor(Math.random() * 1_000_000_000))
-    setAdvanced(false)
-    setFirstFrame(null)
-    setLastFrame(null)
-    setReferenceImages([])
-    setReferenceVideos([])
-    setReferenceAudios([])
-    setTimelineGuides([])
-    setVideoClipDraft(() => null)
-    setActiveJobId(null)
-    setMovieHandoff(null)
+    // One atomic store write (the original called each setter in sequence —
+    // React batched them; a single set preserves the same one-notify
+    // behavior) plus the remount-key bump.
+    const seed = Math.floor(Math.random() * 1_000_000_000)
+    patch({
+      mode: 'text',
+      prompt: '',
+      duration: defaults?.duration ?? workspaceDefaults.duration,
+      resolution: defaults?.resolution ?? workspaceDefaults.resolution,
+      turbo: defaults?.turbo ?? workspaceDefaults.turbo,
+      steps: defaults?.steps ?? workspaceDefaults.steps,
+      sampler: defaults?.sampler ?? workspaceDefaults.sampler,
+      scheduler: defaults?.scheduler ?? workspaceDefaults.scheduler,
+      experimentalSampling: defaults?.experimentalSampling ?? workspaceDefaults.experimentalSampling,
+      refImageSize: defaults?.refImageSize ?? workspaceDefaults.refImageSize,
+      noDialogue: true,
+      clothingPolicy: 'wardrobe',
+      sigmaShiftMode: defaults?.sigmaShiftMode ?? workspaceDefaults.sigmaShiftMode,
+      shiftVideo: defaults?.shiftVideo ?? workspaceDefaults.shiftVideo,
+      shiftAudio: defaults?.shiftAudio ?? workspaceDefaults.shiftAudio,
+      loraStrength: defaults?.loraStrength ?? workspaceDefaults.loraStrength,
+      liveEnabled: defaults?.livePreview ?? workspaceDefaults.liveEnabled,
+      livePreviewMode: 'standard',
+      upscaleMode: defaults?.upscaleMode ?? workspaceDefaults.upscaleMode,
+      rtxModel: '',
+      seed,
+      advanced: false,
+      firstFrame: null,
+      lastFrame: null,
+      referenceImages: [],
+      referenceVideos: [],
+      referenceAudios: [],
+      timelineGuides: [],
+      activeJobId: null,
+      movieHandoff: null,
+      selectedReferenceCharacterIds: [],
+      selectedReferenceLocationIds: [],
+    })
     setCharacterHandoff(null)
-    setSelectedReferenceCharacterIds([])
-    setSelectedReferenceLocationIds([])
-    setCreateResetKey((value) => value + 1)
+    bumpCreateResetKey()
+    setVideoClipDraft(() => null)
     notify('success', 'MiniMax Create reset. Saved libraries, rendered files, and queue history were not deleted.')
   }
 
+  // A call-time snapshot for shape compatibility (see the module doc). The
+  // subscribed slices above are live; everything else is read here.
+  const snapshot = useWorkspaceStore.getState()
   return {
     // persisted creation fields
-    mode, setMode, prompt, setPrompt, duration, setDuration, resolution, setResolution,
-    turbo, setTurbo, steps, setSteps, sampler, setSampler, scheduler, setScheduler,
-    experimentalSampling, setExperimentalSampling, refImageSize, setRefImageSize,
-    noDialogue, setNoDialogue, naturalMovement, setNaturalMovement,
-    clothingPolicy, setClothingPolicy, sigmaShiftMode, setSigmaShiftMode,
-    shiftVideo, setShiftVideo, shiftAudio, setShiftAudio, loraStrength, setLoraStrength,
-    liveEnabled, setLiveEnabled, livePreviewMode, setLivePreviewMode,
-    upscaleMode, setUpscaleMode, rtxModel, setRtxModel, seed, setSeed, advanced, setAdvanced,
+    mode: snapshot.mode, setMode, prompt: snapshot.prompt, setPrompt, duration: snapshot.duration, setDuration: snapshot.setDuration, resolution: snapshot.resolution, setResolution: snapshot.setResolution,
+    turbo: snapshot.turbo, setTurbo: snapshot.setTurbo, steps: snapshot.steps, setSteps: snapshot.setSteps, sampler: snapshot.sampler, setSampler: snapshot.setSampler, scheduler: snapshot.scheduler, setScheduler: snapshot.setScheduler,
+    experimentalSampling: snapshot.experimentalSampling, setExperimentalSampling: snapshot.setExperimentalSampling, refImageSize: snapshot.refImageSize, setRefImageSize,
+    noDialogue: snapshot.noDialogue, setNoDialogue: snapshot.setNoDialogue, naturalMovement: snapshot.naturalMovement, setNaturalMovement: snapshot.setNaturalMovement,
+    clothingPolicy: snapshot.clothingPolicy, setClothingPolicy, sigmaShiftMode: snapshot.sigmaShiftMode, setSigmaShiftMode: snapshot.setSigmaShiftMode,
+    shiftVideo: snapshot.shiftVideo, setShiftVideo: snapshot.setShiftVideo, shiftAudio: snapshot.shiftAudio, setShiftAudio: snapshot.setShiftAudio, loraStrength: snapshot.loraStrength, setLoraStrength: snapshot.setLoraStrength,
+    liveEnabled: snapshot.liveEnabled, setLiveEnabled: snapshot.setLiveEnabled, livePreviewMode: snapshot.livePreviewMode, setLivePreviewMode: snapshot.setLivePreviewMode,
+    upscaleMode: snapshot.upscaleMode, setUpscaleMode: snapshot.setUpscaleMode, rtxModel, setRtxModel, seed: snapshot.seed, setSeed: snapshot.setSeed, advanced: snapshot.advanced, setAdvanced: snapshot.setAdvanced,
     // media and references
     firstFrame, setFirstFrame, lastFrame, setLastFrame,
-    referenceImages, setReferenceImages, referenceVideos, setReferenceVideos, referenceAudios, setReferenceAudios,
-    timelineGuides, setTimelineGuides,
+    referenceImages, setReferenceImages, referenceVideos: snapshot.referenceVideos, setReferenceVideos: snapshot.setReferenceVideos, referenceAudios: snapshot.referenceAudios, setReferenceAudios,
+    timelineGuides: snapshot.timelineGuides, setTimelineGuides: snapshot.setTimelineGuides,
     // libraries
-    characterProjects, wardrobeProjects, locationProjects, hairStyleProjects,
+    characterProjects, wardrobeProjects, locationProjects, hairStyleProjects: snapshot.hairStyleProjects,
     selectedReferenceCharacterIds, setSelectedReferenceCharacterIds,
     selectedReferenceLocationIds, setSelectedReferenceLocationIds,
     // handoffs and reset
-    activeJobId, setActiveJobId, movieHandoff, setMovieHandoff, characterHandoff, setCharacterHandoff,
-    createResetKey, resetCreateWorkspace,
+    activeJobId: snapshot.activeJobId, setActiveJobId: snapshot.setActiveJobId, movieHandoff: snapshot.movieHandoff, setMovieHandoff: snapshot.setMovieHandoff, characterHandoff: snapshot.characterHandoff, setCharacterHandoff,
+    createResetKey: snapshot.createResetKey, resetCreateWorkspace,
     // helpers
     chooseMedia, chooseMany, editVideoReference, refreshSourceMedia,
     workspaceBindingsFor, loadReferenceCharacter, loadReferenceLocation, loadReferenceWardrobe,
   }
 }
-
-export type CreateWorkspace = ReturnType<typeof useCreateWorkspace>

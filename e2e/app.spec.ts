@@ -205,3 +205,44 @@ test('a crashing view is contained by its error boundary without leaking prompt 
   expect(consoleErrors.some((entry) => entry.includes('boundary:settings'))).toBe(true)
   expect(consoleErrors.some((entry) => entry.includes('[redacted]'))).toBe(true)
 })
+
+// Wave 2a — the transient-update discipline, proven: high-frequency updates
+// riding a store subscription with direct DOM writes must not trigger ANY
+// React render. The probe pair (a transform-painted mover beside a
+// data-render-count sibling canary) mounts only with ?probe=transient; the
+// e2e runs the production build, so a DEV-only tree-shaken mechanism could
+// never be exercised — the query flag keeps it inert in every normal session.
+test('transient updates paint through store.subscribe with zero React re-renders', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await page.goto('/?probe=transient')
+  await expect(page.locator('[data-transient-probe="root"]')).toBeAttached()
+  // Everything runs inside ONE synchronous evaluate: no await gap, so an
+  // unrelated re-render (settings landing, telemetry tick) cannot land
+  // between the before/after reads and pollute the assertion.
+  const result = await page.evaluate(() => {
+    const driver = (window as unknown as { __studioDriveTransient?: (count: number) => { mounted: boolean; applied: number; from: number; to: number } }).__studioDriveTransient
+    const counter = document.querySelector('[data-transient-probe="counter"]')
+    const mover = document.querySelector<HTMLElement>('[data-transient-probe="mover"]')
+    const before = counter ? Number(counter.getAttribute('data-render-count')) : -1
+    const transformBefore = mover ? mover.style.transform : ''
+    const report = driver ? driver(120) : { mounted: false, applied: 0, from: 0, to: 0 }
+    return {
+      ready: Boolean(driver && counter && mover),
+      renderCountBefore: before,
+      renderCountAfter: counter ? Number(counter.getAttribute('data-render-count')) : -1,
+      transformBefore,
+      transformAfter: mover ? mover.style.transform : '',
+      ...report,
+    }
+  })
+  expect(result.ready).toBe(true)
+  // All 120 store updates reached the subscriber and moved the element.
+  expect(result.applied).toBe(120)
+  expect(result.to).toBeGreaterThan(result.from)
+  expect(result.transformAfter).not.toBe(result.transformBefore)
+  expect(result.transformAfter).toContain(`${result.to}px`)
+  // The discipline itself: 120 transient updates, ZERO React renders of the
+  // surrounding tree.
+  expect(result.renderCountAfter).toBe(result.renderCountBefore)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})

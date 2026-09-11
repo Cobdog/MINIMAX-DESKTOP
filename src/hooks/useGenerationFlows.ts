@@ -16,6 +16,7 @@ import { buildMusic3Workflow } from '../lib/music3Workflow'
 import { buildContactSheetWorkflow, inferContactSheetSelection } from '../lib/contactSheet'
 import type { Music3GenerationOptions } from '../lib/music3Workflow'
 import { buildRenderManifest } from '../lib/manifest'
+import { useWorkspaceStore } from '../state/workspaceStore'
 import type { useStudioSession } from './useStudioSession'
 import type { useGenerationQueue, NoticeTone } from './useGenerationQueue'
 import type { useCreateWorkspace } from './useCreateWorkspace'
@@ -80,7 +81,9 @@ export function useGenerationFlows(options: {
     }
 
     const localId = createId()
-    const job: GenerationJob = { id: localId, provider: 'ltx25', mode: ltxOptions.mode, prompt: ltxOptions.prompt, createdAt: Date.now(), status: 'queued', progress: 2, progressLabel: input ? 'Preparing first frame' : 'Preparing workflow', width: ltxOptions.width, height: ltxOptions.height, duration: ltxOptions.duration, characterProjectId: handoff?.characterProjectId ?? ws.characterHandoff ?? undefined, locationProjectId: handoff?.locationProjectId }
+    // Wave 2a: read through the store — the App root no longer re-renders on
+    // workspace edits, so the captured facade value could be stale by click time.
+    const job: GenerationJob = { id: localId, provider: 'ltx25', mode: ltxOptions.mode, prompt: ltxOptions.prompt, createdAt: Date.now(), status: 'queued', progress: 2, progressLabel: input ? 'Preparing first frame' : 'Preparing workflow', width: ltxOptions.width, height: ltxOptions.height, duration: ltxOptions.duration, characterProjectId: handoff?.characterProjectId ?? useWorkspaceStore.getState().characterHandoff ?? undefined, locationProjectId: handoff?.locationProjectId }
     setJobs((current) => [job, ...current])
     ws.setActiveJobId(localId)
     setLtxSubmitting(true)
@@ -166,7 +169,13 @@ export function useGenerationFlows(options: {
     missingNodes: readonly string[]
   }) => {
     if (!settings) return
-    const { mode, prompt, firstFrame, lastFrame, referenceImages, referenceVideos, referenceAudios, duration, resolution, turbo, steps, sampler, scheduler, experimentalSampling, loraStrength, seed, sigmaShiftMode, shiftVideo, shiftAudio, refImageSize, liveEnabled, livePreviewMode, clothingPolicy, noDialogue, naturalMovement, movieHandoff, characterHandoff, selectedReferenceCharacterIds, selectedReferenceLocationIds, setActiveJobId } = ws
+    // Wave 2a: workspace fields are read from the store AT CALL TIME — the
+    // App root no longer re-renders on workspace edits (that is the point of
+    // the zustand substrate), so the `ws` facade's captured values could be
+    // stale by the time the user clicks Generate. Same field names, same
+    // validation order; only the read moved.
+    const workspace = useWorkspaceStore.getState()
+    const { mode, prompt, firstFrame, lastFrame, referenceImages, referenceVideos, referenceAudios, duration, resolution, turbo, steps, sampler, scheduler, experimentalSampling, loraStrength, seed, sigmaShiftMode, shiftVideo, shiftAudio, refImageSize, liveEnabled, livePreviewMode, clothingPolicy, noDialogue, naturalMovement, movieHandoff, characterHandoff, selectedReferenceCharacterIds, selectedReferenceLocationIds, setActiveJobId } = workspace
     if (upscale.mode === 'ltx' && (!upscale.model || !upscale.vae)) {
       notify('error', 'LTX 2.5 spatial upscaler and video VAE must be available in ComfyUI.')
       return
@@ -175,7 +184,7 @@ export function useGenerationFlows(options: {
       notify('error', `Update ComfyUI before using LTX 2× upscale. Missing nodes: ${upscale.missingNodes.join(', ')}.`)
       return
     }
-    if (upscale.mode === 'rtx' && !ws.rtxModel) {
+    if (upscale.mode === 'rtx' && !workspace.rtxModel) {
       notify('error', 'Choose an AI upscale model installed in ComfyUI first.')
       return
     }
@@ -220,7 +229,7 @@ export function useGenerationFlows(options: {
       notify('error', 'Reference limits are 9 pictures, 3 videos, and 3 audio files. Remove extras before rendering.')
       return
     }
-    const invalidGuide = ws.timelineGuides.find((guide) => guideFrameWarning(guide.seconds, duration))
+    const invalidGuide = workspace.timelineGuides.find((guide) => guideFrameWarning(guide.seconds, duration))
     if (mode === 'reference' && invalidGuide) {
       notify('error', guideFrameWarning(invalidGuide.seconds, duration)!)
       return
@@ -253,7 +262,7 @@ export function useGenerationFlows(options: {
       const upload = async (file: MediaFile, fitToOutput = false) => file.kind === 'image' && (fitToOutput || Boolean(file.crop))
         ? window.minimax.uploadImageData(settings.comfyUrl, await prepareImage(file, width, height))
         : window.minimax.uploadInput(settings.comfyUrl, file.path)
-      const guides = mode === 'reference' ? ws.timelineGuides : []
+      const guides = mode === 'reference' ? workspace.timelineGuides : []
       const [first, last, images, videos, audios, guideUploads] = await Promise.all([
         firstFrame && (mode === 'image' || mode === 'frames') ? upload(firstFrame, true) : undefined,
         lastFrame && mode === 'frames' ? upload(lastFrame, true) : undefined,
@@ -276,7 +285,7 @@ export function useGenerationFlows(options: {
         loraStrength,
         sampler: experimentalSampling ? sampler : 'res_multistep',
         scheduler: experimentalSampling ? scheduler : 'simple',
-        upscale: upscale.mode === 'ltx' ? { type: 'ltx', model: upscale.model, vae: upscale.vae } : upscale.mode === 'rtx' ? { type: 'rtx', model: ws.rtxModel } : upscale.mode === 'lbh2d' || upscale.mode === 'lbh3d' ? { type: upscale.mode, model: upscale.lbhModel } : undefined,
+        upscale: upscale.mode === 'ltx' ? { type: 'ltx', model: upscale.model, vae: upscale.vae } : upscale.mode === 'rtx' ? { type: 'rtx', model: workspace.rtxModel } : upscale.mode === 'lbh2d' || upscale.mode === 'lbh3d' ? { type: upscale.mode, model: upscale.lbhModel } : undefined,
         refImageSize,
         sigmaShift: sigmaShiftMode === 'custom' ? { video: shiftVideo, audio: shiftAudio } : undefined,
         previewOverride: liveEnabled && livePreviewMode === 'h3-override' && h3PreviewOverrideNode ? { frames: 50, fps: 12, nodeType: h3PreviewOverrideNode, vaeName: selection.previewVae, jpegQuality: 85 } : undefined,
@@ -292,7 +301,7 @@ export function useGenerationFlows(options: {
         mode, prompt: effectivePrompt, width, height, duration, seed, steps, turbo, experimentalSampling, loraStrength,
         sampler: experimentalSampling ? sampler : 'res_multistep', scheduler: experimentalSampling ? scheduler : 'simple',
         refImageSize, sigmaShift: sigmaShiftMode === 'custom' ? { video: shiftVideo, audio: shiftAudio } : undefined,
-        upscale: upscale.mode === 'off' ? undefined : upscale.mode === 'ltx' ? { type: 'ltx', model: upscale.model, vae: upscale.vae } : { type: 'rtx', model: ws.rtxModel },
+        upscale: upscale.mode === 'off' ? undefined : upscale.mode === 'ltx' ? { type: 'ltx', model: upscale.model, vae: upscale.vae } : { type: 'rtx', model: workspace.rtxModel },
         referenceImages: renderReferenceImages.map((item) => item.path), referenceVideos: referenceVideos.map((item) => item.path), referenceAudios: referenceAudios.map((item) => item.path),
         timelineGuides: guides.length ? guides.map((guide) => ({ frameIndex: frameIndexForSeconds(guide.seconds) })) : undefined,
         filenamePrefix: `video/MiniMax_H3_${Date.now()}`,
@@ -307,7 +316,7 @@ export function useGenerationFlows(options: {
         notify('success', 'Generation added to the local ComfyUI queue.')
         ws.setCharacterHandoff(null)
       }
-      ws.setSeed(Math.floor(Math.random() * 1_000_000_000))
+      workspace.setSeed(Math.floor(Math.random() * 1_000_000_000))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const cancelled = cancellationRequests.current.has(localId)
