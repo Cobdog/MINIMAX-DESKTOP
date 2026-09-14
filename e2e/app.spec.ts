@@ -442,6 +442,13 @@ test('library cards render filmstrip posters and pool their video playback', asy
   })
   test.skip(!ffmpegAvailable, 'ffmpeg is not installed on this runner — the filmstrip capability needs it (CI installs it; see .github/workflows/ci.yml)')
 
+  // Codec guard, same honesty pattern: the playback proofs below need a
+  // browser that can actually decode the H.264 fixture. Distro Chromium
+  // builds (Debian/Ubuntu) ship without proprietary codecs; Google Chrome
+  // and codec-complete builds (Arch) run the test in full.
+  const h264Capable = await page.evaluate(() => document.createElement('video').canPlayType('video/mp4; codecs="avc1.42E01E"') !== '')
+  test.skip(!h264Capable, 'this system browser cannot decode H.264 (typical for distro Chromium builds without proprietary codecs) — the pooled-playback proof needs a codec-complete browser such as Google Chrome')
+
   const base = 'http://127.0.0.1:4199'
   const outputDirectory = path.resolve('test-home/e2e-filmstrip-output')
   const settingsResponse = await fetch(`${base}/api/lan/settings`)

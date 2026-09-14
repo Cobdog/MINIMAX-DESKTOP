@@ -25,11 +25,17 @@ const WINDOWS_CANDIDATES = [
     ? [path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe')]
     : []),
 ]
+// Google Chrome is probed BEFORE distro Chromium on purpose: Chrome ships the
+// proprietary codec set (H.264/AAC), while Debian/Ubuntu-packaged chromium
+// builds ship without them — the filmstrip e2e proves pooled VIDEO playback
+// and needs a decodable mp4. Distro chromium remains a valid fallback where
+// it is codec-complete (e.g. Arch); the spec side guards with a loud skip
+// when the resolved browser cannot decode H.264 at all.
 const LINUX_CANDIDATES = [
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
   '/usr/bin/google-chrome',
   '/usr/bin/google-chrome-stable',
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
   '/usr/bin/chrome',
   '/snap/bin/chromium',
 ]
