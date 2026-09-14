@@ -11,6 +11,12 @@ UI work. Process agreed with the maintainer (2026-09-14):
 Two items are now **LOCKED** (maintainer decisions, 2026-09-14). The rest are
 parked or in tension. Nothing beyond the two locks is decided.
 
+**NORTH STAR (maintainer, 2026-09-14):** "Iteration needs to be fast and
+frictionless. Ideas need to be able to be worked on without bottlenecking
+on UI and UX." Testable at spec time: every common action gets an
+interaction budget (keystrokes/clicks from intent → running job); any
+action over budget is a design bug.
+
 ---
 
 ## LOCKED — Item 1: The entry moment (empty canvas IS the launcher)
@@ -249,10 +255,23 @@ being outputted is likely an important consideration."
   fork it (rendered second pass) — both should exist. Rule: ops stack
   in-chain; only forks need outputs.
 
+**Fork semantics RESOLVED (maintainer, 2026-09-14): LOCKED (snapshot) by
+default, LIVE reference as a per-fork toggle.** Rationale (maintainer's
+workflow): locks pin a chain's chosen state so downstream forks rerun only
+on consent; regenerating upstream marks downstream STALE (visible, not
+auto-executed); rerun re-executes the fork's recorded settings against the
+new upstream output "without having to do much of anything." Assistant
+framing: a BUILD SYSTEM WITH CONSENT GATES — lock = pinned artifact, fork =
+dependent stage with recorded settings, upstream change = dirty bit shown
+as stale, rerun = targeted rebuild. Requires fork settings to persist
+separately from fork results (already true: registry/op-stack configs vs.
+job outputs). TAKES fall out naturally: generations within a chain are
+takes; locking pins settings + selected take; rerun produces a NEW take
+and preserves priors for comparison (the Auditions research pattern).
+
 **Open sub-questions:**
-- Fork semantics: live REFERENCE (upstream edits propagate downstream —
-  latent-truth suggests this default) vs SNAPSHOT (detach/freeze for
-  experiments)? Probably reference-by-default with explicit detach.
+- Lock granularity: chain-level (maintainer's phrasing) vs per-fork-edge —
+  chain-level assumed.
 - Can one tail feed multiple forks with different substrates (video to one
   chain, latents to another) simultaneously?
 - Does the seed input node stay visible as the chain's head once populated,
@@ -260,6 +279,38 @@ being outputted is likely an important consideration."
 - Option-menu contents: generation ops and utility ops together, ranked how?
 - Backwards-authoring v1 scope: "what can extend/produce this" only, or
   fuller target-seeking?
+
+## Item 4 (forming): the Director Suite — timeline as projection over the chain DAG
+
+**Maintainer (2026-09-14, near-verbatim):** "a prompt timeline… keep track
+of prompts over a very long duration, where you can run said chains on just
+targeted portions. Plan out a 1 minute video, execute each shot one
+timescale at a time 0-5, 10-20, 20-22, plan either model generated
+transitions or create NLE effects/transitions, attach references that would
+be handed off to each chain etc. A full director suite essentially, along
+with the camera editor and other tools."
+
+**Sharpening (assistant):**
+- The timeline is a PROJECTION over the chain DAG (answers the parked
+  "timeline-as-projection vs permanent" question: summonable view, not a
+  permanent bottom-bar resident). Segments map to chains; the PLAN is what
+  it projects.
+- **In-app prior art:** the existing MoviePlanner already does
+  shots/scenes/continuity handoffs form-based; the Director Suite is its
+  canvas-native successor.
+- **Gaps between segments (0-5, 10-20, 20-22) are the transition seats.**
+  A model-generated transition = a MULTI-INPUT fork (last frame of A +
+  first frame of B = our existing frames mode). Consequence: the input
+  recursion extends to `input = fresh | output-ref | output-refs[]` (H3
+  reference mode already accepts multiple references — engine side ready).
+  NLE transitions (crossfades etc.) live in the same gaps as export-time
+  ops the DAG doesn't need to own.
+- Camera editor (locked placement, canvas phase) plugs in as a tool a
+  segment's chain can carry.
+- **Data-model requirements to honor NOW (cheap now, expensive later):
+  multi-input forks, takes history, lock/stale/rerun semantics,
+  settings-results separation.** The Director Suite itself is a later
+  layer — but the DAG substrate must not preclude it.
 
 ## Parked questions (not yet discussed — take in maintainer's chosen order)
 
