@@ -87,26 +87,86 @@ beats the standard one).
 
 ---
 
-## ⚠ TENSION — REQUIRED DISCUSSION (maintainer flagged for depth post-compaction)
+## ⚠ TENSION — RESOLVING (maintainer direction 2026-09-14; synthesis pending their blessing)
 
-**Queue visibility vs context-sensitive bottom bar.** Item 2 locks the bottom
-bar as context-sensitive. But the UX research's strongest rule was: *a queue
-that fails silently is worse than no queue* — editors' most-hated failure
-mode across every NLE studied. If the bar is fully contextual, the queue needs
-a guaranteed home.
+**The original tension.** Item 2 locks the bottom bar as context-sensitive.
+But the UX research's strongest rule was: *a queue that fails silently is
+worse than no queue* — editors' most-hated failure mode across every NLE
+studied. If the bar is fully contextual, the queue needs a guaranteed home.
+First-round candidates (persistent sliver at bar's end / floating queue
+panel / queue-in-bar-when-generating) are now MOOTED by the maintainer's
+reframe below.
 
-Candidate resolutions (assistant's instinct first):
-1. **Persistent sliver** at the bar's end — status dot + count, expands on
-   click. Context governs the bar's body; generation status is the app's
-   heartbeat and never yields its seat. (Assistant's current preference.)
-2. Floating queue panel (always-rendered, not docked).
-3. Queue-in-bar only while generating (weakest — silent-failure risk when idle).
+**The maintainer's reframe (2026-09-14, near-verbatim):** the job queue is
+represented RIGHT ON THE CANVAS — some indication of which canvas elements
+are part of the current job, its progress, attached to its outputs. New
+outputs get dumped onto the canvas as new artifacts to be worked on directly,
+decomposed, edited, fed into another chain. The point is to represent
+everything on canvas while eliminating ComfyUI's biggest pain (navigating
+the canvas); tools/widgets/modals live anywhere on screen, floating or
+taking focus, showing the output of the current target. **"We want to SOLVE
+the ComfyUI and Blender tension, not do the same thing again."**
 
-Related unresolved: where does PLAYBACK live (context bar transport vs a
-program-monitor tile on canvas)?
+**Proposed synthesis (assistant, pending maintainer confirmation)** — three
+layers, three jobs, which fully dissolves the tension (the bar can be 100%
+contextual because queue status is no longer the bar's job):
 
-The maintainer explicitly wants to discuss this in depth after session
-compaction. Do not resolve unilaterally.
+| Layer | Home | Carries |
+|---|---|---|
+| Per-job state | ON CANVAS, attached to its input elements | progress, cancel, durable failure + reason |
+| Aggregate attention | fixed chrome — extend the titlebar engine chip | "3 running · 1 needs attention"; click ZOOMS canvas to the troubled region (a radar, not a queue home) |
+| Management | summonable index (⌘K / overlay) | flat list across everything: retry/cancel; each entry navigates to its region |
+
+**Conditions for the spatial model to satisfy the no-silent-failure rule**
+(three design contracts, not polish):
+1. Failure state is DURABLE on the object — visibly marked until dismissed,
+   reason attached. A flash-red-then-idle tile is silent failure with steps.
+2. Off-screen events still ping — the aggregate attention indicator is the
+   one fixed-chrome survival of the old "queue seat" idea (tiny, navigates).
+3. The empty-canvas seed is designed: first-ever generation has no input
+   node to attach to, so generation spawns a seed artifact (placeholder tile
+   at the prompt bar, carrying progress, morphing into the output) — this
+   makes the launcher come alive the first time it's used.
+
+**The crisp formulation this implies:** you never travel to state — state
+either lives where you're working or comes to you (job state on objects;
+output inspection floats to attention — the fabric already streams preview
+frames, so a floating panel can show a running job's live output anywhere).
+Navigation then serves only AUTHORED movement (deliberately going to another
+chain), which gets search / camera bookmarks / overview / zoom-to-fit.
+
+**Stakes raised accordingly:** canvas substrate quality is now LOAD-BEARING,
+not polish. Weapons, all consistent with "everything seen is a projection":
+- **Semantic zoom** — far out a tile is thumbnail + status ring; zoom in and
+  metadata / op chips / latent blocks resolve. The overview minimap IS the
+  far-zoom projection (this also answers the parked latent-block question:
+  they appear at a zoom level, not in a mode).
+- **Auto-placement** — outputs land adjacent to their parent, edge drawn
+  (derived read-only edges, per Item 2). The canvas grows where you work.
+- **Zoom-to-attention** — every needs-attention affordance moves the camera.
+- **Camera bookmarks / saved workspaces** — parked question promoted to
+  navigation infrastructure.
+
+**Prior art (piecewise only; the composition is ours):** TouchDesigner puts
+errors/cook state on nodes (but state-without-comes-to-you still means
+traveling); Krea dumps generations on canvas (image-first, no chain
+semantics); tldraw is the substrate candidate; Blender's render queue and
+Resolve's queue are docked-panel counterexamples.
+
+**Open sub-questions (this section):**
+- "Decompose an output" — which primitive is v1: shot-split into take-objects,
+  frame extraction, or latent-block splitting into separately-extendable
+  windows? (Maintainer used the word 2026-09-14; not yet pinned down.)
+- Placement policy beyond adjacent-to-parent (clusters? grid? what on batch
+  completion of e.g. a movie chain?).
+- Does the floating output inspector float freely, dock-to-nearest-edge, or
+  follow selection? (Maintainer: "floating or taking focus" — both allowed?)
+- Summonable index scope (jobs only, or the ⌘K palette over everything?).
+
+**Related unresolved: where does PLAYBACK live** (context-bar transport vs
+program-monitor tile on canvas)? Still open; the spatial-queue direction
+nudges toward playback-as-object-state (playing is a temporary state of a
+tile) but nothing is decided.
 
 ---
 
@@ -166,7 +226,9 @@ component/module in the "video canvas" phase — i.e., inside THIS direction.
 
 ## Next steps
 
-1. Discuss the queue tension (required).
+1. Queue tension: maintainer direction recorded (spatial — see § TENSION);
+   confirm the three-layer synthesis + pin down "decompose" v1 semantics.
 2. Continue parked questions in the maintainer's chosen order.
-3. Viability passes per item as they firm up.
+3. Viability passes per item as they firm up — the canvas substrate itself
+   (semantic zoom, auto-placement, navigation) is now first among them.
 4. Proper brainstorm → Canvas UI spec → build epic.
