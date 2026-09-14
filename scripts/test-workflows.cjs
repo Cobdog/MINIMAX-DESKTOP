@@ -2,11 +2,9 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const vm = require('node:vm')
 const ts = require('typescript')
+const { loadTs } = require('./lib/ts-vm.cjs')
 function load(path) {
-  const exports = {}
-  const code = ts.transpileModule(fs.readFileSync(path, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
-  vm.runInNewContext(code, { exports, require, URLSearchParams, URL })
-  return exports
+  return loadTs(path)
 }
 const workflowModule = load('src/lib/workflow.ts')
 const { frameCount, buildMiniMaxWorkflow, extractOutputUrl, extractOutputFile, outputFileFromUrl, OFFICIAL_H3_SAMPLER, OFFICIAL_H3_SCHEDULER } = workflowModule

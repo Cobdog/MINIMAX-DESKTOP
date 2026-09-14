@@ -36,6 +36,8 @@ export type WorkspaceState = {
   duration: number
   resolution: string
   turbo: 'off' | '4' | '8'
+  turboFamily: string
+  turboLoader: 'auto' | 'plain'
   steps: number
   sampler: string
   scheduler: string
@@ -85,6 +87,8 @@ export type WorkspaceState = {
   setDuration(duration: Updater<number>): void
   setResolution(resolution: Updater<string>): void
   setTurbo(turbo: Updater<'off' | '4' | '8'>): void
+  setTurboFamily(turboFamily: Updater<string>): void
+  setTurboLoader(turboLoader: Updater<'auto' | 'plain'>): void
   setSteps(steps: Updater<number>): void
   setSampler(sampler: Updater<string>): void
   setScheduler(scheduler: Updater<string>): void
@@ -137,6 +141,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
   setDuration: (duration) => set((state) => ({ duration: applied(duration, state.duration) })),
   setResolution: (resolution) => set((state) => ({ resolution: applied(resolution, state.resolution) })),
   setTurbo: (turbo) => set((state) => ({ turbo: applied(turbo, state.turbo) })),
+  setTurboFamily: (turboFamily) => set((state) => ({ turboFamily: applied(turboFamily, state.turboFamily) })),
+  setTurboLoader: (turboLoader) => set((state) => ({ turboLoader: applied(turboLoader, state.turboLoader) })),
   setSteps: (steps) => set((state) => ({ steps: applied(steps, state.steps) })),
   setSampler: (sampler) => set((state) => ({ sampler: applied(sampler, state.sampler) })),
   setScheduler: (scheduler) => set((state) => ({ scheduler: applied(scheduler, state.scheduler) })),
@@ -178,7 +184,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set) => ({
  *  listener gates on these so non-persisted mutations (library caches, boot
  *  latch, reset key) never trigger a workspace write. */
 const PERSISTED_KEYS: ReadonlyArray<keyof PersistedWorkspace> = [
-  'mode', 'prompt', 'duration', 'resolution', 'turbo', 'steps', 'sampler', 'scheduler', 'experimentalSampling',
+  'mode', 'prompt', 'duration', 'resolution', 'turbo', 'turboFamily', 'turboLoader', 'steps', 'sampler', 'scheduler', 'experimentalSampling',
   'refImageSize', 'noDialogue', 'naturalMovement', 'clothingPolicy', 'sigmaShiftMode', 'shiftVideo', 'shiftAudio',
   'loraStrength', 'seed', 'advanced', 'liveEnabled', 'livePreviewMode', 'upscaleMode', 'rtxModel', 'firstFrame',
   'lastFrame', 'referenceImages', 'referenceVideos', 'referenceAudios', 'timelineGuides',
@@ -196,6 +202,7 @@ export function persistedWorkspaceChanged(previous: WorkspaceState, next: Worksp
 export function workspaceSnapshot(state: WorkspaceState): PersistedWorkspace {
   return {
     mode: state.mode, prompt: state.prompt, duration: state.duration, resolution: state.resolution, turbo: state.turbo,
+    turboFamily: state.turboFamily, turboLoader: state.turboLoader,
     steps: state.steps, sampler: state.sampler, scheduler: state.scheduler, experimentalSampling: state.experimentalSampling,
     refImageSize: state.refImageSize, noDialogue: state.noDialogue, naturalMovement: state.naturalMovement, clothingPolicy: state.clothingPolicy,
     sigmaShiftMode: state.sigmaShiftMode, shiftVideo: state.shiftVideo, shiftAudio: state.shiftAudio, loraStrength: state.loraStrength,

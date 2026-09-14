@@ -6,6 +6,7 @@ import { GitBranch } from 'lucide-react'
 import { Activity, AlertCircle, Check, ChevronDown, Cpu, Eye, Folder, FolderOpen, Gauge, HardDrive, LoaderCircle, RefreshCw, Save, SlidersHorizontal, Sparkles, Stethoscope, Unplug } from 'lucide-react'
 import type { AppSettings, ComfyStatus, LlmModelsResult, ModelFile, ModelKind, OllamaModel, UpscaleMode } from '../types'
 import { choices, type ObjectInfo } from '../lib/comfyInfo'
+import { detectOptimizations } from '../lib/graph'
 import type { h3StackReport } from '../lib/h3Stack'
 import { SelectField, NumberField } from '../components/form'
 import { formatBytes } from '../lib/format'
@@ -20,6 +21,11 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
     { kind: 'vae_approx', label: 'Preview models', note: 'Tiny H3 preview decoder' },
     { kind: 'clip_vision', label: 'Vision encoders', note: 'Optional reference encoders' },
   ]
+  // Optimization registry: turbo families detected on this engine (which
+  // family/steps each installed LoRA belongs to) — surfaced next to the
+  // validated-stack report so provenance is visible without generating.
+  const detectedTurboFamilies = detectOptimizations(info, models)
+    .filter(({ entry, detection }) => entry.kind === 'turbo' && detection.available)
   const defaults = settings.generationDefaults
   const updateDefaults = (patch: Partial<AppSettings['generationDefaults']>) => setSettings({ ...settings, generationDefaults: { ...defaults, ...patch } })
   const applyPreset = (preset: 'quality' | 'official-turbo' | 'preview') => {
@@ -59,6 +65,7 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
     <section className="settings-section h3-stack-section">
       <div className="settings-heading"><div><Gauge size={19} /><span><strong>H3 engine stack</strong><small>Compares the selected files with the validated official ComfyUI stack.</small></span></div><span className={`health-pill ${h3Report.validated ? 'online' : ''}`}>{h3Report.validated ? 'Validated' : h3Report.ready ? 'Custom' : 'Incomplete'}</span></div>
       <div className="h3-stack-list">{h3Report.rows.map((row) => <div key={row.label} className={row.validated ? 'validated' : 'custom'}><span>{row.validated ? <Check size={14} /> : <AlertCircle size={14} />}</span><div><strong>{row.label}</strong><small title={row.selected || row.expected}>{row.selected || `Missing · expected ${row.expected}`}</small></div><em>{row.validated ? 'Recommended' : row.selected ? 'Non-standard' : 'Missing'}</em></div>)}</div>
+      <div className="h3-stack-list">{detectedTurboFamilies.length ? detectedTurboFamilies.map(({ entry, detection }) => <div key={entry.id} className="validated"><span><Check size={14} /></span><div><strong>{entry.label}</strong><small title={detection.model ?? entry.ui.installHint}>{detection.model ?? entry.ui.installHint}</small></div><em>{entry.pairing?.steps ?? '?'} steps{entry.pairing?.samplerNode ? ' · larryvrh-ready' : ''}</em></div>) : <div className="custom"><span><AlertCircle size={14} /></span><div><strong>No turbo families detected</strong><small>Install an official or community turbo LoRA into ComfyUI/models/loras, then rescan.</small></div><em>Missing</em></div>}</div>
       {!h3Report.validated && <p className="settings-warning"><AlertCircle size={15} />Some components differ from the validated H3 stack. Generation remains available, but output quality may differ.</p>}
       <div className="diagnostic-action"><span><strong>Fixed quality comparison</strong><small>Queues Native Quality and Turbo 8 at 1344 × 768, 5 seconds, seed 12345, with no upscale.</small></span><button className="secondary-button" disabled={!status.connected || diagnosticRunning || !h3Report.ready} onClick={onRunDiagnostics}>{diagnosticRunning ? <LoaderCircle className="spin" size={15} /> : <Activity size={15} />}{diagnosticRunning ? 'Queuing tests…' : 'Run H3 Quality Test'}</button></div>
     </section>

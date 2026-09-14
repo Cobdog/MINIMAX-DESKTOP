@@ -1,4 +1,5 @@
 import type { Ltx25ModelSelection, ModelFile, ModelKind, ModelSelection } from '../types'
+import { turboLoraPatterns } from './graph'
 
 function findModel(files: ModelFile[], kind: ModelKind, expressions: RegExp | RegExp[]) {
   const candidates = files.filter((file) => file.kind === kind)
@@ -9,9 +10,8 @@ function findModel(files: ModelFile[], kind: ModelKind, expressions: RegExp | Re
   return ''
 }
 
-export function inferSelections(files: ModelFile[], turbo: 'off' | '4' | '8'): ModelSelection {
+export function inferSelections(files: ModelFile[], turbo: 'off' | '4' | '8', family?: string): ModelSelection {
   const find = (kind: ModelKind, expressions: RegExp | RegExp[]) => findModel(files, kind, expressions)
-  const turboSteps = turbo === 'off' ? '[48]' : turbo
   return {
     fl2va: find('diffusion_models', [/^minimax_h3_fl2va_pruned_int8_convrot\.safetensors$/i, /^minimax_h3_fl2va.*\.safetensors$/i]),
     ref2va: find('diffusion_models', [/^minimax_h3_ref2va_pruned_int8_convrot\.safetensors$/i, /^minimax_h3_ref2va.*\.safetensors$/i]),
@@ -19,9 +19,13 @@ export function inferSelections(files: ModelFile[], turbo: 'off' | '4' | '8'): M
     videoVae: find('vae', [/^minimax_h3_video_vae_fp16\.safetensors$/i, /^minimax_h3_video_vae.*\.safetensors$/i]),
     audioVae: find('vae', [/^minimax_h3_audio_vae_fp32\.safetensors$/i, /^minimax_h3_audio_vae.*\.safetensors$/i]),
     previewVae: find('vae_approx', /^taeh3_decoder\.safetensors$/i),
-    fl2vLora: find('loras', new RegExp(`^minimax_h3_fl2v_turbo_${turboSteps}step.*\\.safetensors$`, 'i')),
-    // ComfyUI's official Ref2V template currently publishes the 4-step LoRA.
-    ref2vLora: turbo === '8' ? '' : find('loras', /^minimax_h3_ref2v_turbo_4step.*\.safetensors$/i),
+    // Turbo inference is family-ranked through the optimization registry:
+    // official weights first, then lightx2v newest-first, with an explicit
+    // family choice (registry entry id) constraining the patterns to it.
+    fl2vLora: find('loras', turboLoraPatterns('fl2v', turbo, family)),
+    // Reference mode: the official 4-step LoRA (ComfyUI's template pair), or
+    // the lightx2v Ref2VA 8-step when 8-step reference mode is requested.
+    ref2vLora: find('loras', turboLoraPatterns('ref2v', turbo, family)),
   }
 }
 

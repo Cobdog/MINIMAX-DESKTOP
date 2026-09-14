@@ -175,7 +175,7 @@ export function useGenerationFlows(options: {
     // stale by the time the user clicks Generate. Same field names, same
     // validation order; only the read moved.
     const workspace = useWorkspaceStore.getState()
-    const { mode, prompt, firstFrame, lastFrame, referenceImages, referenceVideos, referenceAudios, duration, resolution, turbo, steps, sampler, scheduler, experimentalSampling, loraStrength, seed, sigmaShiftMode, shiftVideo, shiftAudio, refImageSize, liveEnabled, livePreviewMode, clothingPolicy, noDialogue, naturalMovement, movieHandoff, characterHandoff, selectedReferenceCharacterIds, selectedReferenceLocationIds, setActiveJobId } = workspace
+    const { mode, prompt, firstFrame, lastFrame, referenceImages, referenceVideos, referenceAudios, duration, resolution, turbo, turboLoader, steps, sampler, scheduler, experimentalSampling, loraStrength, seed, sigmaShiftMode, shiftVideo, shiftAudio, refImageSize, liveEnabled, livePreviewMode, clothingPolicy, noDialogue, naturalMovement, movieHandoff, characterHandoff, selectedReferenceCharacterIds, selectedReferenceLocationIds, setActiveJobId } = workspace
     if (upscale.mode === 'ltx' && (!upscale.model || !upscale.vae)) {
       notify('error', 'LTX 2.5 spatial upscaler and video VAE must be available in ComfyUI.')
       return
@@ -296,7 +296,8 @@ export function useGenerationFlows(options: {
         referenceVideos: referenceVideos.map((item) => item.path),
         referenceAudios: referenceAudios.map((item) => item.path),
         timelineGuides: guides.length ? guides.map((guide) => ({ frameIndex: frameIndexForSeconds(guide.seconds) })) : undefined,
-      }, selection, { first, last, images, videos, audios, guides: guideUploads })
+        turboLoader,
+      }, selection, { first, last, images, videos, audios, guides: guideUploads }, info)
       const manifest = buildRenderManifest({
         mode, prompt: effectivePrompt, width, height, duration, seed, steps, turbo, experimentalSampling, loraStrength,
         sampler: experimentalSampling ? sampler : 'res_multistep', scheduler: experimentalSampling ? scheduler : 'simple',
@@ -349,7 +350,7 @@ export function useGenerationFlows(options: {
       const job: GenerationJob = { id, provider: 'minimax', mode: 'text', prompt: `[H3 diagnostic · ${test.name}] ${diagnosticPrompt}`, createdAt: Date.now() + index, status: 'queued', progress: 2, progressLabel: 'Preparing diagnostic workflow', width: 1344, height: 768, duration: 5 }
       setJobs((current) => [job, ...current])
       try {
-        const graph = buildMiniMaxWorkflow({ mode: 'text', prompt: diagnosticPrompt, width: 1344, height: 768, duration: 5, seed: 12345, steps: 20, turbo: test.turbo, sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', filenamePrefix: test.filenamePrefix, referenceImages: [], referenceVideos: [], referenceAudios: [] }, test.selection, { images: [], videos: [], audios: [] })
+        const graph = buildMiniMaxWorkflow({ mode: 'text', prompt: diagnosticPrompt, width: 1344, height: 768, duration: 5, seed: 12345, steps: 20, turbo: test.turbo, sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', filenamePrefix: test.filenamePrefix, referenceImages: [], referenceVideos: [], referenceAudios: [] }, test.selection, { images: [], videos: [], audios: [] }, info)
         const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, clientId)
         queuedCount += 1
         setJobs((current) => current.map((item) => item.id === id ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: index === 0 ? 'Native test queued' : 'Turbo 8 test queued behind Native' } : item))

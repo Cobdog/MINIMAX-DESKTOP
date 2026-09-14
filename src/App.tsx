@@ -171,9 +171,10 @@ function App() {
   } = ws
   const mode = useWorkspaceStore((state) => state.mode)
   const turbo = useWorkspaceStore((state) => state.turbo)
+  const turboFamily = useWorkspaceStore((state) => state.turboFamily)
   const createResetKey = useWorkspaceStore((state) => state.createResetKey)
 
-  const selection = useMemo(() => inferSelections(models, turbo), [models, turbo])
+  const selection = useMemo(() => inferSelections(models, turbo, turboFamily), [models, turbo, turboFamily])
   const h3Report = useMemo(() => h3StackReport(models), [models])
   const ltxSelection = useMemo(() => inferLtx25Selections(models, choices(info, 'LatentUpscaleModelLoader', 'model_name')), [models, info])
   const aceSelection = useMemo(() => inferAceStepSelections(models), [models])

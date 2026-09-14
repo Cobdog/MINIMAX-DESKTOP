@@ -228,6 +228,11 @@ export type GenerationOptions = {
   seed: number
   steps: number
   turbo: 'off' | '4' | '8'
+  /** Turbo loader preference: 'auto' lets a 4-step family use the dedicated
+   *  larryvrh loader/sampler pair when that node pack is installed; 'plain'
+   *  forces the stock LoraLoaderModelOnly path (community-reported quality
+   *  path). Default 'auto'. */
+  turboLoader?: 'auto' | 'plain'
   experimentalSampling?: boolean
   previewOverride?: { frames: number; fps: number; nodeType?: string; vaeName?: string; jpegQuality?: number }
   loraStrength?: number

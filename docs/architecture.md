@@ -63,6 +63,21 @@ Security posture: **open on the LAN by default** (ComfyUI-consistent; a delibera
 
 Job state transitions live in the pure reducer `src/lib/jobReducer.ts` (terminal-state guards, no-output cap, deadline), unit-tested in `scripts/test-workflows.cjs`.
 
+## Optimization registry
+
+`src/lib/graph/` formalizes the graph factory: the builders in `src/lib/workflow.ts` remain deterministic pure functions with stable numeric node ids (now centralized in `graph/ids.ts` as the `H3` table — the ids are public contract: tests, output attribution, and manifests reference them), while every optimization that can alter a graph became a registry ENTRY — data, not code paths. Today: the turbo LoRA loader (node '5'), the H3 live-preview override ('7'), and the post-process branches (LTX latent 2× at 60s–70s, RTX pixel 2× at 80s, LBH hires-fix at 90s).
+
+**Entry schema** (`graph/types.ts`, `OptimizationEntry`): `{ id, label, kind: 'turbo' | 'acceleration' | 'upscale' | 'preview', appliesTo, wraps, patterns?, detect(info, files) → { available, model?, missingNodes?, packs? }, transform(graph, ctx, opts), pairing? { sampler, scheduler, samplerNode?, steps }, ui { description, warning?, installHint? } }`. Entries live in `graph/turbo.ts` (official 8/4, lightx2v 4/8-step FL2V + Ref2VA, drbaph 4-step, alibaba-pai PDD 8-step, plus the `turbo.generic` plain-loader fallback), `graph/upscale.ts`, `graph/preview.ts`; `graph/registry.ts` assembles, exposes detection/provenance/plan resolution, and `registerOptimization()` for runtime registration.
+
+**Two contracts make this safe:**
+
+1. **Insert-only.** Transforms append nodes at a declared factory seam (`wraps: 'modelChain' | 'output' | …`) through a `GraphContext` — a role-addressed node map (`ctx.link('samplerSelect')`, never the raw id `'13'`) with `wrapModel()` enforcing the model chain. A transform never rewrites a node it did not create.
+2. **Inertness.** When an entry is not selected, the produced graph must be deep-equal to the pre-registry graph. `scripts/test-registry.cjs` proves this per build against `scripts/fixtures/registry-golden.json` — golden snapshots of `buildMiniMaxWorkflow` output over the matrix in `scripts/lib/registry-matrix.cjs` (captured from the pre-registry builder; regenerate deliberately with `node scripts/test-registry.cjs --update-golden` and review the diff, the fixture IS the contract). The same suite proves **painless expansion**: a hypothetical turbo family registered in test data detects, transforms, enforces its pairing, and stays inert — zero factory changes.
+
+**Adding a method** (e.g. a new turbo family or SeedVR2 upscale): add one entry to the relevant `graph/*.ts` module — filename patterns for detection, the pairing contract (steps/sampler; `samplerNode` swaps KSamplerSelect for a dedicated pack node like larryvrh's `MiniMaxH3TurboSampler` when object_info shows it installed), and the transform. The UI surfaces detected families automatically (`detectOptimizations(info, models)` gates availability with the entry's `installHint`); model selection ranks through `turboLoraPatterns()` (official first, lightx2v newest-first, an explicit `turboFamily` workspace choice constrains to one entry). The loader choice (`auto` = dedicated pack nodes when installed / `plain` = stock `LoraLoaderModelOnly`) rides `GenerationOptions.turboLoader`.
+
+`pnpm test:registry` runs the suite; it is part of `test:all`.
+
 ## Renderer structure
 
 `src/App.tsx` (~550 lines) is the composition shell — hook wiring, view routing, and handoffs between workspaces. The domain logic is layered so each feature lands in exactly one place:
@@ -92,6 +107,7 @@ pnpm build          # typecheck + web build + server build
 pnpm start:server   # run the app on :4178
 pnpm dev            # vite HMR on :5173 (proxies /api to :4178)
 pnpm test           # assertion suite (workflows, reducer, persistence, poll kernel)
+pnpm test:registry  # optimization registry: inertness goldens, transforms, detection, pairing, expansion
 pnpm smoke:server   # boots the built server on a scratch port; verifies routes + guards
 pnpm test:e2e       # builds, then Playwright: 14-view render sweep at 1920x1080
                     # with console-error tracking + per-view vision screenshots

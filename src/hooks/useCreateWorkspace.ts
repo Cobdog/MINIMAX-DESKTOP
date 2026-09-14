@@ -363,7 +363,7 @@ export function useCreateWorkspace(options: {
   return {
     // persisted creation fields
     mode: snapshot.mode, setMode, prompt: snapshot.prompt, setPrompt, duration: snapshot.duration, setDuration: snapshot.setDuration, resolution: snapshot.resolution, setResolution: snapshot.setResolution,
-    turbo: snapshot.turbo, setTurbo: snapshot.setTurbo, steps: snapshot.steps, setSteps: snapshot.setSteps, sampler: snapshot.sampler, setSampler: snapshot.setSampler, scheduler: snapshot.scheduler, setScheduler: snapshot.setScheduler,
+    turbo: snapshot.turbo, setTurbo: snapshot.setTurbo, turboFamily: snapshot.turboFamily, setTurboFamily: snapshot.setTurboFamily, turboLoader: snapshot.turboLoader, setTurboLoader: snapshot.setTurboLoader, steps: snapshot.steps, setSteps: snapshot.setSteps, sampler: snapshot.sampler, setSampler: snapshot.setSampler, scheduler: snapshot.scheduler, setScheduler: snapshot.setScheduler,
     experimentalSampling: snapshot.experimentalSampling, setExperimentalSampling: snapshot.setExperimentalSampling, refImageSize: snapshot.refImageSize, setRefImageSize,
     noDialogue: snapshot.noDialogue, setNoDialogue: snapshot.setNoDialogue, naturalMovement: snapshot.naturalMovement, setNaturalMovement: snapshot.setNaturalMovement,
     clothingPolicy: snapshot.clothingPolicy, setClothingPolicy, sigmaShiftMode: snapshot.sigmaShiftMode, setSigmaShiftMode: snapshot.setSigmaShiftMode,

@@ -10,6 +10,11 @@ export type PersistedWorkspace = {
   duration: number
   resolution: string
   turbo: 'off' | '4' | '8'
+  /** Explicit turbo family (optimization-registry entry id, '' = auto-rank). */
+  turboFamily: string
+  /** 'auto' lets 4-step families use the dedicated larryvrh loader/sampler
+   *  pair when installed; 'plain' forces the stock LoraLoaderModelOnly path. */
+  turboLoader: 'auto' | 'plain'
   steps: number
   sampler: string
   scheduler: string
@@ -42,7 +47,7 @@ export type PersistedWorkspace = {
 }
 
 export const workspaceDefaults: PersistedWorkspace = {
-  mode: 'text', prompt: '', duration: 5, resolution: '1344x768', turbo: 'off', steps: 30,
+  mode: 'text', prompt: '', duration: 5, resolution: '1344x768', turbo: 'off', turboFamily: '', turboLoader: 'auto', steps: 30,
   sampler: 'res_multistep', scheduler: 'simple', experimentalSampling: false, refImageSize: 'match', noDialogue: true, naturalMovement: true, clothingPolicy: 'wardrobe',
   sigmaShiftMode: 'model', shiftVideo: 12, shiftAudio: 3, loraStrength: 1, seed: Math.floor(Math.random() * 1_000_000_000),
   advanced: false, liveEnabled: true, livePreviewMode: 'standard', upscaleMode: 'off', rtxModel: '', firstFrame: null,
@@ -62,7 +67,10 @@ export function normalizeWorkspace(stored: Partial<PersistedWorkspace>): Persist
     workspace.scheduler = 'simple'
     workspace.experimentalSampling = false
   }
-  if (workspace.mode === 'reference' && workspace.turbo === '8') workspace.turbo = 'off'
+  // Reference mode had no 8-step LoRA before lightx2v's Ref2VA 8-step: reset
+  // legacy 8-step reference choices, but preserve an explicit Ref2VA 8-step
+  // family pick (the one supported path to 8-step reference generation).
+  if (workspace.mode === 'reference' && workspace.turbo === '8' && stored.turboFamily !== 'turbo.lightx2v-ref2v-8') workspace.turbo = 'off'
   workspace.steps = Math.max(16, Math.min(30, Number(workspace.steps) || 30))
   if (stored.steps === 20) workspace.steps = 30
   return workspace
