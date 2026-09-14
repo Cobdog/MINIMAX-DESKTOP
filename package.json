@@ -12,7 +12,7 @@
     "build:server": "tsc -p tsconfig.server.json && node scripts/copy-llm-families.cjs",
     "start:server": "node dist-server/server/index.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
-    "lint": "eslint . --max-warnings 0",
+    "lint": "eslint . --max-warnings 0 && stylelint \"src/**/*.css\"",
     "test": "node scripts/test-workflows.cjs",
     "test:registry": "node scripts/test-registry.cjs",
     "test:storage": "node scripts/test-storage.cjs",
@@ -22,8 +22,11 @@
     "test:engine": "node scripts/test-engine-process.cjs",
     "test:runtime": "node scripts/test-runtime.cjs",
     "smoke:server": "node scripts/smoke-server.cjs",
-    "test:e2e": "pnpm build && playwright test",
-    "test:all": "pnpm test && pnpm test:registry && pnpm test:e2e && pnpm test:storage && pnpm test:filmstrip && pnpm test:realtime && pnpm test:llm && pnpm test:engine && pnpm test:runtime && pnpm smoke:server"
+    "test:e2e": "pnpm build && playwright test --project=e2e",
+    "test:vision": "playwright test --project=vision",
+    "vision:report": "node scripts/vision-e2e/report.cjs",
+    "gate": "node scripts/run-gate.cjs",
+    "test:all": "pnpm test && pnpm test:registry && pnpm test:e2e && pnpm test:storage && pnpm test:filmstrip && pnpm test:realtime && pnpm test:llm && pnpm test:engine && pnpm test:runtime && pnpm smoke:server && pnpm test:vision"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
@@ -49,6 +52,8 @@
     "eslint-plugin-react-hooks": "^5.1.0",
     "eslint-plugin-react-refresh": "^0.4.16",
     "globals": "^15.14.0",
+    "stylelint": "^17.15.0",
+    "stylelint-config-standard": "^40.0.0",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.19.1",
     "vite": "^6.0.7"

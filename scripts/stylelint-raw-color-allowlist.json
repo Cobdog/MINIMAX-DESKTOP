@@ -1,0 +1,665 @@
+{
+  "_comment": "Documented one-off raw-color literals for the minimax/no-raw-colors stylelint rule. Generated from the first full-tree audit (wave 2b token pass); each entry is an exact property+value match kept for pixel-exact rendering. NEW raw colors must NOT be added here casually — prefer a var(--token); if a literal is genuinely one-off, append {property, value, reason} and say why.",
+  "allow": [
+    {
+      "property": "background",
+      "value": "#000",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "proto.css, styles.css"
+    },
+    {
+      "property": "background",
+      "value": "#080a09",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "#0b0e0c",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "#101411",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "#111613",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "#111713",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "#202522",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "background",
+      "value": "#222a26",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "#c9ff42",
+      "reason": "accent-green near-duplicate kept literal by the codemod (≤2-per-channel fold policy)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "#d2ff83",
+      "reason": "accent-green near-duplicate kept literal by the codemod (≤2-per-channel fold policy)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "#fff",
+      "reason": "white hairline / overlay alpha — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "color-mix(in srgb, #0ea5e9 16%, transparent)",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "color-mix(in srgb, #4d6bfe 16%, transparent)",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "color-mix(in srgb, #a855f7 16%, transparent)",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "color-mix(in srgb, #d97757 16%, transparent)",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(0,0,0,.7)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(0,0,0,.76)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(101,214,194,.07)",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(11,14,13,.94)",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(11,14,13,.96)",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(198,255,78,.05)",
+      "reason": "accent-green near-duplicate kept literal by the codemod (≤2-per-channel fold policy)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(198,255,78,.06)",
+      "reason": "accent-green near-duplicate kept literal by the codemod (≤2-per-channel fold policy)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(198,255,78,.07)",
+      "reason": "accent-green near-duplicate kept literal by the codemod (≤2-per-channel fold policy)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(198,255,78,.09)",
+      "reason": "accent-green near-duplicate kept literal by the codemod (≤2-per-channel fold policy)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(198,255,78,.11)",
+      "reason": "accent-green near-duplicate kept literal by the codemod (≤2-per-channel fold policy)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(2,4,3,.68)",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(2,4,3,.72)",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(229,165,210,.08)",
+      "reason": "danger/warning-family near-duplicate kept literal (pixel-exact)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(25,31,27,.96)",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(255,102,102,.07)",
+      "reason": "danger/warning-family near-duplicate kept literal (pixel-exact)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(255,107,107,.1)",
+      "reason": "danger/warning-family near-duplicate kept literal (pixel-exact)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(255,184,92,.08)",
+      "reason": "danger/warning-family near-duplicate kept literal (pixel-exact)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(255,255,255,.01)",
+      "reason": "white hairline / overlay alpha — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(255,255,255,.012)",
+      "reason": "white hairline / overlay alpha — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(255,255,255,.018)",
+      "reason": "white hairline / overlay alpha — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(255,255,255,.055)",
+      "reason": "white hairline / overlay alpha — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "background",
+      "value": "rgba(5,10,7,.76)",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "border-bottom",
+      "value": "1px solid #202622",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "border-bottom",
+      "value": "1px solid rgba(255,184,92,.22)",
+      "reason": "danger/warning-family near-duplicate kept literal (pixel-exact)",
+      "files": "styles.css"
+    },
+    {
+      "property": "border-bottom",
+      "value": "1px solid rgba(255,255,255,.035)",
+      "reason": "white hairline / overlay alpha — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "border-color",
+      "value": "#56615b",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "border-color",
+      "value": "#568c85",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "border-color",
+      "value": "#607248",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "border-color",
+      "value": "#6d844c",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "border-color",
+      "value": "#738f42",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "border-color",
+      "value": "rgba(198,255,78,.38)",
+      "reason": "accent-green near-duplicate kept literal by the codemod (≤2-per-channel fold policy)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "border-color",
+      "value": "rgba(198,255,78,.45)",
+      "reason": "accent-green near-duplicate kept literal by the codemod (≤2-per-channel fold policy)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "border-color",
+      "value": "rgba(198,255,78,.48)",
+      "reason": "accent-green near-duplicate kept literal by the codemod (≤2-per-channel fold policy)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "border-color",
+      "value": "rgba(198,255,78,.55)",
+      "reason": "accent-green near-duplicate kept literal by the codemod (≤2-per-channel fold policy)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "border-color",
+      "value": "rgba(229,165,210,.45)",
+      "reason": "danger/warning-family near-duplicate kept literal (pixel-exact)",
+      "files": "styles.css"
+    },
+    {
+      "property": "border-top",
+      "value": "1px solid rgba(255,255,255,.045)",
+      "reason": "white hairline / overlay alpha — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "border",
+      "value": "1px dashed rgba(255,255,255,.18)",
+      "reason": "white hairline / overlay alpha — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "border",
+      "value": "1px solid rgba(101,214,194,.26)",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "border",
+      "value": "1px solid rgba(123,124,255,.22)",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "border",
+      "value": "1px solid rgba(190,255,69,.4)",
+      "reason": "accent-green near-duplicate kept literal by the codemod (≤2-per-channel fold policy)",
+      "files": "styles.css"
+    },
+    {
+      "property": "border",
+      "value": "1px solid rgba(198,255,78,.25)",
+      "reason": "accent-green near-duplicate kept literal by the codemod (≤2-per-channel fold policy)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "border",
+      "value": "1px solid rgba(198,255,78,.34)",
+      "reason": "accent-green near-duplicate kept literal by the codemod (≤2-per-channel fold policy)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "border",
+      "value": "1px solid rgba(201,255,66,.5)",
+      "reason": "accent-green near-duplicate kept literal by the codemod (≤2-per-channel fold policy)",
+      "files": "styles.css"
+    },
+    {
+      "property": "border",
+      "value": "1px solid rgba(255,102,102,.3)",
+      "reason": "danger/warning-family near-duplicate kept literal (pixel-exact)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "border",
+      "value": "1px solid rgba(255,255,255,.14)",
+      "reason": "white hairline / overlay alpha — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "0 0 0 1px rgba(198,255,78,.14)",
+      "reason": "accent-green near-duplicate kept literal by the codemod (≤2-per-channel fold policy)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "0 10px 34px rgba(0,0,0,.45)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "0 12px 30px rgba(0, 0, 0, .35)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "proto.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "0 12px 32px rgba(0,0,0,.3)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "0 12px 38px rgba(0,0,0,.55)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "0 14px 34px rgba(0, 0, 0, .4)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "proto.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "0 18px 48px rgba(0,0,0,.5)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "0 18px 60px rgba(0,0,0,.58)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "0 20px 60px rgba(0,0,0,.35)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "0 24px 70px rgba(0,0,0,.55)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "0 24px 70px rgba(0,0,0,.58)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "0 24px 72px rgba(0,0,0,.62)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "0 24px 80px rgba(0,0,0,.48)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "0 24px 80px rgba(0,0,0,.52)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "0 28px 90px rgba(0,0,0,.62)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "0 28px 90px rgba(0,0,0,.65)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "0 28px 90px rgba(0,0,0,.68)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "0 2px 10px rgba(0,0,0,.14)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "24px 0 70px rgba(0,0,0,.48)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "24px 0 70px rgba(0,0,0,.5)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "inset 0 0 0 1px rgba(190,255,69,.15)",
+      "reason": "accent-green near-duplicate kept literal by the codemod (≤2-per-channel fold policy)",
+      "files": "styles.css"
+    },
+    {
+      "property": "box-shadow",
+      "value": "inset 0 1px 0 rgba(255,255,255,.025), 0 12px 34px rgba(0,0,0,.08)",
+      "reason": "pure-black shadow / video well — blessed one-off (wave-2b token note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#10150b",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#11150f",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "color",
+      "value": "#20160a",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "proto.css"
+    },
+    {
+      "property": "color",
+      "value": "#58615c",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#65d6c2",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#67d3f8",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#68716c",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#73ded0",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#7d96ff",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#8eeadd",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#a9bbb5",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#a9c8ff",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#b8d391",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#c58b8b",
+      "reason": "danger/warning-family near-duplicate kept literal (pixel-exact)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#c98af9",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#cdd5d0",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#d7ded9",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#d7dfda",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#d8ad77",
+      "reason": "danger/warning-family near-duplicate kept literal (pixel-exact)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#d8dfdb",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#d9e0dc",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#dca4a4",
+      "reason": "danger/warning-family near-duplicate kept literal (pixel-exact)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "color",
+      "value": "#e3c8f1",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#eb9a7d",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#f6fff9",
+      "reason": "pre-token legacy literal kept for pixel-exact rendering — tokenize only alongside a visual diff (wave-2b note)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#ff9b9b",
+      "reason": "danger/warning-family near-duplicate kept literal (pixel-exact)",
+      "files": "guided-studio.css"
+    },
+    {
+      "property": "color",
+      "value": "#ffb85c",
+      "reason": "danger/warning-family near-duplicate kept literal (pixel-exact)",
+      "files": "styles.css"
+    },
+    {
+      "property": "color",
+      "value": "#ffd39b",
+      "reason": "danger/warning-family near-duplicate kept literal (pixel-exact)",
+      "files": "styles.css"
+    }
+  ]
+}

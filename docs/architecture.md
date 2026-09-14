@@ -113,10 +113,19 @@ pnpm test:registry  # optimization registry: inertness goldens, transforms, dete
 pnpm smoke:server   # boots the built server on a scratch port; verifies routes + guards
 pnpm test:e2e       # builds, then Playwright: 14-view render sweep at 1920x1080
                     # with console-error tracking + per-view vision screenshots
-pnpm test:all       # unit + E2E + smoke
+pnpm test:vision    # vision phase 1 (capture): screenshot bundle + rubrics under
+                    # test-results/vision/<run-id>/ — judging is a subagent step
+                    # (scripts/vision-e2e/JUDGE.md), then `pnpm vision:report`
+pnpm test:all       # unit + E2E + smoke + vision capture
+pnpm gate           # the full chain through one harness: typecheck, lint, unit
+                    # suites, build, smoke, e2e, vision capture — timed, noise-
+                    # filtered, one summary table (see README → Testing)
 ```
 
-CI (`.github/workflows/ci.yml`) runs typecheck, lint, unit, build, smoke, and E2E on every push and PR.
+CI (`.github/workflows/ci.yml`) runs typecheck, lint, unit, build, smoke, E2E
+and the vision capture on every push and PR (no browser downloads — the
+Playwright config launches the runner's system Chromium); the Windows Engine
+CI leg covers the server build + engine/runtime suites.
 
 ## Known debts / follow-ups
 

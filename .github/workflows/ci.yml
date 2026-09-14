@@ -34,5 +34,12 @@ jobs:
       # ffmpeg still SKIP gracefully with a logged reason (test-side guard).
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: pnpm test:filmstrip
-      - run: pnpm exec playwright install --with-deps chromium
+      # NO browser download: the Playwright config launches the runner's
+      # SYSTEM browser (ubuntu images ship Google Chrome + Chromium) and
+      # throws with a one-line reason if none is found. Local dev needs a
+      # system Chromium/Chrome too, or MINIMAX_TEST_BROWSER=path (see README).
       - run: pnpm test:e2e
+      # Vision phase 1 (capture only): writes a screenshot bundle under
+      # test-results/vision/. Judgment (JUDGE.md subagent) never runs in CI;
+      # `pnpm vision:report` is the local pre-release gate for the verdicts.
+      - run: pnpm test:vision

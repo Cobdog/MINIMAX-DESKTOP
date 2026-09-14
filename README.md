@@ -13,7 +13,7 @@ pnpm start:server
 # → http://127.0.0.1:4178  (LAN address printed on startup)
 ```
 
-**Development:** `pnpm test` (workflows, contracts, manifests — VM-harness suite), `pnpm test:e2e` (Playwright: 14-view render sweep at 1920×1080 with console-error tracking and per-view vision screenshots), `pnpm smoke:server` (routes + security guards). CI runs all of it on every push.
+**Development:** `pnpm gate` runs the full verification chain (see [Testing](#testing) below). CI runs typecheck/lint/unit/build/smoke/e2e/vision-capture on every push, plus an Engine CI leg on Windows.
 
 Requirements: Node 20+, a local ComfyUI with the MiniMax H3 core nodes, and the H3 model components already on disk. FFmpeg for clip tools. Optional: local Ollama for prompt features; NVIDIA tooling for GPU telemetry.
 
@@ -22,6 +22,87 @@ Configuration lives in `~/.minimax-studio/` (override with `MINIMAX_STUDIO_HOME`
 **Security posture:** open on your LAN by default, exactly like ComfyUI itself — anyone on the same network can use the studio. For hostile networks (café Wi-Fi, shared offices), start with `--token` (or `MINIMAX_LAN_TOKEN=1`) and pass the token as `?token=…`.
 
 `pnpm dev` runs vite HMR on 5173 with `/api` proxied to a server already running on 4178.
+
+## Testing
+
+### The gate
+
+```bash
+pnpm gate
+```
+
+Runs the entire verification chain in canonical order, each suite in its own
+process with wall-clock timing, known-benign output filtered (pino logs,
+chunk-size advisories, pnpm bookkeeping — the tally is printed so nothing
+disappears silently), and a final summary table. Non-zero exit on any
+failure; a failed `build` skips only its dependents (smoke/e2e/vision).
+
+Order: `typecheck` → `lint` → `test` → `test:registry` → `test:storage` →
+`test:realtime` → `test:filmstrip` → `test:llm` → `test:engine` →
+`test:runtime` → `build` → `smoke:server` → e2e (Playwright) →
+vision-capture (Playwright). `pnpm test:all` is the same chain without the
+harness niceties.
+
+### System Chromium (no bundled browser)
+
+The Playwright suites **never download a browser**. The config
+(`playwright.config.ts`) resolves your machine's own Chromium/Google Chrome:
+first `MINIMAX_TEST_BROWSER` (explicit executable path), then common install
+paths on Linux and Windows, then a `$PATH` scan. If nothing is found the
+config **throws with a one-line reason** — a missing system browser is a
+setup error to fix on the machine, not a silent skip. GitHub's ubuntu
+runners ship Chrome/Chromium, so CI needs no install step. The viewport is
+pinned to 1920×1080 at `deviceScaleFactor: 1`; failures keep a trace and
+screenshot, green runs write nothing per-test.
+
+### Vision-in-the-loop QA — capture → judge → report
+
+A three-phase pipeline for having a vision-capable model judge the real UI
+against written contracts. No test code calls any model or external API —
+the only vision consumer is a judge subagent reading screenshots.
+
+1. **Capture** — `pnpm test:vision` (run `pnpm build` first, or use the
+   gate). Drives the scenarios in `scripts/vision-e2e/scenarios.ts` at the
+   pinned viewport and writes a self-describing bundle to
+   `test-results/vision/<run-id>/`: full-page PNG per checkpoint (filenames
+   prefixed with the run id so every read is fresh — image-upload caches
+   dedupe by filename), plus `manifest.json` mapping each image to its
+   rubric. Capture never judges and exits 0 when the bundle is complete.
+2. **Judge** — a Sonnet-tier subagent executes
+   [`scripts/vision-e2e/JUDGE.md`](scripts/vision-e2e/JUDGE.md) against the
+   bundle: it reads every screenshot, applies the rubric plus the general
+   bug taxonomy (overlap / clipping / misalignment / contrast / truncated
+   text), applies the two-pass rule (a fail gets exactly one re-look before
+   becoming final — vision judgments are noisy), and writes `verdicts.json`
+   into the bundle. Dispatch line is in the file. This step does not run in
+   CI; it is an orchestrator/local step.
+3. **Report** — `pnpm vision:report [bundle-dir]` (defaults to the newest
+   bundle). Validates `verdicts.json` against the manifest (shape, every
+   checkpoint covered, run id match), prints PASS/FAIL per checkpoint with
+   issue lists and artifact paths, and exits non-zero on any final fail. A
+   bundle without `verdicts.json` is a loud "not yet judged" error — never
+   a silent pass.
+
+**Adding a scenario/checkpoint:** append to
+`scripts/vision-e2e/scenarios.ts` (driver + rubric as data), re-capture,
+judge, report. Rubrics encode the *current intended design* — verify claims
+against a real capture before committing them; explicitly bless intended
+design choices (dimmed disabled controls offline, dense sub-labels) so the
+judge doesn't flag the design language as defects.
+
+### Lint stack
+
+`pnpm lint` = eslint (`--max-warnings 0`) + stylelint over
+`src/**/*.css`. Stylelint layers `stylelint-config-standard` (syntax) with a
+custom `minimax/no-raw-colors` rule enforcing the wave-2b design tokens:
+color values must go through `var(--token)`; raw literals are only allowed
+in token definitions and on the documented allowlist
+(`scripts/stylelint-raw-color-allowlist.json` — every entry states its
+reason). Rules that only fought house style (single-line rule format,
+legacy `rgba()` notation, cascade-order overrides) are disabled with
+comments in `stylelint.config.mjs`; two behavior-sensitive spots in
+`styles.css` carry inline suppressions with reasons. Typechecking stays
+separate: `pnpm typecheck`.
 
 ## Capabilities
 
