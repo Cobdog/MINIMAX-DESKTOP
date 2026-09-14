@@ -217,11 +217,47 @@ source); Krea canvas (no connectors at all — limitation). No mainstream
 node editor does query-at-the-connector or goal-directed backwards
 authoring.
 
+**Refinement (maintainer, 2026-09-14 later): single-endpoint asymmetry.** You
+always start with an INPUT node ("probably the smartest way instead of both
+an input and output node") — the session seed. Populating the chain makes
+content appear as tiles; when the chain reaches a node that "can really only
+output," the output node "just appears." Few node TYPES are output-capable
+(final artifacts, not intermediates). Purpose of the output node: take the
+previous generation and chain it — extend, crop-then-new-generation,
+mask-and-restart, edit, second pass, upscale. "Being able to choose what is
+being outputted is likely an important consideration."
+
+**Sharpening (assistant):**
+- **THE RECURSION:** an input node is either FRESH (typed prompt, dropped
+  media) or a REFERENCE to an output node. Every edge on the canvas is an
+  output→input reference — that is the whole graph model, and it is WHY
+  no-hand-wiring isn't a limitation: edges are chain relationships that
+  exist the moment a fork references an output; drawn connectors are
+  derived visualization for free. You cannot mis-wire what you never wire.
+  The fresh-input node IS Item 1's launcher made literal.
+- **Output node = substrate selector + take-off.** It chooses what the fork
+  carries: raw latents (chain-true continuation, no re-encode) | decoded
+  media | crop/mask projection | extracted frame | audio stem. This is
+  where latent-truth becomes an explicit UI choice. Possible SUBSUMPTION:
+  the parked Focus primitive may collapse into this ("crop-to-face as the
+  output" feeding a new chain as a refmod = an output substrate choice).
+- **Ops vs forks (answers the maintainer's "not sure all of those need
+  explicit outputs"):** crop/mask/trim/adjust = OP STACK, same chain, no
+  output node (Item 2 owns them). Extend = same-chain growth (latent
+  continuation). Crop→new generation, mask→restart, second pass = FORKS
+  (output node). Upscale is dual-mode: stack it (preview-quality op) or
+  fork it (rendered second pass) — both should exist. Rule: ops stack
+  in-chain; only forks need outputs.
+
 **Open sub-questions:**
-- Do endpoints materialize ONLY when open (assistant's proposal), or does
-  the maintainer picture persistent always-visible I/O objects per chain?
-- Option-menu contents: generation ops and utility ops (crop, upscale)
-  together, ranked how?
+- Fork semantics: live REFERENCE (upstream edits propagate downstream —
+  latent-truth suggests this default) vs SNAPSHOT (detach/freeze for
+  experiments)? Probably reference-by-default with explicit detach.
+- Can one tail feed multiple forks with different substrates (video to one
+  chain, latents to another) simultaneously?
+- Does the seed input node stay visible as the chain's head once populated,
+  or resolve into chain metadata?
+- Option-menu contents: generation ops and utility ops together, ranked how?
 - Backwards-authoring v1 scope: "what can extend/produce this" only, or
   fuller target-seeking?
 
