@@ -92,7 +92,10 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
     // System Chromium, resolved above — never a Playwright-managed download.
-    executablePath: systemChromium,
+    // NOTE: executablePath is a LAUNCH option; a bare `executablePath` key in
+    // `use` is silently ignored and Playwright falls back to its browser
+    // registry (which errors on CI where no bundled browser exists).
+    launchOptions: { executablePath: systemChromium },
   },
   projects: [
     { name: 'e2e', testMatch: /app\.spec\.ts/ },
