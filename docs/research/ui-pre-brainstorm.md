@@ -170,6 +170,61 @@ tile) but nothing is decided.
 
 ---
 
+## Item 3 (forming): chain endpoints as canvas objects — connectors as typed holes
+
+**Maintainer proposal (2026-09-14, near-verbatim):** input and output should
+always live ON the canvas as their own objects; they can be clicked to start
+selecting content for the chain; work forwards or backwards; see what
+options you have available by clicking on a connector. "Simple and easy to
+see at all times." Placement intuition: when a pipeline is framed, the I/O
+nodes sit cleanly nearby. Concern raised: challenges + performance costs on
+an infinite canvas.
+
+**Sharpening (assistant):** this is SELECTION-AUTHORING, not wire-authoring —
+the no-hand-wiring lock (Item 2) is INTACT and gains its best affordance.
+Analogy: **typed holes** — put a hole in the pipeline, ask "what fits
+here?", get every valid completion (type-directed filter over the op
+registry: consumers when clicked forwards from a source, producers when
+clicked backwards from a target). The edge is still created by choosing
+content from a menu; drawn connectors remain derived visualization. The
+properties panel and the connector-click are two doors into the same
+relationship operation. This is also the strongest discoverability answer to
+Blender's sin (options visible AT the affordance) and partially answers the
+parked "engine views dissolve into generators-as-ops" question (the option
+list IS the engine surface).
+
+**Placement rule (proposed):** endpoints materialize only where a chain is
+OPEN. Filled connection = derived edge, no endpoint object. Open input /
+open output = loud clickable object adjacent to its chain (same
+auto-placement-by-adjacency rule as the spatial queue outputs). Head/tail
+tiles of an attached chain ARE its endpoints (click head → browse forwards;
+click tail → browse backwards). No global placement problem; no
+viewport-pinning; endpoints are never "somewhere else."
+
+**Gauge (2026-09-14):** rendering cost of the objects trivial (few, only
+when open); option-space query cheap (in-memory type filter, no engine
+round-trip); adds NO new performance cost class — the real perf question
+remains the substrate at scale (virtualization, semantic-zoom culling, edge
+rendering strategy), already load-bearing. Complexity LOW-MED v1
+(objects + menu + filter); backwards-authoring = same query mirrored.
+Modular: fully (affordance layer over the relationship model, zero model
+changes). Worthwhile: high.
+
+**Prior art (piecewise):** Blender's node search-menu (add-by-search but
+still wire-dragging); TouchDesigner/Houdini typed inputs (no query-at-hole);
+typed holes in programming environments (Idris/Haskell — the conceptual
+source); Krea canvas (no connectors at all — limitation). No mainstream
+node editor does query-at-the-connector or goal-directed backwards
+authoring.
+
+**Open sub-questions:**
+- Do endpoints materialize ONLY when open (assistant's proposal), or does
+  the maintainer picture persistent always-visible I/O objects per chain?
+- Option-menu contents: generation ops and utility ops (crop, upscale)
+  together, ranked how?
+- Backwards-authoring v1 scope: "what can extend/produce this" only, or
+  fuller target-seeking?
+
 ## Parked questions (not yet discussed — take in maintainer's chosen order)
 
 - Latent-truth legibility in tiles: context blocks under previews — always
