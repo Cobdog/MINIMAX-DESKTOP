@@ -415,6 +415,42 @@ assert.ok(referenceOrderWarnings('No tags here.', { images: 3, videos: 0, audios
 assert.ok(referenceOrderWarnings('Uses <Audio 2> first, then <Audio 1>.', { images: 0, videos: 0, audios: 2 }).some((warning) => warning.includes('<Audio 2> is mentioned before')), 'audio order mismatch expected')
 
 
+// ---- H3 no-dialogue emission: ambience bed + silent score --------------------
+// H3 fills unspecified silence with gibberish speech, so the toggle ON must
+// spend the audio budget (ambience bed), silence the score via the official
+// contract field, and keep the plain negation; OFF must leave the prompt
+// untouched (docs/research/h3-sampler-shaping-and-motion-control.md §1c(a)).
+const { composeH3Prompt } = load('src/lib/promptPolicies.ts')
+const { applyDialoguePolicy, applyH3DialoguePolicy, noDialogueDirection, h3AmbienceDirection } = load('src/lib/dialogPolicy.ts')
+const h3PolicyInput = (overrides) => Object.assign({ prompt: 'A lighthouse in a storm.', mode: 'text', bindings: [], clothingPolicy: 'wardrobe', noDialogue: true, naturalMovement: false }, overrides)
+
+assert.equal(composeH3Prompt(h3PolicyInput({ noDialogue: false })), 'A lighthouse in a storm.', 'noDialogue OFF must not alter the prompt')
+assert.ok(composeH3Prompt(h3PolicyInput({ noDialogue: false, naturalMovement: true })).startsWith('A lighthouse in a storm. Motion direction:'), 'OFF keeps the movement direction emission unchanged')
+
+const h3NoDialoguePrompt = composeH3Prompt(h3PolicyInput({}))
+assert.ok(h3NoDialoguePrompt.includes(noDialogueDirection), 'ON keeps the no-dialogue negation as belt-and-braces')
+assert.ok(h3NoDialoguePrompt.includes(h3AmbienceDirection), 'ON spends the audio budget with the ambience bed')
+assert.ok(h3NoDialoguePrompt.endsWith('non_diegetic_music:\nN/A'), 'ON ends with the official silent-score field')
+
+const h3NoDialogueWithMovement = composeH3Prompt(h3PolicyInput({ naturalMovement: true }))
+assert.ok(h3NoDialogueWithMovement.includes('Motion direction:') && h3NoDialogueWithMovement.includes(h3AmbienceDirection), 'movement and no-dialogue policies compose')
+assert.ok(h3NoDialogueWithMovement.endsWith('non_diegetic_music:\nN/A'), 'silent-score field stays last when movement is on')
+
+// A prompt that already declares the music field (assistant-composed contract)
+// must not gain a contradicting second value; the ambience bed still lands.
+const declaredMusic = composeH3Prompt(h3PolicyInput({ prompt: 'integrated_multimodal_description: x\noverall_soundscape: rain\nnon_diegetic_music: soft piano' }))
+assert.equal(declaredMusic.split('non_diegetic_music:').length - 1, 1, 'declared music field must not be duplicated')
+assert.ok(declaredMusic.includes(h3AmbienceDirection), 'ambience bed still emitted for contract prompts')
+
+// Non-H3 engines keep the bare negation; the labeled field is H3's contract.
+assert.equal(applyDialoguePolicy('Quiet scene.', true), `Quiet scene. ${noDialogueDirection}`, 'plain policy stays negation-only')
+assert.ok(!applyDialoguePolicy('Quiet scene.', true).includes('non_diegetic_music'), 'plain policy must not leak the H3 field')
+assert.equal(applyDialoguePolicy('  Quiet scene.  ', false), 'Quiet scene.', 'plain policy only trims when off')
+const h3Direct = applyH3DialoguePolicy('Quiet scene.', true)
+assert.ok(h3Direct.includes(h3AmbienceDirection) && h3Direct.endsWith('non_diegetic_music:\nN/A'), 'H3 helper (mobile path) emits the full block')
+assert.equal(applyH3DialoguePolicy('Quiet scene.', false), 'Quiet scene.', 'H3 helper inert when off')
+
+
 // ---- Local prompt library storage -------------------------------------------
 {
   const store = new Map()
@@ -825,7 +861,7 @@ function runComposerTests() {
 
 runComposerTests()
 runKernelTests().then(() => {
-  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference), ContactSheet character sheets (topology, LoRA inference, size clamps, views-first attribution), graph-family versioning + looseness presets, the Z-Image ControlNet Union graph (pin names, native canny, aux preprocessors, mask, image-sized latent), the pure error sanitizer (prompt-text redaction bar, technical-message preservation, stack-path extraction, length cap, fallback constant), and the layered LLM prompt composer (verbatim seed fragments, NULL-wildcard specificity ranking, 8-layer composition, content-neutral style trio, target-engine rows, user overrides)')
+  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the H3 no-dialogue emission (ambience bed, silent score field, retained negation, OFF-state inertness), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference), ContactSheet character sheets (topology, LoRA inference, size clamps, views-first attribution), graph-family versioning + looseness presets, the Z-Image ControlNet Union graph (pin names, native canny, aux preprocessors, mask, image-sized latent), the pure error sanitizer (prompt-text redaction bar, technical-message preservation, stack-path extraction, length cap, fallback constant), and the layered LLM prompt composer (verbatim seed fragments, NULL-wildcard specificity ranking, 8-layer composition, content-neutral style trio, target-engine rows, user overrides)')
 }, (error) => {
   console.error(error)
   process.exitCode = 1

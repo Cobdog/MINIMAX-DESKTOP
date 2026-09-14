@@ -3,7 +3,7 @@
  *  ordering combine into the final string sent to ComfyUI. */
 import type { GenerationMode, MediaFile, MovieReferenceBinding } from '../types'
 import { composeReferenceInstructions } from './promptComposer'
-import { applyDialoguePolicy, applyNaturalMovementPolicy } from './dialogPolicy'
+import { applyH3DialoguePolicy, applyNaturalMovementPolicy } from './dialogPolicy'
 
 export type ClothingPolicy = 'wardrobe' | 'underwear' | 'unrestricted'
 
@@ -24,7 +24,9 @@ export function composeH3Prompt(input: {
       ? `${missingReferenceDirection} Clothing intent: keep only the underwear shown in each named adult character's own identity reference; do not add outer garments and ignore supplied wardrobe outfits.`
       : `${missingReferenceDirection} Clothing intent: adult fictional characters only; follow the scene prompt's explicit clothing or nudity direction. Clothing visible in identity references is not mandatory and must not override the scene prompt.`
   const composed = [input.prompt.trim(), input.mode === 'reference' && input.bindings.length ? policyDirection.trim() : ''].filter(Boolean).join(' ')
-  return applyNaturalMovementPolicy(applyDialoguePolicy(composed, input.noDialogue), input.naturalMovement)
+  // The H3 no-dialogue emission wraps the movement direction so the labeled
+  // silent-score field stays the last thing in the prompt.
+  return applyH3DialoguePolicy(applyNaturalMovementPolicy(composed, input.naturalMovement), input.noDialogue)
 }
 
 export function syncReferencePrompt(value: string, previous: MovieReferenceBinding[], next: MovieReferenceBinding[]) {

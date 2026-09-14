@@ -8,7 +8,7 @@ import { inferLtx25Selections, inferSelections } from './lib/modelSelection'
 import { buildMiniMaxWorkflow } from './lib/workflow'
 import { buildLtx25Workflow } from './lib/ltx25Workflow'
 import { buildZImage } from './lib/zimage'
-import { applyDialoguePolicy } from './lib/dialogPolicy'
+import { applyDialoguePolicy, applyH3DialoguePolicy } from './lib/dialogPolicy'
 import { createId } from './lib/createId'
 import { startPollLoop } from './lib/promptWatch'
 import type { MediaFile, ModelFile } from './types'
@@ -288,7 +288,8 @@ export default function MobileApp() {
       const seed = Math.floor(Math.random() * 1_000_000_000)
       const postProcess = upscale === 'ltx' ? { type: 'ltx' as const, model: bootstrap.ltxModel!, vae: bootstrap.ltxVae! } : upscale === 'rtx' ? { type: 'rtx' as const, model: rtxModel } : undefined
       const clothingDirection = clothingPolicy === 'assigned' ? 'Clothing intent: preserve the assigned wardrobe shown in the reference images.' : clothingPolicy === 'underwear' ? 'Clothing intent: keep only the underwear shown in each adult character identity reference; do not add outer garments.' : 'Clothing intent: adult fictional characters only; follow the scene prompt explicitly and do not treat reference clothing as mandatory.'
-      const effectivePrompt = applyDialoguePolicy([prompt, mode === 'reference' ? clothingDirection : ''].filter(Boolean).join(' '), noDialogue)
+      const basePrompt = [prompt, mode === 'reference' ? clothingDirection : ''].filter(Boolean).join(' ')
+      const effectivePrompt = provider === 'ltx25' ? applyDialoguePolicy(basePrompt, noDialogue) : applyH3DialoguePolicy(basePrompt, noDialogue)
       const graph = provider === 'ltx25'
         ? buildLtx25Workflow({ mode: mode === 'image' ? 'image' : 'text', prompt: effectivePrompt, width, height, duration: renderDuration, seed, preset: quality, filenamePrefix: `video/LTX_2.5_Mobile_${Date.now()}` }, ltxSelection, first)
         : buildMiniMaxWorkflow({ mode, prompt: effectivePrompt, width, height, duration: renderDuration, seed, steps: quality === 'quality' ? 30 : 20, turbo: mode === 'reference' ? 'off' : turbo, sampler: 'res_multistep', scheduler: 'simple', upscale: postProcess, refImageSize, filenamePrefix: `video/MiniMax_Mobile_${Date.now()}`, firstFrame: frame?.path, referenceImages: referenceImages.map((item) => item.path), referenceVideos: referenceVideos.map((item) => item.path), referenceAudios: referenceAudios.map((item) => item.path) }, selection, { first, images, videos, audios })
