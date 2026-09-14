@@ -47,6 +47,23 @@ is the completion of the rewrite — the diff is the evidence.
   never copied.
 - Each vendored or fetched component keeps its own license notice intact.
 
+### Vendored node packs (`vendor/nodes/`, tracked in `server/engineNodes.ts`)
+
+| Payload | Source | Pinned revision | License (SPDX) | Notes |
+|---|---|---|---|---|
+| `vendor/nodes/ComfyUI-VDN-H3/` | `Saganaki22/ComfyUI-VDN-H3` | `3eb63496c24ca70faaf8a14b6c75fcb480e34bf1` (2026-09-12, "Fix OpenVDN adapter metadata loading and bump to 1.5.2") | Apache-2.0 | Vendored 2026-09-14 (task 3ay7wbz increment 2). Functional content verbatim; excluded at vendor time: `.git/`, `.github/`, `assets/` (demo videos), `example_workflows/*.png` (screenshots) — none functional. VDN checkpoints (~4.3 GB) are NOT vendored: they download from Hugging Face and land as links in the user's model roots. |
+
+License verdicts recorded by the same increment (registry entries in
+`server/engineNodes.ts` carry them as data):
+
+- **Saganaki22/ComfyUI-VDN-H3 — Apache-2.0** (LICENSE file + README statement +
+  GitHub badge; verified against the cloned payload before vendoring).
+- **Larryvrh/ComfyUI-MiniMax-H3-Turbo — Apache-2.0** (LICENSE file read from the
+  local testbed install). Not vendored yet; user-fetch mode from a local copy.
+- **facok/comfyui-krea2-controlnet — NO LICENSE FILE** (all-rights-reserved by
+  default). Never vendored; user-fetch only, flagged in
+  `docs/research/krea2-edit-mode.md` as a hard blocker.
+
 ## Name
 
 The current project name is a **placeholder**, chosen to be easy to `grep`/`sed`

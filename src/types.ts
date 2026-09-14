@@ -32,6 +32,31 @@ export type GenerationDefaults = {
  *  itself supervises from a checkout the USER nominates (clone-on-demand is a
  *  later increment). */
 export type EngineMode = 'external' | 'managed'
+
+/** One pre-launch hook step a profile asks the runtime to run before spawn.
+ *  Increment 2 ships the consent-patch tier; the shape stays declarative so
+ *  new hook kinds (e.g. fetcher checkouts) extend it without migration. */
+export type EngineLaunchHook = { kind: 'patch'; patchId: string }
+
+/** A launch profile = env + pre-launch hook steps + port policy (increment 2
+ *  of task 3ay7wbz). Profiles are pure data: the RuntimeManager resolves the
+ *  active one, injects its env into the spawn, runs its hooks, and honors its
+ *  reserved ports. The seeded 'vdn' profile carries NO env by default — the
+ *  upstream VDN_H3_* variables are lab/ablation toggles read at runtime by
+ *  the node, so the profile exposes only the seam a user would set. */
+export type EngineLaunchProfile = {
+  label: string
+  description: string
+  env: Record<string, string>
+  hooks: EngineLaunchHook[]
+  portPolicy: { reserve?: number[] }
+}
+
+/** Recorded user consent for one engine patch. A patch is NEVER applied
+ *  unless this record exists with consented: true — the runtime degrades
+ *  (launches unpatched, notes it) instead. */
+export type PatchConsentRecord = { consented: boolean; at?: number; comfyVersion?: string }
+
 export type ManagedEngineConfig = {
   mode: EngineMode
   /** Absolute path to an existing ComfyUI checkout (must contain main.py). */
@@ -44,6 +69,14 @@ export type ManagedEngineConfig = {
   /** Launch the managed engine when the server boots (boot reconcile adopts
    *  a healthy recorded instance instead of double-spawning). */
   autoStart: boolean
+  /** Active launch profile id (default | vdn | user-defined). */
+  profile: string
+  /** User-editable launch profiles, keyed by id. Seeded with the studio's
+   *  defaults; user edits win for a given id, and unknown stored ids are
+   *  dropped at normalize time. */
+  profiles: Record<string, EngineLaunchProfile>
+  /** Consent ledger for engine core patches (keyed by patch id). */
+  patches: Record<string, PatchConsentRecord>
 }
 
 export type ManagedEngineState = 'stopped' | 'starting' | 'running' | 'stopping' | 'failed'
@@ -51,6 +84,10 @@ export type ManagedEngineHealth = 'unknown' | 'ok' | 'unreachable'
 export type ManagedEngineStatus = {
   mode: EngineMode
   state: ManagedEngineState
+  /** Launch profile the engine runs under (the recorded one while running —
+   *  adoption included — so a settings change never lies about the live
+   *  process's environment). */
+  profile?: string
   port?: number
   url?: string
   pid?: number
@@ -68,6 +105,45 @@ export type ManagedEngineStatus = {
   /** Lazy /system_stats sample while running ('unknown' otherwise). */
   health: ManagedEngineHealth
   logTail: string[]
+}
+
+// ---- Vendored node packs (increment 2, AC zzdfklo first slice) -------------
+
+/** How a custom-node pack reaches an instance. 'vendor' = the studio ships
+ *  the pack inside its own repo at a pinned revision (license-clean only);
+ *  'user-fetch' = the user consents to it being fetched/copied into the
+ *  instance's custom_nodes/ (for packs whose license does not permit
+ *  redistribution, or that are not vendored yet). */
+export type NodePackInstallMode = 'vendor' | 'user-fetch'
+
+/** One registry entry (server-side data; the Settings surface renders it). */
+export type NodePackDefinition = {
+  id: string
+  name: string
+  description: string
+  repoUrl: string
+  pinnedRevision: string
+  /** SPDX id — 'NO-LICENSE' means the repo carries no license file
+   *  (all-rights-reserved by default): never vendored, user-fetch only. */
+  licenseSpdx: string
+  licenseNote?: string
+  installMode: NodePackInstallMode
+  homepage?: string
+  /** Vendored payload directory (vendor mode only), relative to vendor root. */
+  vendorDir?: string
+}
+
+/** Availability of one registry entry against a concrete checkout. */
+export type NodePackStatus = NodePackDefinition & {
+  /** The vendored payload is present in this install (vendor mode). */
+  vendored: boolean
+  /** The pack is present in the checkout's custom_nodes/. */
+  installed: boolean
+  /** Revision recorded at install time (studio marker), when installed. */
+  installedRevision?: string
+  /** How the pack could be installed right now. */
+  availability: 'ready' | 'needs-source' | 'unavailable'
+  note?: string
 }
 
 export type AppSettings = {
@@ -515,6 +591,10 @@ export type DesktopApi = {
   getEngineStatus(): Promise<ManagedEngineStatus>
   startManagedEngine(): Promise<ManagedEngineStatus & { already?: boolean }>
   stopManagedEngine(): Promise<ManagedEngineStatus>
+  listEngineNodePacks(): Promise<{ packs: NodePackStatus[] }>
+  installEngineNodePack(id: string, sourceDirectory?: string): Promise<NodePackStatus>
+  uninstallEngineNodePack(id: string): Promise<NodePackStatus>
+  revertEnginePatch(id: string): Promise<{ reverted: boolean; patch: string }>
 }
 
 /** One harvested community prompt (Civitai image metadata via the server's

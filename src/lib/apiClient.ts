@@ -1,4 +1,4 @@
-import type { AppSettings, DesktopApi, LlmModelsResult, ManagedEngineStatus, MediaKind, PromptLibraryItem } from '../types'
+import type { AppSettings, DesktopApi, LlmModelsResult, ManagedEngineStatus, MediaKind, NodePackStatus, PromptLibraryItem } from '../types'
 
 /**
  * HTTP implementation of the DesktopApi bridge, used when the renderer runs in
@@ -237,6 +237,20 @@ export function createWebApiClient(): DesktopApi {
     },
     async stopManagedEngine() {
       return postJson<ManagedEngineStatus>('/api/lan/engine/stop', {})
+    },
+    async listEngineNodePacks() {
+      return apiFetch<{ packs: NodePackStatus[] }>('/api/lan/engine/nodes')
+    },
+    async installEngineNodePack(id: string, sourceDirectory?: string) {
+      const body = await postJson<{ pack: NodePackStatus; notes?: string[] }>('/api/lan/engine/nodes/install', { id, sourceDirectory })
+      return body.pack
+    },
+    async uninstallEngineNodePack(id: string) {
+      const body = await postJson<{ pack: NodePackStatus }>('/api/lan/engine/nodes/uninstall', { id })
+      return body.pack
+    },
+    async revertEnginePatch(id: string) {
+      return postJson<{ reverted: boolean; patch: string }>('/api/lan/engine/patch/revert', { id })
     },
     async runSetupDoctor() {
       return apiFetch<Awaited<ReturnType<DesktopApi['runSetupDoctor']>>>('/api/lan/doctor')

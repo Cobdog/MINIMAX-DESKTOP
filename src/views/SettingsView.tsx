@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react'
 import { GitBranch } from 'lucide-react'
 import { Activity, AlertCircle, Check, ChevronDown, Cpu, Eye, Folder, FolderOpen, Gauge, HardDrive, LoaderCircle, Power, RefreshCw, Save, ServerCog, SlidersHorizontal, Sparkles, Stethoscope, Unplug } from 'lucide-react'
-import type { AppSettings, ComfyStatus, LlmModelsResult, ModelFile, ModelKind, OllamaModel, UpscaleMode } from '../types'
+import type { AppSettings, ComfyStatus, LlmModelsResult, ModelFile, ModelKind, NodePackStatus, OllamaModel, UpscaleMode } from '../types'
 import { choices, type ObjectInfo } from '../lib/comfyInfo'
 import { detectOptimizations } from '../lib/graph'
 import type { h3StackReport } from '../lib/h3Stack'
@@ -86,6 +86,33 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
       setEngineBusy(false)
     }
   }
+  // ---- Launch profiles + patch consent + vendored node packs (increment 2) --
+  const profileIds = Object.keys(settings.engine.profiles)
+  const activeProfile = settings.engine.profiles[settings.engine.profile] ?? settings.engine.profiles.default
+  const profileEnvEntries = Object.entries(activeProfile?.env ?? {})
+  const setProfileEnv = (entries: Array<[string, string]>) => updateEngine({ profiles: { ...settings.engine.profiles, [settings.engine.profile]: { ...activeProfile, env: Object.fromEntries(entries.filter(([name]) => name.trim())) } } })
+  const activePatchHooks = (activeProfile?.hooks ?? []).filter((hook) => hook.kind === 'patch')
+  const patchConsent = (patchId: string, consented: boolean) => updateEngine({ patches: { ...settings.engine.patches, [patchId]: { consented, at: consented ? Date.now() : undefined } } })
+  const [nodePacks, setNodePacks] = useState<NodePackStatus[] | null>(null)
+  const [nodePackBusy, setNodePackBusy] = useState<string | null>(null)
+  const [nodePackError, setNodePackError] = useState<string | null>(null)
+  const [nodePackSource, setNodePackSource] = useState<Record<string, string>>({})
+  const refreshNodePacks = async () => {
+    try { setNodePacks((await window.minimax.listEngineNodePacks()).packs) } catch { /* listed on next action; errors surface there */ }
+  }
+  useEffect(() => { void refreshNodePacks() }, [settings.engine.checkoutPath])
+  const runNodePackAction = async (id: string, action: () => Promise<NodePackStatus>) => {
+    setNodePackBusy(id)
+    setNodePackError(null)
+    try {
+      await action()
+      await refreshNodePacks()
+    } catch (error) {
+      setNodePackError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setNodePackBusy(null)
+    }
+  }
   const gpuTiers: Array<{ id: NonNullable<AppSettings['gpuTier']>; label: string; guidance: string }> = [
     { id: '8', label: '8 GB', guidance: 'Pruned INT4 diffusion + INT4 text encoder · 864×480 · 5 s · one render at a time. GGUF only if INT4 is unavailable (ComfyUI manages dynamic VRAM better with safetensors).' },
     { id: '16', label: '16 GB', guidance: 'Pruned INT8/Q4 diffusion + INT4/INT8 text encoder · 1344×768 · 5 s first · queue one at a time. Tiled VAE covers the auto-retry path.' },
@@ -110,6 +137,34 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
           <div className="field-group"><label htmlFor="managed-port">Preferred port</label><input id="managed-port" type="number" min={0} max={65535} value={settings.engine.portPreference || ''} placeholder="auto" onChange={(event) => updateEngine({ portPreference: Number(event.target.value) || 0 })} /></div>
           <label className="settings-check managed-autostart"><input type="checkbox" checked={settings.engine.autoStart} onChange={(event) => updateEngine({ autoStart: event.target.checked })} /><span><strong>Start with the server</strong><small>Boot adopts a healthy running instance instead of double-starting.</small></span></label>
         </div>
+        <div className="connection-row">
+          <div className="field-group"><label htmlFor="managed-profile">Launch profile</label>
+            <select id="managed-profile" value={settings.engine.profile} onChange={(event) => updateEngine({ profile: event.target.value })}>
+              {profileIds.map((id) => <option key={id} value={id}>{settings.engine.profiles[id].label}</option>)}
+            </select>
+          </div>
+          <p className="settings-note managed-engine-note">{activeProfile?.description}</p>
+        </div>
+        <div className="profile-env-editor">
+          <div className="profile-env-heading"><strong>Profile environment</strong><button type="button" className="secondary-button" onClick={() => setProfileEnv([...profileEnvEntries, ['', '']])}><SlidersHorizontal size={14} />Add variable</button></div>
+          {profileEnvEntries.length === 0 && <p className="settings-note">No variables set. The VDN_H3_* toggles are runtime lab switches read by the node itself — add one here only if you mean to set it for every launch.</p>}
+          {profileEnvEntries.map(([name, value], index) => (
+            <div className="connection-row profile-env-row" key={index}>
+              <div className="field-group"><label htmlFor={`profile-env-name-${index}`}>Name</label><input id={`profile-env-name-${index}`} value={name} placeholder="VDN_H3_…" onChange={(event) => setProfileEnv(profileEnvEntries.map((entry, at) => at === index ? [event.target.value, entry[1]] : entry))} /></div>
+              <div className="field-group grow"><label htmlFor={`profile-env-value-${index}`}>Value</label><input id={`profile-env-value-${index}`} value={value} onChange={(event) => setProfileEnv(profileEnvEntries.map((entry, at) => at === index ? [entry[0], event.target.value] : entry))} /></div>
+              <button type="button" className="secondary-button icon-only" aria-label="Remove variable" onClick={() => setProfileEnv(profileEnvEntries.filter((_, at) => at !== index))}><Unplug size={14} /></button>
+            </div>
+          ))}
+        </div>
+        {activePatchHooks.length > 0 && <div className="profile-patch-consent">
+          {activePatchHooks.map((hook) => (
+            <label className="settings-check" key={hook.patchId}>
+              <input type="checkbox" checked={settings.engine.patches[hook.patchId]?.consented === true} onChange={(event) => patchConsent(hook.patchId, event.target.checked)} />
+              <span><strong>Consent: {hook.patchId === 'longcache-block-loop' ? 'VDN LongCache block-loop hook' : hook.patchId}</strong><small>Lets the studio patch comfy/ldm/minimax/model.py before launch (pristine backup kept; layout- and version-gated; refuses on anything unrecognized). Unchecked = never patched — VDN still works, you just lose the LongCache tail cache.</small></span>
+            </label>
+          ))}
+          {activePatchHooks.some((hook) => settings.engine.patches[hook.patchId]?.consented) && <button type="button" className="secondary-button" onClick={() => { void activePatchHooks.filter((hook) => settings.engine.patches[hook.patchId]?.consented).map((hook) => window.minimax.revertEnginePatch(hook.patchId).then(() => refreshNodePacks()).catch((error: unknown) => setNodePackError(error instanceof Error ? error.message : String(error)))) }}>Revert patched files from backup</button>}
+        </div>}
         <div className="connection-row managed-engine-actions">
           <button className="secondary-button" onClick={() => void startEngine()} disabled={engineBusy || engineRuntime?.state === 'running' || engineRuntime?.state === 'starting'}>{engineBusy ? <LoaderCircle size={16} className="spin" /> : <Power size={16} />}Start engine</button>
           <button className="secondary-button" onClick={() => void stopEngine()} disabled={engineBusy || (engineRuntime?.state !== 'running' && engineRuntime?.state !== 'starting' && engineRuntime?.state !== 'failed')}>Stop engine</button>
@@ -121,6 +176,30 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
         {engineRuntime && engineRuntime.logTail.length > 0 && <pre className="engine-log-tail" aria-label="Managed engine log tail">{engineRuntime.logTail.slice(-12).join('\n')}</pre>}
         <p className="settings-note">Start persists the current form, mirrors your model folders into the checkout as extra_model_paths.yaml (weights are never copied), and points the studio at the launched instance. Stopping is graceful-then-forced; the log tail above shows the engine's own output.</p>
       </>}
+    </section>
+    <section className="settings-section node-packs-section" aria-label="Managed node packs">
+      <div className="settings-heading">
+        <div><GitBranch size={19} /><span><strong>Node packs</strong><small>Custom nodes the studio can place into the configured checkout's custom_nodes/ — vendored at a pinned revision (license-verified) or fetched from a local copy with your consent. Weights are linked, never copied.</small></span></div>
+      </div>
+      <div className="node-pack-list">
+        {(nodePacks ?? []).map((pack) => (
+          <div className="node-pack-row" key={pack.id}>
+            <div className="node-pack-main">
+              <div className="node-pack-title"><strong>{pack.name}</strong><span className={`node-pack-license ${pack.licenseSpdx === 'NO-LICENSE' ? 'warn' : ''}`}>{pack.licenseSpdx}</span><span className="node-pack-mode">{pack.installMode === 'vendor' ? (pack.vendored ? 'vendored' : 'vendor payload missing') : 'user-fetch'}</span>{pack.installed && <span className="node-pack-installed">installed{pack.installedRevision ? ` · ${pack.installedRevision.slice(0, 8)}` : ''}</span>}</div>
+              <small>{pack.description}</small>
+              <small className="node-pack-meta">{pack.repoUrl} @ {pack.pinnedRevision.slice(0, 12)}{pack.note ? ` — ${pack.note}` : ''}</small>
+            </div>
+            <div className="node-pack-actions">
+              {pack.installMode === 'user-fetch' && <input className="node-pack-source" placeholder="local repo directory (absolute)" value={nodePackSource[pack.id] ?? ''} onChange={(event) => setNodePackSource({ ...nodePackSource, [pack.id]: event.target.value })} aria-label={`Local source directory for ${pack.name}`} />}
+              <button type="button" className="secondary-button" disabled={nodePackBusy === pack.id || pack.availability === 'unavailable' || (pack.installMode === 'user-fetch' && !nodePackSource[pack.id]?.trim())} onClick={() => void runNodePackAction(pack.id, () => window.minimax.installEngineNodePack(pack.id, nodePackSource[pack.id]?.trim() || undefined))}>{nodePackBusy === pack.id ? <LoaderCircle size={14} className="spin" /> : null}Install</button>
+              <button type="button" className="secondary-button" disabled={!pack.installed || nodePackBusy === pack.id} onClick={() => void runNodePackAction(pack.id, () => window.minimax.uninstallEngineNodePack(pack.id))}>Uninstall</button>
+            </div>
+          </div>
+        ))}
+        {nodePacks === null && <p className="settings-note">Loading node-pack registry…</p>}
+      </div>
+      {nodePackError && <div className="llm-test-result fail" role="status"><AlertCircle size={14} /><span>{nodePackError}</span></div>}
+      <p className="settings-note">Uninstall deletes the pack's custom_nodes/ folder. A revision bump reinstalls at the pin. Packs without a license are never vendored — they install only from your own local copy.</p>
     </section>
     <section className="settings-section h3-stack-section">
       <div className="settings-heading"><div><Gauge size={19} /><span><strong>H3 engine stack</strong><small>Compares the selected files with the validated official ComfyUI stack.</small></span></div><span className={`health-pill ${h3Report.validated ? 'online' : ''}`}>{h3Report.validated ? 'Validated' : h3Report.ready ? 'Custom' : 'Incomplete'}</span></div>

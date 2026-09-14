@@ -26,6 +26,9 @@ import { createStudioRepository, type StudioRepository } from './repo'
 import { createRealtimeHub, type RealtimeHub } from './realtime'
 import { EngineProcess } from './engineProcess'
 import { RuntimeManager, RuntimeConfigError } from './runtime'
+import { ENGINE_PATCH_IDS, revertEnginePatch, ENGINE_PATCHES } from './enginePatch'
+import { mergeEngineProfiles } from './engineProfiles'
+import { checkAllNodePacks, findNodePack, installNodePack, isUsableCheckout, resolveVendorRoot, uninstallNodePack } from './engineNodes'
 import { createLlmService, type LlmService } from './llm'
 import { createRouterProvider } from './llm/providers/router'
 import { familyManifest, inferFamily } from './llm/registry'
@@ -456,8 +459,10 @@ export function createStudioServer(paths: StudioServerPaths) {
       promptContentLevel: 'sfw',
       // Managed engine runtime (increment 1): external default = today's
       // behavior, exactly. Nothing spawns, polls, or re-points unless the
-      // user switches the mode AND nominates a checkout.
-      engine: { mode: 'external', checkoutPath: '', pythonPath: '', portPreference: 0, autoStart: false },
+      // user switches the mode AND nominates a checkout. Increment 2 adds
+      // launch profiles (default/vdn seeds) and an EMPTY patch-consent
+      // ledger — no patch may ever apply without a recorded consent.
+      engine: { mode: 'external', checkoutPath: '', pythonPath: '', portPreference: 0, autoStart: false, profile: 'default', profiles: mergeEngineProfiles({}, ENGINE_PATCH_IDS).profiles, patches: {} },
     }
   }
 
@@ -485,6 +490,32 @@ export function createStudioServer(paths: StudioServerPaths) {
         pythonPath: stringField(raw.engine?.pythonPath, '').trim(),
         portPreference: Number.isInteger(raw.engine?.portPreference) && (raw.engine?.portPreference as number) >= 1024 && (raw.engine?.portPreference as number) <= 65535 ? raw.engine?.portPreference as number : 0,
         autoStart: raw.engine?.autoStart === true,
+        // Launch profiles (increment 2): stored profiles overlay the seeds;
+        // malformed ids/keys/hooks are DROPPED with one log line — a corrupt
+        // settings file must not become a weird launch environment.
+        profile: typeof raw.engine?.profile === 'string' && raw.engine.profile.trim() ? raw.engine.profile.trim().slice(0, 40) : 'default',
+        profiles: (() => {
+          const merged = mergeEngineProfiles(raw.engine?.profiles, ENGINE_PATCH_IDS)
+          if (merged.dropped.length) logEvent({ kind: 'engine.profiles-normalized', dropped: merged.dropped })
+          return merged.profiles
+        })(),
+        // Consent ledger: only well-formed records for KNOWN patches survive.
+        patches: (() => {
+          const ledger: NonNullable<AppSettings['engine']['patches']> = {}
+          const rawLedger = (raw.engine?.patches && typeof raw.engine.patches === 'object' ? raw.engine.patches : {}) as Record<string, unknown>
+          for (const id of Object.keys(rawLedger)) {
+            if (!ENGINE_PATCH_IDS.has(id)) continue
+            const record = rawLedger[id] as { consented?: unknown; at?: unknown; comfyVersion?: unknown } | null
+            if (record && typeof record === 'object') {
+              ledger[id] = {
+                consented: record.consented === true,
+                ...(typeof record.at === 'number' ? { at: record.at } : {}),
+                ...(typeof record.comfyVersion === 'string' ? { comfyVersion: record.comfyVersion } : {}),
+              }
+            }
+          }
+          return ledger
+        })(),
       },
     }
   }
@@ -1306,6 +1337,60 @@ export function createStudioServer(paths: StudioServerPaths) {
         }
         if (url.pathname === '/api/lan/engine/stop' && request.method === 'POST') {
           return sendJson(response, 200, await runtime.stop())
+        }
+        // ---- Vendored node packs (increment 2, AC zzdfklo slice) ------------
+        // custom_nodes/ is ComfyUI's sanctioned extension seam: list is
+        // read-only for everyone; install/uninstall act on the configured
+        // checkout (managed or the user's own — their consent, their disk)
+        // and only ever inside custom_nodes/<pack name>.
+        if (url.pathname === '/api/lan/engine/nodes' && request.method === 'GET') {
+          const checkout = isUsableCheckout(settings.engine.checkoutPath) ? settings.engine.checkoutPath : null
+          return sendJson(response, 200, { packs: await checkAllNodePacks(checkout, resolveVendorRoot()) })
+        }
+        if (url.pathname === '/api/lan/engine/nodes/install' && request.method === 'POST') {
+          const body = await readJson(request, 10_000)
+          const pack = findNodePack(typeof body.id === 'string' ? body.id : '')
+          if (!pack) return sendJson(response, 400, { error: 'Unknown node pack id.' })
+          if (!isUsableCheckout(settings.engine.checkoutPath)) {
+            return sendJson(response, 400, { error: 'Set a valid ComfyUI checkout (with main.py) in the managed engine settings first.' })
+          }
+          const sourceDirectory = typeof body.sourceDirectory === 'string' ? body.sourceDirectory : undefined
+          const result = await installNodePack(pack, { checkout: settings.engine.checkoutPath, sourceDirectory })
+          if (!result.installed && !result.alreadyInstalled) {
+            return sendJson(response, 400, { error: result.notes.join(' ') || 'The pack could not be installed.', pack: result.status })
+          }
+          logEvent({ kind: 'engine.node-pack-installed', pack: pack.id, revision: pack.pinnedRevision })
+          return sendJson(response, 200, { pack: result.status, notes: result.notes })
+        }
+        if (url.pathname === '/api/lan/engine/nodes/uninstall' && request.method === 'POST') {
+          const body = await readJson(request, 10_000)
+          const pack = findNodePack(typeof body.id === 'string' ? body.id : '')
+          if (!pack) return sendJson(response, 400, { error: 'Unknown node pack id.' })
+          if (!isUsableCheckout(settings.engine.checkoutPath)) {
+            return sendJson(response, 400, { error: 'Set a valid ComfyUI checkout (with main.py) in the managed engine settings first.' })
+          }
+          const removed = await uninstallNodePack(pack, settings.engine.checkoutPath)
+          if (!removed.removed) return sendJson(response, 404, { error: removed.reason ?? 'The pack is not installed.' })
+          logEvent({ kind: 'engine.node-pack-uninstalled', pack: pack.id })
+          return sendJson(response, 200, { pack: await checkAllNodePacks(settings.engine.checkoutPath, resolveVendorRoot()).then((packs) => packs.find((entry) => entry.id === pack.id)) })
+        }
+        // ---- Consent patch tier: revert restores the pristine backup -------
+        // (managed checkout only; revert is always safe — it undoes us.)
+        if (url.pathname === '/api/lan/engine/patch/revert' && request.method === 'POST') {
+          const body = await readJson(request, 10_000)
+          const patch = ENGINE_PATCHES.find((candidate) => candidate.id === body.id)
+          if (!patch) return sendJson(response, 400, { error: 'Unknown patch id.' })
+          if (!isUsableCheckout(settings.engine.checkoutPath)) {
+            return sendJson(response, 400, { error: 'Set a valid ComfyUI checkout (with main.py) in the managed engine settings first.' })
+          }
+          try {
+            const reverted = await revertEnginePatch(patch, settings.engine.checkoutPath)
+            if (!reverted.reverted) return sendJson(response, 409, { error: reverted.reason ?? 'The patch could not be reverted.' })
+            logEvent({ kind: 'engine.patch-reverted', patch: patch.id })
+            return sendJson(response, 200, { reverted: true, patch: patch.id })
+          } catch (revertFailure) {
+            return sendJson(response, 502, { error: revertFailure instanceof Error ? revertFailure.message : String(revertFailure) })
+          }
         }
         if (url.pathname === '/api/lan/cancel' && request.method === 'POST') {
           const body = await readJson(request, 10_000)

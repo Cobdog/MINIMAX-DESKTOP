@@ -64,7 +64,9 @@ import { createServer as createTcpServer } from 'node:net'
 import { basename, isAbsolute, join, normalize, resolve } from 'node:path'
 import { EngineProcess, type EngineEvent, type EngineExitSummary } from './engineProcess'
 import { logger } from './logger'
-import type { AppSettings, ManagedEngineHealth, ManagedEngineState, ManagedEngineStatus, ModelKind } from '../src/types'
+import { resolveActiveProfile } from './engineProfiles'
+import { ENGINE_PATCHES, applyEnginePatch, checkEnginePatch, type PatchCheck } from './enginePatch'
+import type { AppSettings, EngineLaunchHook, ManagedEngineHealth, ManagedEngineState, ManagedEngineStatus, ModelKind } from '../src/types'
 
 /** The user's live ComfyUI instances — never allocated, never signalled. */
 export const RESERVED_ENGINE_PORTS = [8188, 8189]
@@ -226,20 +228,22 @@ export async function probeEngineHealth(port: number, timeoutMs: number): Promis
   }
 }
 
-export type PortAllocationOptions = { startPort?: number; preference?: number }
+export type PortAllocationOptions = { startPort?: number; preference?: number; extraReserved?: number[] }
 
 /** Scans upward from startPort (default 8191), hard-skipping the reserved
- *  user ports, requiring BOTH a free TCP bind AND no HTTP responder on each
- *  candidate. A valid preference is tried first and falls through to the
- *  scan when occupied. Returns null when the span is exhausted. */
+ *  user ports plus any the ACTIVE PROFILE reserves, requiring BOTH a free
+ *  TCP bind AND no HTTP responder on each candidate. A valid preference is
+ *  tried first and falls through to the scan when occupied. Returns null
+ *  when the span is exhausted. */
 export async function allocatePort(options: PortAllocationOptions = {}): Promise<number | null> {
   const startPort = options.startPort ?? DEFAULT_PORT_SCAN_START
   const candidates: number[] = []
   const preference = options.preference ?? 0
+  const reserved = new Set([...RESERVED_ENGINE_PORTS, ...(options.extraReserved ?? [])])
   if (Number.isInteger(preference) && preference >= 1024 && preference <= 65535) candidates.push(preference)
   for (let offset = 0; offset < PORT_SCAN_SPAN; offset += 1) candidates.push(startPort + offset)
   for (const candidate of candidates) {
-    if (RESERVED_ENGINE_PORTS.includes(candidate)) continue
+    if (reserved.has(candidate)) continue
     if (candidate < 1024 || candidate > 65535) continue
     if (!(await tcpPortFree(candidate))) continue
     if (await httpPortOccupied(candidate)) continue
@@ -260,6 +264,8 @@ type RuntimeStateFile = {
   args: string[]
   startedAt: number
   checkout: string
+  /** Launch profile the engine was spawned under (boot posture record). */
+  profile?: string
 }
 
 /** process.kill(pid, 0) liveness probe; EPERM = alive but not ours to signal. */
@@ -328,6 +334,10 @@ export type RuntimeManagerOptions = {
 
 type RuntimeSnapshot = {
   state: ManagedEngineState
+  /** Launch profile the live process runs under (set at spawn/adopt — a
+   *  settings change never rewrites what a running engine was launched
+   *  with). Absent while stopped. */
+  profile?: string
   port?: number
   pid?: number
   adopted?: boolean
@@ -335,6 +345,9 @@ type RuntimeSnapshot = {
   startedAt?: number
   lastError?: string
   warning?: string
+  /** Patch-tier posture from the last launch decision (layout + gate per
+   *  patch; refreshed on every start attempt, cached between them). */
+  patches?: PatchCheck[]
 }
 
 export class RuntimeManager {
@@ -379,10 +392,11 @@ export class RuntimeManager {
         await this.removeStateFile()
       }
     }
-    const { state, port, pid, adopted, stray, startedAt, lastError, warning } = this.snapshot
+    const { state, port, pid, adopted, stray, startedAt, lastError, warning, profile, patches } = this.snapshot
     return {
       mode: settings.engine.mode,
       state,
+      ...(profile ? { profile } : {}),
       ...(port ? { port, url: `http://127.0.0.1:${port}` } : {}),
       ...(pid ? { pid } : {}),
       ...(adopted ? { adopted } : {}),
@@ -390,6 +404,7 @@ export class RuntimeManager {
       ...(startedAt ? { startedAt } : {}),
       ...(lastError ? { lastError } : {}),
       ...(warning ? { warning } : {}),
+      ...(patches ? { patches } : {}),
       health,
       logTail: this.logRing.slice(-LOG_TAIL_LINES),
     }
@@ -420,7 +435,20 @@ export class RuntimeManager {
     const checkout = this.validateCheckout(settings)
     const command = this.resolveCommand(settings)
 
-    const port = await allocatePort({ startPort: this.options.startPort, preference: settings.engine.portPreference })
+    // Launch profile (increment 2): env injection + pre-launch hook steps +
+    // port policy. Resolution problems degrade to the default profile WITH a
+    // warning — a typo never produces a silently stock launch, and dropped
+    // env keys are named, never silent.
+    const resolved = resolveActiveProfile(settings)
+    const warnings: string[] = this.snapshot.warning ? [this.snapshot.warning] : []
+    if (resolved.warning) warnings.push(resolved.warning)
+    for (const key of resolved.droppedEnv) warnings.push(`Launch-profile env var "${key}" was dropped (forbidden or malformed name).`)
+
+    // Pre-launch hook steps (the consent-patch tier) run BEFORE the port is
+    // taken: their outcomes are part of the launch posture.
+    const patchChecks = await this.runLaunchHooks(resolved.profile.hooks, settings, checkout, command, warnings)
+
+    const port = await allocatePort({ startPort: this.options.startPort, preference: settings.engine.portPreference, extraReserved: resolved.profile.portPolicy.reserve })
     if (port === null) {
       this.snapshot = { state: 'failed', lastError: `No free port found scanning ${this.options.startPort ?? DEFAULT_PORT_SCAN_START}+ (reserved: ${RESERVED_ENGINE_PORTS.join(', ')}).` }
       throw new RuntimeConfigError(this.snapshot.lastError!)
@@ -431,7 +459,6 @@ export class RuntimeManager {
     // may fail silently either — both land in status.warning. A warning the
     // PREVIOUS snapshot carried (e.g. the boot squatter note) survives the
     // restart attempt instead of being wiped by it.
-    const warnings: string[] = this.snapshot.warning ? [this.snapshot.warning] : []
     try {
       const mirrored = await writeExtraModelPathsConfig(checkout, settings)
       if (!mirrored.written) warnings.push(`extra_model_paths.yaml not regenerated: no valid model roots (${mirrored.skipped.join(', ') || 'none configured'}).`)
@@ -442,9 +469,9 @@ export class RuntimeManager {
     const contention = await this.checkExternalLoad(settings, port)
     if (contention) warnings.push(contention)
 
-    this.snapshot = { state: 'starting', port, startedAt: Date.now(), ...(warnings.length ? { warning: warnings.join(' ') } : {}) }
+    this.snapshot = { state: 'starting', profile: resolved.id, patches: patchChecks, port, startedAt: Date.now(), ...(warnings.length ? { warning: warnings.join(' ') } : {}) }
     this.adoptedRecord = null
-    this.recordLogLine(`studio: launching managed engine on port ${port} from ${checkout}`)
+    this.recordLogLine(`studio: launching managed engine on port ${port} from ${checkout} (profile: ${resolved.id})`)
 
     const args = ['main.py', '--listen', '127.0.0.1', '--port', String(port), '--disable-auto-launch']
     this.stopIntentional = false
@@ -454,6 +481,7 @@ export class RuntimeManager {
       cwd: checkout,
       name: 'comfyui-managed',
       graceTimeoutMs: STOP_GRACE_MS,
+      env: resolved.profile.env,
       readiness: { type: 'http', url: `http://127.0.0.1:${port}`, path: 'system_stats', timeoutMs: this.options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS, pollMs: 500 },
       onEvent: (event) => this.recordLogEvent(event),
       onExit: (summary) => this.handleExit(summary),
@@ -485,7 +513,7 @@ export class RuntimeManager {
     }
     this.snapshot = { ...this.snapshot, state: 'running', pid: engine.pid ?? undefined }
     await this.writeStateFile({
-      version: 1, port, pid: engine.pid ?? 0, command, args, startedAt: this.snapshot.startedAt ?? Date.now(), checkout,
+      version: 1, port, pid: engine.pid ?? 0, command, args, startedAt: this.snapshot.startedAt ?? Date.now(), checkout, profile: resolved.id,
     })
     this.healthSample = null
     this.options.logEvent({ kind: 'runtime.ready', port, pid: engine.pid ?? undefined })
@@ -519,6 +547,76 @@ export class RuntimeManager {
       if (!existsSync(command)) throw new RuntimeConfigError(`The python executable does not exist: "${command}".`)
     }
     return command
+  }
+
+  /** Pre-launch hook steps (increment 2: the consent-patch tier). Each hook
+   *  is best-effort with honest reporting — a refused or failed patch
+   *  DEGRADES (the engine launches unpatched; VDN still works without
+   *  LongCache), never blocks a launch, and never fails silently. Consent
+   *  is checked HERE, before anything touches a file: no consent record
+   *  means no apply, full stop. Returns the patch posture for the snapshot
+   *  (layout + version gate + backup state per patch). */
+  private async runLaunchHooks(hooks: EngineLaunchHook[], settings: AppSettings, checkout: string, pythonCommand: string, warnings: string[]): Promise<PatchCheck[]> {
+    const posture: PatchCheck[] = []
+    const consentLedger = settings.engine.patches ?? {}
+    for (const hook of hooks) {
+      if (hook.kind !== 'patch') continue
+      const patch = ENGINE_PATCHES.find((candidate) => candidate.id === hook.patchId)
+      if (!patch) {
+        warnings.push(`Launch hook "${hook.patchId}" is not a known patch — skipped.`)
+        continue
+      }
+      const consent = consentLedger[patch.id]
+      let check: PatchCheck
+      try {
+        check = await checkEnginePatch(patch, checkout, settings.testedComfyVersion)
+      } catch (checkFailure) {
+        // Even a patch CHECK failing (unreadable target, permissions) must
+        // degrade, not block: warn + launch unpatched.
+        warnings.push(`${patch.label}: could not inspect the target (${checkFailure instanceof Error ? checkFailure.message : String(checkFailure)}) — not applied (${patch.degradesTo}).`)
+        continue
+      }
+      posture.push(check)
+      if (!consent?.consented) {
+        warnings.push(`${patch.label}: consent not given — not applied (${patch.degradesTo}).`)
+        this.recordLogLine(`studio: patch ${patch.id} skipped (no consent recorded)`)
+        continue
+      }
+      if (check.layout === 'missing') {
+        warnings.push(`${patch.label}: the target file is absent from this checkout — not applied (${patch.degradesTo}).`)
+        continue
+      }
+      if (check.layout === 'patched') {
+        this.recordLogLine(`studio: patch ${patch.id} already present`)
+        continue
+      }
+      if (!check.versionGate.ok) {
+        const version = check.versionGate.version ?? 'unknown'
+        warnings.push(`${patch.label}: ComfyUI ${version} is outside the verified set (${patch.testedComfyVersions.join(', ')}) — not applied (${patch.degradesTo}).`)
+        this.recordLogLine(`studio: patch ${patch.id} refused by the version gate (ComfyUI ${version})`)
+        continue
+      }
+      if (check.layout === 'unknown') {
+        warnings.push(`${patch.label}: the block-loop layout in this checkout is not recognized — refused, no file was changed (${patch.degradesTo}).`)
+        this.recordLogLine(`studio: patch ${patch.id} refused (unrecognized layout; no file was changed)`)
+        continue
+      }
+      try {
+        const applied = await applyEnginePatch(patch, checkout, { pythonCommand })
+        if (applied.applied) {
+          this.recordLogLine(`studio: patch ${patch.id} applied (validated: ${applied.validation}${applied.backup ? `, backup ${basename(applied.backup)}` : ''})`)
+          this.options.logEvent({ kind: 'runtime.patch-applied', patch: patch.id, validation: applied.validation })
+        } else if (applied.already) {
+          this.recordLogLine(`studio: patch ${patch.id} already present`)
+        } else {
+          warnings.push(`${patch.label}: ${applied.reason ?? 'not applied'} (${patch.degradesTo}).`)
+        }
+      } catch (patchFailure) {
+        warnings.push(`${patch.label}: apply failed (${patchFailure instanceof Error ? patchFailure.message : String(patchFailure)}) — not applied (${patch.degradesTo}).`)
+        this.options.logFailure('runtime/patch-apply', patchFailure, { patch: patch.id }, 'warn')
+      }
+    }
+    return posture
   }
 
   /** Best-effort VRAM contention note (never a block): any OTHER local
@@ -713,6 +811,7 @@ export class RuntimeManager {
       this.adoptedRecord = record
       this.snapshot = {
         state: 'running',
+        ...(record.profile ? { profile: record.profile } : {}),
         port: record.port,
         pid: record.pid,
         adopted: true,
