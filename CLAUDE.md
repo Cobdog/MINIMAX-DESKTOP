@@ -8,6 +8,7 @@ This repo is tracked by Flux. Project: **MINIMAX-DESKTOP** (`r2lnrfw`).
 - Do NOT guess or invent a project_id.
 - Track all work as tasks; update status as you progress.
 - Close tasks immediately when complete.
+- **Engine usage (maintainer directive, 2026-09-14):** the maintainer's personal ComfyUI instance at `127.0.0.1:8188` is **OFF LIMITS** to all agents — never submit prompts, experiments, jobs, or tests to it. For engine-dependent tests and experiments, use the Kreatine vendor instance at `127.0.0.1:8189` (verify it is up first; it may be down). The self-managed runtime's own instances use the 8191+ scan range and must continue to avoid BOTH ports.
 
 **Agent attribution (required for the live dashboard):**
 In EVERY `mcp__flux__*` tool call, pass `agent_name="<your agent_id>"`. The SubagentStart identity hook (`~/.claude/hooks/flux-identity.sh`) injects your `agent_id` via additionalContext at launch — copy that exact value into `agent_name`.
