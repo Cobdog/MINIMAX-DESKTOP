@@ -391,7 +391,13 @@ async function main() {
 
   // ---- (g) routes against the real server ----------------------------------------
   console.log('runtime: /api/lan/engine/* routes')
-  {
+  // The standalone entry REFUSES to boot without the web build (dist/index.html).
+  // Legs that build only the server (Engine CI Windows) skip this section with
+  // a note — the routes are platform-neutral; the OS-specific supervision
+  // paths (taskkill tree-kill, tasklist verification) ran in sections (c)–(f).
+  if (!fs.existsSync(path.join(__dirname, '..', 'dist', 'index.html'))) {
+    console.log('  NOTE - no web build present (dist/index.html); the standalone server will not boot — route coverage runs on legs that build the web app (ubuntu CI, pnpm test:all)')
+  } else {
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
     const home = makeHome()
     const checkout = makeCheckout()
