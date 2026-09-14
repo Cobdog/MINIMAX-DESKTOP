@@ -11,6 +11,13 @@ UI work. Process agreed with the maintainer (2026-09-14):
 Two items are now **LOCKED** (maintainer decisions, 2026-09-14). The rest are
 parked or in tension. Nothing beyond the two locks is decided.
 
+**[2026-09-14, later sessions — lock count superseded:]** beyond the original
+two, the same day's conversations additionally locked: **canvas substrate**
+(new section below), **queue synthesis** (§ TENSION — resolved), **fork
+semantics + takes model** (Item 3), and **canvases** (one canvas per project +
+multi-canvas session — see Parked questions). This paragraph is kept for the
+record; the per-section dated notes are the running lock register.
+
 **NORTH STAR (maintainer, 2026-09-14):** "Iteration needs to be fast and
 frictionless. Ideas need to be able to be worked on without bottlenecking
 on UI and UX." Testable at spec time: every common action gets an
@@ -93,7 +100,35 @@ beats the standard one).
 
 ---
 
+## LOCKED — Canvas substrate (2026-09-14, later session)
+
+**Decision.** The substrate is **DOM + CSS transforms**, not a canvas engine:
+media tiles are DOM elements moved by CSS transform; the camera is
+**d3-zoom** (pan/zoom, and semantic-zoom behavior as data); derived edges
+render as **SVG**; floating panels are **react-rnd**; the IK-rig viewport
+(Control Surfaces epic) is **three.js**; **PixiJS is reserved but not
+committed** (revisit only if a measured DOM bottleneck appears). Explicitly
+rejected: **tldraw**, and canvas/WebGL-engine substrates generally.
+
+**Why this composes with the locks above:** DOM tiles make the op-stack /
+properties-panel / modal-editor model (Item 2) native — every tile is
+inspectable, styleable, and accessible; d3-zoom gives semantic zoom without a
+scene graph to fight; SVG edges are the derived-visualization layer for free.
+The "everything seen is a projection" document model is unchanged — this is
+the rendering substrate under it, not a model change.
+
+---
+
 ## ⚠ TENSION — RESOLVING (maintainer direction 2026-09-14; synthesis pending their blessing)
+
+> **RESOLVED (2026-09-14, later session):** the three-layer synthesis below
+> was accepted — per-job state lives spatially ON canvas objects (durable
+> failure state on the object; the empty-canvas seed tile spawns at the
+> prompt bar), aggregate attention is the titlebar radar (click zooms the
+> camera to the troubled region), management is the summonable index, and
+> the bottom bar is 100% contextual. The REQUIRED-DISCUSSION directive on
+> the tracking task (wquw2mu) is acknowledged and its AC checked. The
+> section below is the reasoning that got there, kept for the record.
 
 **The original tension.** Item 2 locks the bottom bar as context-sensitive.
 But the UX research's strongest rule was: *a queue that fails silently is
@@ -156,7 +191,9 @@ not polish. Weapons, all consistent with "everything seen is a projection":
 **Prior art (piecewise only; the composition is ours):** TouchDesigner puts
 errors/cook state on nodes (but state-without-comes-to-you still means
 traveling); Krea dumps generations on canvas (image-first, no chain
-semantics); tldraw is the substrate candidate; Blender's render queue and
+semantics); tldraw was the substrate candidate (superseded 2026-09-14 —
+substrate locked to DOM+CSS transforms, see the substrate section; tldraw
+explicitly rejected); Blender's render queue and
 Resolve's queue are docked-panel counterexamples.
 
 **Open sub-questions (this section):**
@@ -269,9 +306,19 @@ job outputs). TAKES fall out naturally: generations within a chain are
 takes; locking pins settings + selected take; rerun produces a NEW take
 and preserves priors for comparison (the Auditions research pattern).
 
+**Takes model (locked 2026-09-14, later session):** takes are APPEND-ONLY —
+a new take never overwrites; it SUPERSEDES via a canonical-pointer switch
+(the chain's "current take" pointer moves; priors stay browsable and
+lockable). Latents are stored RAW ON DISK by default (the decoded video is
+the preview — the document-model insight made a storage rule). Lock
+granularity is CHAIN-LEVEL. These decisions are inputs to the canvas
+document-model spec (o0xw49r), whose acceptance criteria already encode them
+(append-only takes with immutable identity; atomic canonical switching;
+media + latents stay files on disk).
+
 **Open sub-questions:**
 - Lock granularity: chain-level (maintainer's phrasing) vs per-fork-edge —
-  chain-level assumed.
+  **RESOLVED 2026-09-14: chain-level** (see the takes-model note above).
 - Can one tail feed multiple forks with different substrates (video to one
   chain, latents to another) simultaneously?
 - Does the seed input node stay visible as the chain's head once populated,
@@ -312,6 +359,17 @@ with the camera editor and other tools."
   settings-results separation.** The Director Suite itself is a later
   layer — but the DAG substrate must not preclude it.
 
+**[2026-09-14, later sessions — inputs landed:]** the research this item
+depends on has shipped: the transitions/latent-continuity harvest
+(docs/research/h3-transitions-and-latent-continuity.md — 27 sources,
+verdict table, E1–E8 experiment ladder) and the node-ecosystem sweep
+(docs/research/h3-node-ecosystem-sweep.md), which found Director-Suite-
+adjacent machinery already in the field to reference rather than reinvent
+(AIMixer's in-node director with timeline + exchange format; Continuum's
+takes/branch-provenance contract; FL-MiniMaxH3's PromptTimeline
+shot-list→conditioning-mask compiler; GENKAIx's PromptSync
+timed-prompt↔playback review view).
+
 ## Parked questions (not yet discussed — take in maintainer's chosen order)
 
 - Latent-truth legibility in tiles: context blocks under previews — always
@@ -319,9 +377,14 @@ with the camera editor and other tools."
 - Workspace preset set (Generate/Edit/Prep/Graph/Library?) — Blender-style
   saved layouts + active projection.
 - Timeline: summoned projection vs permanent bottom-bar resident.
+  **[Resolved 2026-09-14: summonable projection — Item 4's answer stands.]**
 - Engine views dissolving into generators-as-ops (select nothing + Generate =
   t2v; select image + Generate = i2v).
 - One canvas per project vs one infinite canvas with project regions.
+  **[Resolved 2026-09-14: BOTH, layered — one canvas per project, plus a
+  multi-canvas SESSION: several canvases open at once, ComfyUI-tab-style;
+  they survive restarts and are closeable; autosave EVERYTHING always,
+  including camera positions.]**
 - Screen-size adaptation for floating panels (auto-collapse below width?).
 - Command palette scope (⌘K over every action).
 - The **Focus primitive**: selection → named reusable conditioning target
@@ -348,9 +411,10 @@ with the camera editor and other tools."
   curation celebrated over slot-machine.
 - Prior-art list for the viability passes: tldraw, Natron/Fusion, Descript,
   Blender workspaces, Krita, Resolve Cut-vs-Edit, Runway (what they get
-  wrong), Photopea. Libraries: tldraw SDK (evaluate as substrate), Konva,
-  PixiJS v8 (when WebGL needed), react-rnd, Base UI (adopted), mediabunny +
-  WebCodecs (planned in PreviewSource seam).
+  wrong), Photopea. Libraries: tldraw SDK (was to be evaluated as substrate;
+  rejected 2026-09-14 — substrate locked to DOM+CSS), Konva, PixiJS v8
+  (reserved, not committed), react-rnd (adopted — floating panels), Base UI
+  (adopted), mediabunny + WebCodecs (planned in PreviewSource seam).
 
 ## Status of the three prototypes
 
@@ -370,6 +434,8 @@ component/module in the "video canvas" phase — i.e., inside THIS direction.
 
 1. Queue tension: maintainer direction recorded (spatial — see § TENSION);
    confirm the three-layer synthesis + pin down "decompose" v1 semantics.
+   **[2026-09-14: synthesis CONFIRMED — see the RESOLVED note in § TENSION;
+   still open: "decompose" v1 semantics.]**
 2. Continue parked questions in the maintainer's chosen order.
 3. Viability passes per item as they firm up — the canvas substrate itself
    (semantic zoom, auto-placement, navigation) is now first among them.

@@ -15,7 +15,7 @@ pnpm start:server
 
 **Development:** `pnpm gate` runs the full verification chain (see [Testing](#testing) below). CI runs typecheck/lint/unit/build/smoke/e2e/vision-capture on every push, plus an Engine CI leg on Windows.
 
-Requirements: Node 20+, a local ComfyUI with the MiniMax H3 core nodes, and the H3 model components already on disk. FFmpeg for clip tools. Optional: local Ollama for prompt features; NVIDIA tooling for GPU telemetry.
+Requirements: Node 20+, a local ComfyUI with the MiniMax H3 core nodes, and the H3 model components already on disk. FFmpeg for clip tools. Optional: a local [llama.cpp server in router mode](https://github.com/ggml-org/llama.cpp) for the LLM layer (prompt tailoring, planning, caption rewriting, vision captioning), with local Ollama as the fallback when no router is configured; NVIDIA tooling for GPU telemetry.
 
 Configuration lives in `~/.minimax-studio/` (override with `MINIMAX_STUDIO_HOME`): `settings.json` holds the ComfyUI/Ollama addresses, model folders, and defaults — also editable from the app's Settings page. Default port `4178` (override with `MINIMAX_LAN_PORT`).
 
@@ -124,7 +124,7 @@ separate: `pnpm typecheck`.
 **Other providers (separate workspaces, separate state)**
 - LTX-2.5 T2V/I2V with native synchronized audio, the official two-stage Quality preset and single-stage Turbo preset
 - ACE-Step 1.5 music generation with XL SFT/Base checkpoint selection, lyric/instrumental modes, tempo/key/language controls, and FLAC output
-- **MiniMax Music 3**: complete songs up to five minutes — official three-section caption builder (Global Metadata / Vocal Details / Arrangement), lyrics with `[Intro]…[Outro]` structure tags, a local Ollama caption rewriter following the official skill's rules, tiled low-VRAM audio decode, mp3 V0 output
+- **MiniMax Music 3**: complete songs up to five minutes — official three-section caption builder (Global Metadata / Vocal Details / Arrangement), lyrics with `[Intro]…[Outro]` structure tags, an LLM-layer caption rewriter following the official skill's rules (llama.cpp router primary, Ollama fallback), tiled low-VRAM audio decode, mp3 V0 output
 - Z-Image Turbo first-frame and standalone still generation with direct I2V handoff
 
 **Production libraries**
@@ -138,7 +138,7 @@ separate: `pnpm typecheck`.
 - The ten official style embeddings (bullet_time, truman_show, …) as one-click `embedding:name` insertions
 
 **Local integration**
-- Local Ollama prompt enhancement, timed shot planning, and synchronized-audio rewriting — prompt text never leaves the workstation, and the planner instructs MiniMax's official structure and label discipline
+- LLM-layer prompt enhancement, timed shot planning, synchronized-audio rewriting, and image captioning — served by a llama.cpp router (one endpoint for every local text model, with model-family detection, sticky-model keep-alive, and pre-generation unload choreography for VRAM hygiene) or local Ollama as fallback. Prompt text never leaves the workstation, and the planner instructs MiniMax's official structure and label discipline
 - Live WebSocket render progress and previews; GPU/VRAM telemetry; job queue with cancellation and bounded failure detection
 - Landscape/portrait/square output presets with automatic fitting and interactive crop preview
 
@@ -154,9 +154,9 @@ separate: `pnpm typecheck`.
 - One-time model-license notice covering the MiniMax community license's reported region and commercial-use constraints
 
 - ComfyUI defaults to `http://127.0.0.1:8188`
-- Ollama defaults to `http://127.0.0.1:11434`; the app lists installed local text models and excludes embedding and cloud-backed entries
+- The LLM layer's llama.cpp router address is set in Settings (router mode; leaving it empty keeps the Ollama fallback at `http://127.0.0.1:11434`); the app lists the served text models with family and vision-capability detection and excludes embedding and cloud-backed entries
 
-Both addresses, every model directory, and the ComfyUI output directory can be changed from Settings.
+Both engine addresses, every model directory, and the ComfyUI output directory can be changed from Settings.
 
 ## Workflow compatibility
 
@@ -205,6 +205,13 @@ Reference downloads and node documentation are maintained by [Comfy-Org's ACE-St
 | [docs/audit/security-audit.md](docs/audit/security-audit.md) | Threat model, findings, hardening priorities |
 | [docs/migration.md](docs/migration.md) | The Electron → web migration record |
 | [docs/research/ecosystem-2026-09.md](docs/research/ecosystem-2026-09.md) | H3/LTX/ACE/Z-Image ecosystem research driving the roadmap |
+| [docs/research/h3-transitions-and-latent-continuity.md](docs/research/h3-transitions-and-latent-continuity.md) | Transitions & latent continuity: verdict table, three strategies, E1–E8 experiment ladder |
+| [docs/research/h3-node-ecosystem-sweep.md](docs/research/h3-node-ecosystem-sweep.md) | Custom-node field sweep: code-read verdicts, new methods, adopt shortlist |
+| [docs/research/h3-sampler-shaping-and-motion-control.md](docs/research/h3-sampler-shaping-and-motion-control.md) | Sampler/sigma/guidance recipe, adherence levers, movement-director lineage, E-MD1 |
+| [docs/research/speed-quality-and-imagegen-paths.md](docs/research/speed-quality-and-imagegen-paths.md) | Speed/quality levers (VDN vs turbo, TE caching), memory choreography, Krea 2 / Klein image paths |
+| [docs/research/h3-instruction-based-editing.md](docs/research/h3-instruction-based-editing.md) | H3 as instruction-based editor: arena rank, adaln-hybrid gap, T=1/frame-packet, model division of labor |
+| [docs/research/fun-control-input-surface.md](docs/research/fun-control-input-surface.md) | Fun Control wire format, DWPose render spec, extraction matrix, IK-rig architecture |
+| [docs/research/ui-pre-brainstorm.md](docs/research/ui-pre-brainstorm.md) | Canvas UI working doc — locks, tensions, open questions (living document) |
 | [docs/history/plan-v0.md](docs/history/plan-v0.md) | Upstream's original planning document (historical) |
 
 ## License

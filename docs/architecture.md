@@ -1,10 +1,10 @@
 # Architecture
 
-> Contributor-oriented overview of MiniMax Studio as a web application. For the migration history, see [migration.md](migration.md). Last verified at the Electron decommission (2026-09-10).
+> Contributor-oriented overview of MiniMax Studio as a web application. For the migration history, see [migration.md](migration.md). Last verified 2026-09-14 (managed runtime, optimization registry, LLM layer, QA gate).
 
 ## What this is
 
-A standalone Node web server (`server/`) that serves a React SPA (`src/`) and a local API, fronting local services the app does not own: **ComfyUI** (rendering), **Ollama** (prompt assistance), **FFmpeg** (clip operations). Every browser on the network — workstation, phone, tablet — gets the full Studio.
+A standalone Node web server (`server/`) that serves a React SPA (`src/`) and a local API, fronting local services the app does not own: **ComfyUI** (rendering), the **LLM layer** — a llama.cpp server in router mode, with Ollama as the fallback provider when no router is configured (prompt assistance, planning, captioning), and **FFmpeg** (clip operations). Every browser on the network — workstation, phone, tablet — gets the full Studio.
 
 The app **indexes models from their existing locations** — it never downloads, copies, or reorganizes model files.
 
@@ -22,7 +22,8 @@ The app **indexes models from their existing locations** — it never downloads,
        │ REST + WS                  │ spawns
        ▼                            ▼
    ComfyUI :8188                  ffmpeg
-   Ollama  :11434                 (frames/trim/join)
+   LLM: llama.cpp router          (frames/trim/join)
+   or Ollama :11434
 
   any browser ── http://workstation:4178 ──► full Studio
                  ?mobile=1 ───────────────► touch companion
@@ -32,7 +33,7 @@ Two modules:
 
 | Module | Role |
 |---|---|
-| `server/core.ts` | `createStudioServer(paths)` factory: settings persistence (atomic write-then-rename), model scanning, ComfyUI/Ollama proxy, GPU telemetry, FFmpeg operations, output resolution, the full route table, static hosting. Zero Electron imports; everything path-parameterized |
+| `server/core.ts` | `createStudioServer(paths)` factory: settings persistence (atomic write-then-rename), model scanning, ComfyUI proxy, the LLM layer (llama.cpp router provider with Ollama fallback — model listing with family/vision detection, generation, fragment store, vision captioning, pre-generation unload choreography), GPU telemetry, FFmpeg operations, output resolution, the full route table, static hosting. Zero Electron imports; everything path-parameterized |
 | `server/index.ts` | Standalone entry: resolves config home (`MINIMAX_STUDIO_HOME`, default `~/.minimax-studio`), serves `dist/`, listens on 4178 (`MINIMAX_LAN_PORT`) |
 
 **Managed engine runtime** (increment 1 of the self-managed ComfyUI work): `server/runtime.ts` (`RuntimeManager`) can launch and supervise the app's own ComfyUI from a checkout the user nominates, on top of the wave-2c `EngineProcess` supervision contract. Ports allocate from 8191 up, hard-clear of the user's live instances (8188/8189); `extra_model_paths.yaml` is generated into the checkout from the configured model roots (weights are never copied — the same indexing-in-place rule as the scanner); boot reconcile adopts a healthy recorded instance instead of double-spawning; a stop is graceful-then-tree-killed and always resolves. External mode (the default) is byte-for-byte the pre-runtime behavior — nothing spawns, polls, or re-points unless the user switches the mode in Settings.
@@ -50,7 +51,7 @@ The server is authoritative for service URLs, the output directory, and the FFmp
 
 ## API surface
 
-All routes under `/api/lan/` (legacy prefix retained from the mobile-companion era). Representative routes: `bootstrap`, `settings` (GET/POST), `object-info`, `comfy-status` (SSRF-guarded), `prompt`, `history/{id}`, `cancel`, `events` (SSE⇄WS bridge), `ollama` + `ollama/structured`, `engine/{status,start,stop}` (the managed runtime; start is refused outside managed mode and is idempotent — a repeated start never double-spawns), `video/{frame,frames,trim,join}`, `outputs/{resolve,save-image}`, `upload` / `upload-media` / `upload-output`, `media` (ComfyUI proxy or output-contained local serving with Range), `telemetry`, `characters`. Full contract table in [migration.md](migration.md).
+All routes under `/api/lan/` (legacy prefix retained from the mobile-companion era). Representative routes: `bootstrap`, `settings` (GET/POST), `object-info`, `comfy-status` (SSRF-guarded), `prompt`, `history/{id}`, `cancel`, `events` (SSE⇄WS bridge), `ollama` + `ollama/structured` (fallback provider), `llm/{models,generate,prepare,vision,fragments}` (the LLM layer: router-primary provider selection, model-family manifests, layered prompt fragments, vision captioning), `engine/{status,start,stop}` (the managed runtime; start is refused outside managed mode and is idempotent — a repeated start never double-spawns), `video/{frame,frames,trim,join}`, `outputs/{resolve,save-image}`, `upload` / `upload-media` / `upload-output`, `media` (ComfyUI proxy or output-contained local serving with Range), `telemetry`, `characters`. Full contract table in [migration.md](migration.md).
 
 Security posture: **open on the LAN by default** (ComfyUI-consistent; a deliberate 2026-09-10 decision), token-gated via `--token` / `MINIMAX_LAN_TOKEN=1` for hostile networks. Input validation everywhere: path containment (`relative()`-based), numeric FFmpeg arguments (concat-directive injection guarded), MIME allowlists and size caps on uploads, SSRF guard on probe-able URLs.
 
@@ -82,12 +83,12 @@ Job state transitions live in the pure reducer `src/lib/jobReducer.ts` (terminal
 
 ## Renderer structure
 
-`src/App.tsx` (~550 lines) is the composition shell — hook wiring, view routing, and handoffs between workspaces. The domain logic is layered so each feature lands in exactly one place:
+`src/App.tsx` (~630 lines) is the composition shell — hook wiring, view routing, and handoffs between workspaces. The domain logic is layered so each feature lands in exactly one place:
 
 | Layer | Modules | What lives there |
 | --- | --- | --- |
 | `src/views/` | `CreateView`, `LibraryView`, `JobsView`, `SettingsView` | One component per nav destination + its private helpers (reference pickers, strips, modals) |
-| `src/hooks/` | `useStudioSession` | Settings load, model scanning, ComfyUI connection/object-info, Ollama list, GPU telemetry |
+| `src/hooks/` | `useStudioSession` | Settings load, model scanning, ComfyUI connection/object-info, LLM model list (router/Ollama), GPU telemetry |
 | | `useGenerationQueue` | Job persistence, guarded history polling, deadline sweep, cancellation |
 | | `useCreateWorkspace` | Every persisted Create field, the character/wardrobe/location libraries, reference binding and ordering, media picking, reset |
 | | `useGenerationFlows` | Submit-side generation for every provider (H3 + upscale validation, LTX 2.5, ACE-Step, the fixed-seed diagnostic pair) |
@@ -130,4 +131,4 @@ CI leg covers the server build + engine/runtime suites.
 ## Known debts / follow-ups
 
 - Desktop/mobile generation semantics share builders but duplicate orchestration with drift
-- The Create view's primary Generate button and bottom controls are below the fold at 1080p, and six status signals contradict each other on first run — tracked as the UI polish wave (task ipmk4ci) with vision-inspection evidence
+- ~~The Create view's primary Generate button and bottom controls are below the fold at 1080p, and six status signals contradict each other on first run — tracked as the UI polish wave (task ipmk4ci) with vision-inspection evidence~~ [Resolved 2026-09-11: UI polish waves 1 (ipmk4ci) and 2 (vuubsmh) shipped]
