@@ -27,6 +27,7 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import WebSocket, { WebSocketServer } from 'ws'
 import type { EngineLifecycleEvent, EnginePhase, GpuTelemetry, JobLifecycleEvent, LlmStreamRequest, PreviewMime, RealtimeChannel, RealtimeEnvelope } from '../src/types'
+import { iterateOpenAiSse } from './llm/sse'
 import { logEvent, logFailure } from './logger'
 
 export const REALTIME_WS_PATH = '/ws'
@@ -578,30 +579,18 @@ export function createRealtimeHub(options: RealtimeHubOptions) {
         finish('error', { error: detail || `The LLM endpoint returned ${response.status}.` })
         return
       }
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
+      // The ONE OpenAI-compatible SSE parser (server/llm/sse.ts) — shared
+      // with the router provider's chatStream, so both consumers parse
+      // identically. Reasoning deltas (DeepSeek thinking mode) are parsed but
+      // deliberately NOT forwarded as tokens: they are the model's thinking,
+      // not the visible answer.
       let finishReason: string | undefined
       let sawDone = false
-      for (;;) {
-        const chunk = await reader.read()
-        if (chunk.done) break
+      for await (const event of iterateOpenAiSse(response.body)) {
         bumpInactivity()
-        buffer += decoder.decode(chunk.value, { stream: true })
-        let newlineIndex: number
-        while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
-          const line = buffer.slice(0, newlineIndex).replace(/\r$/, '')
-          buffer = buffer.slice(newlineIndex + 1)
-          if (!line.startsWith('data:')) continue
-          const data = line.slice(5).trim()
-          if (data === '[DONE]') { sawDone = true; continue }
-          let parsed: { choices?: Array<{ delta?: { content?: unknown }; finish_reason?: unknown }> }
-          try { parsed = JSON.parse(data) } catch { continue }
-          const choice = parsed.choices?.[0]
-          if (typeof choice?.finish_reason === 'string' && choice.finish_reason) finishReason = choice.finish_reason
-          const delta = choice?.delta?.content
-          if (typeof delta === 'string' && delta) deliver(client, 'llm', 'token', { reqId, delta })
-        }
+        if (event.kind === 'content') deliver(client, 'llm', 'token', { reqId, delta: event.delta })
+        else if (event.kind === 'finish') finishReason = event.reason
+        else if (event.kind === 'end') sawDone = true
       }
       const aborted = stream.controller.signal.aborted
       if (!aborted && !sawDone && !finishReason) {

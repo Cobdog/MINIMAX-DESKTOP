@@ -2419,3 +2419,28 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 /* Z-Image control-sketch panel. */
 .zimage-control-panel { display: grid; gap: 11px; margin-top:var(--space-3); padding: 13px; border: 1px dashed var(--line-strong); border-radius: 10px; }
 .zimage-control-panel .remove-media { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+
+/* ---- LLM layer (v2 wave): router provider, streaming previews, captions -- */
+/* Token-streaming preview: the hook paints plain text directly into this
+   element (never React state), so it needs only containment + scroll. */
+.llm-stream-preview { margin-top: 2px; padding: 10px 11px; max-height: 180px; overflow-y: auto; border: 1px dashed color-mix(in srgb, var(--accent) 32%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--accent) 3%, transparent); color: var(--text); font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.llm-test-result { display: flex; align-items: center; gap: 7px; margin: 0 17px; padding: 8px 10px; border-radius: 8px; font-size: var(--text-sm); }
+.llm-test-result.ok { color: var(--accent); background: var(--accent-soft); }
+.llm-test-result.fail { color: var(--danger); background: color-mix(in srgb, var(--danger) 7%, transparent); }
+.llm-model-list { display: grid; gap: 6px; padding: 10px 17px 0; max-height: 240px; overflow-y: auto; }
+.llm-model-row { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 1px solid color-mix(in srgb, var(--color-border, #888) 25%, transparent); border-radius: 8px; background: var(--color-surface-sunken, transparent); color: var(--text); cursor: pointer; text-align: left; }
+.llm-model-row:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.llm-model-row.active { border-color: var(--accent); background: var(--accent-soft); }
+.llm-family-badge { flex: 0 0 auto; min-width: 64px; text-align: center; padding: 2px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.llm-family-badge.family-deepseek { background: color-mix(in srgb, #4d6bfe 16%, transparent); color: #7d96ff; }
+.llm-family-badge.family-gemma { background: color-mix(in srgb, #d97757 16%, transparent); color: #eb9a7d; }
+.llm-family-badge.family-qwen { background: color-mix(in srgb, #a855f7 16%, transparent); color: #c98af9; }
+.llm-family-badge.family-llama { background: color-mix(in srgb, #0ea5e9 16%, transparent); color: #67d3f8; }
+.llm-model-name { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); }
+.llm-model-flags { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.llm-model-flags em { display: inline-flex; align-items: center; gap: 3px; font-style: normal; font-size: 11px; color: var(--muted-2); }
+.llm-model-flags em.llm-model-active { color: var(--accent); font-weight: 700; }
+.caption-reference { display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; min-height: 24px; border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-radius: 6px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 650; cursor: pointer; }
+.caption-reference:hover:not(:disabled) { filter: brightness(1.08); }
+.caption-reference:disabled { opacity: .5; cursor: wait; }
+.reference-caption-notice { grid-column: 1 / -1; color: var(--muted-2); font-size: var(--text-sm); }

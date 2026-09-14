@@ -1,0 +1,23 @@
+{
+  "family": "deepseek",
+  "displayName": "DeepSeek",
+  "match": ["deepseek"],
+  "sampling": { "temperature": 0.7, "top_p": 0.95, "maxTokens": 4096 },
+  "templateKwargs": {},
+  "thinking": {
+    "style": "top-level",
+    "field": "thinking",
+    "effortField": "reasoning_effort",
+    "efforts": ["low", "high", "max"],
+    "defaultEffort": "low",
+    "reasoningField": "reasoning_content"
+  },
+  "thinkingBudgetTokens": 0,
+  "vision": {
+    "familyDefault": false,
+    "match": ["vl", "vision"],
+    "imageFirst": false,
+    "notation": "Vision-exp models document references as <image>path</image>; base64 parts are sent as OpenAI image_url parts."
+  },
+  "notes": "Thinking is a TOP-LEVEL {type:'enabled'|'disabled'} object — never 'off'. reasoning_effort is low|high|max. reasoning_content MUST be passed back on multi-turn/tool turns in thinking mode; the first streamed reasoning chunk carries an empty string and must not open a block. prompt_tokens includes cache hits."
+}

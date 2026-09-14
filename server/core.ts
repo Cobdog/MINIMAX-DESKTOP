@@ -25,6 +25,9 @@ import { failureRef, logEvent, logFailure } from './logger'
 import { createStudioRepository, type StudioRepository } from './repo'
 import { createRealtimeHub, type RealtimeHub } from './realtime'
 import { EngineProcess } from './engineProcess'
+import { createLlmService, type LlmService } from './llm'
+import { createRouterProvider } from './llm/providers/router'
+import { familyManifest, inferFamily } from './llm/registry'
 
 export type StudioServerPaths = {
   settingsFile: string
@@ -125,16 +128,10 @@ function probeMediaDurationSeconds(ffmpegExecutable: string, input: string): Pro
   })
 }
 
-function finalOllamaAnswer(value: string) {
-  let answer = value.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '').replace(/<analysis\b[^>]*>[\s\S]*?<\/analysis>/gi, '')
-  const unclosedThink = answer.search(/<(?:think|analysis)\b[^>]*>/i)
-  if (unclosedThink >= 0) answer = answer.slice(0, unclosedThink)
-  return answer.replace(/<\/?(?:think|analysis)\b[^>]*>/gi, '').trim()
-}
-
 function cleanUrl(url: string) {
   return url.trim().replace(/\/+$/, '')
 }
+
 
 /** Hard timeout for ComfyUI/Ollama calls: a hung engine socket must not hold
  *  server requests open forever. 60 s because /object_info legitimately runs
@@ -398,6 +395,19 @@ export function createStudioServer(paths: StudioServerPaths) {
   EngineProcess.setEngineSink((event) => realtimeHub.emitEngine(event.name, event.phase, event.detail, event.pid))
   EngineProcess.setUrlGuard(isLocalServiceUrl)
 
+  // LLM layer (v2 wave): provider selection (llama.cpp router primary,
+  // Ollama fallback), the layered prompt composer, vision captioning, and
+  // VRAM unload choreography. Unload events surface on the SAME engine
+  // channel the sidecars use, so one subscription observes both.
+  const llm: LlmService = createLlmService({
+    loadSettings,
+    repo: () => studioRepo,
+    isLocalServiceUrl,
+    logEvent,
+    logFailure,
+    emitEngine: (name, phase, detail, pid) => realtimeHub.emitEngine(name, phase, detail, pid),
+  })
+
   function defaultSettings(): AppSettings {
     const root = join(paths.documentsDirectory, 'ComfyUI', 'models')
     return {
@@ -413,6 +423,16 @@ export function createStudioServer(paths: StudioServerPaths) {
         sampler: 'res_multistep', scheduler: 'simple', experimentalSampling: false,
         refImageSize: 'match', livePreview: true, sigmaShiftMode: 'model', shiftVideo: 12, shiftAudio: 3, loraStrength: 1, upscaleMode: 'off',
       },
+      // LLM layer defaults: no router configured → exact Ollama-only behavior;
+      // unload-on-generate is ON by default (VRAM hygiene), thinking OFF
+      // (structured tasks are always off; freeform respects this default).
+      llamaCppUrl: '',
+      llamaCppModel: '',
+      llamaVisionModel: '',
+      llamaStickyModels: '',
+      unloadLlmOnGenerate: true,
+      llmThinkingDefault: 'off',
+      promptContentLevel: 'sfw',
     }
   }
 
@@ -421,7 +441,20 @@ export function createStudioServer(paths: StudioServerPaths) {
     const generationDefaults = { ...defaults.generationDefaults, ...raw.generationDefaults }
     generationDefaults.steps = Math.max(16, Math.min(30, Number(generationDefaults.steps) || 30))
     if (raw.generationDefaults?.steps === 20) generationDefaults.steps = 30
-    return { ...defaults, ...raw, paths: { ...defaults.paths, ...raw.paths }, generationDefaults }
+    const stringField = (value: unknown, fallback: string) => (typeof value === 'string' ? value : fallback)
+    return {
+      ...defaults,
+      ...raw,
+      paths: { ...defaults.paths, ...raw.paths },
+      generationDefaults,
+      llamaCppUrl: stringField(raw.llamaCppUrl, defaults.llamaCppUrl).trim(),
+      llamaCppModel: stringField(raw.llamaCppModel, defaults.llamaCppModel).trim(),
+      llamaVisionModel: stringField(raw.llamaVisionModel, defaults.llamaVisionModel).trim(),
+      llamaStickyModels: stringField(raw.llamaStickyModels, defaults.llamaStickyModels).trim(),
+      unloadLlmOnGenerate: raw.unloadLlmOnGenerate === undefined ? defaults.unloadLlmOnGenerate : raw.unloadLlmOnGenerate !== false,
+      llmThinkingDefault: raw.llmThinkingDefault === 'on' ? 'on' : 'off',
+      promptContentLevel: raw.promptContentLevel === 'nsfw' || raw.promptContentLevel === 'suggestive' ? raw.promptContentLevel : 'sfw',
+    }
   }
 
   // Settings cache: every LAN request (including each media Range seek) needs
@@ -1047,6 +1080,13 @@ export function createStudioServer(paths: StudioServerPaths) {
           const body = await readJson(request, 5_000_000)
           if (!body.prompt || typeof body.prompt !== 'object') return sendJson(response, 400, { error: 'A ComfyUI workflow is required.' })
           const clientId = typeof body.clientId === 'string' && /^[a-f0-9-]{16,64}$/i.test(body.clientId) ? body.clientId : randomUUID()
+          // VRAM hygiene (pre-submit hook): when the router provider has
+          // loaded models and unload-on-generate is on (default), unload them
+          // BEFORE the graph lands. Bounded to ~2 s so a slow router can never
+          // block the submission itself; observable on the engine channel.
+          await llm.unloadBeforeGeneration().catch((unloadFailure: unknown) => {
+            logFailure('llm/unload-before-generate', unloadFailure, undefined, 'debug')
+          })
           const result = await comfyFetch(settings.comfyUrl, '/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: body.prompt, client_id: clientId }) })
           return sendJson(response, 200, result)
         }
@@ -1059,29 +1099,159 @@ export function createStudioServer(paths: StudioServerPaths) {
         // Realtime fabric — SSE v2 fallback: the typed JSON channels only
         // (previews degrade to base64 here; WS is the primary transport).
         if (url.pathname === '/api/lan/realtime' && request.method === 'GET') return realtimeHub.handleSse(request, response, url.searchParams)
+        // LEGACY prompt-assistant routes — now delegated to the ACTIVE LLM
+        // provider (llama.cpp router when configured, Ollama otherwise). The
+        // Ollama provider reproduces the previous wire behavior exactly.
         if (url.pathname === '/api/lan/ollama' && request.method === 'POST') {
           const body = await readJson(request, 80_000)
           const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
           if (!prompt || prompt.length > 50_000) return sendJson(response, 400, { error: 'A shorter prompt-assistant request is required.' })
-          const data = await comfyFetch(settings.ollamaUrl, '/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: settings.ollamaModel, prompt, stream: false, think: false, options: { temperature: 0.6, num_predict: 1200 } }) }) as { response?: string; error?: string }
-          if (!data.response) return sendJson(response, 502, { error: data.error || 'Ollama returned an empty response.' })
-          const answer = finalOllamaAnswer(data.response)
-          if (!answer) return sendJson(response, 502, { error: 'Ollama returned reasoning without a final answer.' })
-          return sendJson(response, 200, { response: answer })
+          const { provider, error: providerError } = llm.activeProvider(settings)
+          if (providerError) return sendJson(response, 400, { error: providerError })
+          const model = provider.kind === 'router' ? (settings.llamaCppModel.trim() || (await llm.resolveActiveModel(provider, settings))) : settings.ollamaModel
+          if (!model) return sendJson(response, 400, { error: 'No local text model is configured. Check the LLM section in Settings.' })
+          try {
+            const result = provider.kind === 'router'
+              ? await provider.chat({ model, messages: [{ role: 'user', content: prompt }], manifest: familyManifest(inferFamily(model)), thinking: false })
+              : { content: await provider.legacyGenerate!(model, prompt) }
+            if (!result.content) return sendJson(response, 502, { error: 'The local model returned an empty response.' })
+            return sendJson(response, 200, { response: result.content })
+          } catch (providerFailure) {
+            return sendJson(response, 502, { error: providerFailure instanceof Error ? providerFailure.message : String(providerFailure) })
+          }
         }
         if (url.pathname === '/api/lan/ollama/structured' && request.method === 'POST') {
           const body = await readJson(request, 1_000_000)
           const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
           if (!prompt || prompt.length > 50_000) return sendJson(response, 400, { error: 'A structured prompt is required.' })
           if (!body.schema || typeof body.schema !== 'object' || Array.isArray(body.schema)) return sendJson(response, 400, { error: 'A JSON schema is required.' })
-          const data = await comfyFetch(settings.ollamaUrl, '/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: settings.ollamaModel, messages: [{ role: 'user', content: prompt }], stream: false, think: false, format: body.schema, options: { temperature: 0.2, num_predict: 6000 } }),
-          }) as { message?: { content?: string }; error?: string }
-          const content = data.message?.content ? finalOllamaAnswer(data.message.content) : ''
-          if (!content) return sendJson(response, 502, { error: data.error || 'Ollama returned an empty response.' })
-          try { return sendJson(response, 200, { result: JSON.parse(content) }) } catch { return sendJson(response, 502, { error: 'Ollama returned a response that was not valid JSON.' }) }
+          try {
+            const generated = await llm.generate({ prompt, schema: body.schema as Record<string, unknown> })
+            return sendJson(response, 200, { result: generated.result })
+          } catch (providerFailure) {
+            return sendJson(response, 502, { error: providerFailure instanceof Error ? providerFailure.message : String(providerFailure) })
+          }
+        }
+        // ---- LLM layer routes (v2 wave) --------------------------------------
+        // Model listing from the ACTIVE provider, shaped for the client:
+        // family inference, vision capability, router status, active flag.
+        // An optional ?url= probes a CANDIDATE endpoint (Settings' Test
+        // connection) through the same local-only SSRF guard.
+        if (url.pathname === '/api/lan/llm/models' && request.method === 'GET') {
+          const candidate = url.searchParams.get('url')
+          const target = candidate && candidate.trim() ? candidate.trim() : settings.llamaCppUrl.trim()
+          const started = Date.now()
+          if (!target) {
+            // No router configured: the Ollama fallback, surfaced with the
+            // same shape so the Settings UI renders one model list either way.
+            try {
+              const models = await llm.activeProvider(settings).provider.listModels()
+              return sendJson(response, 200, { provider: 'ollama' as const, endpoint: settings.ollamaUrl, model: settings.ollamaModel, connected: true, latencyMs: Date.now() - started, models: models.map((entry) => ({ id: entry.id, family: entry.family, familyLabel: familyManifest(entry.family).displayName, vision: entry.vision, status: entry.status, active: entry.id === settings.ollamaModel })) })
+            } catch (providerFailure) {
+              return sendJson(response, 200, { provider: 'ollama' as const, endpoint: settings.ollamaUrl, model: settings.ollamaModel, connected: false, latencyMs: Date.now() - started, error: providerFailure instanceof Error ? providerFailure.message : String(providerFailure), models: [] })
+            }
+          }
+          if (!isLocalServiceUrl(target)) return sendJson(response, 400, { error: 'Only local service addresses can be tested.' })
+          const router = createRouterProvider({ baseUrl: target, logFailure })
+          try {
+            const models = await router.listModels()
+            const active = settings.llamaCppUrl.trim() === target ? (settings.llamaCppModel.trim() || models[0]?.id || '') : (settings.llamaCppModel.trim() || models[0]?.id || '')
+            return sendJson(response, 200, { provider: 'router' as const, endpoint: target, model: active, connected: true, latencyMs: Date.now() - started, models: models.map((entry) => ({ id: entry.id, family: entry.family, familyLabel: familyManifest(entry.family).displayName, vision: entry.vision, status: entry.status, active: entry.id === active })) })
+          } catch (providerFailure) {
+            return sendJson(response, 200, { provider: 'router' as const, endpoint: target, model: '', connected: false, latencyMs: Date.now() - started, error: providerFailure instanceof Error ? providerFailure.message : String(providerFailure), models: [] })
+          }
+        }
+        // Unified generate (non-streaming): composer-shaped assistant
+        // requests AND legacy raw prompts; optional schema switches to a
+        // structured result with thinking forced off for speed.
+        if (url.pathname === '/api/lan/llm/generate' && request.method === 'POST') {
+          const body = await readJson(request, 2_000_000)
+          const prompt = typeof body.prompt === 'string' ? body.prompt.slice(0, 50_000) : undefined
+          const draft = typeof body.draft === 'string' ? body.draft.slice(0, 50_000) : undefined
+          if (!prompt && !draft) return sendJson(response, 400, { error: 'A draft or prompt is required.' })
+          const history = Array.isArray(body.history) ? (body.history as Array<Record<string, unknown>>).slice(0, 24).flatMap((turn) => {
+            if (!turn || typeof turn !== 'object' || (turn.role !== 'user' && turn.role !== 'assistant') || typeof turn.content !== 'string') return []
+            return [{ role: turn.role as 'user' | 'assistant', content: turn.content.slice(0, 50_000), ...(typeof turn.reasoning === 'string' && turn.reasoning ? { reasoning: turn.reasoning.slice(0, 100_000) } : {}) }]
+          }) : undefined
+          try {
+            const generated = await llm.generate({
+              task: typeof body.task === 'string' ? body.task.slice(0, 64) : undefined,
+              targetEngine: typeof body.targetEngine === 'string' ? body.targetEngine.slice(0, 64) : undefined,
+              length: typeof body.length === 'string' ? body.length.slice(0, 16) : undefined,
+              contentLevel: typeof body.contentLevel === 'string' ? body.contentLevel.slice(0, 16) : undefined,
+              instructions: typeof body.instructions === 'string' ? body.instructions.slice(0, 20_000) : undefined,
+              draft,
+              prompt,
+              history,
+              schema: body.schema && typeof body.schema === 'object' && !Array.isArray(body.schema) ? body.schema as Record<string, unknown> : undefined,
+              thinking: body.thinking === true ? true : body.thinking === false ? false : undefined,
+              model: typeof body.model === 'string' ? body.model.slice(0, 200) : undefined,
+              raw: body.raw === true,
+            })
+            if (generated.result !== undefined) return sendJson(response, 200, { result: generated.result, model: generated.model, provider: generated.provider })
+            return sendJson(response, 200, { response: generated.response, reasoning: generated.reasoning, model: generated.model, provider: generated.provider })
+          } catch (providerFailure) {
+            return sendJson(response, 502, { error: providerFailure instanceof Error ? providerFailure.message : String(providerFailure) })
+          }
+        }
+        // Streaming prep: returns a fabric-ready llm request (endpoint, model,
+        // composed messages, family-tuned options) the client forwards
+        // through the realtime llm channel. Router provider only.
+        if (url.pathname === '/api/lan/llm/prepare' && request.method === 'POST') {
+          const body = await readJson(request, 1_000_000)
+          const draft = typeof body.draft === 'string' ? body.draft.slice(0, 50_000) : undefined
+          if (!draft && typeof body.prompt !== 'string') return sendJson(response, 400, { error: 'A draft is required.' })
+          try {
+            const prepared = await llm.prepare({
+              task: typeof body.task === 'string' ? body.task.slice(0, 64) : undefined,
+              targetEngine: typeof body.targetEngine === 'string' ? body.targetEngine.slice(0, 64) : undefined,
+              length: typeof body.length === 'string' ? body.length.slice(0, 16) : undefined,
+              contentLevel: typeof body.contentLevel === 'string' ? body.contentLevel.slice(0, 16) : undefined,
+              instructions: typeof body.instructions === 'string' ? body.instructions.slice(0, 20_000) : undefined,
+              draft: draft ?? (typeof body.prompt === 'string' ? body.prompt.slice(0, 50_000) : ''),
+              thinking: body.thinking === true ? true : body.thinking === false ? false : undefined,
+              model: typeof body.model === 'string' ? body.model.slice(0, 200) : undefined,
+              raw: body.raw === true,
+            })
+            return sendJson(response, 200, prepared)
+          } catch (providerFailure) {
+            return sendJson(response, 400, { error: providerFailure instanceof Error ? providerFailure.message : String(providerFailure) })
+          }
+        }
+        // Vision captioning: one base64 image → descriptive line, with the
+        // active vision-capable model (Gemma image-part-first when family is
+        // gemma; <image> notation documented for vision-exp families).
+        if (url.pathname === '/api/lan/llm/vision' && request.method === 'POST') {
+          const body = await readJson(request, 36_000_000)
+          const image = typeof body.image === 'string' ? body.image : ''
+          if (!/^data:image\/(?:png|jpeg|webp);base64,/.test(image.slice(0, 40)) || image.length > 35_000_000) return sendJson(response, 400, { error: 'A base64 image data URL is required.' })
+          try {
+            const captioned = await llm.captionImage({
+              image,
+              instruction: typeof body.instruction === 'string' ? body.instruction.slice(0, 4_000) : undefined,
+              model: typeof body.model === 'string' ? body.model.slice(0, 200) : undefined,
+            })
+            return sendJson(response, 200, captioned)
+          } catch (providerFailure) {
+            return sendJson(response, 502, { error: providerFailure instanceof Error ? providerFailure.message : String(providerFailure) })
+          }
+        }
+        // User-editable composer fragments: factory seeds + persisted
+        // overrides (workspace_state kv, smallest surface).
+        if (url.pathname === '/api/lan/llm/fragments' && request.method === 'GET') {
+          return sendJson(response, 200, llm.listFragments())
+        }
+        if (url.pathname === '/api/lan/llm/fragments' && request.method === 'POST') {
+          const body = await readJson(request, 200_000)
+          const id = typeof body.id === 'string' ? body.id.trim() : ''
+          const content = typeof body.content === 'string' ? body.content : ''
+          if (!id || id.length > 200 || content.length > 20_000) return sendJson(response, 400, { error: 'A fragment id and content are required.' })
+          try {
+            llm.saveFragmentOverride(id, content)
+            return sendJson(response, 200, { saved: true })
+          } catch (saveFailure) {
+            return sendJson(response, 503, { error: saveFailure instanceof Error ? saveFailure.message : String(saveFailure) })
+          }
         }
         if (url.pathname === '/api/lan/cancel' && request.method === 'POST') {
           const body = await readJson(request, 10_000)

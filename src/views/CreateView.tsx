@@ -9,10 +9,12 @@
  *  state (generation flows, prompt-assistant state, the live-preview
  *  metadata feed), which genuinely belong to the App. */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { RefObject } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   AlertCircle,
   Aperture,
+  Captions,
   Check,
   ChevronDown,
   CircleStop,
@@ -157,6 +159,9 @@ const LTX_UPSCALE_REQUIRED_NODES = [
 /** Wave-2a shape: behavioral callbacks and App-level UI state only — every
  *  workspace/session/job VALUE is selected from the stores inside the view. */
 export type CreateViewProps = {
+  /** Mount point for token streaming (prompt assistant): a plain div whose
+   *  text the useLlmStream hook paints directly — never React state. */
+  promptStreamTarget: RefObject<HTMLDivElement | null>
   liveConnected: boolean
   livePreview: LivePreview | null
   submitting: boolean
@@ -185,7 +190,7 @@ export type CreateViewProps = {
 
 export function CreateView(props: CreateViewProps) {
   const {
-    liveConnected, livePreview, submitting, promptSuggestion, promptingTool, dialogueGenerating,
+    promptStreamTarget, liveConnected, livePreview, submitting, promptSuggestion, promptingTool, dialogueGenerating,
     onPromptTool, onGenerateDialogue, onUseSuggestion, onDismissSuggestion, onGenerate, onCancel, onContinue, onOpenSettings,
     chooseMedia, chooseReference, removeReference, addReferenceImage, updateReference, editVideoReference,
     loadCharacter, loadWardrobe, loadLocation, refreshSourceMedia,
@@ -303,6 +308,27 @@ export function CreateView(props: CreateViewProps) {
   }, [mode, sourceMediaOpen])
   useEffect(() => setRenderedVideoDuration(0), [latestJob?.id])
   const insertPromptText = (text: string) => promptRef.current?.insert(text)
+  // Vision captioning: describe a reference picture with the active
+  // vision-capable model (Gemma image-first), then insert the description as
+  // a <Picture N> line in the prompt. Errors surface inline — never silently.
+  const [captioningIndex, setCaptioningIndex] = useState<number | null>(null)
+  const [captionNotice, setCaptionNotice] = useState<string | null>(null)
+  const captionReference = async (index: number) => {
+    const file = referenceImages[index]
+    if (!file || captioningIndex !== null) return
+    setCaptioningIndex(index)
+    setCaptionNotice(null)
+    try {
+      const dataUrl = await window.minimax.fileDataUrl(file.path)
+      const { caption, model } = await window.minimax.llmCaptionImage(dataUrl)
+      insertPromptText(`<Picture ${index + 1}> ${caption}`)
+      setCaptionNotice(`Described Picture ${index + 1} with ${model} — inserted into the prompt.`)
+    } catch (error) {
+      setCaptionNotice(error instanceof Error ? error.message : String(error))
+    } finally {
+      setCaptioningIndex(null)
+    }
+  }
   const copyComposedPrompt = async () => {
     if (!composedPrompt) return
     try {
@@ -422,27 +448,28 @@ export function CreateView(props: CreateViewProps) {
               <label className="no-dialogue-toggle natural-movement-toggle" title="Adds restrained breathing, blinking, eye movement, and posture adjustment without changing the requested action, pose, camera, identity, wardrobe, or scene."><input type="checkbox" checked={naturalMovement} onChange={(event) => setNaturalMovement(event.target.checked)} /><span><strong>Natural movement</strong><small>{naturalMovement ? 'Subtle subject motion' : 'No added motion direction'}</small></span></label>
             </div>
             {mode === 'reference' && <ReferencePromptHelper pictureCount={builderReferenceImages.length} videoCount={referenceVideos.length} audioCount={referenceAudios.length} referenceInstructions={composeReferenceInstructions(activeSelectedBindings)} onInsert={insertPromptText} />}
-            <div className="prompt-tools" aria-label="Local Ollama prompt tools">
+            <div className="prompt-tools" aria-label="Local prompt tools">
               <div className="prompt-tool-buttons">
-                <button type="button" onClick={() => onPromptTool('enhance')} disabled={!ollamaAvailable || Boolean(promptingTool)} title={!ollamaAvailable ? 'Configure a local Ollama text model in Settings to enable prompt assistance — nothing leaves this workstation' : 'Rewrite the prompt for stronger MiniMax video direction'}>
+                <button type="button" onClick={() => onPromptTool('enhance')} disabled={!ollamaAvailable || Boolean(promptingTool)} title={!ollamaAvailable ? 'Connect a local text model (llama.cpp router or Ollama) in Settings to enable prompt assistance — nothing leaves this workstation' : 'Rewrite the prompt for stronger MiniMax video direction'}>
                   {promptingTool === 'enhance' ? <LoaderCircle size={14} className="spin" /> : <WandSparkles size={14} />}Enhance
                 </button>
-                <button type="button" onClick={() => onPromptTool('timeline')} disabled={!ollamaAvailable || Boolean(promptingTool)} title={!ollamaAvailable ? 'Configure a local Ollama text model in Settings to enable prompt assistance — nothing leaves this workstation' : 'Add a concise sequence of timed shots'}>
+                <button type="button" onClick={() => onPromptTool('timeline')} disabled={!ollamaAvailable || Boolean(promptingTool)} title={!ollamaAvailable ? 'Connect a local text model (llama.cpp router or Ollama) in Settings to enable prompt assistance — nothing leaves this workstation' : 'Add a concise sequence of timed shots'}>
                   {promptingTool === 'timeline' ? <LoaderCircle size={14} className="spin" /> : <Clock3 size={14} />}Shot timeline
                 </button>
-                <button type="button" onClick={() => onPromptTool('audio')} disabled={!ollamaAvailable || Boolean(promptingTool)} title={!ollamaAvailable ? 'Configure a local Ollama text model in Settings to enable prompt assistance — nothing leaves this workstation' : 'Improve ambience, dialogue, and sound cues'}>
+                <button type="button" onClick={() => onPromptTool('audio')} disabled={!ollamaAvailable || Boolean(promptingTool)} title={!ollamaAvailable ? 'Connect a local text model (llama.cpp router or Ollama) in Settings to enable prompt assistance — nothing leaves this workstation' : 'Improve ambience, dialogue, and sound cues'}>
                   {promptingTool === 'audio' ? <LoaderCircle size={14} className="spin" /> : <Volume2 size={14} />}Audio pass
                 </button>
                 {mode === 'reference' && <button ref={dialogueTriggerRef} type="button" className="dialogue-tool-button" onClick={() => setDialogueOpen(true)} title="Write performable dialogue for a selected character"><MessageSquareText size={14} />Character dialogue</button>}
               </div>
-              <span className={`local-model-chip ${ollamaAvailable ? 'online' : ''}`} title={ollamaAvailable ? `Local Ollama model: ${ollamaModel}` : 'Configure Ollama in Settings'}>
-                <span />{ollamaAvailable ? ollamaModel : 'Ollama offline'}
+              <span className={`local-model-chip ${ollamaAvailable ? 'online' : ''}`} title={ollamaAvailable ? `Local text model: ${ollamaModel}` : 'Connect a local text model in Settings'}>
+                <span />{ollamaAvailable ? ollamaModel : 'Local LLM offline'}
               </span>
             </div>
+            {promptingTool && <div className="llm-stream-preview" ref={promptStreamTarget} role="status" aria-label="Local assistant streaming" />}
             {promptSuggestion && (
               <div className="assistant-result" role="status">
                 <div className="assistant-result-heading"><span><Sparkles size={14} />Local suggestion</span><small>Review before replacing your prompt</small></div>
-                <textarea aria-label="Ollama prompt suggestion" value={promptSuggestion} readOnly />
+                <textarea aria-label="Local prompt suggestion" value={promptSuggestion} readOnly />
                 <div className="assistant-actions"><button type="button" className="secondary-button" onClick={onDismissSuggestion}>Dismiss</button><button type="button" className="primary-button" onClick={onUseSuggestion}><Check size={14} />Use suggestion</button></div>
               </div>
             )}
@@ -492,7 +519,7 @@ export function CreateView(props: CreateViewProps) {
                 <div className="source-media-modal-body">
                   <section className="source-media-modal-section"><div className="source-media-section-title"><span>01</span><div><strong>Libraries</strong><small>Select reusable people and environments. Their approved pictures share the 9-picture budget.</small></div></div><div className="reference-groups source-media-library-groups"><CharacterReferencePicker characters={characters} wardrobes={wardrobes} hairStyles={hairStyles} values={selectedCharacterIds} onChange={loadCharacter} /><LocationReferencePicker locations={locations} values={selectedLocationIds} onChange={loadLocation} /></div>{selectedBindings.length > 0 && <details className="source-media-auto-prompt"><summary><Sparkles size={14} /><span><strong>Automatic reference direction</strong><small>{selectedBindings.length} numbered picture assignment{selectedBindings.length === 1 ? '' : 's'} synced to the prompt</small></span><ChevronDown size={14} /></summary><ol>{composeReferenceInstructions(selectedBindings).map((line) => <li key={line}>{line}</li>)}</ol></details>}</section>
                   <section className="source-media-modal-section"><div className="source-media-section-title"><span>02</span><div><strong>Clothing behavior</strong><small>Decide whether assigned wardrobe or identity-photo clothing is authoritative.</small></div></div><div className="reference-groups source-media-policy-groups"><fieldset className="reference-fidelity clothing-policy"><legend><Shirt size={15} /><span><strong>Clothing intent</strong><small>Controls whether identity-photo clothing or assigned wardrobe is authoritative.</small></span></legend><div><label className={clothingPolicy === 'wardrobe' ? 'selected' : ''}><input type="radio" name="clothing-policy" checked={clothingPolicy === 'wardrobe'} onChange={() => setClothingPolicy('wardrobe')} /><span><strong>Assigned wardrobe</strong><small>Wardrobe Studio images exclusively control clothing. Identity-photo clothes are discarded.</small></span></label><label className={clothingPolicy === 'underwear' ? 'selected' : ''}><input type="radio" name="clothing-policy" checked={clothingPolicy === 'underwear'} onChange={() => setClothingPolicy('underwear')} /><span><strong>Underwear</strong><small>Use each adult character's own identity reference without assigned outerwear.</small></span></label><label className={clothingPolicy === 'unrestricted' ? 'selected' : ''}><input type="radio" name="clothing-policy" checked={clothingPolicy === 'unrestricted'} onChange={() => setClothingPolicy('unrestricted')} /><span><strong>Unrestricted</strong><small>Follow explicit adult fictional clothing or nudity direction in the scene prompt.</small></span></label></div></fieldset></div></section>
-                  <section className="source-media-modal-section"><div className="source-media-section-title"><span>03</span><div><strong>Files and crops</strong><small>Add standalone pictures, motion references, and audio cues.</small></div></div><div className="reference-groups source-media-file-groups"><ReferenceRow icon={ImageIcon} label="Pictures" limit="Up to 9" kind="image" files={referenceImages} onAdd={() => void chooseReference('image')} onRemove={(index) => removeReference('image', index)} />{referenceImages.length > 0 && <div className="reference-crops">{referenceImages.map((file, i) => <details key={`${file.path}-${i}`}><summary>Picture {i + 1} · crop to output</summary><ImageCrop label={`Picture ${i + 1}`} file={file} resolution={resolution} onChange={(next) => updateReference(i, next)} /></details>)}</div>}<ReferenceRow icon={Film} label="Videos" limit="Up to 3 · trim longer sources to 2–15 seconds" kind="video" files={referenceVideos} onAdd={() => void chooseReference('video')} onEdit={editVideoReference} onRemove={(index) => removeReference('video', index)} /><ReferenceRow icon={Volume2} label="Audio" limit="Up to 3" kind="audio" files={referenceAudios} onAdd={() => void chooseReference('audio')} onRemove={(index) => removeReference('audio', index)} /><div className="timeline-guides"><div className="reference-title"><span><Clock3 size={17} /></span><div><strong>Timeline keyframes</strong><small>Pin images at exact seconds through MiniMaxH3AddGuide</small></div></div>{timelineGuides.map((guide, index) => { const warning = guideFrameWarning(guide.seconds, duration); const promptVisible = referenceImages.some((file) => file.path === guide.file.path); return <div className={`timeline-guide-row ${warning ? 'invalid' : ''}`} key={`${guide.file.path}-${index}`} title={warning ?? undefined}>{guide.file.preview ? <img src={guide.file.preview} alt="" /> : <span className="reference-choice-placeholder"><ImageIcon size={16} /></span>}<span><strong>Keyframe {index + 1}</strong><small>{guide.file.name}</small></span>{!promptVisible && <button type="button" className="timeline-guide-mirror" title="Guide-only images are not visible to the text encoder. Mirror this image into the reference Pictures so the prompt can describe it as <Picture N>." onClick={() => addReferenceImage(guide.file)}>Not prompt-visible — add as Picture</button>}<label>Seconds<input type="number" min={-15} max={duration} step={0.1} value={guide.seconds} onChange={(event) => setTimelineGuides(timelineGuides.map((item, itemIndex) => itemIndex === index ? { ...item, seconds: Number(event.target.value) } : item))} /></label><output>frame {frameIndexForSeconds(guide.seconds)}</output><button aria-label={`Remove keyframe ${index + 1}`} onClick={() => setTimelineGuides(timelineGuides.filter((_item, itemIndex) => itemIndex !== index))}><X size={14} /></button></div> })}<button className="add-reference" onClick={() => void chooseMedia('image', (file) => setTimelineGuides(timelineGuides.length < 6 ? [...timelineGuides, { file, seconds: Math.max(0.5, Math.round((duration / (timelineGuides.length + 2)) * 10) / 10) }] : timelineGuides))} disabled={timelineGuides.length >= 6}><Plus size={16} />Add keyframe</button><small className="timeline-guide-note">Keyframes pin composition at their frame but are not visible to the text encoder — also load them as Pictures when the prompt must describe their content. Negative seconds count from the clip's end.</small></div></div></section>
+                  <section className="source-media-modal-section"><div className="source-media-section-title"><span>03</span><div><strong>Files and crops</strong><small>Add standalone pictures, motion references, and audio cues.</small></div></div><div className="reference-groups source-media-file-groups"><ReferenceRow icon={ImageIcon} label="Pictures" limit="Up to 9" kind="image" files={referenceImages} onAdd={() => void chooseReference('image')} onRemove={(index) => removeReference('image', index)} onCaption={(index) => void captionReference(index)} captioningIndex={captioningIndex} captionNotice={captionNotice} />{referenceImages.length > 0 && <div className="reference-crops">{referenceImages.map((file, i) => <details key={`${file.path}-${i}`}><summary>Picture {i + 1} · crop to output</summary><ImageCrop label={`Picture ${i + 1}`} file={file} resolution={resolution} onChange={(next) => updateReference(i, next)} /></details>)}</div>}<ReferenceRow icon={Film} label="Videos" limit="Up to 3 · trim longer sources to 2–15 seconds" kind="video" files={referenceVideos} onAdd={() => void chooseReference('video')} onEdit={editVideoReference} onRemove={(index) => removeReference('video', index)} /><ReferenceRow icon={Volume2} label="Audio" limit="Up to 3" kind="audio" files={referenceAudios} onAdd={() => void chooseReference('audio')} onRemove={(index) => removeReference('audio', index)} /><div className="timeline-guides"><div className="reference-title"><span><Clock3 size={17} /></span><div><strong>Timeline keyframes</strong><small>Pin images at exact seconds through MiniMaxH3AddGuide</small></div></div>{timelineGuides.map((guide, index) => { const warning = guideFrameWarning(guide.seconds, duration); const promptVisible = referenceImages.some((file) => file.path === guide.file.path); return <div className={`timeline-guide-row ${warning ? 'invalid' : ''}`} key={`${guide.file.path}-${index}`} title={warning ?? undefined}>{guide.file.preview ? <img src={guide.file.preview} alt="" /> : <span className="reference-choice-placeholder"><ImageIcon size={16} /></span>}<span><strong>Keyframe {index + 1}</strong><small>{guide.file.name}</small></span>{!promptVisible && <button type="button" className="timeline-guide-mirror" title="Guide-only images are not visible to the text encoder. Mirror this image into the reference Pictures so the prompt can describe it as <Picture N>." onClick={() => addReferenceImage(guide.file)}>Not prompt-visible — add as Picture</button>}<label>Seconds<input type="number" min={-15} max={duration} step={0.1} value={guide.seconds} onChange={(event) => setTimelineGuides(timelineGuides.map((item, itemIndex) => itemIndex === index ? { ...item, seconds: Number(event.target.value) } : item))} /></label><output>frame {frameIndexForSeconds(guide.seconds)}</output><button aria-label={`Remove keyframe ${index + 1}`} onClick={() => setTimelineGuides(timelineGuides.filter((_item, itemIndex) => itemIndex !== index))}><X size={14} /></button></div> })}<button className="add-reference" onClick={() => void chooseMedia('image', (file) => setTimelineGuides(timelineGuides.length < 6 ? [...timelineGuides, { file, seconds: Math.max(0.5, Math.round((duration / (timelineGuides.length + 2)) * 10) / 10) }] : timelineGuides))} disabled={timelineGuides.length >= 6}><Plus size={16} />Add keyframe</button><small className="timeline-guide-note">Keyframes pin composition at their frame but are not visible to the text encoder — also load them as Pictures when the prompt must describe their content. Negative seconds count from the clip's end.</small></div></div></section>
                 </div>
                 <footer><span>{sourceMediaCount ? `${sourceMediaCount} file${sourceMediaCount === 1 ? '' : 's'} ready for this render` : 'No standalone files added yet'}</span><button type="button" className="primary-button" onClick={closeSourceMedia}><Check size={15} />Done</button></footer>
             </StudioDialog>
@@ -580,8 +607,8 @@ function ReferenceMediaStrip({ files, bindings, videoCount, audioCount, onManage
   </section>
 }
 
-function ReferenceRow({ icon: Icon, label, limit, kind, files, onAdd, onEdit, onRemove }: { icon: typeof FilmIcon; label: string; limit: string; kind: MediaKind; files: MediaFile[]; onAdd(): void; onEdit?(index: number): void; onRemove(index: number): void }) {
-  return <div className="reference-row"><div className="reference-title"><span><Icon size={17} /></span><div><strong>{label}</strong><small>{limit}</small></div></div><div className="reference-files">{files.map((file, index) => <div className="file-pill" key={`${file.path}-${index}`}>{file.preview && kind === 'image' ? <img src={file.preview} alt="" /> : <Icon size={15} />}<span><strong>{kind === 'image' ? `Picture ${index + 1}` : kind === 'video' ? `Video ${index + 1}` : `Audio ${index + 1}`}</strong><small>{file.clip ? `${(file.clip.end - file.clip.start).toFixed(1)}s · ${file.name}` : file.name}</small></span>{onEdit && <button onClick={() => onEdit(index)} aria-label={`Edit clip ${file.name}`} title="Change reference clip"><Scissors size={13} /></button>}<button onClick={() => onRemove(index)} aria-label={`Remove ${file.name}`}><X size={14} /></button></div>)}<button className="add-reference" onClick={onAdd} disabled={files.length >= (kind === 'image' ? 9 : 3)}><Plus size={16} />Add {kind}</button></div></div>
+function ReferenceRow({ icon: Icon, label, limit, kind, files, onAdd, onEdit, onRemove, onCaption, captioningIndex, captionNotice }: { icon: typeof FilmIcon; label: string; limit: string; kind: MediaKind; files: MediaFile[]; onAdd(): void; onEdit?(index: number): void; onRemove(index: number): void; onCaption?(index: number): void; captioningIndex?: number | null; captionNotice?: string | null }) {
+  return <div className="reference-row"><div className="reference-title"><span><Icon size={17} /></span><div><strong>{label}</strong><small>{limit}</small></div></div><div className="reference-files">{files.map((file, index) => <div className="file-pill" key={`${file.path}-${index}`}>{file.preview && kind === 'image' ? <img src={file.preview} alt="" /> : <Icon size={15} />}<span><strong>{kind === 'image' ? `Picture ${index + 1}` : kind === 'video' ? `Video ${index + 1}` : `Audio ${index + 1}`}</strong><small>{file.clip ? `${(file.clip.end - file.clip.start).toFixed(1)}s · ${file.name}` : file.name}</small></span>{onCaption && kind === 'image' && <button className="caption-reference" onClick={() => onCaption(index)} disabled={captioningIndex !== null} title={captioningIndex === index ? 'Describing with the local vision model…' : 'Describe this picture with the local vision model and insert the description into the prompt'} aria-label={`Caption ${file.name}`}>{captioningIndex === index ? <LoaderCircle size={13} className="spin" /> : <Captions size={13} />}{captioningIndex === index ? '…' : 'Caption'}</button>}{onEdit && <button onClick={() => onEdit(index)} aria-label={`Edit clip ${file.name}`} title="Change reference clip"><Scissors size={13} /></button>}<button onClick={() => onRemove(index)} aria-label={`Remove ${file.name}`}><X size={14} /></button></div>)}<button className="add-reference" onClick={onAdd} disabled={files.length >= (kind === 'image' ? 9 : 3)}><Plus size={16} />Add {kind}</button>{captionNotice && <small className="reference-caption-notice" role="status">{captionNotice}</small>}</div></div>
 }
 
 function CharacterReferencePicker({ characters, wardrobes, hairStyles, values, onChange }: { characters: CharacterProject[]; wardrobes: WardrobeProject[]; hairStyles: HairStyleProject[]; values: string[]; onChange(value: string): void }) {

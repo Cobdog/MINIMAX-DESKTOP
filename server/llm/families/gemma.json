@@ -1,0 +1,22 @@
+{
+  "family": "gemma",
+  "displayName": "Gemma",
+  "match": ["gemma"],
+  "sampling": { "temperature": 1.0, "top_p": 0.95, "top_k": 64, "maxTokens": 1024 },
+  "templateKwargs": {},
+  "thinking": {
+    "style": "chat-template-kwargs",
+    "field": "chat_template_kwargs.enable_thinking",
+    "efforts": [],
+    "defaultEffort": "",
+    "reasoningField": "reasoning_content"
+  },
+  "thinkingBudgetTokens": 2048,
+  "vision": {
+    "familyDefault": true,
+    "match": [],
+    "imageFirst": true,
+    "notation": "Image content part BEFORE the text part (model-card best practice)."
+  },
+  "notes": "Requires llama-server started with --jinja and a chat template (the canonical Gemma 4 template needs the minja 'is iterable' patch). Thinking emits <|channel>thought … <channel|> blocks — strip on the closer <channel|> before extracting output; the empty channel is emitted even when thinking is OFF. When thinking is on, add the budget (+2048) to max_tokens. VLM: vision token budget is startup-only (--image-min-tokens/--image-max-tokens, locked 1120) and needs --ubatch-size 2048."
+}

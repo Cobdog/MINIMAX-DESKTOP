@@ -123,6 +123,35 @@ test('settings round-trips a change through the server API', async ({ page }) =>
   void target
 })
 
+// 15th test (LLM layer): the Settings LLM section renders in its
+// provider-empty fallback state. The e2e server has no llama.cpp router
+// configured (llamaCppUrl defaults to ''), so the section must show the
+// Ollama-fallback indicator, the router address input, and the
+// unload-on-generate toggle — deeper provider behavior lives in test:llm
+// against a mock router.
+test('Settings renders the LLM router section with the Ollama fallback state', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await page.goto('/')
+  await page.getByRole('button', { name: /settings/i }).first().click()
+  await expect(page.getByRole('heading', { name: /settings/i })).toBeVisible()
+
+  const llmSection = page.locator('.llm-section')
+  await expect(llmSection).toBeVisible()
+  await expect(llmSection.getByText(/llama\.cpp router/i)).toBeVisible()
+  // No router configured → the fallback pill, never a false "online" state.
+  await expect(llmSection.locator('.health-pill')).toHaveText(/ollama fallback/i)
+  const routerInput = page.locator('#llm-router-url')
+  await expect(routerInput).toBeVisible()
+  await expect(routerInput).toHaveValue('')
+  // The choreography + thinking toggles render with their defaults (on / off).
+  const unloadToggle = llmSection.locator('.settings-check input').first()
+  await expect(unloadToggle).toBeChecked()
+  // The model list stays empty without a reachable provider — no phantom rows.
+  await expect(llmSection.locator('.llm-model-row')).toHaveCount(0)
+
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
 test('mobile companion view boots alongside the studio', async ({ page }) => {
   const problems = await trackErrors(page)
   await page.goto('/?mobile=1')

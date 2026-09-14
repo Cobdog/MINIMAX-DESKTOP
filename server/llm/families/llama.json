@@ -1,0 +1,16 @@
+{
+  "family": "llama",
+  "displayName": "Llama",
+  "match": ["llama"],
+  "sampling": { "temperature": 0.8, "top_p": 0.9, "maxTokens": 2048 },
+  "templateKwargs": {},
+  "thinking": { "style": "none", "field": "", "efforts": [], "defaultEffort": "", "reasoningField": "" },
+  "thinkingBudgetTokens": 0,
+  "vision": {
+    "familyDefault": false,
+    "match": ["vision"],
+    "imageFirst": false,
+    "notation": "Llama Vision models accept OpenAI image_url parts."
+  },
+  "notes": "Base llama-family behavior; no thinking toggle is sent."
+}

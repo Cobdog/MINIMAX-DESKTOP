@@ -1,9 +1,10 @@
 /** The Settings view: engine connection, validated H3 stack report,
- *  generation defaults, Ollama, model locations, and output/clip paths. */
-import { useState } from 'react'
+ *  generation defaults, the LLM layer (llama.cpp router + Ollama fallback),
+ *  model locations, and output/clip paths. */
+import { useEffect, useState } from 'react'
 import { GitBranch } from 'lucide-react'
-import { Activity, AlertCircle, Check, ChevronDown, Folder, FolderOpen, Gauge, HardDrive, LoaderCircle, RefreshCw, Save, SlidersHorizontal, Sparkles, Stethoscope } from 'lucide-react'
-import type { AppSettings, ComfyStatus, ModelFile, ModelKind, OllamaModel, UpscaleMode } from '../types'
+import { Activity, AlertCircle, Check, ChevronDown, Cpu, Eye, Folder, FolderOpen, Gauge, HardDrive, LoaderCircle, RefreshCw, Save, SlidersHorizontal, Sparkles, Stethoscope, Unplug } from 'lucide-react'
+import type { AppSettings, ComfyStatus, LlmModelsResult, ModelFile, ModelKind, OllamaModel, UpscaleMode } from '../types'
 import { choices, type ObjectInfo } from '../lib/comfyInfo'
 import type { h3StackReport } from '../lib/h3Stack'
 import { SelectField, NumberField } from '../components/form'
@@ -36,6 +37,17 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
     setDoctorRunning(true)
     try { setDoctor(await window.minimax.runSetupDoctor()) } catch (error) { setDoctor({ checks: [{ id: 'error', label: 'Doctor failed', status: 'fail', detail: error instanceof Error ? error.message : String(error) }], ranAt: Date.now() }) } finally { setDoctorRunning(false) }
   }
+
+  // ---- LLM layer (llama.cpp router primary, Ollama fallback) ----------------
+  const [llmList, setLlmList] = useState<LlmModelsResult | null>(null)
+  const [llmTesting, setLlmTesting] = useState(false)
+  const testLlm = async (candidate: string) => {
+    setLlmTesting(true)
+    try { setLlmList(await window.minimax.listLlmModels(candidate)) } catch (error) {
+      setLlmList({ provider: candidate.trim() ? 'router' : 'ollama', endpoint: candidate, model: '', models: [], connected: false, latencyMs: 0, error: error instanceof Error ? error.message : String(error) })
+    } finally { setLlmTesting(false) }
+  }
+  useEffect(() => { void testLlm('') /* current settings on mount */ }, [])
   const gpuTiers: Array<{ id: NonNullable<AppSettings['gpuTier']>; label: string; guidance: string }> = [
     { id: '8', label: '8 GB', guidance: 'Pruned INT4 diffusion + INT4 text encoder · 864×480 · 5 s · one render at a time. GGUF only if INT4 is unavailable (ComfyUI manages dynamic VRAM better with safetensors).' },
     { id: '16', label: '16 GB', guidance: 'Pruned INT8/Q4 diffusion + INT4/INT8 text encoder · 1344×768 · 5 s first · queue one at a time. Tiled VAE covers the auto-retry path.' },
@@ -89,10 +101,41 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
       {warnedSampler && <p className="settings-warning"><AlertCircle size={15} />This sampler is on the compatibility-risk list you supplied. Test a short clip before committing to a final render.</p>}
       <p className="settings-note">The production path is 1344 × 768, 30 steps, res_multistep + simple, CFG 1, denoise 1, 24 fps, native 12/3 shifts, and upscale off. Custom sampling is intentionally separated because it complicates quality diagnosis.</p>
     </section>
+    <section className="settings-section llm-section" aria-label="LLM router">
+      <div className="settings-heading">
+        <div><Cpu size={19} /><span><strong>LLM · llama.cpp router</strong><small>One router endpoint serves every text model (DeepSeek, Gemma, Qwen…). Empty address keeps the Ollama fallback below.</small></span></div>
+        <span className={`health-pill ${llmList?.connected && llmList.provider === 'router' ? 'online' : ''}`}>{llmList?.provider === 'router' ? (llmList.connected ? `Router · ${llmList.models.length} models` : 'Router offline') : 'Ollama fallback'}</span>
+      </div>
+      <div className="connection-row">
+        <div className="field-group grow"><label htmlFor="llm-router-url">Router address (router mode)</label><input id="llm-router-url" value={settings.llamaCppUrl} placeholder="http://127.0.0.1:8080 — empty = Ollama fallback" onChange={(event) => setSettings({ ...settings, llamaCppUrl: event.target.value })} /></div>
+        <button className="secondary-button test-button" onClick={() => void testLlm(settings.llamaCppUrl)} disabled={llmTesting}>{llmTesting ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}Test connection</button>
+      </div>
+      {llmList && <div className={`llm-test-result ${llmList.connected ? 'ok' : 'fail'}`} role="status">
+        {llmList.connected
+          ? <><Check size={14} /><span>{llmList.provider === 'router' ? 'Router reachable' : 'Ollama reachable'} · {llmList.models.length} model{llmList.models.length === 1 ? '' : 's'} · {llmList.latencyMs} ms{llmList.model ? ` · active: ${llmList.model}` : ''}</span></>
+          : <><AlertCircle size={14} /><span>{llmList.error || 'No models listed — check the address and that the server runs in router mode.'}</span></>}
+      </div>}
+      {llmList && llmList.models.length > 0 && <div className="llm-model-list" aria-label="Router models">
+        {llmList.models.map((model) => (
+          <button type="button" key={model.id} className={`llm-model-row ${model.active ? 'active' : ''}`} onClick={() => setSettings({ ...settings, llamaCppModel: model.id })} title={model.active ? 'Active chat model' : `Make ${model.id} the active chat model`}>
+            <span className={`llm-family-badge family-${model.family}`}>{model.family}</span>
+            <span className="llm-model-name">{model.id}</span>
+            <span className="llm-model-flags">{model.vision && <em title="Vision-capable (image input)"><Eye size={13} /> vision</em>}{model.status && <em className="llm-model-status">{model.status}</em>}{model.active && <em className="llm-model-active"><Check size={13} /> active</em>}</span>
+          </button>
+        ))}
+      </div>}
+      <div className="generation-defaults-grid">
+        <label className="settings-check"><input type="checkbox" checked={settings.unloadLlmOnGenerate} onChange={(event) => setSettings({ ...settings, unloadLlmOnGenerate: event.target.checked })} /><span><strong><Unplug size={14} /> Unload models before generating</strong><small>Frees VRAM by unloading non-sticky router models when a render submits (≈2 s budget, never blocks the queue).</small></span></label>
+        <label className="settings-check"><input type="checkbox" checked={settings.llmThinkingDefault === 'on'} onChange={(event) => setSettings({ ...settings, llmThinkingDefault: event.target.checked ? 'on' : 'off' })} /><span><strong>Thinking by default (freeform)</strong><small>Structured/JSON requests always run thinking-off for speed; this sets the default for freeform enhancement.</small></span></label>
+        <SelectField label="Prompt writing style" value={settings.promptContentLevel} onChange={(promptContentLevel) => setSettings({ ...settings, promptContentLevel: promptContentLevel as AppSettings['promptContentLevel'] })} options={[['sfw', 'SFW · concrete visual'], ['suggestive', 'Suggestive · sensual mood'], ['nsfw', 'NSFW · explicit and precise']]} />
+        <div className="field-group"><label htmlFor="llm-sticky-models">Sticky models (never unload)</label><input id="llm-sticky-models" value={settings.llamaStickyModels} placeholder="comma-separated ids or substrings" onChange={(event) => setSettings({ ...settings, llamaStickyModels: event.target.value })} /></div>
+      </div>
+      <p className="settings-note">Router mode auto-loads the requested model per call and {settings.unloadLlmOnGenerate ? 'unloads non-sticky models before each render' : 'keeps models resident between calls'}. Gemma needs the server started with --jinja. Nothing leaves this workstation.</p>
+    </section>
     <section className="settings-section ollama-section">
       <div className="settings-heading">
-        <div><Sparkles size={19} /><span><strong>Ollama prompt assistant</strong><small>Uses only text models installed on this computer.</small></span></div>
-        <span className={`health-pill ${ollamaModels.length > 0 ? 'online' : ''}`}>{ollamaModels.length > 0 ? `${ollamaModels.length} local` : 'Offline'}</span>
+        <div><Sparkles size={19} /><span><strong>Ollama prompt assistant</strong><small>Fallback provider — active while no router address is set above. Uses only text models installed on this computer.</small></span></div>
+        <span className={`health-pill ${ollamaModels.length > 0 && !settings.llamaCppUrl.trim() ? 'online' : ''}`}>{settings.llamaCppUrl.trim() ? 'Fallback (router active)' : ollamaModels.length > 0 ? `${ollamaModels.length} local` : 'Offline'}</span>
       </div>
       <div className="ollama-grid">
         <div className="field-group"><label htmlFor="ollama-url">Ollama URL</label><input id="ollama-url" value={settings.ollamaUrl} onChange={(event) => setSettings({ ...settings, ollamaUrl: event.target.value })} /></div>

@@ -1,0 +1,16 @@
+{
+  "family": "other",
+  "displayName": "Other",
+  "match": [],
+  "sampling": { "temperature": 0.7, "top_p": 0.95, "maxTokens": 2048 },
+  "templateKwargs": {},
+  "thinking": { "style": "none", "field": "", "efforts": [], "defaultEffort": "", "reasoningField": "" },
+  "thinkingBudgetTokens": 0,
+  "vision": {
+    "familyDefault": false,
+    "match": ["vl", "vision", "image"],
+    "imageFirst": false,
+    "notation": "Unknown families fall back to OpenAI image_url parts."
+  },
+  "notes": "Default family for models that match no known pattern. Adding a family later = one JSON file in server/llm/families/."
+}

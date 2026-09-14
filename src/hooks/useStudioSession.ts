@@ -21,7 +21,7 @@ export function useStudioSession() {
   const gpu = useSessionStore((state) => state.gpu)
   const info = useSessionStore((state) => state.info)
   const ollamaModels = useSessionStore((state) => state.ollamaModels)
-  const { setSettings, setModels, setScanning, setStatus, setChecking, setGpu, setInfo, setOllamaModels } = useSessionStore.getState()
+  const { setSettings, setModels, setScanning, setStatus, setChecking, setGpu, setInfo, setOllamaModels, setLlm } = useSessionStore.getState()
 
   const scanModels = useCallback(async (nextSettings: AppSettings) => {
     setScanning(true)
@@ -53,12 +53,24 @@ export function useStudioSession() {
     }
   }, [setOllamaModels])
 
+  // Active LLM provider (router primary, Ollama fallback): family-inferred
+  // model list + the resolved active model. Assistant availability across the
+  // app reads this — a configured router with models counts even when Ollama
+  // has none.
+  const refreshLlm = useCallback(async () => {
+    try {
+      setLlm(await window.minimax.listLlmModels())
+    } catch {
+      setLlm(null)
+    }
+  }, [setLlm])
+
   useEffect(() => {
     void window.minimax.getSettings().then((loaded) => {
       setSettings(loaded)
-      void Promise.all([scanModels(loaded), checkConnection(loaded.comfyUrl), refreshOllama(loaded)])
+      void Promise.all([scanModels(loaded), checkConnection(loaded.comfyUrl), refreshOllama(loaded), refreshLlm()])
     })
-  }, [checkConnection, refreshOllama, scanModels, setSettings])
+  }, [checkConnection, refreshLlm, refreshOllama, scanModels, setSettings])
 
   // GPU telemetry rides the realtime fabric (wave 1): the server pushes each
   // sample while this client is subscribed, so the 4 s HTTP poll is gone. A
@@ -96,7 +108,7 @@ export function useStudioSession() {
     status, checking,
     gpu, info,
     ollamaModels,
-    scanModels, checkConnection, refreshOllama,
+    scanModels, checkConnection, refreshOllama, refreshLlm,
   }
 }
 

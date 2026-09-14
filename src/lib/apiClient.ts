@@ -1,4 +1,4 @@
-import type { AppSettings, DesktopApi, MediaKind, PromptLibraryItem } from '../types'
+import type { AppSettings, DesktopApi, LlmModelsResult, MediaKind, PromptLibraryItem } from '../types'
 
 /**
  * HTTP implementation of the DesktopApi bridge, used when the renderer runs in
@@ -173,6 +173,24 @@ export function createWebApiClient(): DesktopApi {
     async generateStructuredWithOllama(_url: string, _model: string, prompt: string, schema: Record<string, unknown>) {
       const body = await postJson<{ result: unknown }>('/api/lan/ollama/structured', { prompt, schema })
       return body.result
+    },
+    async listLlmModels(url) {
+      const query = url && url.trim() ? `?url=${encodeURIComponent(url.trim())}` : ''
+      return apiFetch<LlmModelsResult>(`/api/lan/llm/models${query}`)
+    },
+    async llmGenerate(options) {
+      const body = await postJson<{ response: string }>('/api/lan/llm/generate', options)
+      return body.response
+    },
+    async llmGenerateStructured(options) {
+      const body = await postJson<{ result: unknown }>('/api/lan/llm/generate', options)
+      return body.result
+    },
+    async llmPrepareStream(options) {
+      return postJson('/api/lan/llm/prepare', options)
+    },
+    async llmCaptionImage(image, instruction) {
+      return postJson<{ caption: string; model: string }>('/api/lan/llm/vision', { image, instruction })
     },
     async fileDataUrl(filePath: string) {
       const response = await fetch(`/api/lan/media?${new URLSearchParams(mediaQuery(filePath))}`, { headers: { 'x-minimax-token': authToken() } })

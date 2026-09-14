@@ -1,0 +1,22 @@
+{
+  "family": "qwen",
+  "displayName": "Qwen",
+  "match": ["qwen", "qwq"],
+  "sampling": { "temperature": 0.7, "top_p": 0.8, "top_k": 20, "maxTokens": 2048 },
+  "templateKwargs": {},
+  "thinking": {
+    "style": "chat-template-kwargs",
+    "field": "chat_template_kwargs.enable_thinking",
+    "efforts": [],
+    "defaultEffort": "",
+    "reasoningField": "reasoning_content"
+  },
+  "thinkingBudgetTokens": 1024,
+  "vision": {
+    "familyDefault": false,
+    "match": ["vl"],
+    "imageFirst": false,
+    "notation": "Qwen-VL accepts OpenAI image_url parts."
+  },
+  "notes": "Qwen3 thinking toggles through chat_template_kwargs.enable_thinking with --jinja; <think> blocks are stripped server-side into reasoning_content."
+}

@@ -40,6 +40,25 @@ export type AppSettings = {
   /** ComfyUI version the bundled graphs were last verified against
    *  (self-recorded on first successful connection). */
   testedComfyVersion?: string
+  /** llama.cpp router-mode endpoint. Empty (default) → Ollama fallback,
+   *  preserving the pre-LLM-layer behavior exactly. */
+  llamaCppUrl: string
+  /** Active chat model on the router (e.g. DeepSeek V4 Flash 0731). Empty →
+   *  the first model the router lists. */
+  llamaCppModel: string
+  /** Preferred vision/captioning model; empty → auto (active model when
+   *  vision-capable, else first vision-capable listed). */
+  llamaVisionModel: string
+  /** Comma-separated model ids (substring match) that skip the pre-generation
+   *  unload choreography. */
+  llamaStickyModels: string
+  /** Auto-unload router models before generation submits (VRAM hygiene). */
+  unloadLlmOnGenerate: boolean
+  /** Default thinking mode for freeform enhancement (structured tasks are
+   *  always thinking-OFF for speed). */
+  llmThinkingDefault: 'off' | 'on'
+  /** Prompt-assistant writing style — deliberately content-neutral. */
+  promptContentLevel: 'sfw' | 'suggestive' | 'nsfw'
 }
 
 export type ClipItem = { id: string; name: string; source: string; createdAt: number; start?: number; end?: number; duration?: number }
@@ -324,6 +343,47 @@ export type LlmTokenDelta = { delta: string }
 export type LlmDonePayload = { aborted?: boolean; finishReason?: string }
 export type LlmErrorPayload = { error: string }
 
+/** One model on the ACTIVE LLM provider (llama.cpp router or Ollama
+ *  fallback), enriched by the server's family registry: inferred family,
+ *  vision capability, and router load status. */
+export type LlmModelStatus = {
+  id: string
+  family: string
+  familyLabel: string
+  vision: boolean
+  status: string
+  active: boolean
+}
+
+export type LlmModelsResult = {
+  provider: 'router' | 'ollama'
+  endpoint: string
+  /** The resolved active chat model ('' when none). */
+  model: string
+  models: LlmModelStatus[]
+  connected: boolean
+  latencyMs: number
+  error?: string
+}
+
+/** Composer-facing assistant request: the server resolves the layered system
+ *  message from these dimensions (task, target engine, length, content
+ *  level) plus the active model's family. */
+export type LlmGenerateOptions = {
+  task?: string
+  targetEngine?: string
+  length?: 'concise' | 'standard' | 'detailed'
+  contentLevel?: 'sfw' | 'suggestive' | 'nsfw'
+  /** Runtime per-request instructions — the composer's [context] layer. */
+  instructions?: string
+  draft?: string
+  history?: Array<{ role: 'user' | 'assistant'; content: string; reasoning?: string }>
+  thinking?: boolean
+  model?: string
+  /** Send the draft verbatim — no composer layers. */
+  raw?: boolean
+}
+
 /** Mime types the binary preview channel carries; the wire header stores the
  *  index (0=jpeg, 1=png, 2=webp, 3=mp4 — 3 covers animated H3 override clips). */
 export type PreviewMime = 'image/jpeg' | 'image/png' | 'image/webp' | 'video/mp4'
@@ -391,6 +451,11 @@ export type DesktopApi = {
   listOllamaModels(url: string): Promise<OllamaModel[]>
   generateWithOllama(url: string, model: string, prompt: string): Promise<string>
   generateStructuredWithOllama(url: string, model: string, prompt: string, schema: Record<string, unknown>): Promise<unknown>
+  listLlmModels(url?: string): Promise<LlmModelsResult>
+  llmGenerate(options: LlmGenerateOptions & { prompt?: string }): Promise<string>
+  llmGenerateStructured(options: LlmGenerateOptions & { schema: Record<string, unknown> }): Promise<unknown>
+  llmPrepareStream(options: LlmGenerateOptions): Promise<LlmStreamRequest>
+  llmCaptionImage(image: string, instruction?: string): Promise<{ caption: string; model: string }>
   syncMobileCharacters(characters: unknown[]): Promise<{ synced: number }>
   listPromptLibrary(query: { text?: string; limit?: number; cursor?: string; nsfw?: boolean; sort?: string; scope?: 'h3' | 'all' }): Promise<{ items: PromptLibraryItem[]; cursor?: string }>
   runSetupDoctor(): Promise<{ checks: Array<{ id: string; label: string; status: 'ok' | 'warn' | 'fail'; detail: string; recommendation?: string }>; ranAt: number }>

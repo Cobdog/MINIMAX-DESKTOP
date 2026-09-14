@@ -9,7 +9,7 @@
     "dev:server": "pnpm build:web && pnpm start:server",
     "build": "pnpm typecheck && pnpm build:web && pnpm build:server",
     "build:web": "vite build && node scripts/compress-dist.cjs",
-    "build:server": "tsc -p tsconfig.server.json",
+    "build:server": "tsc -p tsconfig.server.json && node scripts/copy-llm-families.cjs",
     "start:server": "node dist-server/server/index.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
     "lint": "eslint . --max-warnings 0",
@@ -17,10 +17,11 @@
     "test:storage": "node scripts/test-storage.cjs",
     "test:filmstrip": "node scripts/test-filmstrip.cjs",
     "test:realtime": "node scripts/test-realtime.cjs",
+    "test:llm": "node scripts/test-llm.cjs",
     "test:engine": "node scripts/test-engine-process.cjs",
     "smoke:server": "node scripts/smoke-server.cjs",
     "test:e2e": "pnpm build && playwright test",
-    "test:all": "pnpm test && pnpm test:e2e && pnpm test:storage && pnpm test:filmstrip && pnpm test:realtime && pnpm test:engine && pnpm smoke:server"
+    "test:all": "pnpm test && pnpm test:e2e && pnpm test:storage && pnpm test:filmstrip && pnpm test:realtime && pnpm test:llm && pnpm test:engine && pnpm smoke:server"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

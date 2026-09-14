@@ -1,11 +1,12 @@
 /** MiniMax Music 3 workspace: the official three-section caption builder,
  *  lyrics with structure-tag insertion, the local caption rewriter, and
  *  up-to-5-minute generation through the official template graph. */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AlertCircle, Check, LoaderCircle, Music2, Play, RotateCcw, WandSparkles } from 'lucide-react'
 import type { GenerationJob } from '../types'
 import type { Music3ModelSelection, Music3GenerationOptions } from '../lib/music3Workflow'
-import { MUSIC3_SECTION_TAGS, buildMusic3Caption, buildMusic3CaptionRewriteRequest } from '../lib/music3Workflow'
+import { MUSIC3_SECTION_TAGS, buildMusic3Caption } from '../lib/music3Workflow'
+import { useLlmStream } from '../lib/useLlmStream'
 
 type Music3Draft = {
   globalMetadata: string
@@ -36,8 +37,7 @@ function loadDraft(): Music3Draft {
   }
 }
 
-export function Music3Workspace({ settings, models, connected, pipelineReady, missingNodes, latestJob, submitting, cancelling, ollamaAvailable, onGenerate, onCancel, onNotice }: {
-  settings: { ollamaModel: string }
+export function Music3Workspace({ models, connected, pipelineReady, missingNodes, latestJob, submitting, cancelling, ollamaAvailable, onGenerate, onCancel, onNotice }: {
   models: Music3ModelSelection
   connected: boolean
   pipelineReady: boolean
@@ -52,6 +52,8 @@ export function Music3Workspace({ settings, models, connected, pipelineReady, mi
 }) {
   const [draft, setDraft] = useState<Music3Draft>(loadDraft)
   const [rewriting, setRewriting] = useState(false)
+  const rewriteStreamTarget = useRef<HTMLDivElement>(null)
+  const llmStream = useLlmStream()
   const modelsReady = Boolean(models.diffusion && models.textEncoder && models.vae)
 
   useEffect(() => { localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)) }, [draft])
@@ -61,10 +63,19 @@ export function Music3Workspace({ settings, models, connected, pipelineReady, mi
   const rewriteCaption = async () => {
     const caption = buildMusic3Caption(draft)
     if (!caption.trim()) { onNotice('error', 'Write a caption first — the rewriter improves an existing description.'); return }
-    if (!ollamaAvailable) { onNotice('error', 'No local Ollama text model is available. Check Ollama in Settings.'); return }
+    if (!ollamaAvailable) { onNotice('error', 'No local text model is available. Connect the llama.cpp router or Ollama in Settings.'); return }
     setRewriting(true)
     try {
-      const rewritten = await window.minimax.generateWithOllama('', settings.ollamaModel, buildMusic3CaptionRewriteRequest(caption))
+      // Layered composer path (task music3-caption / target music3); the
+      // official-format rules ride the [context] layer, tokens stream in.
+      await new Promise((resolvePaint) => requestAnimationFrame(() => requestAnimationFrame(resolvePaint)))
+      const rewritten = await llmStream.stream({
+        task: 'music3-caption',
+        targetEngine: 'music3',
+        instructions: 'Rules: concrete audio-specific language only (no “beautiful”, “amazing”, “cinematic”); one listening scenario; keep the stated BPM/key/scale exactly; describe the emotional progression through musical changes, not adjectives; leave all structural directions in the lyrics tags, not the caption.',
+        draft: caption,
+        target: rewriteStreamTarget.current,
+      })
       const section = (heading: string) => {
         const match = new RegExp(`${heading}:\\s*([\\s\\S]*?)(?=\\n[A-Z][a-z]+ [A-Z]|$)`).exec(rewritten)
         return match ? match[1].trim() : ''
@@ -103,7 +114,7 @@ export function Music3Workspace({ settings, models, connected, pipelineReady, mi
           {sectionField('vocalDetails', 'Vocal Details', 'Voice gender, timbre, performance style, harmonies, vocal effects')}
           {sectionField('arrangement', 'Arrangement', 'Primary and secondary instruments, groove, bass, percussion, textures, spatial effects')}
           <div className="prompt-tool-buttons music3-rewrite">
-            <button type="button" className="secondary-button" onClick={() => void rewriteCaption()} disabled={!ollamaAvailable || rewriting} title={ollamaAvailable ? 'Rewrite the caption locally with Ollama following the official rules' : 'Configure a local Ollama text model in Settings to enable the rewriter'}>{rewriting ? <LoaderCircle size={14} className="spin" /> : <WandSparkles size={14} />}Rewrite caption</button>
+            <button type="button" className="secondary-button" onClick={() => void rewriteCaption()} disabled={!ollamaAvailable || rewriting} title={ollamaAvailable ? 'Rewrite the caption locally with the active text model following the official rules' : 'Connect a local text model in Settings to enable the rewriter'}>{rewriting ? <LoaderCircle size={14} className="spin" /> : <WandSparkles size={14} />}Rewrite caption</button>{rewriting && <div className="llm-stream-preview" ref={rewriteStreamTarget} role="status" aria-label="Local assistant streaming" />}
             <button type="button" className="secondary-button" onClick={() => patch({ globalMetadata: '', vocalDetails: '', arrangement: '', lyrics: '', seed: Math.floor(Math.random() * 1_000_000_000) })} title="Clear the caption and lyrics for a fresh start"><RotateCcw size={14} />Clear</button>
           </div>
           <label className="music3-lyrics"><span>Lyrics<small>Structure tags are the only structural instructions — the lyric text carries the mood</small></span>

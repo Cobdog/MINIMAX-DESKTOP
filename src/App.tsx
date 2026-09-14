@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Aperture,
   Clapperboard,
@@ -52,8 +52,10 @@ import { useStudioSession } from './hooks/useStudioSession'
 import { useGenerationQueue } from './hooks/useGenerationQueue'
 import { useCreateWorkspace, type VideoClipDraft } from './hooks/useCreateWorkspace'
 import { useGenerationFlows } from './hooks/useGenerationFlows'
+import { useSessionStore } from './state/sessionStore'
 import { useWorkspaceStore } from './state/workspaceStore'
-import { buildPromptAssistantRequest } from './lib/promptComposer'
+import { buildPromptAssistantContext } from './lib/promptComposer'
+import { useLlmStream } from './lib/useLlmStream'
 import { buildCharacterDialogueRequest } from './lib/dialogPolicy'
 import type {
   GenerationJob,
@@ -106,7 +108,15 @@ function App() {
 
   // Session: settings, models, engine status, Ollama, GPU telemetry.
   const session = useStudioSession()
-  const { settings, models, status, checking, gpu, info, ollamaModels, scanModels, checkConnection, refreshOllama } = session
+  const { settings, models, status, checking, gpu, info, ollamaModels, scanModels, checkConnection, refreshOllama, refreshLlm } = session
+  // Active LLM provider descriptor (router primary, Ollama fallback). Assistant
+  // availability is provider-wide: a configured router counts even with zero
+  // Ollama models.
+  const llmDescriptor = useSessionStore((state) => state.llm)
+  const llmAvailable = llmDescriptor ? llmDescriptor.connected && Boolean(llmDescriptor.model) : ollamaModels.length > 0
+  const llmModelLabel = llmDescriptor?.model || settings?.ollamaModel || ''
+  const llmStream = useLlmStream()
+  const promptStreamTarget = useRef<HTMLDivElement>(null)
 
   // Job queue: persistence, ComfyUI polling, deadline sweep, cancellation.
   const queue = useGenerationQueue({ settings, connected: status.connected, notify })
@@ -267,8 +277,8 @@ function App() {
       notify('error', 'Write a rough prompt first, then ask the local assistant to refine it.')
       return
     }
-    if (!settings.ollamaModel || ollamaModels.length === 0) {
-      notify('error', 'No local Ollama text model is available. Check Ollama in Settings.')
+    if (!llmAvailable) {
+      notify('error', 'No local text model is available. Connect the llama.cpp router or Ollama in Settings.')
       return
     }
     const workspaceBindings = workspaceBindingsFor(selectedReferenceCharacterIds, selectedReferenceLocationIds)
@@ -277,12 +287,25 @@ function App() {
       ...referenceVideos.map((file, index) => `<Video ${index + 1}> = ${file.name}`),
       ...referenceAudios.map((file, index) => `<Audio ${index + 1}> = ${file.name}`),
     ] : undefined
-    const request = buildPromptAssistantRequest(tool, prompt, { duration, mode, referenceMap, noDialogue })
+    // The layered composer (server) supplies role/output-format/contract;
+    // this context carries the runtime facts (official structure rules,
+    // preservation, route, reference map).
+    const instructions = buildPromptAssistantContext(tool, { duration, mode, referenceMap, noDialogue })
     setPromptingTool(tool)
     setPromptSuggestion('')
     try {
-      const response = await window.minimax.generateWithOllama(settings.ollamaUrl, settings.ollamaModel, request)
-      setPromptSuggestion(response)
+      // Wait one paint so the streaming preview element exists before the
+      // first token targets it.
+      await new Promise((resolvePaint) => requestAnimationFrame(() => requestAnimationFrame(resolvePaint)))
+      const full = await llmStream.stream({
+        task: tool,
+        targetEngine: 'minimax-h3',
+        length: 'standard',
+        instructions,
+        draft: prompt,
+        target: promptStreamTarget.current,
+      })
+      setPromptSuggestion(full.trim())
     } catch (error) {
       notify('error', error instanceof Error ? error.message : String(error))
     } finally {
@@ -298,7 +321,7 @@ function App() {
   }
 
   const generateCharacterDialogue = async (draft: CharacterDialogueDraft) => {
-    if (!settings || !settings.ollamaModel || ollamaModels.length === 0) throw new Error('No local Ollama text model is available. Check Ollama in Settings.')
+    if (!settings || !llmAvailable) throw new Error('No local text model is available. Connect the llama.cpp router or Ollama in Settings.')
     setDialogueGenerating(true)
     try {
       // Call-time read — see runPromptTool.
@@ -441,6 +464,7 @@ function App() {
               behavioral callbacks and UI state (generation flows, prompt
               assistant, live-preview feed). */}
           <CreateView key={`create-${createResetKey}`}
+            promptStreamTarget={promptStreamTarget}
             liveConnected={live.connected}
             livePreview={live.preview}
             submitting={submitting}
@@ -483,7 +507,7 @@ function App() {
           latestJob={jobs.find((job) => job.provider === 'ltx25' && job.createdAt > ltxResetAt)}
           submitting={ltxSubmitting}
           cancelling={Boolean(jobs.find((job) => job.provider === 'ltx25' && ['queued', 'running'].includes(job.status)) && cancellingIds.has(jobs.find((job) => job.provider === 'ltx25' && ['queued', 'running'].includes(job.status))!.id))}
-          ollamaAvailable={ollamaModels.length > 0}
+          ollamaAvailable={llmAvailable}
           onChooseImage={chooseLtxImage}
           onGenerate={(options, file) => void generateLtx(options, file)}
           onCancel={(job) => void cancelJob(job)}
@@ -497,12 +521,11 @@ function App() {
           latestJob={jobs.find((job) => job.provider === 'acestep')}
           submitting={aceSubmitting}
           cancelling={Boolean(jobs.find((job) => job.provider === 'acestep' && ['queued', 'running'].includes(job.status)) && cancellingIds.has(jobs.find((job) => job.provider === 'acestep' && ['queued', 'running'].includes(job.status))!.id))}
-          ollamaAvailable={ollamaModels.length > 0}
+          ollamaAvailable={llmAvailable}
           onGenerate={(options) => void generateAceStep(options)}
           onCancel={(job) => void cancelJob(job)}
         /></ErrorBoundary>}
         {view === 'music3' && <ErrorBoundary label="music3"><Music3Workspace
-          settings={settings}
           models={music3Selection}
           connected={status.connected}
           pipelineReady={MUSIC3_REQUIRED_NODES.every((node) => Boolean(info[node]))}
@@ -510,24 +533,24 @@ function App() {
           latestJob={jobs.find((job) => job.provider === 'music3')}
           submitting={music3Submitting}
           cancelling={Boolean(jobs.find((job) => job.provider === 'music3' && ['queued', 'running'].includes(job.status)) && cancellingIds.has(jobs.find((job) => job.provider === 'music3' && ['queued', 'running'].includes(job.status))!.id))}
-          ollamaAvailable={ollamaModels.length > 0}
+          ollamaAvailable={llmAvailable}
           onGenerate={(options) => void generateMusic3(options, music3Selection)}
           onCancel={(job: GenerationJob) => void cancelJob(job)}
           onNotice={(tone: 'error' | 'success' | 'neutral', text: string) => setNotice({ tone, text })}
         /></ErrorBoundary>}
-        <div hidden={view !== 'zimage'}><ErrorBoundary label="zimage"><ZImageWorkspace key={`first-frame-${zImageResetKey}`} url={settings.comfyUrl} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} ollamaUrl={settings.ollamaUrl} ollamaModel={settings.ollamaModel} outputDirectory={settings.outputDirectory} onUse={(file, frameResolution) => {
+        <div hidden={view !== 'zimage'}><ErrorBoundary label="zimage"><ZImageWorkspace key={`first-frame-${zImageResetKey}`} url={settings.comfyUrl} info={info} connected={status.connected} ollamaAvailable={llmAvailable} ollamaUrl={settings.ollamaUrl} ollamaModel={llmModelLabel || settings.ollamaModel} outputDirectory={settings.outputDirectory} onUse={(file, frameResolution) => {
           setFirstFrame(file); ws.setResolution(frameResolution); setMode('image'); setActiveJobId(null); setView('create'); notify('success', 'Z-Image frame loaded into the MiniMax I2V workspace.')
         }} /></ErrorBoundary></div>
-        {view === 'characters' && <ErrorBoundary label="characters"><Suspense fallback={viewFallback}><CharacterStudio settings={settings} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} automationJob={jobs.find((job) => job.characterProjectId)} onNotice={(tone, text) => setNotice({ tone, text })} onCreateTurntable={(project) => {
+        {view === 'characters' && <ErrorBoundary label="characters"><Suspense fallback={viewFallback}><CharacterStudio settings={settings} info={info} connected={status.connected} ollamaAvailable={llmAvailable} automationJob={jobs.find((job) => job.characterProjectId)} onNotice={(tone, text) => setNotice({ tone, text })} onCreateTurntable={(project) => {
           if (!project.baseImage) return Promise.resolve('Approve a character identity image before rendering the survey.')
           if (contactSheetAvailable) return generateCharacterSheet(project, contactSheetAvailable)
           const firstFrame = fitWholeCharacter({ ...project.baseImage }); delete firstFrame.preview
           return generateLtx({ mode: 'image', prompt: `Ten-second character identity coverage survey of ${project.name} in one continuous stabilized take. Preserve the exact identity, facial geometry, skin, hair, body proportions, clothing, and neutral studio background from the first frame. From 0 to 2 seconds hold a sharp neutral full-body front view with the entire head, hands, and feet visible. From 2 to 5 seconds make a slow stabilized camera push to a sharp head-and-shoulders close-up. From 5 to 7 seconds hold the face clearly while moving through frontal and gentle three-quarter facial angles so the eyes, nose, mouth, jawline, ears, hairline, and distinguishing marks remain readable. From 7 to 10 seconds pull back smoothly to a complete full-body view and continue a restrained orbit through three-quarter, side, and rear body angles. The character stays still with a neutral expression and unchanged pose. Even soft studio lighting, accurate anatomy, crisp individual frames, fast shutter. No cuts, no identity drift, no morphing, no pose changes, no expression changes, no clothing changes, no added objects, no motion blur, no smearing, no ghosting, no whip pans, no text, no dialogue.`, width: 768, height: 1024, duration: 10, preset: 'quality', seed: Math.floor(Math.random() * 1_000_000_000), filenamePrefix: 'MiniMax_character_identity_survey' }, firstFrame, { characterProjectId: project.id })
         }} /></Suspense></ErrorBoundary>}
-        {view === 'hair' && <ErrorBoundary label="hair"><Suspense fallback={viewFallback}><HairStudio settings={settings} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} onNotice={(tone, text) => setNotice({ tone, text })} /></Suspense></ErrorBoundary>}
+        {view === 'hair' && <ErrorBoundary label="hair"><Suspense fallback={viewFallback}><HairStudio settings={settings} info={info} connected={status.connected} ollamaAvailable={llmAvailable} onNotice={(tone, text) => setNotice({ tone, text })} /></Suspense></ErrorBoundary>}
         {view === 'wardrobes' && <ErrorBoundary label="wardrobes"><Suspense fallback={viewFallback}><WardrobeStudio settings={settings} info={info} connected={status.connected} onNotice={(tone, text) => setNotice({ tone, text })} /></Suspense></ErrorBoundary>}
         {view === 'accessories' && <ErrorBoundary label="accessories"><Suspense fallback={viewFallback}><AccessoryStudio settings={settings} info={info} connected={status.connected} onNotice={(tone, text) => setNotice({ tone, text })} /></Suspense></ErrorBoundary>}
-        {view === 'locations' && <ErrorBoundary label="locations"><Suspense fallback={viewFallback}><LocationStudio settings={settings} info={info} connected={status.connected} ollamaAvailable={ollamaModels.length > 0} automationJob={jobs.find((job) => job.locationProjectId)} onNotice={(tone, text) => setNotice({ tone, text })} onCreateWalkthrough={(project: LocationProject, options?: { duration: number; cameraLanguage: string }) => {
+        {view === 'locations' && <ErrorBoundary label="locations"><Suspense fallback={viewFallback}><LocationStudio settings={settings} info={info} connected={status.connected} ollamaAvailable={llmAvailable} automationJob={jobs.find((job) => job.locationProjectId)} onNotice={(tone, text) => setNotice({ tone, text })} onCreateWalkthrough={(project: LocationProject, options?: { duration: number; cameraLanguage: string }) => {
           if (!project.baseImage) return Promise.resolve('Approve a location image before rendering the walkthrough.')
           const firstFrame = { ...project.baseImage }; delete firstFrame.preview
           const walkthroughDirection = project.environmentMode === 'nature'
@@ -538,7 +561,7 @@ function App() {
           const clarityDirection = 'Maintain crisp, sharp frames with a fast shutter and slow stabilized camera movement. No motion blur, temporal smearing, ghosting, rolling-shutter distortion, speed ramps, whip pans, or rapid camera movement.'
           return generateLtx({ mode: 'image', prompt: `${walkthroughDirection} Location description: ${locationProfile} Camera language: ${cameraLanguage} Image clarity: ${clarityDirection} No cuts, no teleporting, no layout changes, no duplicated objects, no people as focal subjects, no dialogue, no text, no logos.`, width: 1344, height: 768, duration: Math.max(5, Math.min(20, options?.duration ?? 10)), preset: 'quality', seed: Math.floor(Math.random() * 1_000_000_000), filenamePrefix: 'MiniMax_location_walkthrough' }, firstFrame, { locationProjectId: project.id })
         }} /></Suspense></ErrorBoundary>}
-        {view === 'movie' && <ErrorBoundary label="movie"><Suspense fallback={viewFallback}><MoviePlanner settings={settings} ollamaAvailable={ollamaModels.length > 0} ollamaModel={settings.ollamaModel} chainAvailable={chainAvailable} onRenderChain={(project, scene) => { void flows.generateSceneChain(project, scene, useWorkspaceStore.getState().characterProjects, chainAvailable).then((message) => { if (message) setNotice({ tone: 'error', text: message }) }) }} onNotice={(tone, text) => setNotice({ tone, text })} onOpenShot={async (shot: MovieShot, aspectRatio: MovieProject['aspectRatio'], resolved: ResolvedMovieShot, context: { projectId: string; sceneId: string; continuationSource?: string }) => {
+        {view === 'movie' && <ErrorBoundary label="movie"><Suspense fallback={viewFallback}><MoviePlanner settings={settings} ollamaAvailable={llmAvailable} ollamaModel={llmModelLabel || settings.ollamaModel} chainAvailable={chainAvailable} onRenderChain={(project, scene) => { void flows.generateSceneChain(project, scene, useWorkspaceStore.getState().characterProjects, chainAvailable).then((message) => { if (message) setNotice({ tone: 'error', text: message }) }) }} onNotice={(tone, text) => setNotice({ tone, text })} onOpenShot={async (shot: MovieShot, aspectRatio: MovieProject['aspectRatio'], resolved: ResolvedMovieShot, context: { projectId: string; sceneId: string; continuationSource?: string }) => {
           setCharacterHandoff(null)
           setSelectedReferenceCharacterIds([])
           setSelectedReferenceLocationIds([])
@@ -573,9 +596,9 @@ function App() {
           setActiveJobId(null); setView('create')
           notify('success', target === 'i2v' ? `Frame loaded from ${clip.name} as the I2V first frame. The new render will remain a separate video until you add and export it in Clip Editor.` : 'Extracted frame loaded into Create.')
         }} /></ErrorBoundary>}
-        {view === 'settings' && <ErrorBoundary label="settings"><SettingsView settings={settings} setSettings={session.setSettings} info={info} models={models} h3Report={h3Report} scanning={session.scanning} status={status} checking={checking} diagnosticRunning={diagnosticRunning} ollamaModels={ollamaModels} onRefreshOllama={() => void refreshOllama(settings)} onScan={() => void scanModels(settings)} onCheck={() => void checkConnection(settings.comfyUrl)} onSave={() => void saveAppSettings()} onApplyDefaults={applyGenerationDefaults} onRunDiagnostics={() => void runH3Diagnostics()} /></ErrorBoundary>}
+        {view === 'settings' && <ErrorBoundary label="settings"><SettingsView settings={settings} setSettings={session.setSettings} info={info} models={models} h3Report={h3Report} scanning={session.scanning} status={status} checking={checking} diagnosticRunning={diagnosticRunning} ollamaModels={ollamaModels} onRefreshOllama={() => { void refreshOllama(settings); void refreshLlm() }} onScan={() => void scanModels(settings)} onCheck={() => void checkConnection(settings.comfyUrl)} onSave={() => void saveAppSettings()} onApplyDefaults={applyGenerationDefaults} onRunDiagnostics={() => void runH3Diagnostics()} /></ErrorBoundary>}
       </main>
-      <AiChatHead available={ollamaModels.length > 0} ollamaUrl={settings.ollamaUrl} ollamaModel={settings.ollamaModel} onUseImage={(imagePrompt) => {
+      <AiChatHead available={llmAvailable} ollamaModel={llmModelLabel || settings.ollamaModel} onUseImage={(imagePrompt) => {
         setView('zimage')
         window.dispatchEvent(new CustomEvent('minimax:load-image-prompt', { detail: imagePrompt }))
         notify('success', 'Image prompt loaded into Create Image.')

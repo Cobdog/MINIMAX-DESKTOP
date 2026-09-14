@@ -3,7 +3,7 @@
  *  state `useStudioSession` held as React state. The hook keeps its boot-load
  *  and telemetry effects; only where the values live changed. */
 import { create } from 'zustand'
-import type { AppSettings, ComfyStatus, GpuTelemetry, ModelFile, OllamaModel } from '../types'
+import type { AppSettings, ComfyStatus, GpuTelemetry, LlmModelsResult, ModelFile, OllamaModel } from '../types'
 import type { ObjectInfo } from '../lib/comfyInfo'
 
 export type SessionState = {
@@ -15,6 +15,9 @@ export type SessionState = {
   gpu: GpuTelemetry | null
   info: ObjectInfo
   ollamaModels: OllamaModel[]
+  /** Active LLM provider descriptor (router or Ollama fallback) from
+   *  /api/lan/llm/models — drives assistant availability + model labels. */
+  llm: LlmModelsResult | null
   setSettings(settings: AppSettings | null): void
   setModels(models: ModelFile[]): void
   setScanning(scanning: boolean): void
@@ -23,6 +26,7 @@ export type SessionState = {
   setGpu(gpu: GpuTelemetry | null): void
   setInfo(info: ObjectInfo): void
   setOllamaModels(ollamaModels: OllamaModel[]): void
+  setLlm(llm: LlmModelsResult | null): void
 }
 
 export const useSessionStore = create<SessionState>()((set) => ({
@@ -34,6 +38,7 @@ export const useSessionStore = create<SessionState>()((set) => ({
   gpu: null,
   info: {},
   ollamaModels: [],
+  llm: null,
   setSettings: (settings) => set({ settings }),
   setModels: (models) => set({ models }),
   setScanning: (scanning) => set({ scanning }),
@@ -42,4 +47,5 @@ export const useSessionStore = create<SessionState>()((set) => ({
   setGpu: (gpu) => set({ gpu }),
   setInfo: (info) => set({ info }),
   setOllamaModels: (ollamaModels) => set({ ollamaModels }),
+  setLlm: (llm) => set({ llm }),
 }))
