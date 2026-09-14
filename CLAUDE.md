@@ -8,7 +8,13 @@ This repo is tracked by Flux. Project: **MINIMAX-DESKTOP** (`r2lnrfw`).
 - Do NOT guess or invent a project_id.
 - Track all work as tasks; update status as you progress.
 - Close tasks immediately when complete.
-- **Engine usage (maintainer directive, 2026-09-14):** the maintainer's personal ComfyUI instance at `127.0.0.1:8188` is **OFF LIMITS** to all agents — never submit prompts, experiments, jobs, or tests to it. For engine-dependent tests and experiments, use the Kreatine vendor instance at `127.0.0.1:8189` (verify it is up first; it may be down). The self-managed runtime's own instances use the 8191+ scan range and must continue to avoid BOTH ports.
+- **Engine usage (maintainer directive, 2026-09-14):** the maintainer's personal ComfyUI instance at `127.0.0.1:8188` is **OFF LIMITS** to all agents — never submit prompts, experiments, jobs, or tests to it. For engine-dependent tests and experiments, use the **Kreatine testbed at 8189** via the runbook below. The self-managed runtime's own instances use the 8191+ scan range and must continue to avoid BOTH ports.
+
+  **8189 testbed runbook** (source: the Kreatine repo's CLAUDE.md; testbed lives at `"/home/agent/work/VS Proj/Kreatine/testbed/ComfyUI"` — gitignored, own uv venv, weights symlinked, ComfyUI 0.34.x):
+  - **Bring up:** from the testbed dir, `./.venv/bin/python main.py --port 8189 --listen 127.0.0.1 --disable-dynamic-vram` — launch in the background with a log file and RECORD THE PID.
+  - **Before submitting:** health-check `curl -s http://127.0.0.1:8189/system_stats`, and check `nvidia-smi --query-gpu=memory.used --format=csv` — baseline VRAM and confirm the maintainer's own workload isn't mid-job on the GPU. **Their runs take priority; if the GPU is busy with their work, wait or ask.**
+  - **Between test phases:** `POST /free` with `{"unload_models": true, "free_memory": true}` (the Kreatine A/B convention) so models unload before the next arm.
+  - **ALWAYS tear down when tests complete:** `POST /free` first (release VRAM), then SIGINT the recorded PID, wait for exit, and **verify with `nvidia-smi` that VRAM returned to baseline**. Never leave the stack running after tests; never leave orphaned processes. If the maintainer needs the GPU mid-run, bring the testbed down immediately on request.
 
 **Agent attribution (required for the live dashboard):**
 In EVERY `mcp__flux__*` tool call, pass `agent_name="<your agent_id>"`. The SubagentStart identity hook (`~/.claude/hooks/flux-identity.sh`) injects your `agent_id` via additionalContext at launch — copy that exact value into `agent_name`.
