@@ -109,6 +109,10 @@ function App() {
   // Session: settings, models, engine status, Ollama, GPU telemetry.
   const session = useStudioSession()
   const { settings, models, status, checking, gpu, info, ollamaModels, scanModels, checkConnection, refreshOllama, refreshLlm } = session
+  // Self-managed engine runtime (increment 1): non-null only while managed
+  // mode is active — the tile then reports the runtime state machine instead
+  // of the external connection probe.
+  const engineRuntime = useSessionStore((state) => state.engineRuntime)
   // Active LLM provider descriptor (router primary, Ollama fallback). Assistant
   // availability is provider-wide: a configured router counts even with zero
   // Ollama models.
@@ -408,15 +412,28 @@ function App() {
         <button className="titlebar-mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open workspace menu"><Menu size={18} /></button>
         <div className="titlebar-brand"><span className="brand-mark"><Film size={16} /></span><span>MiniMax Studio</span></div>
         <div className="titlebar-drag" />
-        <GpuMeter value={gpu} engineOnline={status.connected} />
-        <button
-          className={`connection-chip ${status.connected ? (modelReady ? 'online' : 'degraded') : ''}`}
-          onClick={() => { if (!modelReady) setView('settings'); else void checkConnection(settings.comfyUrl) }}
-          title={status.connected ? (modelReady ? 'Local engine connected — click to re-check' : 'The engine is connected but MiniMax H3 model components are missing — click to open Settings') : 'The generation engine is unreachable — click to re-check the connection'}
-        >
-          {checking ? <LoaderCircle size={14} className="spin" /> : <span className="status-dot" />}
-          {!status.connected ? 'Engine offline' : !modelReady ? 'Engine on · models missing' : `Local engine · ${status.latencyMs} ms`}
-        </button>
+        <GpuMeter value={gpu} engineOnline={settings?.engine.mode === 'managed' ? engineRuntime?.state === 'running' : status.connected} />
+        {settings?.engine.mode === 'managed' ? (
+          <button
+            className={`connection-chip ${engineRuntime?.state === 'running' ? 'online' : ''}`}
+            onClick={() => setView('settings')}
+            title={engineRuntime
+              ? `Managed engine · ${engineRuntime.state}${engineRuntime.port ? ` · port ${engineRuntime.port}` : ''}${engineRuntime.lastError ? ` — ${engineRuntime.lastError}` : ''} — click to open Settings`
+              : 'Managed engine — click to open Settings'}
+          >
+            <span className="status-dot" />
+            {engineRuntime?.state === 'running' ? `Managed engine · :${engineRuntime.port}` : `Managed engine · ${engineRuntime?.state ?? '…'}`}
+          </button>
+        ) : (
+          <button
+            className={`connection-chip ${status.connected ? (modelReady ? 'online' : 'degraded') : ''}`}
+            onClick={() => { if (!modelReady) setView('settings'); else void checkConnection(settings.comfyUrl) }}
+            title={status.connected ? (modelReady ? 'Local engine connected — click to re-check' : 'The engine is connected but MiniMax H3 model components are missing — click to open Settings') : 'The generation engine is unreachable — click to re-check the connection'}
+          >
+            {checking ? <LoaderCircle size={14} className="spin" /> : <span className="status-dot" />}
+            {!status.connected ? 'Engine offline' : !modelReady ? 'Engine on · models missing' : `Local engine · ${status.latencyMs} ms`}
+          </button>
+        )}
         {(view === 'create' || view === 'ltx25' || view === 'zimage' || view === 'music3') && <button className="titlebar-action titlebar-reset" onClick={resetCurrentWorkspace} title="Reset this workspace: prompts, options, media, selections, and the current preview" aria-label="Reset workspace"><RotateCcw size={14} /></button>}
       </header>
 

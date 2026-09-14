@@ -20,9 +20,10 @@
     "test:realtime": "node scripts/test-realtime.cjs",
     "test:llm": "node scripts/test-llm.cjs",
     "test:engine": "node scripts/test-engine-process.cjs",
+    "test:runtime": "node scripts/test-runtime.cjs",
     "smoke:server": "node scripts/smoke-server.cjs",
     "test:e2e": "pnpm build && playwright test",
-    "test:all": "pnpm test && pnpm test:registry && pnpm test:e2e && pnpm test:storage && pnpm test:filmstrip && pnpm test:realtime && pnpm test:llm && pnpm test:engine && pnpm smoke:server"
+    "test:all": "pnpm test && pnpm test:registry && pnpm test:e2e && pnpm test:storage && pnpm test:filmstrip && pnpm test:realtime && pnpm test:llm && pnpm test:engine && pnpm test:runtime && pnpm smoke:server"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

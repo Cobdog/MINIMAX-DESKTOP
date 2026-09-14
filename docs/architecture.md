@@ -35,6 +35,8 @@ Two modules:
 | `server/core.ts` | `createStudioServer(paths)` factory: settings persistence (atomic write-then-rename), model scanning, ComfyUI/Ollama proxy, GPU telemetry, FFmpeg operations, output resolution, the full route table, static hosting. Zero Electron imports; everything path-parameterized |
 | `server/index.ts` | Standalone entry: resolves config home (`MINIMAX_STUDIO_HOME`, default `~/.minimax-studio`), serves `dist/`, listens on 4178 (`MINIMAX_LAN_PORT`) |
 
+**Managed engine runtime** (increment 1 of the self-managed ComfyUI work): `server/runtime.ts` (`RuntimeManager`) can launch and supervise the app's own ComfyUI from a checkout the user nominates, on top of the wave-2c `EngineProcess` supervision contract. Ports allocate from 8191 up, hard-clear of the user's live instances (8188/8189); `extra_model_paths.yaml` is generated into the checkout from the configured model roots (weights are never copied — the same indexing-in-place rule as the scanner); boot reconcile adopts a healthy recorded instance instead of double-spawning; a stop is graceful-then-tree-killed and always resolves. External mode (the default) is byte-for-byte the pre-runtime behavior — nothing spawns, polls, or re-points unless the user switches the mode in Settings.
+
 ## The renderer bridge
 
 The SPA never talks to ComfyUI REST directly — it consumes the server's API through `src/lib/apiClient.ts`, which implements the `DesktopApi` interface (`src/types.ts`) over HTTP and installs as `window.minimax` at startup. The interface is the seam that made the Electron→web migration possible: the same 24-method contract the old preload exposed.
@@ -48,7 +50,7 @@ The server is authoritative for service URLs, the output directory, and the FFmp
 
 ## API surface
 
-All routes under `/api/lan/` (legacy prefix retained from the mobile-companion era). Representative routes: `bootstrap`, `settings` (GET/POST), `object-info`, `comfy-status` (SSRF-guarded), `prompt`, `history/{id}`, `cancel`, `events` (SSE⇄WS bridge), `ollama` + `ollama/structured`, `video/{frame,frames,trim,join}`, `outputs/{resolve,save-image}`, `upload` / `upload-media` / `upload-output`, `media` (ComfyUI proxy or output-contained local serving with Range), `telemetry`, `characters`. Full contract table in [migration.md](migration.md).
+All routes under `/api/lan/` (legacy prefix retained from the mobile-companion era). Representative routes: `bootstrap`, `settings` (GET/POST), `object-info`, `comfy-status` (SSRF-guarded), `prompt`, `history/{id}`, `cancel`, `events` (SSE⇄WS bridge), `ollama` + `ollama/structured`, `engine/{status,start,stop}` (the managed runtime; start is refused outside managed mode and is idempotent — a repeated start never double-spawns), `video/{frame,frames,trim,join}`, `outputs/{resolve,save-image}`, `upload` / `upload-media` / `upload-output`, `media` (ComfyUI proxy or output-contained local serving with Range), `telemetry`, `characters`. Full contract table in [migration.md](migration.md).
 
 Security posture: **open on the LAN by default** (ComfyUI-consistent; a deliberate 2026-09-10 decision), token-gated via `--token` / `MINIMAX_LAN_TOKEN=1` for hostile networks. Input validation everywhere: path containment (`relative()`-based), numeric FFmpeg arguments (concat-directive injection guarded), MIME allowlists and size caps on uploads, SSRF guard on probe-able URLs.
 

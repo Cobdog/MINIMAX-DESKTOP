@@ -1,9 +1,9 @@
-/** The Settings view: engine connection, validated H3 stack report,
- *  generation defaults, the LLM layer (llama.cpp router + Ollama fallback),
- *  model locations, and output/clip paths. */
+/** The Settings view: engine connection, managed engine runtime, validated
+ *  H3 stack report, generation defaults, the LLM layer (llama.cpp router +
+ *  Ollama fallback), model locations, and output/clip paths. */
 import { useEffect, useState } from 'react'
 import { GitBranch } from 'lucide-react'
-import { Activity, AlertCircle, Check, ChevronDown, Cpu, Eye, Folder, FolderOpen, Gauge, HardDrive, LoaderCircle, RefreshCw, Save, SlidersHorizontal, Sparkles, Stethoscope, Unplug } from 'lucide-react'
+import { Activity, AlertCircle, Check, ChevronDown, Cpu, Eye, Folder, FolderOpen, Gauge, HardDrive, LoaderCircle, Power, RefreshCw, Save, ServerCog, SlidersHorizontal, Sparkles, Stethoscope, Unplug } from 'lucide-react'
 import type { AppSettings, ComfyStatus, LlmModelsResult, ModelFile, ModelKind, OllamaModel, UpscaleMode } from '../types'
 import { choices, type ObjectInfo } from '../lib/comfyInfo'
 import { detectOptimizations } from '../lib/graph'
@@ -11,6 +11,7 @@ import type { h3StackReport } from '../lib/h3Stack'
 import { SelectField, NumberField } from '../components/form'
 import { formatBytes } from '../lib/format'
 import type { DoctorReport } from '../lib/doctor'
+import { useSessionStore } from '../state/sessionStore'
 
 export function SettingsView({ settings, setSettings, info, models, h3Report, scanning, status, checking, diagnosticRunning, ollamaModels, onRefreshOllama, onScan, onCheck, onSave, onApplyDefaults, onRunDiagnostics }: { settings: AppSettings; setSettings(value: AppSettings): void; info: ObjectInfo; models: ModelFile[]; h3Report: ReturnType<typeof h3StackReport>; scanning: boolean; status: ComfyStatus; checking: boolean; diagnosticRunning: boolean; ollamaModels: OllamaModel[]; onRefreshOllama(): void; onScan(): void; onCheck(): void; onSave(): void; onApplyDefaults(): void; onRunDiagnostics(): void }) {
   const pathRows: Array<{ kind: ModelKind; label: string; note: string }> = [
@@ -54,6 +55,37 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
     } finally { setLlmTesting(false) }
   }
   useEffect(() => { void testLlm('') /* current settings on mount */ }, [])
+
+  // ---- Managed engine runtime (increment 1) ---------------------------------
+  // Runtime state rides the session store (the hook polls it ONLY while
+  // managed mode is active); start/stop act through the bridge and persist
+  // the current form first — the launch uses exactly what is on screen.
+  const engineRuntime = useSessionStore((state) => state.engineRuntime)
+  const [engineBusy, setEngineBusy] = useState(false)
+  const [engineActionError, setEngineActionError] = useState<string | null>(null)
+  const updateEngine = (patch: Partial<AppSettings['engine']>) => setSettings({ ...settings, engine: { ...settings.engine, ...patch } })
+  const startEngine = async () => {
+    setEngineBusy(true)
+    setEngineActionError(null)
+    try {
+      setSettings(await window.minimax.saveSettings(settings))
+      await window.minimax.startManagedEngine()
+      setSettings(await window.minimax.getSettings()) // comfyUrl re-pointed server-side on success
+    } catch (error) {
+      setEngineActionError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setEngineBusy(false)
+    }
+  }
+  const stopEngine = async () => {
+    setEngineBusy(true)
+    setEngineActionError(null)
+    try { await window.minimax.stopManagedEngine() } catch (error) {
+      setEngineActionError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setEngineBusy(false)
+    }
+  }
   const gpuTiers: Array<{ id: NonNullable<AppSettings['gpuTier']>; label: string; guidance: string }> = [
     { id: '8', label: '8 GB', guidance: 'Pruned INT4 diffusion + INT4 text encoder · 864×480 · 5 s · one render at a time. GGUF only if INT4 is unavailable (ComfyUI manages dynamic VRAM better with safetensors).' },
     { id: '16', label: '16 GB', guidance: 'Pruned INT8/Q4 diffusion + INT4/INT8 text encoder · 1344×768 · 5 s first · queue one at a time. Tiled VAE covers the auto-retry path.' },
@@ -62,6 +94,34 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
   ]
   return <div className="standard-page settings-page"><div className="page-heading"><div><p className="eyebrow">APPLICATION</p><h1>Settings</h1><p>Point the studio at your existing local engine and model folders.</p></div><button className="primary-button" onClick={onSave}><Save size={17} />Save settings</button></div>
     <section className="settings-section"><div className="settings-heading"><div><Activity size={19} /><span><strong>ComfyUI engine</strong><small>The desktop app communicates only with this local address.</small></span></div><span className={`health-pill ${status.connected ? 'online' : ''}`}>{status.connected ? 'Connected' : 'Offline'}</span></div><div className="connection-row"><div className="field-group grow"><label htmlFor="comfy-url">Server URL</label><input id="comfy-url" value={settings.comfyUrl} onChange={(event) => setSettings({ ...settings, comfyUrl: event.target.value })} /></div><button className="secondary-button test-button" onClick={onCheck} disabled={checking}>{checking ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}Test connection</button></div>{status.connected && status.stats?.devices?.[0] && <div className="device-strip"><Gauge size={17} /><span><strong>{status.stats.devices[0].name ?? 'Compute device'}</strong><small>{status.stats.devices[0].vram_total ? `${formatBytes(status.stats.devices[0].vram_total)} VRAM · ${formatBytes(status.stats.devices[0].vram_free ?? 0)} free` : 'ComfyUI device detected'}</small></span></div>}</section>
+    <section className="settings-section managed-engine-section" aria-label="Managed engine">
+      <div className="settings-heading">
+        <div><ServerCog size={19} /><span><strong>Managed engine</strong><small>The studio launches and supervises its own ComfyUI from a checkout you nominate. External mode keeps the connection above.</small></span></div>
+        <span className={`health-pill ${engineRuntime?.state === 'running' ? 'online' : ''}`}>{settings.engine.mode === 'managed' ? (engineRuntime ? engineRuntime.state : 'managed') : 'external'}</span>
+      </div>
+      <div className="preset-row" aria-label="Engine mode">
+        <button type="button" className={settings.engine.mode !== 'managed' ? 'tier-selected' : ''} onClick={() => updateEngine({ mode: 'external' })}><strong>External</strong><small>Use the ComfyUI address above — the studio never launches an engine.</small></button>
+        <button type="button" className={settings.engine.mode === 'managed' ? 'tier-selected' : ''} onClick={() => updateEngine({ mode: 'managed' })}><strong>Managed</strong><small>The studio starts, configures, and stops its own instance. Ports stay clear of 8188/8189.</small></button>
+      </div>
+      {settings.engine.mode === 'managed' && <>
+        <div className="connection-row"><div className="field-group grow"><label htmlFor="managed-checkout">ComfyUI checkout (existing)</label><input id="managed-checkout" value={settings.engine.checkoutPath} placeholder="/path/to/ComfyUI — must contain main.py" onChange={(event) => updateEngine({ checkoutPath: event.target.value })} /></div></div>
+        <div className="connection-row">
+          <div className="field-group grow"><label htmlFor="managed-python">Python executable</label><input id="managed-python" value={settings.engine.pythonPath} placeholder="empty = python3 (python on Windows)" onChange={(event) => updateEngine({ pythonPath: event.target.value })} /></div>
+          <div className="field-group"><label htmlFor="managed-port">Preferred port</label><input id="managed-port" type="number" min={0} max={65535} value={settings.engine.portPreference || ''} placeholder="auto" onChange={(event) => updateEngine({ portPreference: Number(event.target.value) || 0 })} /></div>
+          <label className="settings-check managed-autostart"><input type="checkbox" checked={settings.engine.autoStart} onChange={(event) => updateEngine({ autoStart: event.target.checked })} /><span><strong>Start with the server</strong><small>Boot adopts a healthy running instance instead of double-starting.</small></span></label>
+        </div>
+        <div className="connection-row managed-engine-actions">
+          <button className="secondary-button" onClick={() => void startEngine()} disabled={engineBusy || engineRuntime?.state === 'running' || engineRuntime?.state === 'starting'}>{engineBusy ? <LoaderCircle size={16} className="spin" /> : <Power size={16} />}Start engine</button>
+          <button className="secondary-button" onClick={() => void stopEngine()} disabled={engineBusy || (engineRuntime?.state !== 'running' && engineRuntime?.state !== 'starting' && engineRuntime?.state !== 'failed')}>Stop engine</button>
+          {engineRuntime && <p className="settings-note managed-engine-note">State <strong>{engineRuntime.state}</strong>{engineRuntime.url ? <> · <strong>{engineRuntime.url}</strong></> : null}{engineRuntime.pid ? <> · pid {engineRuntime.pid}</> : null}{engineRuntime.adopted ? ' · adopted' : ''}{engineRuntime.health === 'unreachable' ? ' · health checks failing' : ''}</p>}
+        </div>
+        {engineRuntime?.warning && <div className="llm-test-result fail" role="status"><AlertCircle size={14} /><span>{engineRuntime.warning}</span></div>}
+        {engineRuntime?.lastError && <div className="llm-test-result fail" role="status"><AlertCircle size={14} /><span>{engineRuntime.lastError}</span></div>}
+        {engineActionError && <div className="llm-test-result fail" role="status"><AlertCircle size={14} /><span>{engineActionError}</span></div>}
+        {engineRuntime && engineRuntime.logTail.length > 0 && <pre className="engine-log-tail" aria-label="Managed engine log tail">{engineRuntime.logTail.slice(-12).join('\n')}</pre>}
+        <p className="settings-note">Start persists the current form, mirrors your model folders into the checkout as extra_model_paths.yaml (weights are never copied), and points the studio at the launched instance. Stopping is graceful-then-forced; the log tail above shows the engine's own output.</p>
+      </>}
+    </section>
     <section className="settings-section h3-stack-section">
       <div className="settings-heading"><div><Gauge size={19} /><span><strong>H3 engine stack</strong><small>Compares the selected files with the validated official ComfyUI stack.</small></span></div><span className={`health-pill ${h3Report.validated ? 'online' : ''}`}>{h3Report.validated ? 'Validated' : h3Report.ready ? 'Custom' : 'Incomplete'}</span></div>
       <div className="h3-stack-list">{h3Report.rows.map((row) => <div key={row.label} className={row.validated ? 'validated' : 'custom'}><span>{row.validated ? <Check size={14} /> : <AlertCircle size={14} />}</span><div><strong>{row.label}</strong><small title={row.selected || row.expected}>{row.selected || `Missing · expected ${row.expected}`}</small></div><em>{row.validated ? 'Recommended' : row.selected ? 'Non-standard' : 'Missing'}</em></div>)}</div>

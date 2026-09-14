@@ -2427,6 +2427,12 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .llm-test-result { display: flex; align-items: center; gap: 7px; margin: 0 17px; padding: 8px 10px; border-radius: 8px; font-size: var(--text-sm); }
 .llm-test-result.ok { color: var(--accent); background: var(--accent-soft); }
 .llm-test-result.fail { color: var(--danger); background: color-mix(in srgb, var(--danger) 7%, transparent); }
+/* Managed engine runtime (increment 1): the runtime's own log tail + the
+   start/stop action row. Reuses settings-section scaffolding above. */
+.engine-log-tail { margin: 8px 17px 0; padding: 9px 11px; max-height: 170px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--text-sm); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.managed-engine-actions { align-items: center; }
+.managed-engine-note { margin: 0; flex: 1 1 auto; min-width: 220px; }
+.managed-autostart { flex: 0 0 auto; }
 .llm-model-list { display: grid; gap: 6px; padding: 10px 17px 0; max-height: 240px; overflow-y: auto; }
 .llm-model-row { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 1px solid color-mix(in srgb, var(--color-border, #888) 25%, transparent); border-radius: 8px; background: var(--color-surface-sunken, transparent); color: var(--text); cursor: pointer; text-align: left; }
 .llm-model-row:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }

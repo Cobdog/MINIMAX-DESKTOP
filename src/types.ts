@@ -26,6 +26,50 @@ export type GenerationDefaults = {
   upscaleMode: UpscaleMode
 }
 
+/** Self-managed engine runtime (managed ComfyUI, increment 1). External mode
+ *  (the default) is byte-for-byte the pre-runtime behavior: no spawns, no
+ *  polls, no route side effects. Managed mode launches a ComfyUI the studio
+ *  itself supervises from a checkout the USER nominates (clone-on-demand is a
+ *  later increment). */
+export type EngineMode = 'external' | 'managed'
+export type ManagedEngineConfig = {
+  mode: EngineMode
+  /** Absolute path to an existing ComfyUI checkout (must contain main.py). */
+  checkoutPath: string
+  /** Python executable for the checkout ('' → python3/python by platform). */
+  pythonPath: string
+  /** Preferred port; 0 = auto-allocate scanning upward from 8191, clear of
+  *  the reserved user instances (8188, 8189). */
+  portPreference: number
+  /** Launch the managed engine when the server boots (boot reconcile adopts
+   *  a healthy recorded instance instead of double-spawning). */
+  autoStart: boolean
+}
+
+export type ManagedEngineState = 'stopped' | 'starting' | 'running' | 'stopping' | 'failed'
+export type ManagedEngineHealth = 'unknown' | 'ok' | 'unreachable'
+export type ManagedEngineStatus = {
+  mode: EngineMode
+  state: ManagedEngineState
+  port?: number
+  url?: string
+  pid?: number
+  /** The running instance was adopted from a previous server run (this
+   *  process did not spawn it; stop re-verifies before signalling). */
+  adopted?: boolean
+  /** Adopted while managed mode is off — reported honestly, never killed by
+   *  reconcile; only an explicit stop (or a mode flip) touches it. */
+  stray?: boolean
+  startedAt?: number
+  lastError?: string
+  /** Best-effort VRAM contention note (another local ComfyUI has jobs in
+   *  flight) — a warning, never a block. */
+  warning?: string
+  /** Lazy /system_stats sample while running ('unknown' otherwise). */
+  health: ManagedEngineHealth
+  logTail: string[]
+}
+
 export type AppSettings = {
   comfyUrl: string
   ollamaUrl: string
@@ -59,6 +103,9 @@ export type AppSettings = {
   llmThinkingDefault: 'off' | 'on'
   /** Prompt-assistant writing style — deliberately content-neutral. */
   promptContentLevel: 'sfw' | 'suggestive' | 'nsfw'
+  /** Self-managed engine runtime (increment 1); defaults keep external mode,
+   *  which preserves today's behavior exactly. */
+  engine: ManagedEngineConfig
 }
 
 export type ClipItem = { id: string; name: string; source: string; createdAt: number; start?: number; end?: number; duration?: number }
@@ -465,6 +512,9 @@ export type DesktopApi = {
   listPromptLibrary(query: { text?: string; limit?: number; cursor?: string; nsfw?: boolean; sort?: string; scope?: 'h3' | 'all' }): Promise<{ items: PromptLibraryItem[]; cursor?: string }>
   runSetupDoctor(): Promise<{ checks: Array<{ id: string; label: string; status: 'ok' | 'warn' | 'fail'; detail: string; recommendation?: string }>; ranAt: number }>
   freeComfyMemory(url: string): Promise<{ freed: boolean }>
+  getEngineStatus(): Promise<ManagedEngineStatus>
+  startManagedEngine(): Promise<ManagedEngineStatus & { already?: boolean }>
+  stopManagedEngine(): Promise<ManagedEngineStatus>
 }
 
 /** One harvested community prompt (Civitai image metadata via the server's

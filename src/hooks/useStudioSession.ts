@@ -21,7 +21,8 @@ export function useStudioSession() {
   const gpu = useSessionStore((state) => state.gpu)
   const info = useSessionStore((state) => state.info)
   const ollamaModels = useSessionStore((state) => state.ollamaModels)
-  const { setSettings, setModels, setScanning, setStatus, setChecking, setGpu, setInfo, setOllamaModels, setLlm } = useSessionStore.getState()
+  const engineMode = useSessionStore((state) => state.settings?.engine.mode)
+  const { setSettings, setModels, setScanning, setStatus, setChecking, setGpu, setInfo, setOllamaModels, setLlm, setEngineRuntime } = useSessionStore.getState()
 
   const scanModels = useCallback(async (nextSettings: AppSettings) => {
     setScanning(true)
@@ -101,6 +102,24 @@ export function useStudioSession() {
     })
     return () => { disposed = true; stopFallback(); unsubscribe(); stopStatus() }
   }, [setGpu])
+
+  // Managed engine runtime (increment 1): poll ONLY while managed mode is
+  // active — external mode must not issue a single new request (external is
+  // byte-for-byte the pre-runtime behavior). One poll feeds the titlebar
+  // tile and the Settings section alike.
+  useEffect(() => {
+    if (engineMode !== 'managed') {
+      setEngineRuntime(null)
+      return
+    }
+    let disposed = false
+    const refresh = () => {
+      void window.minimax.getEngineStatus().then((value) => { if (!disposed) setEngineRuntime(value) }).catch(() => { if (!disposed) setEngineRuntime(null) })
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 2500)
+    return () => { disposed = true; window.clearInterval(timer) }
+  }, [engineMode, setEngineRuntime])
 
   return {
     settings, setSettings,

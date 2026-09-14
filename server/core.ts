@@ -25,6 +25,7 @@ import { failureRef, logEvent, logFailure } from './logger'
 import { createStudioRepository, type StudioRepository } from './repo'
 import { createRealtimeHub, type RealtimeHub } from './realtime'
 import { EngineProcess } from './engineProcess'
+import { RuntimeManager, RuntimeConfigError } from './runtime'
 import { createLlmService, type LlmService } from './llm'
 import { createRouterProvider } from './llm/providers/router'
 import { familyManifest, inferFamily } from './llm/registry'
@@ -408,6 +409,26 @@ export function createStudioServer(paths: StudioServerPaths) {
     emitEngine: (name, phase, detail, pid) => realtimeHub.emitEngine(name, phase, detail, pid),
   })
 
+  // Self-managed engine runtime (increment 1): supervises a ComfyUI the
+  // studio launches itself from a user-nominated checkout, over the same
+  // EngineProcess contract. When a managed engine becomes ready, managed
+  // mode re-points comfyUrl at it — every existing seam (generation, the
+  // realtime hub, the proxy) then just works. External mode never triggers
+  // any of this.
+  const runtime = new RuntimeManager({
+    homeDirectory: dirname(paths.settingsFile),
+    loadSettings,
+    logEvent,
+    logFailure,
+    isLocalServiceUrl,
+    onRunning: (url) => {
+      void (async () => {
+        const current = await loadSettings()
+        if (current.engine.mode === 'managed' && current.comfyUrl !== url) await saveSettings({ ...current, comfyUrl: url })
+      })().catch((error: unknown) => logFailure('engine/repoint-url', error, undefined, 'warn'))
+    },
+  })
+
   function defaultSettings(): AppSettings {
     const root = join(paths.documentsDirectory, 'ComfyUI', 'models')
     return {
@@ -433,6 +454,10 @@ export function createStudioServer(paths: StudioServerPaths) {
       unloadLlmOnGenerate: true,
       llmThinkingDefault: 'off',
       promptContentLevel: 'sfw',
+      // Managed engine runtime (increment 1): external default = today's
+      // behavior, exactly. Nothing spawns, polls, or re-points unless the
+      // user switches the mode AND nominates a checkout.
+      engine: { mode: 'external', checkoutPath: '', pythonPath: '', portPreference: 0, autoStart: false },
     }
   }
 
@@ -454,6 +479,13 @@ export function createStudioServer(paths: StudioServerPaths) {
       unloadLlmOnGenerate: raw.unloadLlmOnGenerate === undefined ? defaults.unloadLlmOnGenerate : raw.unloadLlmOnGenerate !== false,
       llmThinkingDefault: raw.llmThinkingDefault === 'on' ? 'on' : 'off',
       promptContentLevel: raw.promptContentLevel === 'nsfw' || raw.promptContentLevel === 'suggestive' ? raw.promptContentLevel : 'sfw',
+      engine: {
+        mode: raw.engine?.mode === 'managed' ? 'managed' : 'external',
+        checkoutPath: stringField(raw.engine?.checkoutPath, '').trim(),
+        pythonPath: stringField(raw.engine?.pythonPath, '').trim(),
+        portPreference: Number.isInteger(raw.engine?.portPreference) && (raw.engine?.portPreference as number) >= 1024 && (raw.engine?.portPreference as number) <= 65535 ? raw.engine?.portPreference as number : 0,
+        autoStart: raw.engine?.autoStart === true,
+      },
     }
   }
 
@@ -1253,6 +1285,28 @@ export function createStudioServer(paths: StudioServerPaths) {
             return sendJson(response, 503, { error: saveFailure instanceof Error ? saveFailure.message : String(saveFailure) })
           }
         }
+        // ---- Managed engine runtime (increment 1) ----------------------------
+        // Status is a cheap snapshot + lazy health sample; start/stop are
+        // idempotent (a start while starting/running reports already: true
+        // and NEVER double-spawns — the port is probed before any spawn).
+        if (url.pathname === '/api/lan/engine/status' && request.method === 'GET') {
+          return sendJson(response, 200, await runtime.status())
+        }
+        if (url.pathname === '/api/lan/engine/start' && request.method === 'POST') {
+          if (settings.engine.mode !== 'managed') return sendJson(response, 400, { error: 'Switch the engine to managed mode in Settings before launching.' })
+          try {
+            const started = await runtime.start()
+            return sendJson(response, 200, { ...(await runtime.status()), already: started.already })
+          } catch (startFailure) {
+            const message = startFailure instanceof Error ? startFailure.message : String(startFailure)
+            logFailure('engine/start', startFailure, { managed: true }, 'warn')
+            const snapshot = await runtime.status().catch(() => null)
+            return sendJson(response, startFailure instanceof RuntimeConfigError ? 400 : 502, { error: message, ...(snapshot ?? {}) })
+          }
+        }
+        if (url.pathname === '/api/lan/engine/stop' && request.method === 'POST') {
+          return sendJson(response, 200, await runtime.stop())
+        }
         if (url.pathname === '/api/lan/cancel' && request.method === 'POST') {
           const body = await readJson(request, 10_000)
           const promptId = typeof body.promptId === 'string' ? body.promptId : ''
@@ -1272,7 +1326,15 @@ export function createStudioServer(paths: StudioServerPaths) {
           const body = await readJson(request, 200_000)
           const raw = body.settings && typeof body.settings === 'object' ? body.settings as Partial<AppSettings> : null
           if (!raw || typeof raw.comfyUrl !== 'string' || typeof raw.outputDirectory !== 'string') return sendJson(response, 400, { error: 'A settings object with service URLs is required.' })
-          return sendJson(response, 200, { settings: await saveSettings(normalizeSettings(raw)) })
+          const saved = await saveSettings(normalizeSettings(raw))
+          // Leaving managed mode is an explicit user action: stop the engine
+          // the studio started (adopted strays included — stop re-verifies
+          // before signalling anything). Fire-and-forget so the save never
+          // blocks on a 3 s grace window; the status route reports the end.
+          if (settings.engine.mode === 'managed' && saved.engine.mode !== 'managed') {
+            void runtime.stop().catch((stopFailure: unknown) => logFailure('engine/stop-on-mode-flip', stopFailure, undefined, 'warn'))
+          }
+          return sendJson(response, 200, { settings: saved })
         }
         if (url.pathname === '/api/lan/object-info' && request.method === 'GET') {
           return sendJson(response, 200, await comfyFetch(settings.comfyUrl, '/object_info'))
@@ -1583,6 +1645,10 @@ export function createStudioServer(paths: StudioServerPaths) {
         const origin = `${certificate ? 'https' : 'http'}://${address}:${port}`
         lanStatus = { running: true, port, secure: Boolean(certificate), certificateFingerprint: certificate?.fingerprint, url: `${origin}/?mobile=1`, desktopUrl: `${origin}/?desktop=1` }
         logEvent({ kind: 'lan.server', port, secure: Boolean(certificate) })
+        // Boot posture: AFTER the server is listening (routes can answer
+        // while a slow engine boots), reconcile the managed runtime — adopt
+        // a healthy recorded instance instead of double-spawning.
+        void runtime.reconcileOnBoot().catch((error: unknown) => logFailure('engine/reconcile', error, undefined, 'warn'))
         resolvePromise()
       })
     })
@@ -1591,7 +1657,11 @@ export function createStudioServer(paths: StudioServerPaths) {
   function stopLanServer() {
     realtimeHub.close()
     // No supervised sidecar outlives the server that started it: graceful
-    // quit line first, forced tree-kill for whatever ignores it.
+    // quit line first, forced tree-kill for whatever ignores it. The runtime
+    // marks the shutdown intentional FIRST so the exit settles 'stopped' and
+    // the recorded state file is cleared (a crash, by contrast, leaves it —
+    // the next boot adopts the orphan instead of double-spawning).
+    runtime.prepareForShutdown()
     void EngineProcess.shutdownAll()
     lanServer?.close()
     lanServer = null
@@ -1625,6 +1695,9 @@ export function createStudioServer(paths: StudioServerPaths) {
     /** The realtime event fabric (wave 1): WS at /ws, SSE v2 at
      *  /api/lan/realtime; emitEngine is the wave-2c sidecar seam. */
     realtime: realtimeHub,
+    /** Self-managed ComfyUI runtime (increment 1): start/stop/status +
+     *  boot reconcile. External mode never fires its side effects. */
+    runtime,
     status: () => lanStatus,
     syncCharacters: (characters: unknown[]) => { mobileCharacterLibrary = Array.isArray(characters) ? characters : []; return { synced: mobileCharacterLibrary.length } },
     rotateToken: async () => {

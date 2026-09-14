@@ -24,3 +24,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:server
       - run: node scripts/test-engine-process.cjs
+      # Managed ComfyUI runtime (increment 1): the stub-checkout suite needs
+      # neither python nor a real checkout, so both Windows legs run in full.
+      - run: node scripts/test-runtime.cjs

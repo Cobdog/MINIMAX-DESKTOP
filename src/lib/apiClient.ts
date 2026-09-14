@@ -1,4 +1,4 @@
-import type { AppSettings, DesktopApi, LlmModelsResult, MediaKind, PromptLibraryItem } from '../types'
+import type { AppSettings, DesktopApi, LlmModelsResult, ManagedEngineStatus, MediaKind, PromptLibraryItem } from '../types'
 
 /**
  * HTTP implementation of the DesktopApi bridge, used when the renderer runs in
@@ -228,6 +228,15 @@ export function createWebApiClient(): DesktopApi {
     },
     async freeComfyMemory() {
       return postJson<{ freed: boolean }>('/api/lan/free', {})
+    },
+    async getEngineStatus() {
+      return apiFetch<ManagedEngineStatus>('/api/lan/engine/status')
+    },
+    async startManagedEngine() {
+      return postJson<ManagedEngineStatus & { already?: boolean }>('/api/lan/engine/start', {})
+    },
+    async stopManagedEngine() {
+      return postJson<ManagedEngineStatus>('/api/lan/engine/stop', {})
     },
     async runSetupDoctor() {
       return apiFetch<Awaited<ReturnType<DesktopApi['runSetupDoctor']>>>('/api/lan/doctor')

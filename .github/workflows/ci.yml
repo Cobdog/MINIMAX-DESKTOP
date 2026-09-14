@@ -23,6 +23,9 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: pnpm smoke:server
+      # Managed ComfyUI runtime (increment 1): stub-checkout suite — needs
+      # neither python nor a real checkout; the python section self-skips.
+      - run: pnpm test:runtime
       # ffmpeg is required by the filmstrip capability (wave 2d: server-side
       # sprite-sheet thumbnails + the e2e video fixture). ubuntu-latest does
       # NOT ship it by default. Decision: install it rather than let the
