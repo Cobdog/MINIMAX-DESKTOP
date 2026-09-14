@@ -1,123 +1,172 @@
-# UI pre-brainstorm — working notes (informal)
+# UI pre-brainstorm — working notes (session handoff edition)
 
-**Status:** living document. This is the loose-shape list that precedes the real
-brainstorm. Process agreed with the maintainer (2026-09-14):
+**Status:** LIVING DOCUMENT and the primary reorientation point for the canvas
+UI work. Process agreed with the maintainer (2026-09-14):
 
-1. Conversational pass (this doc) — capture ideas that "sound good," keep them vague-shaped.
+1. Conversational pass (this doc) — capture ideas, keep them vague-shaped, gauge each.
 2. Per-item viability pass — prior art, reference code, libraries; verdict on
    possible / worthwhile / overly complicated / modular fit.
-3. Only then: the proper brainstorm → real spec.
+3. Only then: the proper brainstorm → real spec → the Canvas UI epic.
 
-Nothing here is decided. Everything here is gauged.
+Two items are now **LOCKED** (maintainer decisions, 2026-09-14). The rest are
+parked or in tension. Nothing beyond the two locks is decided.
 
 ---
 
-## Item 1 — The entry moment (no File→New dialog)
+## LOCKED — Item 1: The entry moment (empty canvas IS the launcher)
 
-**Shape so far.** The first ten seconds should resolve *intent*, not document
-type: create an image from scratch, have a VLM describe an existing image into
-a prompt, edit a video I already have, resume where I left off, remix past
-work. A "new project / open project" modal is the wrong shape for this.
+**Decision.** No File→New dialog. The first ten seconds resolve *intent*, and
+the empty canvas itself is the launcher: a prompt bar, a drop-anything zone
+(image/video/audio — the drop routes itself), intent chips, resume cards for
+recent sessions. Every intent seeds the canvas differently; no modal, no mode
+switch — the app is already the app.
 
-**Working direction.** The empty canvas IS the launcher. On boot with no
-session: a prompt bar, a drop zone (drop anything — image/video/audio routes
-itself), intent chips (Generate · Describe an image · Edit a video · Remix
-from library), and resume cards for recent sessions. Every intent just *seeds
-the canvas differently* — no modal, no mode switch; the app is already the app.
+**Maintainer caveat (part of the lock):** start with the MINIMAL set of chips
+that are really needed; add more as gaps are found. (Assistant's guard:
+≤5 chips at first; the drop zone is the hero gesture.)
 
-**Already built that feeds this.** Vision captioning (LLM layer, `0292ec7`) —
-the "VLM describes an image into a prompt" path is live as a primitive.
-Projects/workspace persistence (SQLite `projects`/`workspace_state`) — resume
-has a store. Jobs/assets tables — the remix library. Video pooling +
-filmstrips — dropped video renders as a live tile immediately.
+**Already built that feeds this.** Vision captioning (LLM layer `0292ec7`) —
+"describe an image into a prompt" is a live primitive. Projects/workspace
+persistence (SQLite) — resume has a store. Jobs/assets tables — the remix
+library. Video pooling + filmstrips — dropped video renders as a live tile
+immediately.
 
-**Prior art to study.** Blender splash (recent + templates, but document-
-shaped); Figma's opening surface (recent files + drop-anywhere); tldraw /
-Excalidraw empty-canvas affordances; Ableton's startup (session-centric, no
-"document" concept); Notion's new-page intent gallery.
+**Prior art anchors.** Blender splash (counterexample: document-shaped);
+Figma opening surface (recent + drop-anywhere); tldraw/Excalidraw empty-canvas
+affordances; Ableton startup (session-centric, no "document" concept).
 
-**Gauge.** Possible: trivially (it's an empty-canvas state, not a subsystem).
-Worthwhile: highest first-impression leverage of anything on this list.
+**Gauge.** Possible: trivially. Worthwhile: highest first-impression leverage.
 Complexity: low. Modular: each chip is an independent seeder.
 
-**Open questions.** How many intents before paralysis (target ≤5)? Do resume
-cards need scrubbing previews or is title+thumbnail enough? Does "remix" open
-a library browser floating panel or filter the canvas?
-
 ---
 
-## Item 2 — Media nodes, stacked ops, derived edges, context bar
+## LOCKED — Item 2: Media nodes, stacked ops, derived edges, context bar
 
-**Shape so far.** The canvas is a node graph *inverted from ComfyUI*: nodes
-are full representations of MEDIA, not settings. Each tile embodies the asset
-(preview, filmstrip, latent blocks, metadata, op chips) and carries its full
-control set. A hotkey slides a node into a popup modal — a Photoshop-like
-editor (layers, masking, cropping) whose every effect **stacks non-destructively
-on the source**; drop the modal and the node is now the cropped headshot.
-Inputs/outputs are assigned from a properties panel; connectors may be DRAWN as
-read-only visualization of what feeds what — **no hand wiring**. The bottom
-bar is the context-sensitive frame of reference for the current selection.
+**Decision.** The canvas is a node graph *inverted from ComfyUI*: nodes are
+full representations of MEDIA, not settings. Each tile embodies the asset
+(preview, filmstrip, latent blocks, metadata, op chips) and carries its
+controls. A hotkey slides a node into a popup modal — a Photoshop-like editor
+(layers, masking, cropping) whose every effect **stacks non-destructively on
+the source**; drop the modal and the node now *is* the cropped headshot.
+Relationships are authored from a properties panel; connectors MAY be drawn as
+read-only visualization of what feeds where — **no hand wiring** (maintainer:
+"at least not as a feature I would start off with" — hand wiring is a
+possible LATER feature, not a v1 one). The bottom bar is the context-sensitive
+frame of reference for the current selection.
 
-**Why this is strong (and named precisely).** This is three proven ideas
-composed, not one new one:
-- **Blender modifier-stack semantics** — ops stack on a source; `Apply`/bake is
+**Why this composition is strong (named precisely).** Three proven ideas
+composed, not one novel gamble:
+- **Blender modifier-stack semantics** — ops stack on a source; bake/Apply is
   explicit and rare; the source is never silently altered.
-- **Photoshop smart-object feel** — the modal *feels* destructive (crop!
-  paint!) but everything is an op in a stack; the "destructive" edit is just
-  the top of the stack.
-- **Graph as projection, not authoring surface** — relationships are authored
-  by selection in a properties panel (exactly how today's Create view binds
-  characters/locations — our own app already does binding-without-wiring), and
-  the edge curves are *derived display*, never interaction.
+- **Photoshop smart-object feel** — the modal *feels* destructive but every
+  edit is an op in a stack (the newest op on top).
+- **Graph as projection, not authoring surface** — relationships authored by
+  selection (today's Create view already binds characters/locations this way:
+  our own app proves binding-without-wiring). Killing hand-wiring eliminates
+  the #1 node-graph failure mode from the UX research ("artists get lost in
+  our own node setups" — Blender's own workshop).
 
-The no-hand-wiring decision directly kills the #1 node-graph failure mode our
-UX research found ("artists get lost in our own node setups" — Blender's own
-workshop). The graph remains legible; it stops being a skill floor.
+**Already built that feeds this.** Stage prototype (pan/zoom/select canvas —
+the shell); op-stack + staleness chips (Bench prototype); ImageCrop with
+non-destructive crop data; z-token ladder + Base UI panels; video pool +
+filmstrip + OPFS cache (rich tiles); the fabric (context events streaming).
 
-**Already built that feeds this.** Stage prototype (pan/zoom/select canvas
-with object cards — the shell exists); op-stack + staleness chips (Bench
-prototype); ImageCrop with non-destructive crop data (crop op exists); the
-document/projection model + refmod-from-selection flows map 1:1 onto op stacks;
-z-token ladder + Base UI panels (the floating/modal chrome); video pool +
-filmstrip + OPFS cache (tiles render rich media cheaply).
+**Prior art anchors.** Blender modifier stack; Photoshop/Krita adjustment
+layers & smart objects; ComfyUI (what we invert); Fusion (wiring-heavy
+counterexample); tldraw selection toolbar; Descript (non-standard projection
+beats the standard one).
 
-**Prior art to study.** Blender modifier stack (semantics + Apply);
-Photoshop/Krita adjustment layers & smart objects (the modal's UX); ComfyUI
-(what we're inverting — thumbnail-in-node but settings-first); DaVinci Fusion
-(wiring-heavy counterexample); tldraw selection toolbar + contextual handles;
-Descript (proof that a non-standard projection of media beats the standard
-one).
-
-**Gauge.** Possible: yes, staged. Worthwhile: this IS the product thesis
-(prep + generate + assemble in one surface). Complexity: the honest ramp —
-  - Canvas of media tiles + contextual toolbar + derived-edge overlay: LOW
-    (prototype exists; edges are an SVG overlay from properties data).
-  - Properties-panel relationship authoring: LOW-MED (binding UI patterns exist).
-  - Modal editor v1 — crop + rotate/flip + brush mask + canvas-filter
-    adjustments (brightness/contrast/saturation via `ctx.filter`): MODERATE.
-  - Full multi-layer stack with blend modes: LARGER — defer; v1 = source +
-    mask + adjustments is enough for the RefMod prep flow (crop to the face).
-Modular: cleanly — op-stack data model, tile component, modal editor, and
-edge overlay are four independent modules.
-
-**Open questions.** Where does the always-visible queue live if the bottom
-bar is fully context-sensitive? (Our research rule: a queue that fails
-silently is worse than no queue — candidates: persistent sliver in the bar,
-floating queue panel, or queue-in-bar-when-generating.) Does transport
-(playback) also live in the context bar, or in a program-monitor tile on
-canvas? Do op chips on the tile open inline quick-controls, or is the modal
-the only editor (v1: modal-only keeps it simple)? What happens to a node's
-tile preview while its modal is open (live-update or frozen)?
+**Viability (staged, agreed).**
+| Piece | Complexity |
+|---|---|
+| Canvas of media tiles + contextual toolbar | LOW (Stage prototype is the shell) |
+| Derived-edge overlay (SVG from properties data) | LOW |
+| Properties-panel relationship authoring | LOW-MED |
+| Modal editor v1: crop + rotate + brush mask + ctx.filter adjustments | MODERATE |
+| Full multi-layer + blend modes | DEFER (v1 = source + mask + adjustments completes the RefMod prep flow) |
 
 ---
 
-## Parked (not yet discussed)
+## ⚠ TENSION — REQUIRED DISCUSSION (maintainer flagged for depth post-compaction)
 
-- Latent-truth legibility in tiles (context blocks under previews; when visible).
-- Workspace preset set (Generate/Edit/Prep/Graph/Library?).
-- Timeline: projection vs permanent resident.
-- Engine views dissolving into generators-as-ops.
-- One canvas per project vs regions.
-- Screen-size adaptation for floating panels.
-- Command palette scope.
-- The "Focus" primitive (selection → named reusable conditioning target).
+**Queue visibility vs context-sensitive bottom bar.** Item 2 locks the bottom
+bar as context-sensitive. But the UX research's strongest rule was: *a queue
+that fails silently is worse than no queue* — editors' most-hated failure
+mode across every NLE studied. If the bar is fully contextual, the queue needs
+a guaranteed home.
+
+Candidate resolutions (assistant's instinct first):
+1. **Persistent sliver** at the bar's end — status dot + count, expands on
+   click. Context governs the bar's body; generation status is the app's
+   heartbeat and never yields its seat. (Assistant's current preference.)
+2. Floating queue panel (always-rendered, not docked).
+3. Queue-in-bar only while generating (weakest — silent-failure risk when idle).
+
+Related unresolved: where does PLAYBACK live (context bar transport vs a
+program-monitor tile on canvas)?
+
+The maintainer explicitly wants to discuss this in depth after session
+compaction. Do not resolve unilaterally.
+
+---
+
+## Parked questions (not yet discussed — take in maintainer's chosen order)
+
+- Latent-truth legibility in tiles: context blocks under previews — always
+  visible, or only during chain/extend actions?
+- Workspace preset set (Generate/Edit/Prep/Graph/Library?) — Blender-style
+  saved layouts + active projection.
+- Timeline: summoned projection vs permanent bottom-bar resident.
+- Engine views dissolving into generators-as-ops (select nothing + Generate =
+  t2v; select image + Generate = i2v).
+- One canvas per project vs one infinite canvas with project regions.
+- Screen-size adaptation for floating panels (auto-collapse below width?).
+- Command palette scope (⌘K over every action).
+- The **Focus primitive**: selection → named reusable conditioning target
+  (crop-to-face refmod, context-window extension, region inpainting = one
+  gesture). Assistant's candidate for THE novel abstraction; not yet discussed.
+- Modal open: tile preview live-updates or freezes? (Assistant's instinct:
+  live-update — the honest-projection answer.)
+- Do op chips on tiles open inline quick-controls, or is the modal the only
+  editor in v1? (Assistant's instinct: modal-only v1.)
+
+## Session inspirations inventory (what shaped this direction)
+
+- The maintainer's latent-truth insight: "the VAE decoded video is just the
+  preview and what I was actually selecting was the raw latents" — the
+  DOCUMENT MODEL: chains of latents/assets; everything seen is a projection;
+  preview quality is per-object. Trim = window; extend = continue chain from
+  context window; quality degradation avoided by never re-encoding round trips.
+- RefMod flow: paste image → crop to face/body/outfit → create refmod in-app.
+- Blender as the creation-model north star (with its discoverability sins
+  fixed by design: shortcuts printed on affordances).
+- Research findings that bind us: editors' pain = flow interruption, not
+  layout; Auditions (takes compared in context) and Operate→Settings (run
+  immediately, adjust, re-runs — no dialogs) are the two steal patterns;
+  curation celebrated over slot-machine.
+- Prior-art list for the viability passes: tldraw, Natron/Fusion, Descript,
+  Blender workspaces, Krita, Resolve Cut-vs-Edit, Runway (what they get
+  wrong), Photopea. Libraries: tldraw SDK (evaluate as substrate), Konva,
+  PixiJS v8 (when WebGL needed), react-rnd, Base UI (adopted), mediabunny +
+  WebCodecs (planned in PreviewSource seam).
+
+## Status of the three prototypes
+
+Shot Bench / Stage / Score remain live at `/?proto=bench|stage|score`
+(commit `71a6689`, 14/14 e2e) as interactive references. The locked
+direction is effectively **Stage's shell + Score's document soul** — the
+prototypes served their purpose (the conversation evolved past them); they
+stay runnable for ground truth but do not need updating.
+
+## Camera editor placement (locked earlier)
+
+The bruxosdovfx camera compiler port (task ving89w, directive b309fad7):
+compiler ports as a pure UI-free lib when needed; the EDITOR lands as a UI
+component/module in the "video canvas" phase — i.e., inside THIS direction.
+
+## Next steps
+
+1. Discuss the queue tension (required).
+2. Continue parked questions in the maintainer's chosen order.
+3. Viability passes per item as they firm up.
+4. Proper brainstorm → Canvas UI spec → build epic.
