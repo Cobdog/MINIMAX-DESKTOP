@@ -102,7 +102,14 @@ failure-propagation semantics + partial-take validation (F6), blob
 content-hash + re-link flow (F8), schemaVersion + append-only document
 migrations + loud-fail on unknown-newer (F9), chain hop-count + drift metrics
 (F1), cross-project asset scope decision (F3)** — all schema-blocking or
-schema-shaping; none decided yet.
+schema-shaping; none decided yet. **Identity payload (DECIDED 2026-09-14,
+maintainer): chains carry an identity anchor — reference set / RefMods +
+verbatim subject text — re-injected into every window the chain generates,
+with USER-DRIVEN strength** (a dial: down when reminders over-constrain —
+stiffness, motion fighting, union artifacts; up when drift shows; no
+auto-ramping — the E7 dosage arm calibrates the DEFAULT). Strength is chain
+settings (persisted, rerun-stable per settings-results separation);
+per-RefMod slot strength composes with the chain-level dial.
 
 ## 3. Canvas surface architecture (stub)
 
