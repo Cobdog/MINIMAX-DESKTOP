@@ -1,0 +1,37 @@
+{
+  "note": "canonical pose render fingerprints — regenerate with UPDATE=1 node scripts/test-poserig.cjs",
+  "poses": [
+    {
+      "id": "standing",
+      "fingerprint": "fnv1a-dbb222fb-191"
+    },
+    {
+      "id": "t-pose",
+      "fingerprint": "fnv1a-ed8e6ebc-191"
+    },
+    {
+      "id": "walking",
+      "fingerprint": "fnv1a-e01a114d-191"
+    },
+    {
+      "id": "running",
+      "fingerprint": "fnv1a-6f40ed37-191"
+    },
+    {
+      "id": "sitting",
+      "fingerprint": "fnv1a-b331006e-191"
+    },
+    {
+      "id": "crouch",
+      "fingerprint": "fnv1a-287e0394-191"
+    },
+    {
+      "id": "reaching",
+      "fingerprint": "fnv1a-e1191ad7-191"
+    },
+    {
+      "id": "victory",
+      "fingerprint": "fnv1a-f9483482-191"
+    }
+  ]
+}

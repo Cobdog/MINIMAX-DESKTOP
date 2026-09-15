@@ -104,7 +104,9 @@ export default defineConfig({
     launchOptions: { executablePath: systemChromium },
   },
   projects: [
-    { name: 'e2e', testMatch: /app\.spec\.ts/ },
+    // e2e: the app suite + the pose-rig dev surface (task 41ebvfo —
+    // deterministic hook-driven interactions + palette-pixel assertions).
+    { name: 'e2e', testMatch: /(app|poserig)\.spec\.ts/ },
     { name: 'vision', testMatch: /vision-capture\.spec\.ts/ },
   ],
   webServer: {

@@ -1,0 +1,66 @@
+/* Pose rig dev surface (?poserig=1). Tokens-only styling like the proto
+   chunk (src/prototypes/proto.css) — this file ships inside the lazy
+   poserig chunk so normal app routes never load a line of it. The preview
+   canvas keeps its own black (the render contract's background), painted by
+   the renderer, not by CSS. */
+
+.poserig-root { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100%; min-height: 0; background: var(--bg); color: var(--text); overflow: hidden; }
+
+/* ---- header ---- */
+.poserig-header { display: flex; align-items: center; gap: var(--space-4); min-height: 40px; padding: 0 var(--space-4); background: var(--color-surface-sunken); border-bottom: 1px solid var(--line); }
+.poserig-brand { display: flex; align-items: center; gap: var(--space-3); }
+.poserig-brand strong { font-size: var(--text-lg); white-space: nowrap; }
+.poserig-flag { padding: 3px var(--space-2); border: 1px solid color-mix(in srgb, var(--warning) 38%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--warning) 8%, transparent); color: var(--warning); font-size: var(--text-2xs); font-weight: 750; letter-spacing: .09em; text-transform: uppercase; white-space: nowrap; }
+.poserig-status { flex: 1; min-width: 0; overflow: hidden; color: var(--muted); font-size: var(--text-base); text-overflow: ellipsis; white-space: nowrap; }
+.poserig-header-note { color: var(--muted-2); font-size: var(--text-xs); white-space: nowrap; }
+
+/* ---- main columns ---- */
+.poserig-main { display: grid; grid-template-columns: 250px minmax(0, 1fr) 290px; min-height: 0; }
+.poserig-panel { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-3); overflow-y: auto; scrollbar-width: thin; }
+.poserig-panel-left { border-right: 1px solid var(--line); }
+.poserig-panel-right { border-left: 1px solid var(--line); }
+.poserig-panel h3 { margin: 0 0 6px; color: var(--color-text-soft); font-size: var(--text-2xs); font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.poserig-note { margin: 6px 0 0; color: var(--muted-2); font-size: var(--text-xs); line-height: 1.45; }
+
+/* ---- presets ---- */
+.poserig-presets { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.poserig-presets button, .poserig-export button, .poserig-controls button, .poserig-timeline-actions button { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 var(--space-2); border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--muted); font-size: var(--text-sm); cursor: pointer; white-space: nowrap; }
+.poserig-presets button:hover:not(:disabled), .poserig-export button:hover:not(:disabled), .poserig-controls button:hover:not(:disabled), .poserig-timeline-actions button:hover:not(:disabled) { border-color: var(--line-strong); color: var(--text); }
+.poserig-presets button:disabled, .poserig-export button:disabled, .poserig-timeline-actions button:disabled { opacity: .45; cursor: not-allowed; }
+
+.poserig-panel select { width: 100%; min-height: 28px; padding: 0 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--text); font-size: var(--text-sm); }
+
+.poserig-file { position: relative; display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 var(--space-2); border: 1px dashed var(--line-strong); border-radius: 8px; color: var(--muted); font-size: var(--text-sm); cursor: pointer; }
+.poserig-file:hover { color: var(--text); border-color: var(--accent); }
+.poserig-file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+.poserig-export { display: grid; gap: 6px; }
+.poserig-canvas-picker { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.poserig-canvas-picker button { min-height: 22px; padding: 0 7px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--muted-2); font-size: var(--text-xs); cursor: pointer; }
+.poserig-canvas-picker button.active { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: var(--accent-soft); color: var(--accent); }
+
+/* ---- viewport ---- */
+.poserig-viewport-wrap { position: relative; display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
+.poserig-viewport { position: relative; min-height: 0; overflow: hidden; }
+.poserig-viewport canvas { display: block; }
+.poserig-hints { display: flex; flex-wrap: wrap; gap: var(--space-3); padding: 4px var(--space-3); border-top: 1px solid var(--line); color: var(--muted-2); font-size: var(--text-xs); }
+.poserig-hints kbd { display: inline-grid; place-items: center; min-width: 14px; height: 14px; padding: 0 3px; margin-right: 3px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface-2); color: var(--color-text-soft); font-family: ui-monospace, Consolas, monospace; font-size: var(--text-2xs); }
+.poserig-selection { position: absolute; top: var(--space-2); left: var(--space-3); padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--color-surface-abyss) 72%, transparent); color: var(--muted); font-size: var(--text-xs); }
+.poserig-selection strong { color: var(--accent); }
+
+/* ---- preview + controls ---- */
+.poserig-preview-wrap { display: grid; place-items: center; padding: var(--space-2); border: 1px solid var(--line); border-radius: 8px; background: var(--color-surface-abyss); }
+.poserig-preview { max-width: 100%; max-height: 42vh; image-rendering: pixelated; }
+.poserig-controls { display: grid; gap: 6px; }
+
+/* ---- timeline ---- */
+.poserig-timeline { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-top: 1px solid var(--line); background: var(--color-surface-sunken); }
+.poserig-timeline-actions { display: flex; align-items: center; gap: 6px; }
+.poserig-frame-readout { margin-left: 6px; color: var(--muted); font-size: var(--text-sm); }
+.poserig-frame-readout span { color: var(--accent); font-variant-numeric: tabular-nums; }
+.poserig-timeline-track { position: relative; display: flex; gap: 3px; min-width: 0; padding: 3px 0; }
+.poserig-tick { flex: 1 1 0; min-width: 8px; height: 18px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-2); cursor: pointer; }
+.poserig-tick:hover { border-color: var(--line-strong); }
+.poserig-tick.current { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: var(--accent-soft); }
+.poserig-tick.has-key { background: var(--accent); border-color: var(--accent); }
+.poserig-timeline-note { color: var(--muted-2); font-size: var(--text-xs); white-space: nowrap; }

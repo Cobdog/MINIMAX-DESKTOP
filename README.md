@@ -40,6 +40,7 @@ failure; a failed `build` skips only its dependents (smoke/e2e/vision).
 Order: `typecheck` → `lint` → `license:audit` → `test` → `test:registry` →
 `test:storage` → `test:realtime` → `test:filmstrip` → `test:llm` →
 `test:engine` → `test:runtime` → `test:fetcher` → `test:lora-form` →
+`test:poserig` →
 `build` → `smoke:server` →
 e2e (Playwright) → vision-capture (Playwright). `pnpm test:all` is the same
 chain without the harness niceties. `license:audit` classifies every direct
@@ -54,7 +55,10 @@ projection: centered-fit math with both traps as tests, the kijai golden,
 form detection; needs `python3` + `numpy` — skips loudly without python,
 fails loudly with python but no numpy) plus the server-side form detection,
 compat/guidance, first-party pack install and consent-gated local-install
-tests.
+tests. `test:poserig` runs the IK pose rig's pure client modules through
+the VM harness — analytic two-bone + FABRIK solver contracts, the §3
+palette-exact draw-op goldens, the OpenPose-134 JSON round-trip and 17n+5
+grid snapping (the three.js/React shell is covered by the e2e suite).
 
 ### System Chromium (no bundled browser)
 

@@ -21,6 +21,11 @@ const MobileApp = lazy(() => import('./MobileApp'))
 // their own lazy chunk (app + css); every normal app route is untouched.
 const PrototypeShell = lazy(() => import('./prototypes/PrototypeShell'))
 
+// The IK pose rig dev surface (task 41ebvfo) — ?proto= precedent: own lazy
+// chunk (three.js + React shell + css), never imported by normal routes.
+// Wired into the canvas at §5.2 integration time.
+const PoseRigApp = lazy(() => import('./poserig/PoseRigApp'))
+
 // The renderer always runs in a browser against the app's own web server
 // (server/index.ts); the HTTP client is the only bridge.
 installWebApiClient()
@@ -29,6 +34,7 @@ const params = new URLSearchParams(location.search)
 const mobile = params.get('mobile') === '1'
 const proto = params.get('proto')
 const protoRoute = proto === 'bench' || proto === 'stage' || proto === 'score'
+const poserigRoute = params.get('poserig') === '1'
 document.documentElement.classList.toggle('mobile-route', mobile)
 
 const viewFallback = <div className="boot"><LoaderCircle className="spin" /><span>Loading…</span></div>
@@ -46,11 +52,13 @@ const onCaughtError = (error: unknown) => {
 createRoot(document.getElementById('root')!, { onCaughtError }).render(
   <StrictMode>
     <ErrorBoundary label="root">
-      {protoRoute
-        ? <Suspense fallback={viewFallback}><PrototypeShell /></Suspense>
-        : mobile
-          ? <Suspense fallback={viewFallback}><MobileApp /></Suspense>
-          : <App />}
+      {poserigRoute
+        ? <Suspense fallback={viewFallback}><PoseRigApp /></Suspense>
+        : protoRoute
+          ? <Suspense fallback={viewFallback}><PrototypeShell /></Suspense>
+          : mobile
+            ? <Suspense fallback={viewFallback}><MobileApp /></Suspense>
+            : <App />}
     </ErrorBoundary>
   </StrictMode>,
 )

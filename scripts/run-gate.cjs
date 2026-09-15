@@ -63,6 +63,10 @@ const SUITES = [
   // half (CI installs it; the suite skips loudly when python is absent and
   // FAILS when python exists without numpy).
   { name: 'test:lora-form', command: 'pnpm run test:lora-form', timeoutMs: 20 * MINUTE },
+  // IK pose rig (task 41ebvfo): IK solver correctness, palette-exact draw
+  // ops vs committed goldens, keypoint-JSON round-trip, grid snapping,
+  // server-bridge gating. Pure client modules via the VM harness.
+  { name: 'test:poserig', command: 'pnpm run test:poserig', timeoutMs: 10 * MINUTE },
   // build:web + build:server directly — typecheck already ran as its own suite
   // (the plain `build` script re-runs typecheck; redundant here).
   { name: 'build', command: 'pnpm run build:web && pnpm run build:server', timeoutMs: 15 * MINUTE, dependents: ['smoke:server', 'e2e', 'vision-capture'] },

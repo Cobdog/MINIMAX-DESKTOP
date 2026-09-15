@@ -196,4 +196,34 @@ export const SCENARIOS: VisionScenario[] = [
       },
     ],
   },
+  {
+    id: 'poserig-surface',
+    label: 'Pose rig — IK viewport + palette-exact DWPose preview',
+    run: async (page) => {
+      await page.goto('/?poserig=1')
+      await expect(page.locator('[data-poserig="app"]')).toBeVisible()
+      await expect(page.locator('[data-poserig-preview]')).toBeVisible()
+      // A non-trivial preset so both the 3D figure and the render read as a
+      // posed human, not a rest stick.
+      await page.locator('[data-poserig-preset="victory"]').click()
+      await page.waitForTimeout(400)
+    },
+    checkpoints: [
+      {
+        id: 'poserig-1080p',
+        label: 'Pose rig — 3D stick figure viewport beside the palette-exact 2D render',
+        rubric: [
+          'Context: a dark-theme dev surface (no app sidebar — this is the ?poserig=1 route) at 1920x1080 with three columns and a bottom timeline strip.',
+          'Header: "Pose Rig" title, a small amber "DEV SURFACE — ?POSERIG=1" pill, a status line, and the note "IK pose rig → palette-exact DWPose render → Fun Control input".',
+          'Left panel: a PRESETS section with 8 compact buttons (Standing, T-pose, Walking, Running, Sitting, Crouch, Reaching up, Arms raised — one highlighted as applied), a SKELETON TEMPLATE select showing "Human (DWPose 134)", an IMPORT section with a dashed "keypoint JSON" drop area, and an EXPORT section (Keypoint JSON / PNG frames buttons, a DISABLED "Server render" button — disabled is correct, plus canvas-size and duration chip rows).',
+          'Center: a 3D viewport showing a HUMAN STICK FIGURE with arms raised in a V — colored joint spheres (bright saturated dots) connected by darker colored bone sticks, standing on a faint dark floor grid; a "selected:" pill near the top; a keyboard-hints bar along the bottom of the viewport.',
+          'Right panel: a square black canvas preview rendering the SAME pose as a DWPose whole-body skeleton on pure black — colored limb sticks (darker, slightly desaturated versions of the joint colors), bright colored joint dots, small blue hand-dot clusters near both wrists with thin rainbow finger lines, a cluster of tiny white dots for the face, colored dots at the feet — this is a colored DWPose figure on black, NOT a photo, wireframe, or 3D mesh.',
+          'The 3D figure and the 2D preview must be recognizably the SAME pose (arms up in a V).',
+          'Bottom timeline: "Key (K)" and "Delete" buttons, a "frame N / 55" readout, a row of many small tick marks (grid frames) with one or two bright green keyframe markers, and a right-aligned note line.',
+          'Blessings: the preview canvas may show slight pixelation (intended image-rendering); the figure in the 3D viewport is intentionally flat-shaded without lighting; small muted sub-labels are the app\'s design language.',
+          'Defects to flag: 3D viewport empty or all-black, preview canvas blank, limbs missing or single-colored (the limb palette must be multi-colored), overlapping panel content, text clipped by panels, timeline ticks missing.',
+        ].join(' '),
+      },
+    ],
+  },
 ]
