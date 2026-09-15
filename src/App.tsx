@@ -17,6 +17,7 @@ import {
   Scissors,
   Settings,
   Shirt,
+  Stethoscope,
   Users,
   Watch,
   WandSparkles,
@@ -48,6 +49,7 @@ import { CreateView } from './views/CreateView'
 import { LibraryView } from './views/LibraryView'
 import { JobsView } from './views/JobsView'
 import { SettingsView } from './views/SettingsView'
+import { DiagnosticsView } from './views/DiagnosticsView'
 import { useStudioSession } from './hooks/useStudioSession'
 import { useGenerationQueue } from './hooks/useGenerationQueue'
 import { useCreateWorkspace, type VideoClipDraft } from './hooks/useCreateWorkspace'
@@ -468,7 +470,7 @@ function App() {
           <HardDrive size={17} />
           <div><strong>{modelReady ? 'Models ready' : 'Models incomplete'}</strong><span>{models.length} local files indexed</span></div>
         </div>
-        <nav className="sidebar-secondary" aria-label="Advanced tools"><div className="nav-group"><span className="nav-section-label">Advanced tools</span><NavButton active={view === 'movie'} icon={Clapperboard} label="Movie" onClick={() => setView('movie')} /></div></nav>
+        <nav className="sidebar-secondary" aria-label="Advanced tools"><div className="nav-group"><span className="nav-section-label">Advanced tools</span><NavButton active={view === 'movie'} icon={Clapperboard} label="Movie" onClick={() => setView('movie')} /><NavButton active={view === 'diagnostics'} icon={Stethoscope} label="Diagnostics" onClick={() => setView('diagnostics')} /></div></nav>
         <NavButton active={view === 'settings'} icon={Settings} label="Settings" onClick={() => setView('settings')} />
       </aside>
 
@@ -615,6 +617,7 @@ function App() {
           notify('success', target === 'i2v' ? `Frame loaded from ${clip.name} as the I2V first frame. The new render will remain a separate video until you add and export it in Clip Editor.` : 'Extracted frame loaded into Create.')
         }} /></ErrorBoundary>}
         {view === 'settings' && <ErrorBoundary label="settings"><SettingsView settings={settings} setSettings={session.setSettings} info={info} models={models} h3Report={h3Report} scanning={session.scanning} status={status} checking={checking} diagnosticRunning={diagnosticRunning} ollamaModels={ollamaModels} onRefreshOllama={() => { void refreshOllama(settings); void refreshLlm() }} onScan={() => void scanModels(settings)} onCheck={() => void checkConnection(settings.comfyUrl)} onSave={() => void saveAppSettings()} onApplyDefaults={applyGenerationDefaults} onRunDiagnostics={() => void runH3Diagnostics()} /></ErrorBoundary>}
+        {view === 'diagnostics' && <ErrorBoundary label="diagnostics"><DiagnosticsView /></ErrorBoundary>}
       </main>
       <AiChatHead available={llmAvailable} ollamaModel={llmModelLabel || settings.ollamaModel} onUseImage={(imagePrompt) => {
         setView('zimage')

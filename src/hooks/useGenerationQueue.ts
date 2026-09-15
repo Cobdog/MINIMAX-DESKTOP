@@ -16,7 +16,7 @@
  *  component re-rendered in between. */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppSettings, GenerationJob } from '../types'
-import { isPastRunningDeadline, isTerminalStatus, reduceJobPoll, type PollObservation, type PollReduction } from '../lib/jobReducer'
+import { extractExecutionError, isPastRunningDeadline, isTerminalStatus, reduceJobPoll, type PollObservation, type PollReduction } from '../lib/jobReducer'
 import { extractOutputFile, extractOutputUrl, withTiledVideoDecode } from '../lib/workflow'
 import { extractAutomatedReferenceSet, hydrateLoadedJobs, playableOutputUrl, recordCharacterSheetImages, recordCharacterTurntable, recordLocationWalkthrough, recordMovieOutput } from '../lib/jobRecords'
 import { fetchServerJobs, saveServerJobs, serverStorageMigrationDone } from '../lib/serverStorage'
@@ -125,7 +125,13 @@ export function useGenerationQueue(options: {
           const outputUrl = playableOutputUrl(extractOutputUrl(history, promptId, settings.comfyUrl, mediaType))
           let observation: PollObservation
           if (entry?.status?.status_str === 'error') {
-            observation = { kind: 'executionError' }
+            // Structural failure capture: which node/class failed plus a
+            // SANITIZED reason from the history's execution_error message —
+            // never the raw exception text, which can echo input values.
+            const detail = extractExecutionError(history, promptId)
+            observation = detail
+              ? { kind: 'executionError', node: detail.node, nodeType: detail.nodeType, reason: detail.reason }
+              : { kind: 'executionError', reason: '' }
           } else if (entry?.status?.completed) {
             // Attribute the output by the exact filename ComfyUI reported —
             // never by the newest file on disk, which can belong to a

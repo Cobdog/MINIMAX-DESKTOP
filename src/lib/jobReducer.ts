@@ -1,7 +1,9 @@
 import type { GenerationJob } from '../types'
+import { sanitizeErrorMessage } from './logSanitize'
+import { classifyFailure } from './failureTaxonomy'
 
 export type PollObservation =
-  | { kind: 'executionError' }
+  | { kind: 'executionError'; node?: string; nodeType?: string; reason: string }
   | { kind: 'completed'; outputUrl: string; localOutputPath?: string }
   | { kind: 'completedNoLocalOutput' }
   | { kind: 'incomplete' }
@@ -34,6 +36,43 @@ export function isPastRunningDeadline(job: GenerationJob, now: number): boolean 
   return !TERMINAL_STATUSES.has(job.status) && now - job.createdAt > RUNNING_DEADLINE_MS
 }
 
+/** Pulls the structural failure out of a ComfyUI history entry: which node
+ *  (id + class) failed and a SANITIZED reason. The raw exception_message is
+ *  external text — engine exceptions can echo input values — so it passes
+ *  through the pure sanitizer before it exists anywhere downstream (job
+ *  records, notices, reports). Returns null when the entry has no
+ *  execution_error message. */
+export function extractExecutionError(history: Record<string, unknown>, promptId: string): { node: string; nodeType: string; reason: string } | null {
+  const entry = history[promptId] as { status?: { messages?: unknown } } | undefined
+  const messages = entry?.status?.messages
+  if (!Array.isArray(messages)) return null
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index]
+    if (!Array.isArray(message) || message[0] !== 'execution_error') continue
+    const data = message[1] as { node_id?: unknown; node_type?: unknown; exception_type?: unknown; exception_message?: unknown } | undefined
+    if (!data || typeof data !== 'object') continue
+    const node = typeof data.node_id === 'string' ? data.node_id : ''
+    const nodeType = typeof data.node_type === 'string' ? data.node_type : ''
+    const exceptionType = typeof data.exception_type === 'string' ? data.exception_type : ''
+    const exceptionMessage = typeof data.exception_message === 'string' ? data.exception_message : ''
+    const reason = sanitizeErrorMessage(`${exceptionType}${exceptionType && exceptionMessage ? ': ' : ''}${exceptionMessage}`)
+    if (!node && !nodeType && !reason) return null
+    return { node, nodeType, reason }
+  }
+  return null
+}
+
+/** The user-facing failure line for an execution error: node id + class +
+ *  sanitized reason, plus the taxonomy's human-cause label when the class is
+ *  known ("GPU memory exhausted", not a traceback). */
+export function executionErrorMessage(observation: { node?: string; nodeType?: string; reason: string }): string {
+  const structural = observation.nodeType || observation.node
+    ? `ComfyUI failed at node ${observation.node || '?'}${observation.nodeType ? ` (${observation.nodeType})` : ''}${observation.reason ? `: ${observation.reason}` : ''}`
+    : `ComfyUI reported an execution error${observation.reason ? `: ${observation.reason}` : '. The original may still be saved if upscaling failed.'}`
+  const bucket = classifyFailure(`${observation.reason} ${observation.nodeType ?? ''}`)
+  return bucket.id === 'unknown' ? structural : `${structural} · Likely cause: ${bucket.label}`
+}
+
 /** Pure transition for one job given one poll observation. A stale in-flight
  *  response for a job that already reached a terminal state is a no-op — it
  *  must neither resurrect the job nor repeat its completion side effects. */
@@ -48,7 +87,7 @@ export function reduceJobPoll(job: GenerationJob, observation: PollObservation, 
   switch (observation.kind) {
     case 'executionError':
       return {
-        job: { ...job, status: 'failed', error: 'ComfyUI reported an execution error. The original may still be saved if upscaling failed.' },
+        job: { ...job, status: 'failed', error: executionErrorMessage(observation) },
         transitionedTo: 'failed',
       }
     case 'completed':

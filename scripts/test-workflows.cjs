@@ -176,7 +176,7 @@ assert.equal(recovered.type, fileA.type)
 assert.equal(outputFileFromUrl('minimax-media://local?path=C%3A%5Cout%5Cx.mp4'), undefined)
 assert.equal(outputFileFromUrl('http://127.0.0.1:8188/view?filename=x.mp4'), undefined)
 
-const { reduceJobPoll, isPastRunningDeadline, isTerminalStatus, NO_OUTPUT_POLL_CAP } = load('src/lib/jobReducer.ts')
+const { reduceJobPoll, isPastRunningDeadline, isTerminalStatus, NO_OUTPUT_POLL_CAP, extractExecutionError } = load('src/lib/jobReducer.ts')
 const baseJob = { id: 'j1', promptId: 'p1', mode: 'text', prompt: 'test', createdAt: Date.now() - 1000, status: 'running', progress: 40, width: 608, height: 352, duration: 5 }
 {
   // Happy path: completed observation with a localized output file.
@@ -190,7 +190,7 @@ const baseJob = { id: 'j1', promptId: 'p1', mode: 'text', prompt: 'test', create
   const stale = reduceJobPoll(done.job, { kind: 'incomplete' }, Date.now())
   assert.equal(stale.transitionedTo, undefined)
   assert.equal(stale.job.status, 'completed')
-  const staleError = reduceJobPoll(done.job, { kind: 'executionError' }, Date.now())
+  const staleError = reduceJobPoll(done.job, { kind: 'executionError', reason: '' }, Date.now())
   assert.equal(staleError.transitionedTo, undefined)
   assert.equal(staleError.job.status, 'completed')
 
@@ -208,9 +208,46 @@ const baseJob = { id: 'j1', promptId: 'p1', mode: 'text', prompt: 'test', create
   assert.equal(tolerant.job.status, 'running')
 
   // Execution errors surface with the original wording.
-  const errored = reduceJobPoll(baseJob, { kind: 'executionError' }, Date.now())
+  const errored = reduceJobPoll(baseJob, { kind: 'executionError', reason: '' }, Date.now())
   assert.equal(errored.transitionedTo, 'failed')
   assert.ok(errored.job.error?.includes('execution error'))
+
+  // Structural failure capture (diagnostics doctrine): the observation now
+  // carries WHICH node failed (id + class) plus an already-sanitized reason,
+  // and a known cause class appends the taxonomy's human label.
+  const { sanitizeErrorMessage: sanitizeForReducer } = load('src/lib/logSanitize.ts')
+  const oomReason = sanitizeForReducer('torch.OutOfMemoryError: CUDA out of memory while rendering moonlit qzxveldra umbrella merchants waltzing')
+  assert.ok(oomReason.includes('CUDA out of memory'), 'sanitized reason keeps the cause')
+  assert.ok(!oomReason.includes('qzxveldra') && !oomReason.includes('umbrella') && !oomReason.includes('waltzing'), 'sanitized reason drops prompt echoes')
+  const oom = reduceJobPoll(baseJob, { kind: 'executionError', node: '84', nodeType: 'VAEDecodeTiled', reason: oomReason }, Date.now())
+  assert.equal(oom.transitionedTo, 'failed')
+  assert.ok(oom.job.error?.includes('node 84'), `error names the node id (got: ${oom.job.error})`)
+  assert.ok(oom.job.error?.includes('VAEDecodeTiled'), 'error names the node class')
+  assert.ok(oom.job.error?.includes('GPU memory exhausted'), 'known class appends the taxonomy label')
+  assert.ok(!oom.job.error?.includes('qzxveldra'), 'no prompt echo in the job error')
+  const unclassified = reduceJobPoll(baseJob, { kind: 'executionError', node: '7', nodeType: 'SomethingBespoke', reason: 'a very specific engine complaint 12' }, Date.now())
+  assert.ok(unclassified.job.error?.includes('node 7') && !unclassified.job.error?.includes('Likely cause'), 'unknown class leaves the taxonomy out of the line')
+
+  // extractExecutionError: pulls node id/class + sanitized reason out of a
+  // ComfyUI history entry's execution_error message tuple; absent/malformed
+  // shapes return null instead of guessing.
+  const historyWithError = {
+    p1: { status: { status_str: 'error', completed: false, messages: [
+      ['execution_start', { prompt_id: 'p1' }],
+      ['execution_error', { prompt_id: 'p1', node_id: '84', node_type: 'VAEDecodeTiled', exception_type: 'torch.OutOfMemoryError', exception_message: 'CUDA out of memory while rendering moonlit qzxveldra umbrella merchants waltzing' }],
+    ] } },
+  }
+  const extracted = extractExecutionError(historyWithError, 'p1')
+  assert.ok(extracted, 'execution_error message extracted')
+  assert.equal(extracted.node, '84')
+  assert.equal(extracted.nodeType, 'VAEDecodeTiled')
+  assert.ok(extracted.reason.includes('CUDA out of memory'), 'reason keeps the cause')
+  assert.ok(extracted.reason.includes('[redacted]'), 'reason shows redaction engaged')
+  assert.ok(!extracted.reason.includes('qzxveldra') && !extracted.reason.includes('umbrella'), 'prompt echo cannot survive extraction')
+  assert.equal(extractExecutionError(historyWithError, 'missing'), null, 'unknown prompt id → null')
+  assert.equal(extractExecutionError({}, 'p1'), null, 'empty history → null')
+  assert.equal(extractExecutionError({ p1: { status: { messages: [['execution_success', {}]] } } }, 'p1'), null, 'no execution_error message → null')
+  assert.equal(extractExecutionError({ p1: { status: { messages: ['not-a-tuple'] } } }, 'p1'), null, 'malformed message → null')
 
   // P1-6: completed-but-no-output spins at 98% for a bounded count, then fails.
   let spinning = baseJob
@@ -780,6 +817,140 @@ assert.equal(applyH3DialoguePolicy('Quiet scene.', false), 'Quiet scene.', 'H3 h
   assert.ok(sanitizeErrorMessage(longInput).length <= 200, 'sanitizeErrorMessage capped at ~200 chars')
   assert.ok(sanitizeError(new Error(longInput)).reason.length <= 200, 'sanitizeError reason capped at ~200 chars')
   assert.ok(sanitizeErrorMessage(longInput).includes('error'), 'cap keeps the leading signal')
+
+  // Bar 4 — comma-heavy prompt semantics inside an error wrapper (the
+  // "failed on a node because of a comma" bar): the wrapper's technical
+  // signal survives, every content clause collapses.
+  const wrapped = sanitizeErrorMessage('Prompt validation failed for node 13: "a windswept qzxveldra, barefoot in the surf, at golden hour, whispered to umbrella merchants"')
+  for (const token of ['failed', 'node', '13']) assert.ok(wrapped.includes(token), `wrapper signal lost: ${token} (got: ${wrapped})`)
+  for (const word of ['windswept', 'barefoot', 'surf', 'golden', 'whispered', 'merchants']) assert.ok(wrapped.toLowerCase().indexOf(word) === -1, `prompt clause leaked: ${word} (got: ${wrapped})`)
+}
+
+
+// ---- Failure taxonomy --------------------------------------------------------
+// classifyFailure maps SANITIZED structural reasons to human cause buckets —
+// ordered matchers, first match wins, unknown text never guesses.
+{
+  const taxonomy = load('src/lib/failureTaxonomy.ts')
+  const { classifyFailure, FAILURE_BUCKETS } = taxonomy
+  assert.equal(classifyFailure('CUDA out of memory').id, 'out-of-memory')
+  assert.equal(classifyFailure('torch.OutOfMemoryError [redacted] 2.19 GiB').id, 'out-of-memory')
+  assert.equal(classifyFailure('fetch failed').id, 'engine-unreachable')
+  assert.equal(classifyFailure('ECONNREFUSED connection refused 127.0.0.1 8188').id, 'engine-unreachable')
+  assert.equal(classifyFailure('ComfyUI request to /prompt timed out after 120 s.').id, 'timeout')
+  assert.equal(classifyFailure('Still rendering after 60 minutes with no completion.').id, 'timeout')
+  assert.equal(classifyFailure("ImportError: No module named 'nodes'").id, 'node-missing')
+  assert.equal(classifyFailure("Value not in list: 'euler_x'").id, 'validation')
+  assert.equal(classifyFailure('The render finished, but its output file never appeared in the output directory.').id, 'output-missing')
+  assert.equal(classifyFailure('Generation cancelled.').id, 'cancelled')
+  assert.equal(classifyFailure('something completely novel happened').id, 'unknown')
+  assert.equal(classifyFailure('').id, 'unknown', 'empty reason → unknown, never a crash')
+  // Precedence: the specific classes sit above their generic parents — an
+  // OOM that mentions a connection word classifies as out-of-memory.
+  assert.equal(classifyFailure('CUDA out of memory during connection handshake').id, 'out-of-memory')
+  // Every bucket is fully described (the view renders label + cause).
+  for (const id of Object.keys(FAILURE_BUCKETS)) {
+    assert.ok(FAILURE_BUCKETS[id].label.length > 0, `bucket ${id} has a label`)
+    assert.ok(FAILURE_BUCKETS[id].cause.length > 0, `bucket ${id} has a cause`)
+  }
+}
+
+
+// ---- Diagnostic report (PII-scrubbed by construction) ------------------------
+// buildDiagnosticReport turns structured fields into a pasteable plain-text
+// blob. The bar (task xyo4is4): canary prompt text planted in EVERY free-text
+// input cannot survive anywhere in the output; model names never appear;
+// same input → identical bytes.
+{
+  const reportModule = load('src/lib/diagnosticReport.ts')
+  const { runSanitizerSelfTest, buildDiagnosticReport, SELF_TEST_SENTINELS } = reportModule
+  const { sanitizeErrorMessage: sanitizeForReport } = load('src/lib/logSanitize.ts')
+
+  // The shipped self-test passes its own canaries.
+  const selfTest = runSanitizerSelfTest()
+  assert.equal(selfTest.cases.length, 5, 'five canary cases shipped')
+  assert.equal(selfTest.passed, true, 'self-test passes')
+  for (const one of selfTest.cases) {
+    assert.ok(one.output.includes('[redacted]'), `case ${one.name}: redaction engaged`)
+    for (const sentinel of SELF_TEST_SENTINELS) assert.ok(!one.output.includes(sentinel), `case ${one.name}: sentinel ${sentinel} leaked`)
+  }
+
+  const canary = 'moonlit qzxveldra umbrella merchants waltzing past Elinor in Lisbon at sunset over Kyoto'
+  const input = {
+    appVersion: '0.1.0',
+    osPlatform: 'Linux ' + canary,
+    generatedAt: 1760000000000,
+    engine: {
+      mode: 'external',
+      connected: true,
+      latencyMs: 12,
+      comfyVersion: '0.34.4',
+      testedComfyVersion: '0.33.9',
+      engineOs: 'Linux ' + canary,
+      pythonVersion: '3.12.7',
+      deviceName: 'RTX 4090 ' + canary,
+      vramTotalBytes: 24 * 1024 ** 3,
+    },
+    managedRuntime: { state: 'failed', profile: 'default', port: 8191, pid: 4242, health: 'unreachable', lastError: 'spawn failed: ' + canary, logTail: ['ERROR traceback /opt/ComfyUI/main.py line 84 ' + canary, 'raw engine line with no structure'] },
+    modelScan: [{ kind: 'diffusion_models', count: 3 }, { kind: 'text_encoders', count: 1 }, { kind: 'loras', count: 2 }],
+    jobCounts: { total: 7, completed: 4, failed: 2, cancelled: 1 },
+    failures: [
+      { id: 'f1', at: 1759999000000, provider: 'minimax', mode: 'text', reason: 'ComfyUI failed at node 84 (VAEDecodeTiled): ' + sanitizeForReport('torch.OutOfMemoryError: CUDA out of memory while rendering ' + canary) },
+      { id: 'f2', at: 1759998000000, provider: 'ltx25', mode: 'image', nodeType: 'VAEDecodeTiled', reason: 'CUDA out of memory' },
+    ],
+    doctor: { ranAt: 1759997000000, checks: [{ id: 'ffmpeg', label: 'FFmpeg', status: 'ok', detail: 'ffmpeg version 7.1.1-3 — ' + canary }] },
+    selfTest,
+  }
+  const report = buildDiagnosticReport(input)
+
+  // THE bar: no sentinel anywhere in the blob — planted in failures, log
+  // tail, lastError, doctor detail, OS, and device name.
+  for (const sentinel of SELF_TEST_SENTINELS) assert.ok(!report.includes(sentinel), `sentinel leaked into the report: ${sentinel}`)
+  assert.ok(!report.includes('moonlit'), 'canary headword absent')
+  assert.ok(report.includes('[redacted]'), 'redaction markers present')
+
+  // Structure: deterministic sections, versions readable, drift flagged.
+  assert.ok(report.startsWith('MiniMax Studio diagnostic report\n'), 'title line')
+  assert.ok(report.includes(`Generated: ${new Date(1760000000000).toISOString()}`), 'deterministic timestamp')
+  assert.ok(report.includes('App: 0.1.0 on'), 'app version readable (shape allow-list, not mangled)')
+  assert.ok(report.includes('[ENGINE]'))
+  assert.ok(report.includes('connected (external mode, 12 ms)'), 'connection + latency')
+  assert.ok(report.includes('Engine version: 0.34.4'), 'engine version readable')
+  assert.ok(report.includes('graphs verified against: 0.33.9'), 'verified version readable')
+  assert.ok(report.includes('DRIFT'), 'version drift flagged')
+  assert.ok(report.includes('24.0 GB VRAM'), 'VRAM total formatted')
+
+  // Model scan contributes counts only — custom file names never appear.
+  assert.ok(report.includes('[MODEL SCAN]'))
+  assert.ok(report.includes('diffusion_models: 3'), 'counts per kind')
+  assert.ok(!report.includes('safetensors'), 'no model file names in the report')
+
+  // Failure history: histogram over taxonomy buckets + sanitized rows.
+  assert.ok(report.includes('[FAILURE HISTORY]'))
+  assert.ok(report.includes('out-of-memory: 2'), 'histogram counts by bucket')
+  assert.ok(report.includes('ref=f1'), 'failure rows carry their ref id')
+  assert.ok(report.includes('Window summary: 7 tracked · 4 completed · 2 failed · 1 cancelled'), 'job-count summary')
+
+  // Doctor + self-test sections.
+  assert.ok(report.includes('[SETUP DOCTOR]'))
+  assert.ok(report.includes('OK   FFmpeg'), 'doctor rows status + label')
+  assert.ok(report.includes('[SANITIZER SELF-TEST]'))
+  assert.ok(report.includes('PASS — 5/5 canary cases scrubbed'), 'self-test verdict')
+
+  // Determinism: same input → byte-identical output.
+  assert.equal(buildDiagnosticReport(input), report, 'report is deterministic')
+
+  // Empty-state rendering: no failures, no runtime, no doctor.
+  const bare = buildDiagnosticReport({ appVersion: '0.1.0', osPlatform: 'linux', generatedAt: 1760000000000, engine: { mode: 'external', connected: false }, managedRuntime: null, modelScan: [], jobCounts: { total: 0, completed: 0, failed: 0, cancelled: 0 }, failures: [], doctor: null, selfTest })
+  assert.ok(bare.includes('offline (external mode)'), 'offline engine line')
+  assert.ok(bare.includes('Not active (external engine mode'), 'no managed runtime')
+  assert.ok(bare.includes('No models indexed.'), 'empty model scan')
+  assert.ok(bare.includes('No failed jobs recorded.'), 'no failures line')
+  assert.ok(bare.includes('Not run in this session'), 'doctor absent line')
+
+  // A FAILING self-test is reported loudly — the report says do-not-paste.
+  const failing = buildDiagnosticReport({ ...input, selfTest: { passed: false, cases: selfTest.cases.map((one) => ({ ...one, passed: false })) } })
+  assert.ok(failing.includes('FAIL — only 0/5'), 'failing self-test surfaces in the report')
 }
 
 
@@ -861,7 +1032,7 @@ function runComposerTests() {
 
 runComposerTests()
 runKernelTests().then(() => {
-  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the H3 no-dialogue emission (ambience bed, silent score field, retained negation, OFF-state inertness), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference), ContactSheet character sheets (topology, LoRA inference, size clamps, views-first attribution), graph-family versioning + looseness presets, the Z-Image ControlNet Union graph (pin names, native canny, aux preprocessors, mask, image-sized latent), the pure error sanitizer (prompt-text redaction bar, technical-message preservation, stack-path extraction, length cap, fallback constant), and the layered LLM prompt composer (verbatim seed fragments, NULL-wildcard specificity ranking, 8-layer composition, content-neutral style trio, target-engine rows, user overrides)')
+  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction (incl. structural execution-error capture: node id/class + sanitized reason + taxonomy label), quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the H3 no-dialogue emission (ambience bed, silent score field, retained negation, OFF-state inertness), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference), ContactSheet character sheets (topology, LoRA inference, size clamps, views-first attribution), graph-family versioning + looseness presets, the Z-Image ControlNet Union graph (pin names, native canny, aux preprocessors, mask, image-sized latent), the pure error sanitizer (prompt-text redaction bar, comma-clause redaction, technical-message preservation, stack-path extraction, length cap, fallback constant), the failure taxonomy (ordered human-cause buckets over sanitized reasons), and the diagnostic report (canary-proof blob by construction, version shape allow-list, model-scan counts only, failure histogram by bucket, deterministic output, sanitizer self-test verdict)')
 }, (error) => {
   console.error(error)
   process.exitCode = 1

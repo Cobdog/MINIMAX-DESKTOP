@@ -22,6 +22,7 @@ import WebSocket from 'ws'
 import { FILMSTRIP_CELL_WIDTH, FILMSTRIP_FPS, filmstripLayout } from '../src/media/filmstripLayout'
 import type { AppSettings, GpuTelemetry, LanStatus, ModelKind } from '../src/types'
 import { failureRef, logEvent, logFailure } from './logger'
+import { sanitizeErrorMessage } from './logSanitize'
 import { createStudioRepository, type StudioRepository } from './repo'
 import { createRealtimeHub, type RealtimeHub } from './realtime'
 import { EngineProcess } from './engineProcess'
@@ -159,6 +160,33 @@ async function comfyFetch(url: string, path: string, init?: RequestInit) {
   } finally {
     clearTimeout(timeout)
   }
+}
+
+/** Reduces a ComfyUI /prompt rejection body to the structural failure signal:
+ *  per-node validation detail (node id + the engine's short reason, each
+ *  fragment sanitized). Non-JSON bodies fall through to whole-text
+ *  sanitization — either way no raw engine text crosses to the client. */
+function structuralPromptError(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw) as {
+      node_errors?: Record<string, { errors?: Array<{ details?: unknown; extra_info?: { error_message?: unknown } }> }>
+    }
+    const nodeErrors = parsed.node_errors
+    if (nodeErrors && typeof nodeErrors === 'object') {
+      const ids = Object.keys(nodeErrors)
+      const lines: string[] = []
+      for (const id of ids.slice(0, 6)) {
+        const errors = Array.isArray(nodeErrors[id]?.errors) ? nodeErrors[id].errors : []
+        const first = errors[0] as { details?: unknown; extra_info?: { error_message?: unknown } } | undefined
+        const detail = typeof first?.details === 'string' ? first.details : ''
+        const message = typeof first?.extra_info?.error_message === 'string' ? first.extra_info.error_message : ''
+        const text = sanitizeErrorMessage([detail, message].filter(Boolean).join(': '))
+        if (text) lines.push(`node ${id}: ${text}`)
+      }
+      if (lines.length) return `Graph validation failed — ${lines.join('; ')}${ids.length > 6 ? ` (+${ids.length - 6} more nodes)` : ''}`
+    }
+  } catch { /* not JSON — whole-text sanitization below */ }
+  return sanitizeErrorMessage(raw)
 }
 
 function comfyChoices(info: Record<string, unknown>, node: string, field: string) {
@@ -1150,8 +1178,20 @@ export function createStudioServer(paths: StudioServerPaths) {
           await llm.unloadBeforeGeneration().catch((unloadFailure: unknown) => {
             logFailure('llm/unload-before-generate', unloadFailure, undefined, 'debug')
           })
-          const result = await comfyFetch(settings.comfyUrl, '/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: body.prompt, client_id: clientId }) })
-          return sendJson(response, 200, result)
+          try {
+            const result = await comfyFetch(settings.comfyUrl, '/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: body.prompt, client_id: clientId }) })
+            return sendJson(response, 200, result)
+          } catch (upstream) {
+            // The upstream body is EXTERNAL text (a ComfyUI validation or
+            // server error — it can echo input values): it never reaches the
+            // client raw. The structural 400 carries the sanitized reason
+            // (node ids, classes, statuses survive) plus a log-correlation
+            // ref, matching the structural-500 contract one layer up.
+            const ref = failureRef()
+            logFailure('comfy/prompt', upstream, { ref })
+            const raw = upstream instanceof Error ? upstream.message : String(upstream)
+            return sendJson(response, 400, { error: structuralPromptError(raw) || 'The engine rejected the prompt.', stage: 'comfy/prompt', ref })
+          }
         }
         // LEGACY (wave 0 SSE bridge): one upstream ComfyUI WebSocket per SSE
         // client, binary previews base64-wrapped. Kept functional through

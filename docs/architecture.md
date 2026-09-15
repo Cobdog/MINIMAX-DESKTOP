@@ -96,7 +96,7 @@ Job state transitions live in the pure reducer `src/lib/jobReducer.ts` (terminal
 
 | Layer | Modules | What lives there |
 | --- | --- | --- |
-| `src/views/` | `CreateView`, `LibraryView`, `JobsView`, `SettingsView` | One component per nav destination + its private helpers (reference pickers, strips, modals) |
+| `src/views/` | `CreateView`, `LibraryView`, `JobsView`, `SettingsView`, `DiagnosticsView` | One component per nav destination + its private helpers (reference pickers, strips, modals) |
 | `src/hooks/` | `useStudioSession` | Settings load, model scanning, ComfyUI connection/object-info, LLM model list (router/Ollama), GPU telemetry |
 | | `useGenerationQueue` | Job persistence, guarded history polling, deadline sweep, cancellation |
 | | `useCreateWorkspace` | Every persisted Create field, the character/wardrobe/location libraries, reference binding and ordering, media picking, reset |

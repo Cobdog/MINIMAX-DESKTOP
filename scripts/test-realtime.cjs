@@ -301,16 +301,19 @@ async function main() {
     client.send({ ch: 'llm', type: 'generate', reqId: 'llm-1', payload: { endpoint: `http://127.0.0.1:${llmPort}`, model: 'mock', messages: [{ role: 'user', content: 'hi' }] } })
     let text = ''
     const check = () => {
-      const done = client.envelopes.find((envelope) => envelope.ch === 'llm' && envelope.payload.reqId === 'llm-1' && envelope.type === 'done')
-      const failed = client.envelopes.find((envelope) => envelope.ch === 'llm' && envelope.payload.reqId === 'llm-1' && envelope.type === 'error')
-      if (done) { clearTimeout(deadline); resolve({ text, done }); return }
-      if (failed) { clearTimeout(deadline); reject(new Error(`llm error: ${failed.payload.error}`)); return }
+      // Drain unseen token envelopes BEFORE testing for done — the final
+      // delta can land in the same 40 ms tick as the done envelope, and
+      // checking done first would resolve with the last token missing.
       for (const envelope of client.envelopes) {
         if (envelope.ch === 'llm' && envelope.payload.reqId === 'llm-1' && envelope.type === 'token' && !envelope.seen) {
           envelope.seen = true
           text += envelope.payload.delta
         }
       }
+      const done = client.envelopes.find((envelope) => envelope.ch === 'llm' && envelope.payload.reqId === 'llm-1' && envelope.type === 'done')
+      const failed = client.envelopes.find((envelope) => envelope.ch === 'llm' && envelope.payload.reqId === 'llm-1' && envelope.type === 'error')
+      if (done) { clearTimeout(deadline); resolve({ text, done }); return }
+      if (failed) { clearTimeout(deadline); reject(new Error(`llm error: ${failed.payload.error}`)); return }
       setTimeout(check, 40)
     }
     check()

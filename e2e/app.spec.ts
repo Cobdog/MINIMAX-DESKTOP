@@ -45,6 +45,7 @@ const VIEW_HEADINGS: Array<[label: string, heading: RegExp]> = [
   ['Library', /Library/i],
   ['Clip editor', /Clip|Editor/i],
   ['Settings', /Settings/i],
+  ['Diagnostics', /Diagnostics/i],
 ]
 
 test('boots to the Create view with the studio shell', async ({ page }) => {
@@ -152,8 +153,52 @@ test('Settings renders the LLM router section with the Ollama fallback state', a
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
-test('mobile companion view boots alongside the studio', async ({ page }) => {
+// Diagnostics suite (task xyo4is4): the PII-scrubbed surface renders
+// engine-independently, builds its report from structured fields only,
+// copies it through the (permission-granted) clipboard, and saves it as a
+// local download — no network beyond this app's own server, nothing leaves
+// the machine.
+test('diagnostics view renders, builds a scrubbed report, and copies it', async ({ page }) => {
   const problems = await trackErrors(page)
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.goto('/')
+  await page.getByRole('button', { name: /diagnostics/i }).first().click()
+  await expect(page.getByRole('heading', { name: /diagnostics/i })).toBeVisible()
+
+  // Sections render (engine state is environment-dependent: the e2e server
+  // has no engine on CI, but a dev box may expose one on the default port).
+  const engineSection = page.locator('section[aria-label="Engine"]')
+  await expect(engineSection.locator('.health-pill')).toHaveText(/offline|connected/i)
+  await expect(page.locator('section[aria-label="Sanitizer self-test"] .health-pill')).toHaveText(/pass/i)
+
+  // The report blob exists, is scrubbed by construction, and carries the
+  // deterministic section skeleton.
+  const preview = page.locator('.diagnostics-report-preview')
+  await expect(preview).toBeVisible()
+  const text = await preview.innerText()
+  expect(text).toContain('MiniMax Studio diagnostic report')
+  expect(text).toContain('[ENGINE]')
+  expect(text).toContain('external mode')
+  expect(text).toContain('[MODEL SCAN]')
+  expect(text).toContain('[SANITIZER SELF-TEST]')
+
+  // Copy: the clipboard receives exactly the previewed (scrubbed) blob.
+  await page.getByRole('button', { name: /copy report/i }).click()
+  await expect(page.locator('.llm-test-result')).toContainText(/copied/i)
+  const copied = await page.evaluate(() => navigator.clipboard.readText())
+  expect(copied.startsWith('MiniMax Studio diagnostic report')).toBe(true)
+  expect(copied).toContain('[SETUP DOCTOR]')
+
+  // Save: the report lands as a local file download, no server round trip.
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: /save report/i }).click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toMatch(/^minimax-diagnostics-.*\.txt$/)
+
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('mobile companion view boots alongside the studio', async ({ page }) => {  const problems = await trackErrors(page)
   await page.goto('/?mobile=1')
   await expect(page.locator('.mobile-app, main').first()).toBeVisible()
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
