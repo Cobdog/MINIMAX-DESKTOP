@@ -42,12 +42,16 @@ Note: rows 3, 4, 7 extend the north star's unit ("intent → running job") to
 tool/inspection actions generally — itself a proposal requiring maintainer
 confirmation.
 
-**The inheritance line (corrected per audit):** clean slate means a new SHELL
-— launcher, navigation model, attention surfaces, per-engine destination views
-(§5.4, pending ledger closure) — while the app's capability survives via
-absorb-or-keep: of the inventory's 72 rows, 28 re-home into the canvas model,
-29 survive shell-free as infrastructure, and only 3 (the nav model itself) are
-removed. Migration is **re-homing + unwinding singleton state**, not rewriting
+**The inheritance line (v0.2.1 — SEED class restored, L4-dependence made
+explicit):** clean slate means a new SHELL — launcher, navigation model,
+attention surfaces — replacing, among other things, the per-engine destination
+views **if and only if ledger row L4 closes yes** (engines-as-ops). The app's
+capability survives through three channels, closing the inventory's full 72
+rows: **28 REFACTOR-ABSORB** (re-home into the canvas model), **29 KEEP**
+(survive shell-free as infrastructure), **12 SEED** (become explicit inputs to
+the new build — the substrate, op-stack chips, projection soul, crop data,
+prompt editor, filmstrip layout), and **3 REMOVE** (the nav model itself).
+Migration is **re-homing + unwinding singleton state**, not rewriting
 capability. The spec's job: define the new shell precisely and name the
 landing spot for every absorbed capability.
 
@@ -57,8 +61,9 @@ landing spot for every absorbed capability.
 2. Everything seen is a projection of the document (chains/forks/takes);
    edits are ops in stacks; sources are never silently altered. (Item 2 +
    takes/fork locks.)
-3. Relationships are authored by selection, visualized for free — never
-   hand-wired. (Item 2; binding-without-wiring proven in-app.)
+3. Relationships are authored by selection, visualized for free — **no hand
+   wiring in v1** (the lock names hand wiring a possible LATER feature, not a
+   v1 one). (Item 2; binding-without-wiring proven in-app.)
 4. **A queue that fails silently is worse than no queue** (the UX research's
    strongest rule). Failure contract: (a) failure state is durable ON the
    object until dismissed; (b) off-screen events ping the radar; (c) the
@@ -69,8 +74,10 @@ landing spot for every absorbed capability.
    gates framing.)
 6. Everything saved, always. (Multi-canvas session lock.)
 7. Curation is celebrated; takes are compared in context; operate→settings
-   runs immediately and adjusts. (The two research steal patterns — Auditions
-   and Operate→Settings — added per audit M9.)
+   runs immediately and adjusts — **scoped to unlocked working contexts**:
+   locked chains and downstream propagation remain consent-gated per
+   principle 5. (The two research steal patterns — Auditions and
+   Operate→Settings — added per first-audit M9; scoping per second-audit S6.)
 
 ---
 
@@ -86,7 +93,16 @@ reference-sets vs takes alignment** (inventory Q8 — one model, not two);
 **macro/chain-template records** (inventory Q6 — same machinery serves
 Director-Suite shot emission); sessions (open canvases, camera positions,
 always-autosave); blob discipline (media + latents on disk, references in
-DB); FTS surfaces (palette, index).
+DB); FTS surfaces (palette, index); **control-track policy** (research
+recommendation: one control track per shot + optional inpaint mask — carry as
+model constraint); **undo/history semantics for op stacks** (per-op undo,
+stack reordering, bake irreversibility marker — second-audit S10); **per
+decisions audit (yhepvdi): document-level soft-delete/tombstones (F5),
+failure-propagation semantics + partial-take validation (F6), blob
+content-hash + re-link flow (F8), schemaVersion + append-only document
+migrations + loud-fail on unknown-newer (F9), chain hop-count + drift metrics
+(F1), cross-project asset scope decision (F3)** — all schema-blocking or
+schema-shaping; none decided yet.
 
 ## 3. Canvas surface architecture (stub)
 
@@ -110,7 +126,12 @@ multi-canvas session); spatial per-job state (failure contract §1.4, seed
 tile); titlebar radar (aggregate; click = zoom-to-attention); summonable
 index; contextual bottom-bar contexts (not "modes"); **notice-routing
 policy** (inventory Q9: what is durable-on-object vs radar vs ambient toast
-— absorbed flows must stop toast-spamming on-canvas state).
+— absorbed flows must stop toast-spamming on-canvas state); **concurrency
+policy L26: queued-for-GPU as a first-class on-object state with radar
+semantics — the queue's honest shape on a single 24GB card**; **projections
+inherit the attention/failure contracts (audit F7): timeline and library
+surfaces render failure/staleness/queued states and navigate via radar —
+the no-silent-failure rule applies everywhere work is visible**.
 
 ## 5. Tool families (stubs)
 
@@ -121,9 +142,10 @@ policy** (inventory Q9: what is durable-on-object vs radar vs ambient toast
   (canny/depth/HED/MLSD/pose/mask) from media or scratch, all-or-selected;
   the **IK pose rig** (2.5D three.js viewport, palette-exact renderer);
   non-human skeletons pending E-FC1; trajectory-plan UI pending E-MD1.
-- **5.3 Camera editor** (locked placement: canvas-phase component; compiler
-  port is ecosystem work — Flux ving89w split question in the maintainer
-  review list).
+- **5.3 Camera editor** (locked placement per directive b309fad7: the editor
+  is a canvas-phase component; the compiler port is its own in-repo task
+  ving89w — whose scope split relative to this epic is staged for the
+  maintainer on task 0rtwaj4).
 - **5.4 Engines-as-ops** (engines are op choices, not destinations —
   **pending ledger closure**, row L4).
 - **5.5 Prompt surfaces**: SmartPromptEditor as the universal prompt field
@@ -179,17 +201,34 @@ section. Closed when the maintainer decides; deferred rows need rationale.
 | L18 | Seed input-node visibility once populated | §3 | stays visible as chain head (identity + "why this exists") | OPEN |
 | L19 | Option-menu ranking (generation vs utility ops) | §3 | recency + type-naturalness, category visible | OPEN |
 | L20 | Backwards-authoring v1 scope | §3 | "what can extend/produce this" only; target-seeking later | OPEN |
-| L21 | Lock granularity confirmation | §2 | chain-level (assumed from maintainer phrasing; uncontradicted) | OPEN-confirm |
+| L21 | Lock granularity | §2 | chain-level — **RESOLVED in the register (2026-09-14, twice: takes-model block + canvases resolution); recorded here for completeness** | RESOLVED |
 | L22 | "Decompose an output" v1 primitive | §5.1 | frame-extraction v1 (one candidate); shot-split/latent-split later | OPEN |
 | L23 | Budget-unit extension (tool/find/summon rows) | §1 | extend as proposed | OPEN |
 | L24 | Floating-inspector behavior | §3/§5 | floats freely, follows selection optionally | OPEN |
+| L25 | **Placement policy for batch/new outputs** (adjacency default vs clusters vs grid; the direction doc's open placement question, inventory row 16) | §3 | adjacency-near-parent default + cluster-on-batch-completion; confirm | OPEN |
+| L26 | **Concurrency / GPU-arbitration policy** (decisions audit F2 — most dangerous missing: serialize vs interleave, "queued-for-GPU" as on-object state + radar semantics, VRAM arbitration; the #14076 canary decides) | §4 | serialize generations by default (1 active), queued-for-GPU as first-class object state, interleave only after benchmark | **DECIDED (maintainer, 2026-09-14): assistant's pick approved** |
+| L27 | **Cross-project asset scope** (audit F3: libraries are global today, one-canvas-per-project isolates — where do shared characters/locations live?) | §2 | global asset store above projects + explicit fork-into-project (consent-gate pattern) | OPEN |
+| L28 | **Drift-envelope counterpart for chains** (audit F1: measured ~0.06 ArcFace/hop, chains ≤4–6 windows — the UI must surface drift budgets; Item 4 gap default) | §3/§6 | chain hop-count + per-hop drift metrics in schema; drift-budget in a semantic-zoom band; reset-as-op (hard-cut + fresh refs = documented identity reset); Director gaps default hard-cut/NLE, bridges opt-in pending E1/E7 | **DECIDED (maintainer, 2026-09-14): assistant's pick approved** |
+| L29 | **Retention tiers + document trash + session pruning** (audit F5: 20–40MB/take at working res; canonical+locked always-resident, priors evictable-with-marker, GC over fork edges; soft-delete tombstones for chains/canvases/projects; **maintainer addition: the ability to PRUNE everything attached to a session**) | §2 | as recommended + session-scoped prune affordance (bulk-evict a session's non-canonical, non-locked takes); GC liveness must respect live fork references; trash = soft-delete + restore | **DECIDED (maintainer, 2026-09-14): trash + session-prune required** |
+| L30 | **Failure propagation / partial completion** (audit F6: plan executes 10 chains, shot 7 fails — spawn/block/skip; is a crashed generation's half-written latent a take or garbage?) | §2/§4 | semantics table + partial-take validation + rerun-storm serialization (ties to L26) | OPEN |
+| L31 | **Blob durability / re-link** (audit F8: files move; detect→degrade→re-link flow, content-hash on ingest, placeholder failure state) | §2 | as recommended | OPEN |
+| L32 | **Project import/export** (audit F11: DB rows + blob tree — cheap now, painful bolted on) | §8 | define the archive format early even if export UI is later | OPEN |
 
 ## 10. Acceptance (how this spec completes)
 
-Every section individually blessed; **§9 ledger complete against BOTH sources
-(the pre-brainstorm parked list and the inventory's ten) — verified by
-enumeration, not assertion**; every row closed or explicitly deferred with
-rationale; the interaction-budget table confirmed per section; migration
-phases verified against the inventory's dependency register; the schema spec
-(o0xw49r) reviewed in the same window so model and surface never contradict.
-Build tasks are then cut from this spec under epic vbrstja.
+Every section individually blessed; **§9 ledger complete against BOTH sources,
+demonstrated by enumeration** — pre-brainstorm parked list (11 items):
+latent-blocks→L9, presets→L2, timeline→RESOLVED-in-register, engine-views→L4,
+canvases→RESOLVED-in-register, screen-size→L5, palette→L6, Focus→L7,
+modal-live→L3, inline-chips→L8, + the register's own open sub-questions
+(lock-granularity→L21-RESOLVED, placement→L25, option-ranking→L19,
+backwards-v1→L20, multi-substrate→L17, seed-visibility→L18); inventory's ten:
+mobile→L10, keyboard→§7, playback→L1, export→L16, prompt-library→L11,
+macros→L12, keyframe-guides→§2, ref-sets→L13, notice-routing→L14,
+chips→L15; plus budget-unit→L23, decompose→L22, inspector→L24 = **25 rows +
+2 sections, both sources fully mapped, zero orphans**; every OPEN row closed
+or explicitly deferred with rationale; the interaction-budget table confirmed
+per section; migration phases verified against the inventory's dependency
+register; the schema spec (o0xw49r) reviewed in the same window so model and
+surface never contradict. Build tasks are then cut from this spec under epic
+vbrstja.
