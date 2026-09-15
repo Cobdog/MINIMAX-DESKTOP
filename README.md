@@ -37,11 +37,13 @@ chunk-size advisories, pnpm bookkeeping — the tally is printed so nothing
 disappears silently), and a final summary table. Non-zero exit on any
 failure; a failed `build` skips only its dependents (smoke/e2e/vision).
 
-Order: `typecheck` → `lint` → `test` → `test:registry` → `test:storage` →
-`test:realtime` → `test:filmstrip` → `test:llm` → `test:engine` →
-`test:runtime` → `build` → `smoke:server` → e2e (Playwright) →
+Order: `typecheck` → `lint` → `license:audit` → `test` → `test:registry` →
+`test:storage` → `test:realtime` → `test:filmstrip` → `test:llm` →
+`test:engine` → `test:runtime` → `build` → `smoke:server` → e2e (Playwright) →
 vision-capture (Playwright). `pnpm test:all` is the same chain without the
-harness niceties.
+harness niceties. `license:audit` classifies every direct dependency's SPDX
+against the AGPLv3 allowlist and enforces the never-vendor-what-we-can't-ship
+registry invariant (see [docs/LICENSES.md](docs/LICENSES.md)).
 
 ### System Chromium (no bundled browser)
 
@@ -200,6 +202,7 @@ Reference downloads and node documentation are maintained by [Comfy-Org's ACE-St
 | Doc | Contents |
 | --- | --- |
 | [docs/architecture.md](docs/architecture.md) | Server + SPA process model, API surface, generation pipeline |
+| [docs/LICENSES.md](docs/LICENSES.md) | Third-party license inventory (deps, vendored, user-fetch, weights), AGPL mechanics, headers policy, VDN-patch analysis |
 | [docs/inventory.md](docs/inventory.md) | Exhaustive file/feature/dependency census (pre-migration) |
 | [docs/audit/code-quality-audit.md](docs/audit/code-quality-audit.md) | Adversarial review: P0–P3 findings, top-10 fixes |
 | [docs/audit/security-audit.md](docs/audit/security-audit.md) | Threat model, findings, hardening priorities |
@@ -216,4 +219,6 @@ Reference downloads and node documentation are maintained by [Comfy-Org's ACE-St
 
 ## License
 
-**GNU AGPLv3** — see [LICENSE](LICENSE). Copyleft in both directions: use it, host it, build on it, but share your source. The fork lineage and licensing rationale are documented in [docs/PROVENANCE.md](docs/PROVENANCE.md). Content-neutral by design: no filters, no gating, no telemetry — what people create is their business, not the tool's.
+**GNU AGPLv3** — see [LICENSE](LICENSE). Copyleft in both directions: use it, host it, build on it, but share your source. The fork lineage and licensing rationale are documented in [docs/PROVENANCE.md](docs/PROVENANCE.md), and the complete third-party inventory (dependencies, vendored packs, user-fetch components, model-weight licenses) lives in [docs/LICENSES.md](docs/LICENSES.md). Content-neutral by design: no filters, no gating, no telemetry — what people create is their business, not the tool's.
+
+**Source offer (AGPL §13).** The server serves the web app over HTTP, so network-interaction terms apply. The canonical source is this repository — <https://github.com/Cobdog/MINIMAX-DESKTOP>. If you run a modified copy for others over a network, offer them your Corresponding Source (a link to your fork satisfies this); the in-app notice in Settings → License & source carries the same link.

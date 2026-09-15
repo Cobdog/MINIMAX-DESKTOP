@@ -112,6 +112,63 @@ Adding a feature is a one-file change: a workspace field goes in `useCreateWorks
 - **Browser localStorage (per browser):** ~20 keys — workspace state, jobs (last 100), movie projects + undo history, clip projects, frame bookmarks, six library collections. Libraries signal changes via `window` CustomEvents; saves route through `persistToLocalStorage` (`src/lib/libraryStorage.ts`) which survives quota exhaustion by scrubbing inline previews
 - **Disk (output directory):** FFmpeg artifacts (reference clips, extracted frames, joined videos, character references) in named subfolders
 
+## Third-party components & the user-fetch pattern
+
+The full inventory (SPDX per component, consumption class, obligations) lives
+in [LICENSES.md](LICENSES.md); the policy rationale and fork lineage in
+[PROVENANCE.md](PROVENANCE.md). This section is the builder-facing rule: what
+the pattern IS, because every future component integration must follow it.
+Implementation: `server/engineNodes.ts` (registry + install machinery),
+`server/enginePatch.ts` (consent patch tier), Settings → Node packs /
+Managed engine (UI).
+
+**The license gate (absolute, and machine-checked):**
+
+- Only permissive-licensed code (Apache-2.0 / MIT / ISC-class) may be
+  **vendored** into `vendor/nodes/`, at a pinned revision, with the LICENSE
+  file shipped in the tree.
+- **NO-LICENSE** (all-rights-reserved by default) and **GPL-family**
+  components are **never vendored** — GPL-3.0 would be combining-compatible
+  with our AGPLv3, but vendoring third-party GPL code couples our releases to
+  contributor sets we don't control; policy is pattern-adopt / re-implement,
+  install via user-fetch only. `pnpm license:audit` (gate + CI) fails the
+  build if a non-permissive registry entry is `installMode: 'vendor'`.
+
+**User-fetch flow (what a builder must preserve):**
+
+1. **Registry entry first.** Every pack the managed runtime can install is a
+   `NodePackDefinition` in `ENGINE_NODE_PACKS` with an explicit `licenseSpdx`
+   verdict (recorded in the entry's comment when non-obvious), a pinned
+   revision, and an `installMode`. No pack reaches an install path except
+   through the registry.
+2. **Consent.** Nothing is installed without the user acting: today the user
+   nominates a local directory holding the pack (the network
+   clone-on-consent fetcher is a later increment); then confirms. The
+   Settings row shows the SPDX badge at consent time — NO-LICENSE renders
+   with a warning class.
+3. **Weights link, never copy.** Pack-carried weight files and any weight the
+   studio places into a model root go through `linkNeverCopy()`
+   (symlink → junction → hardlink → refuse with a reason). A copy is never
+   the fallback; a refused link fails the install (staged-then-rename, so no
+   half pack survives).
+4. **Pin recording.** The install marker (`.studio-node.json`) records id +
+   pinned revision; a registry pin bump is a delete-and-reinstall, never a
+   merge. A foreign `custom_nodes/<name>` the studio did not place is
+   refused, never silently replaced. (Known gap: the facok entry's pin is the
+   `main` branch — the network fetcher must stamp the fetched HEAD SHA.)
+5. **Uninstall = delete the folder.** Marker-only installs never touch
+   anything outside `custom_nodes/<name>`; linked weights in model roots are
+   links — removing the pack leaves the user's own files alone.
+
+**Consent patches (core-file tier).** The one class of optimization that
+cannot ride the `custom_nodes/` seam — a core-file hook — lives in
+`server/enginePatch.ts` under stricter rules: nothing applies unless
+`settings.engine.patches[id].consented` is true (the RuntimeManager hook
+path is the only production caller); layout-detect refuses unknown layouts;
+ast/structural validation before commit; atomic write; pristine backup with
+revert. We never ship pre-applied patches — the patcher runs user-locally
+only (distribution analysis in LICENSES.md §8).
+
 ## Development
 
 ```bash
@@ -127,15 +184,17 @@ pnpm test:vision    # vision phase 1 (capture): screenshot bundle + rubrics unde
                     # test-results/vision/<run-id>/ — judging is a subagent step
                     # (scripts/vision-e2e/JUDGE.md), then `pnpm vision:report`
 pnpm test:all       # unit + E2E + smoke + vision capture
-pnpm gate           # the full chain through one harness: typecheck, lint, unit
-                    # suites, build, smoke, e2e, vision capture — timed, noise-
-                    # filtered, one summary table (see README → Testing)
+pnpm gate           # the full chain through one harness: typecheck, lint,
+                    # license:audit, unit suites, build, smoke, e2e, vision
+                    # capture — timed, noise-filtered, one summary table
+                    # (see README → Testing)
 ```
 
-CI (`.github/workflows/ci.yml`) runs typecheck, lint, unit, build, smoke, E2E
-and the vision capture on every push and PR (no browser downloads — the
-Playwright config launches the runner's system Chromium); the Windows Engine
-CI leg covers the server build + engine/runtime suites.
+CI (`.github/workflows/ci.yml`) runs typecheck, lint, the license audit,
+unit, build, smoke, E2E and the vision capture on every push and PR
+(no browser downloads — the Playwright config launches the runner's system
+Chromium); the Windows Engine CI leg covers the server build + engine/runtime
+suites.
 
 ## Known debts / follow-ups
 

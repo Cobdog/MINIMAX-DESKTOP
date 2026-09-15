@@ -36,6 +36,17 @@ is the completion of the rewrite — the diff is the evidence.
 
 ## Vendor and third-party handling
 
+The complete, machine-checkable inventory — every dependency, vendored pack,
+user-fetch component, and model-weight license with its obligations — lives in
+[docs/LICENSES.md](LICENSES.md); `pnpm license:audit` (part of the gate and CI)
+re-derives the dependency table, re-checks vendored LICENSE files, and enforces
+the never-vendor-what-we-can't-ship rule below. Summary of that file's
+findings (verified 2026-09-14): all 26 direct dependencies are permissive
+(MIT × 23, Apache-2.0 × 2, ISC × 1) and AGPLv3-compatible; the sample of
+research-doc license claims re-checked against the GitHub/HF APIs held, with
+one correction recorded there (karuvanan's Director-Cut-Studio carries an MIT
+LICENSE file; T8mars is precisely GPL-3.0-or-later).
+
 - All runtime dependencies (MIT/Apache-2.0/ISC/GPL-compatible) are compatible with
   AGPLv3.
 - **We never vendor code we can't ship.** Anything with a restrictive license —
@@ -52,6 +63,7 @@ is the completion of the rewrite — the diff is the evidence.
 | Payload | Source | Pinned revision | License (SPDX) | Notes |
 |---|---|---|---|---|
 | `vendor/nodes/ComfyUI-VDN-H3/` | `Saganaki22/ComfyUI-VDN-H3` | `3eb63496c24ca70faaf8a14b6c75fcb480e34bf1` (2026-09-12, "Fix OpenVDN adapter metadata loading and bump to 1.5.2") | Apache-2.0 | Vendored 2026-09-14 (task 3ay7wbz increment 2). Functional content verbatim; excluded at vendor time: `.git/`, `.github/`, `assets/` (demo videos), `example_workflows/*.png` (screenshots) — none functional. VDN checkpoints (~4.3 GB) are NOT vendored: they download from Hugging Face and land as links in the user's model roots. |
+| `server/enginePatch.ts` patch-content constants (`RUN_BLOCKS`, `HOOK_LOOP`) + installer discipline | the maintainer's ComfyUI-VDN-H3-24GB fork, `tools/install_minimax_block_loop_hook.py` | fork @ local scratchpad (not a published pin) | Apache-2.0 (fork's license); GPL-3.0 second reading analyzed in [LICENSES.md §8](LICENSES.md) | Verbatim port with attribution (in-file header). NOT a distribution of ComfyUI: the patch applies only at runtime, on the user's machine, behind an explicit consent record, reversible from a pristine backup. We never ship a pre-patched file. |
 
 License verdicts recorded by the same increment (registry entries in
 `server/engineNodes.ts` carry them as data):

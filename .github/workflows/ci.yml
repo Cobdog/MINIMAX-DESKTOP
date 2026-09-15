@@ -20,6 +20,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
+      # License audit (task 68rnn84): dep SPDX classification + the
+      # never-vendor-what-we-cannot-ship registry invariant.
+      - run: pnpm license:audit
       - run: pnpm test
       - run: pnpm build
       - run: pnpm smoke:server

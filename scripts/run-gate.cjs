@@ -40,6 +40,10 @@ const MINUTE = 60_000
 const SUITES = [
   { name: 'typecheck', command: 'pnpm run typecheck', timeoutMs: 10 * MINUTE },
   { name: 'lint', command: 'pnpm run lint', timeoutMs: 10 * MINUTE },
+  // License audit (task 68rnn84): dependency SPDX classification + the
+  // never-vendor-what-we-can't-ship registry invariant. Docs-only duty —
+  // runs before the heavy suites so a red license state is visible early.
+  { name: 'license:audit', command: 'pnpm run license:audit', timeoutMs: 2 * MINUTE },
   { name: 'test', command: 'pnpm run test', timeoutMs: 20 * MINUTE },
   { name: 'test:registry', command: 'pnpm run test:registry', timeoutMs: 20 * MINUTE },
   { name: 'test:storage', command: 'pnpm run test:storage', timeoutMs: 20 * MINUTE },
