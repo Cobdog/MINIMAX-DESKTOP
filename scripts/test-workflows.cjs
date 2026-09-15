@@ -895,7 +895,7 @@ assert.equal(applyH3DialoguePolicy('Quiet scene.', false), 'Quiet scene.', 'H3 h
     modelScan: [{ kind: 'diffusion_models', count: 3 }, { kind: 'text_encoders', count: 1 }, { kind: 'loras', count: 2 }],
     jobCounts: { total: 7, completed: 4, failed: 2, cancelled: 1 },
     failures: [
-      { id: 'f1', at: 1759999000000, provider: 'minimax', mode: 'text', reason: 'ComfyUI failed at node 84 (VAEDecodeTiled): ' + sanitizeForReport('torch.OutOfMemoryError: CUDA out of memory while rendering ' + canary) },
+      { id: 'f1', at: 1759999000000, provider: 'minimax', mode: 'text', reason: 'ComfyUI failed at node 84 (VAEDecodeTiled): ' + sanitizeForReport('torch.OutOfMemoryError: CUDA out of memory while rendering ' + canary), graph: { family: 'studio-2026-09', topologyHash: 'fnv1a-ab12cd34', seed: 12345, steps: 20, turbo: '8', sampler: 'res_multistep', scheduler: 'simple', resolution: '1344x768', frameCount: 121, references: '3i/1v/0a' } },
       { id: 'f2', at: 1759998000000, provider: 'ltx25', mode: 'image', nodeType: 'VAEDecodeTiled', reason: 'CUDA out of memory' },
     ],
     doctor: { ranAt: 1759997000000, checks: [{ id: 'ffmpeg', label: 'FFmpeg', status: 'ok', detail: 'ffmpeg version 7.1.1-3 — ' + canary }] },
@@ -929,6 +929,7 @@ assert.equal(applyH3DialoguePolicy('Quiet scene.', false), 'Quiet scene.', 'H3 h
   assert.ok(report.includes('[FAILURE HISTORY]'))
   assert.ok(report.includes('out-of-memory: 2'), 'histogram counts by bucket')
   assert.ok(report.includes('ref=f1'), 'failure rows carry their ref id')
+  assert.ok(report.includes('graph=studio-2026-09/fnv1a-ab12cd34 seed=12345 steps=20 turbo=8 sampler=res_multistep scheduler=simple res=1344x768 frames=121 refs=3i/1v/0a'), 'failure rows carry the graph topology fingerprint (family + structural hash + sampling knobs — never prompt or model names)')
   assert.ok(report.includes('Window summary: 7 tracked · 4 completed · 2 failed · 1 cancelled'), 'job-count summary')
 
   // Doctor + self-test sections.

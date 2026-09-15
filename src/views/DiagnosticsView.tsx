@@ -14,7 +14,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Activity, AlertCircle, Check, ClipboardCopy, Download, LoaderCircle, RefreshCw, ShieldCheck, Stethoscope } from 'lucide-react'
 import type { ModelKind } from '../types'
-import { buildDiagnosticReport, runSanitizerSelfTest, type ReportFailure } from '../lib/diagnosticReport'
+import { buildDiagnosticReport, runSanitizerSelfTest, type ReportFailure, type ReportFailureGraph } from '../lib/diagnosticReport'
 import { classifyFailure } from '../lib/failureTaxonomy'
 import { sanitizeErrorMessage } from '../lib/logSanitize'
 import type { DoctorReport } from '../lib/doctor'
@@ -74,6 +74,42 @@ function nodeFromError(error: string | undefined): string | undefined {
   return match ? `${match[1]} (${match[2]})` : undefined
 }
 
+/** Structural graph fingerprint from a job's persisted reproducibility
+ *  manifest — family, prompt-insensitive topology hash, and the sampling
+ *  knobs. The manifest is persisted JSON (a trust boundary): every field is
+ *  type-checked before it enters the report, and prompt-bearing fields are
+ *  never read at all. */
+function graphFromManifest(manifest: Record<string, unknown> | undefined): ReportFailureGraph | undefined {
+  if (!manifest || typeof manifest !== 'object') return undefined
+  const text = (key: string): string | undefined => {
+    const value = manifest[key]
+    return typeof value === 'string' && value.length > 0 && value.length <= 48 ? value : undefined
+  }
+  const count = (key: string): number | undefined => {
+    const value = manifest[key]
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+  }
+  const graph: ReportFailureGraph = {
+    family: text('graphFamily'),
+    topologyHash: text('graphVersion'),
+    seed: count('seed'),
+    steps: count('steps'),
+    turbo: text('turbo'),
+    sampler: text('sampler'),
+    scheduler: text('scheduler'),
+    resolution: text('resolution'),
+    frameCount: count('frameCount'),
+  }
+  const refCounts = manifest.referenceCounts as Record<string, unknown> | undefined
+  if (refCounts && typeof refCounts === 'object') {
+    const images = typeof refCounts.images === 'number' ? refCounts.images : 0
+    const videos = typeof refCounts.videos === 'number' ? refCounts.videos : 0
+    const audios = typeof refCounts.audios === 'number' ? refCounts.audios : 0
+    graph.references = `${images}i/${videos}v/${audios}a`
+  }
+  return graph.family || graph.topologyHash || graph.steps !== undefined || graph.turbo ? graph : undefined
+}
+
 export function DiagnosticsView() {
   const settings = useSessionStore((state) => state.settings)
   const status = useSessionStore((state) => state.status)
@@ -128,6 +164,7 @@ export function DiagnosticsView() {
       mediaType: job.mediaType,
       nodeType: nodeFromError(job.error),
       reason: job.error ?? '',
+      graph: graphFromManifest(job.manifest as Record<string, unknown> | undefined),
     }))
     return buildDiagnosticReport({
       appVersion: typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'unknown',
@@ -234,11 +271,12 @@ export function DiagnosticsView() {
           <div className="doctor-report">
             {recentFailures.map((job) => {
               const bucket = classifyFailure(`${job.error ?? ''} ${nodeFromError(job.error) ?? ''}`)
+              const graph = graphFromManifest(job.manifest as Record<string, unknown> | undefined)
               return <div className={`doctor-check ${bucket.id === 'unknown' ? 'warn' : 'fail'}`} key={job.id}>
                 <span><AlertCircle size={14} /></span>
                 <div>
                   <strong>{bucket.label}{nodeFromError(job.error) ? ` · node ${nodeFromError(job.error)}` : ''}</strong>
-                  <small>{new Date(job.createdAt).toLocaleString()} · {job.provider ?? 'minimax'}/{job.mode}</small>
+                  <small>{new Date(job.createdAt).toLocaleString()} · {job.provider ?? 'minimax'}/{job.mode}{graph?.topologyHash ? ` · ${graph.family ?? '-'}/${graph.topologyHash}${graph.steps !== undefined ? ` · ${graph.steps} steps` : ''}${graph.turbo ? ` · turbo ${graph.turbo}` : ''}` : ''}</small>
                   <p>{sanitizeErrorMessage(job.error ?? '')}</p>
                   <p>{bucket.cause}</p>
                 </div>

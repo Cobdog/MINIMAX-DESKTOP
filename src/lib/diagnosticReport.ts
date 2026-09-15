@@ -26,6 +26,23 @@ import { classifyFailure } from './failureTaxonomy'
 const MAX_FAILURE_ROWS = 20
 const MAX_LOG_TAIL_LINES = 20
 
+/** Structural graph fingerprint for one failure — the repro path minus
+ *  semantics: family + the prompt-insensitive topology hash (see
+ *  lib/manifest.ts graphVersionHash) plus the sampling knobs that pair with
+ *  turbo families. Never prompt text, model file names, or media. */
+export type ReportFailureGraph = {
+  family?: string
+  topologyHash?: string
+  seed?: number
+  steps?: number
+  turbo?: string
+  sampler?: string
+  scheduler?: string
+  resolution?: string
+  frameCount?: number
+  references?: string
+}
+
 /** One recent failed render as the report records it. `reason` is the job's
  *  error text (already structural under the fixed flow, but re-sanitized
  *  here so pre-fix persisted jobs cannot leak either). */
@@ -37,6 +54,7 @@ export type ReportFailure = {
   mediaType?: string
   nodeType?: string
   reason: string
+  graph?: ReportFailureGraph
 }
 
 export type DiagnosticReportInput = {
@@ -143,7 +161,7 @@ function versionToken(value: string | undefined): string {
  *  anything multi-word still goes through the sanitizer. */
 function codeToken(value: string | undefined, fallback = ''): string {
   if (typeof value !== 'string' || value.length === 0) return fallback
-  return /^[\w.:@-]{1,48}$/.test(value) ? value : sanitizeErrorMessage(value)
+  return /^[\w.:@/-]{1,48}$/.test(value) ? value : sanitizeErrorMessage(value)
 }
 
 function gigabytes(bytes: number | undefined): string {
@@ -228,7 +246,11 @@ export function buildDiagnosticReport(input: DiagnosticReportInput): string {
     for (let index = 0; index < rows.length; index += 1) {
       const failure = rows[index]
       const bucket = classifyFailure(`${failure.reason} ${failure.nodeType ?? ''}`)
-      push(`  ${iso(failure.at)} [${bucket.id}] ${codeToken(failure.provider, 'minimax')}/${codeToken(failure.mode, 'text')}${failure.nodeType ? ` node=${codeToken(failure.nodeType)}` : ''} ref=${codeToken(failure.id)} reason=${sanitizeErrorMessage(failure.reason) || 'unavailable'}`)
+      const graph = failure.graph
+      const graphText = graph
+        ? ` graph=${codeToken(graph.family, '-')}/${codeToken(graph.topologyHash, '-')}${typeof graph.seed === 'number' ? ` seed=${graph.seed}` : ''}${typeof graph.steps === 'number' ? ` steps=${graph.steps}` : ''}${graph.turbo ? ` turbo=${codeToken(graph.turbo)}` : ''}${graph.sampler ? ` sampler=${codeToken(graph.sampler)}` : ''}${graph.scheduler ? ` scheduler=${codeToken(graph.scheduler)}` : ''}${graph.resolution ? ` res=${codeToken(graph.resolution)}` : ''}${typeof graph.frameCount === 'number' ? ` frames=${graph.frameCount}` : ''}${graph.references ? ` refs=${codeToken(graph.references)}` : ''}`
+        : ''
+      push(`  ${iso(failure.at)} [${bucket.id}] ${codeToken(failure.provider, 'minimax')}/${codeToken(failure.mode, 'text')}${failure.nodeType ? ` node=${codeToken(failure.nodeType)}` : ''} ref=${codeToken(failure.id)}${graphText} reason=${sanitizeErrorMessage(failure.reason) || 'unavailable'}`)
     }
     if (input.failures.length > rows.length) push(`  … ${input.failures.length - rows.length} older failure(s) omitted`)
   }
