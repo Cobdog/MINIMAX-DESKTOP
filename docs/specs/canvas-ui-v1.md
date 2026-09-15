@@ -191,7 +191,7 @@ section. Closed when the maintainer decides; deferred rows need rationale.
 | L1 | Playback transport home | §3/§5 | playing = temporary tile state + contextual transport; program-monitor tile v1.5 (pooling exclusivity argues object-state — inventory Q3) | OPEN |
 | L2 | Workspace presets | §3 | defer v1; saved layouts after multi-canvas session ships | OPEN |
 | L3 | Modal live-update vs frozen tile | §5.1 | live-update (honest projection) | OPEN |
-| L4 | **Engine views dissolve into generators-as-ops** | §5.4 | yes — selection decides engine surface (t2v/i2v/frames/ref2v already one flow in-app) | **OPEN — maintainer counter-question (2026-09-14): "Is LTX worth keeping at all?" — pending the LTX-vs-H3 comparison research; if LTX stays → option 1 (dissolve into ops); if H3 dominates every metric and LTX adds nothing complementary → the LTX path itself retires** |
+| L4 | **Engine views dissolve into generators-as-ops** | §5.4 | yes — selection decides engine surface (t2v/i2v/frames/ref2v already one flow in-app) | **DECIDED (maintainer via Q&A, 2026-09-14, on the LTX-vs-H3 research verdict): YES — dissolve; LTX = keep-utilities-only** (2.3-dev utility family + transitional survey builder; general workspace retires; LocationStudio migration = §8 dependency) |
 | L5 | Screen-size adaptation | §3 | desktop-first; collapse threshold TBD (not pre-decided) | OPEN |
 | L6 | Command palette scope | §7 | actions + objects + ops; prompt-content search rides FTS but is not the palette's primary role | OPEN |
 | L7 | Focus primitive (selection → named reusable conditioning target; may be subsumed by output-substrate selection) | §5.1 | defer decision until §5.1 + substrate-selector co-design | OPEN |
