@@ -1,4 +1,4 @@
-import type { AppSettings, DesktopApi, LlmModelsResult, ManagedEngineStatus, MediaKind, NodePackStatus, PromptLibraryItem } from '../types'
+import type { AppSettings, DesktopApi, FetchEntryStatus, LlmModelsResult, ManagedEngineStatus, MediaKind, NodePackStatus, PromptLibraryItem } from '../types'
 
 /**
  * HTTP implementation of the DesktopApi bridge, used when the renderer runs in
@@ -251,6 +251,18 @@ export function createWebApiClient(): DesktopApi {
     },
     async revertEnginePatch(id: string) {
       return postJson<{ reverted: boolean; patch: string }>('/api/lan/engine/patch/revert', { id })
+    },
+    async listFetchCatalog() {
+      return apiFetch<{ entries: FetchEntryStatus[] }>('/api/lan/fetch/catalog')
+    },
+    async setFetchConsent(id: string, consented: boolean) {
+      return postJson<{ entries: FetchEntryStatus[] }>('/api/lan/fetch/consent', { id, consented })
+    },
+    async startFetch(id: string, options?: { destinationDir?: string }) {
+      return postJson<{ started: boolean; id: string }>('/api/lan/fetch/start', { id, ...(options?.destinationDir ? { destinationDir: options.destinationDir } : {}) })
+    },
+    async removeFetched(id: string) {
+      return postJson<{ removed: boolean; notes: string[]; entries: FetchEntryStatus[] }>('/api/lan/fetch/remove', { id })
     },
     async runSetupDoctor() {
       return apiFetch<Awaited<ReturnType<DesktopApi['runSetupDoctor']>>>('/api/lan/doctor')

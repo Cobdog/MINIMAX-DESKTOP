@@ -11,12 +11,14 @@
  *               copied — the AC 35m2zvh invariant), a studio marker
  *               recording id/revision. Uninstall = delete the folder.
  *   user-fetch  the user consents to the pack being placed into the
- *               instance's custom_nodes/ themselves (this increment: from
- *               a local directory they nominate; the network clone-on-
- *               consent fetcher is task hgjbea2). Used for packs whose
- *               license does not permit redistribution — facok's controlnet
- *               pack carries NO license and must never be vendored — and
- *               for packs not yet vendored.
+ *               instance's custom_nodes/ themselves: from a local
+ *               directory they nominate, or fetched from the pinned
+ *               repository revision through the consent-gated fetcher
+ *               (server/fetcher.ts, task hgjbea2 — branch pins are
+ *               resolved-and-stamped there). Used for packs whose license
+ *               does not permit redistribution — facok's controlnet pack
+ *               carries NO license and must never be vendored — and for
+ *               packs not yet vendored.
  *
  * LICENSING DISCIPLINE IS ABSOLUTE here: every registry entry carries an
  * SPDX record; a repo with no license file is recorded as 'NO-LICENSE'
@@ -47,7 +49,12 @@ import type { AppSettings, ModelKind, NodePackDefinition, NodePackStatus } from 
  *    from the local testbed install.
  *  - comfyui-krea2-controlnet (facok): NO license file in the repo —
  *    all-rights-reserved by default; NEVER vendored, user-fetch only
- *    (docs/research/krea2-edit-mode.md flags it as a hard blocker). */
+ *    (docs/research/krea2-edit-mode.md flags it as a hard blocker).
+ *  - comfyui-minimax-h3-audio-T8 (T8mars, task hgjbea2): GPL-3.0-or-later
+ *    (LICENSE file is an SPDX notice — docs/LICENSES.md §3). GPL packs are
+ *    never vendored (pattern-adopt policy) but ARE fetchable-but-flagged
+ *    through the consent-gated fetcher: the user fetches their own copy,
+ *    we redistribute nothing. */
 export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
   {
     id: 'vdn-h3',
@@ -80,6 +87,17 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     licenseNote: 'No license file in the upstream repo — redistribution not permitted; user-fetch only, never vendored (docs/research/krea2-edit-mode.md).',
     installMode: 'user-fetch',
     homepage: 'https://github.com/facok/comfyui-krea2-controlnet',
+  },
+  {
+    id: 'h3-audio-t8',
+    name: 'comfyui-minimax-h3-audio-T8',
+    description: 'T8mars\' audio sidecar pack (H3 audio editing). GPL-3.0-or-later: pattern-adopted in our own code where ideas were useful, but fetchable-but-flagged for your own instance via the consent flow — the studio never vendors or redistributes it. The fetcher stamps the resolved HEAD SHA of the main branch at fetch time.',
+    repoUrl: 'https://github.com/T8mars/comfyui-minimax-h3-audio-T8',
+    pinnedRevision: 'main',
+    licenseSpdx: 'GPL-3.0-or-later',
+    licenseNote: 'LICENSE file is an SPDX notice, not full text (docs/LICENSES.md §3, API-verified 2026-09-14). GPL-3.0 is combining-compatible with our AGPLv3, but vendoring third-party GPL code couples our releases to a contributor set we do not control — user-fetch only.',
+    installMode: 'user-fetch',
+    homepage: 'https://github.com/T8mars/comfyui-minimax-h3-audio-T8',
   },
 ]
 
@@ -218,6 +236,34 @@ export function isUsableCheckout(checkoutPath: string): boolean {
   return isAbsolute(checkout) && existsSync(join(checkout, 'main.py'))
 }
 
+/** A 40-hex string is a commit SHA; anything else is a branch/tag name. */
+function isShaRevision(revision: string): boolean {
+  return /^[0-9a-f]{40}$/i.test(revision)
+}
+
+/** The revision an install records: for a branch pin, the fetcher-resolved
+ *  HEAD SHA (pin discipline — a branch string in a marker is a moving
+ *  target); for a sha pin, the pin itself. */
+function installRevision(pack: NodePackDefinition, options: InstallNodePackOptions): string {
+  if (!isShaRevision(pack.pinnedRevision) && options.resolvedRevision && isShaRevision(options.resolvedRevision)) return options.resolvedRevision
+  return pack.pinnedRevision
+}
+
+/** True when a marker revision is a stamped SHA satisfying a branch pin. */
+function isBranchPin(markerRevision: string, pinnedRevision: string): boolean {
+  return !isShaRevision(pinnedRevision) && isShaRevision(markerRevision)
+}
+
+/** Revision recorded in the studio marker of an installed pack, when it is
+ *  (the fetcher's catalog status reads this; branch pins report the stamped
+ *  fetch-time SHA). */
+export async function nodePackInstalledRevision(pack: NodePackDefinition, checkout: string | null): Promise<string | null> {
+  if (!checkout || !isUsableCheckout(checkout)) return null
+  const installDir = nodePackInstallDir(checkout, pack)
+  if (!existsSync(installDir)) return null
+  return (await readInstallMarker(installDir))?.revision ?? null
+}
+
 export async function checkNodePack(pack: NodePackDefinition, checkout: string | null, vendorRoot: string | null): Promise<NodePackStatus> {
   const vendored = pack.installMode === 'vendor' && Boolean(pack.vendorDir && vendorRoot && existsSync(join(vendorRoot, pack.vendorDir)))
   const base: NodePackStatus = {
@@ -234,7 +280,8 @@ export async function checkNodePack(pack: NodePackDefinition, checkout: string |
   const marker = folderExists ? await readInstallMarker(installDir) : null
   if (marker) {
     const status: NodePackStatus = { ...base, installed: true, installedRevision: marker.revision }
-    return withAvailability(status, pack, vendored, marker.revision !== pack.pinnedRevision ? `pinned revision changed — reinstall to move ${marker.revision.slice(0, 12)} → ${pack.pinnedRevision.slice(0, 12)}.` : undefined)
+    const drifted = marker.revision !== pack.pinnedRevision && !isBranchPin(marker.revision, pack.pinnedRevision)
+    return withAvailability(status, pack, vendored, drifted ? `pinned revision changed — reinstall to move ${marker.revision.slice(0, 12)} → ${pack.pinnedRevision.slice(0, 12)}.` : undefined)
   }
   if (folderExists) {
     // The folder exists but WE did not place it (no studio marker). Never a
@@ -249,9 +296,9 @@ function withAvailability(status: NodePackStatus, pack: NodePackDefinition, vend
     ? (vendored ? 'ready' : 'unavailable')
     : 'needs-source'
   const baseNote = pack.installMode === 'vendor' && !vendored
-    ? 'the vendored payload is not present in this install (vendor/nodes not found); use user-fetch from a local copy.'
+    ? 'the vendored payload is not present in this install (vendor/nodes not found); use user-fetch from a local copy or the fetcher.'
     : pack.installMode === 'user-fetch' && !note
-      ? 'user-fetch: install from a local copy of the repository (the consent-based network fetcher lands in a later increment).'
+      ? 'user-fetch: install from a local copy of the repository, or through the consent-gated fetcher (Settings → Fetchable items).'
       : undefined
   const notes = [note, baseNote].filter((entry): entry is string => Boolean(entry))
   return { ...status, availability, note: notes.length ? notes.join(' ') : undefined }
@@ -259,10 +306,15 @@ function withAvailability(status: NodePackStatus, pack: NodePackDefinition, vend
 
 export type InstallNodePackOptions = {
   checkout: string
-  /** Local directory holding the pack's files (user-fetch mode; the
-   *  network clone-on-consent fetcher is a later increment). */
+  /** Local directory holding the pack's files (user-fetch mode: the user's
+   *  nominated copy, or the fetcher's extracted archive). */
   sourceDirectory?: string
   vendorRoot?: string | null
+  /** Resolved HEAD SHA for a BRANCH pin (task hgjbea2 pin discipline): when
+   *  the registry pins a moving branch, the fetcher resolves it at fetch
+   *  time and the install marker records THIS — the stamped revision, never
+   *  the branch string. Ignored for sha pins. */
+  resolvedRevision?: string
 }
 
 export type InstallNodePackResult = { status: NodePackStatus; installed: boolean; alreadyInstalled?: boolean; notes: string[] }
@@ -305,10 +357,15 @@ export async function installNodePack(pack: NodePackDefinition, options: Install
   if (existingMarker && existingMarker.revision === pack.pinnedRevision) {
     return { status: await checkNodePack(pack, checkout, vendorRoot), installed: true, alreadyInstalled: true, notes: [`${pack.name} is already installed at the pinned revision ${pack.pinnedRevision.slice(0, 12)}.`] }
   }
+  if (existingMarker && isBranchPin(existingMarker.revision, pack.pinnedRevision)) {
+    // Branch pin already stamped at a resolved SHA: nothing to move. (The
+    // fetcher stamps HEAD at fetch time; a later fetch re-stamps.)
+    return { status: await checkNodePack(pack, checkout, vendorRoot), installed: true, alreadyInstalled: true, notes: [`${pack.name} is already installed at the fetched revision ${existingMarker.revision.slice(0, 12)} (branch pin ${pack.pinnedRevision}).`] }
+  }
   if (existingMarker) {
     // Version bump: uninstall the old copy, then reinstall at the pin —
     // never merge two revisions of a pack into one folder.
-    notes.push(`revision changed (${existingMarker.revision.slice(0, 12)} → ${pack.pinnedRevision.slice(0, 12)}): reinstalling at the pin.`)
+    notes.push(`revision changed (${existingMarker.revision.slice(0, 12)} → ${installRevision(pack, options)}): reinstalling at the pin.`)
     await uninstallNodePack(pack, checkout)
   }
 
@@ -319,7 +376,7 @@ export async function installNodePack(pack: NodePackDefinition, options: Install
     const weightLinks: string[] = []
     await copyPackTree(sourceRoot, staged, weightLinks)
     if (weightLinks.length) notes.push(`weights linked, never copied: ${weightLinks.map((entry) => entry.split(/[/\\]/).pop()).join(', ')}.`)
-    const marker: InstallMarker = { id: pack.id, revision: pack.pinnedRevision, mode: pack.installMode, installedAt: Date.now(), source: sourceLabel }
+    const marker: InstallMarker = { id: pack.id, revision: installRevision(pack, options), mode: pack.installMode, installedAt: Date.now(), source: sourceLabel }
     await writeFile(join(staged, INSTALL_MARKER), `${JSON.stringify(marker, null, 2)}\n`, 'utf8')
     await rename(staged, installDir)
   } catch (installFailure) {

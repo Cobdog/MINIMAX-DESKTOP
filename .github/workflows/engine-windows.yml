@@ -27,3 +27,6 @@ jobs:
       # Managed ComfyUI runtime (increment 1): the stub-checkout suite needs
       # neither python nor a real checkout, so both Windows legs run in full.
       - run: node scripts/test-runtime.cjs
+      # Local-first fetcher (task hgjbea2): both legs run it in full — symlink
+      # placement and the tar extractor are exactly the OS-sensitive paths.
+      - run: node scripts/test-fetcher.cjs

@@ -11,6 +11,7 @@ import type { h3StackReport } from '../lib/h3Stack'
 import { SelectField, NumberField } from '../components/form'
 import { formatBytes } from '../lib/format'
 import type { DoctorReport } from '../lib/doctor'
+import { FetchBrowser } from '../components/FetchBrowser'
 import { useSessionStore } from '../state/sessionStore'
 
 export function SettingsView({ settings, setSettings, info, models, h3Report, scanning, status, checking, diagnosticRunning, ollamaModels, onRefreshOllama, onScan, onCheck, onSave, onApplyDefaults, onRunDiagnostics }: { settings: AppSettings; setSettings(value: AppSettings): void; info: ObjectInfo; models: ModelFile[]; h3Report: ReturnType<typeof h3StackReport>; scanning: boolean; status: ComfyStatus; checking: boolean; diagnosticRunning: boolean; ollamaModels: OllamaModel[]; onRefreshOllama(): void; onScan(): void; onCheck(): void; onSave(): void; onApplyDefaults(): void; onRunDiagnostics(): void }) {
@@ -132,6 +133,7 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
       </div>
       {settings.engine.mode === 'managed' && <>
         <div className="connection-row"><div className="field-group grow"><label htmlFor="managed-checkout">ComfyUI checkout (existing)</label><input id="managed-checkout" value={settings.engine.checkoutPath} placeholder="/path/to/ComfyUI — must contain main.py" onChange={(event) => updateEngine({ checkoutPath: event.target.value })} /></div></div>
+        <p className="settings-note managed-engine-note">No checkout yet? The <strong>Fetchable items</strong> section below can fetch the reference ComfyUI revision (v0.34.0, GPL-3.0, consent-gated) and then nominate it here with one click.</p>
         <div className="connection-row">
           <div className="field-group grow"><label htmlFor="managed-python">Python executable</label><input id="managed-python" value={settings.engine.pythonPath} placeholder="empty = python3 (python on Windows)" onChange={(event) => updateEngine({ pythonPath: event.target.value })} /></div>
           <div className="field-group"><label htmlFor="managed-port">Preferred port</label><input id="managed-port" type="number" min={0} max={65535} value={settings.engine.portPreference || ''} placeholder="auto" onChange={(event) => updateEngine({ portPreference: Number(event.target.value) || 0 })} /></div>
@@ -199,8 +201,9 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
         {nodePacks === null && <p className="settings-note">Loading node-pack registry…</p>}
       </div>
       {nodePackError && <div className="llm-test-result fail" role="status"><AlertCircle size={14} /><span>{nodePackError}</span></div>}
-      <p className="settings-note">Uninstall deletes the pack's custom_nodes/ folder. A revision bump reinstalls at the pin. Packs without a license are never vendored — they install only from your own local copy.</p>
+      <p className="settings-note">Uninstall deletes the pack's custom_nodes/ folder. A revision bump reinstalls at the pin. Packs without a license are never vendored — they install only from your own local copy or the fetcher below.</p>
     </section>
+    <FetchBrowser settings={settings} setSettings={setSettings} onAfterFetch={onScan} onAdoptCheckout={(path) => updateEngine({ checkoutPath: path })} />
     <section className="settings-section h3-stack-section">
       <div className="settings-heading"><div><Gauge size={19} /><span><strong>H3 engine stack</strong><small>Compares the selected files with the validated official ComfyUI stack.</small></span></div><span className={`health-pill ${h3Report.validated ? 'online' : ''}`}>{h3Report.validated ? 'Validated' : h3Report.ready ? 'Custom' : 'Incomplete'}</span></div>
       <div className="h3-stack-list">{h3Report.rows.map((row) => <div key={row.label} className={row.validated ? 'validated' : 'custom'}><span>{row.validated ? <Check size={14} /> : <AlertCircle size={14} />}</span><div><strong>{row.label}</strong><small title={row.selected || row.expected}>{row.selected || `Missing · expected ${row.expected}`}</small></div><em>{row.validated ? 'Recommended' : row.selected ? 'Non-standard' : 'Missing'}</em></div>)}</div>

@@ -39,11 +39,15 @@ failure; a failed `build` skips only its dependents (smoke/e2e/vision).
 
 Order: `typecheck` → `lint` → `license:audit` → `test` → `test:registry` →
 `test:storage` → `test:realtime` → `test:filmstrip` → `test:llm` →
-`test:engine` → `test:runtime` → `build` → `smoke:server` → e2e (Playwright) →
-vision-capture (Playwright). `pnpm test:all` is the same chain without the
-harness niceties. `license:audit` classifies every direct dependency's SPDX
-against the AGPLv3 allowlist and enforces the never-vendor-what-we-can't-ship
-registry invariant (see [docs/LICENSES.md](docs/LICENSES.md)).
+`test:engine` → `test:runtime` → `test:fetcher` → `build` → `smoke:server` →
+e2e (Playwright) → vision-capture (Playwright). `pnpm test:all` is the same
+chain without the harness niceties. `license:audit` classifies every direct
+dependency's SPDX against the AGPLv3 allowlist and enforces the
+never-vendor-what-we-can't-ship registry invariant (see
+[docs/LICENSES.md](docs/LICENSES.md)). `test:fetcher` covers the local-first
+fetcher with the transport mocked throughout — consent gating, catalog
+integrity, sha/size verification, pin stamping, link placement and the
+fetch routes; no test ever touches the network.
 
 ### System Chromium (no bundled browser)
 

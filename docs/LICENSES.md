@@ -24,7 +24,7 @@ independently re-verified this pass.
 | Class | Meaning | License gate |
 | --- | --- | --- |
 | vendored | Code ships inside this repo (`vendor/nodes/`), pinned revision | permissive only (Apache-2.0/MIT/ISC-class) |
-| user-fetch | The studio installs it into the user's own ComfyUI checkout from a source the user nominates (local copy today; consent-gated network fetch is the planned increment) | any — license surfaced at consent time; NO-LICENSE and GPL live here forever |
+| user-fetch | The studio installs it into the user's own ComfyUI checkout: from a local copy the user nominates, or through the consent-gated network fetcher (task hgjbea2) | any — license surfaced at consent time; NO-LICENSE and GPL live here forever |
 | documented-only | Referenced in research docs as pattern/idea source; no code or asset flows into the repo | any — cite, never copy |
 | weights | Model tensors; never in the repo, never copied — linked into the user's model roots | any — surfaced at install time |
 
@@ -81,21 +81,25 @@ user's model roots (§5).
 
 ## 3. User-fetch-only components (never vendored)
 
-The installable subset (facok, Larryvrh) is tracked as data in
+The installable subset (facok, Larryvrh, T8mars) is tracked as data in
 `server/engineNodes.ts` (`ENGINE_NODE_PACKS`), surfaced in Settings → Node
-packs with the SPDX badge visible at consent time. The license gate is
-enforced mechanically: `pnpm license:audit` fails the build if any
-non-permissive entry is `installMode: 'vendor'`. T8mars and LanPaint are not
-installable components at all — their GPL status confines them to
-pattern-adoption in our own code (see docs/research/fun-control-input-surface.md,
-T8mars renderer row: "pattern-adopt, re-implement").
+packs with the SPDX badge visible at consent time, and fetchable through the
+consent-gated local-first fetcher (task hgjbea2: `server/fetchCatalog.ts` +
+`server/fetcher.ts`, Settings → Fetchable items) — the GPL items are
+deliberately **fetchable-but-flagged**: the license text is surfaced at
+consent time, we redistribute nothing, vendoring stays forbidden. The
+license gate is enforced mechanically: `pnpm license:audit` fails the build
+if any non-permissive entry is `installMode: 'vendor'`. LanPaint is not an
+installable component — its GPL status confines it to pattern-adoption in
+our own code.
 
 | Component | Pin | SPDX | Why user-fetch | Obligations | Status |
 | --- | --- | --- | --- | --- | --- |
-| facok/comfyui-krea2-controlnet | `main` (moving — see §9.1) | **NO-LICENSE** `[API-2026-09-14]` (no license file in repo → all-rights-reserved) | redistribution not permitted, ever | none triggered (we never redistribute); user installs from their own local copy with consent | gate holds |
-| T8mars/comfyui-minimax-h3-audio-T8 | — | **GPL-3.0-or-later** `[API-2026-09-14]` (LICENSE file is an SPDX-notice, not full text) | policy: GPL packs are never vendored even though GPL-3.0 ↔ AGPLv3 are combining-compatible — vendoring would fold third-party GPL code into our distribution and couple our releases to an unmaintained-by-us contributor set | none triggered (we never redistribute); if we ever vendored: full GPL §4–§6 duties + combined-work terms | pattern-adopt only (re-implement the trajectory/composite renderers); gate holds |
-| Larryvrh/ComfyUI-MiniMax-H3-Turbo | `4274783a23afcfdbea3b4876cb79effd6c510785` | Apache-2.0 `[API-2026-09-14]` | **not a license reason** — simply not vendored yet; user-fetch from a local copy until the vendoring increment | none beyond notices when vendored | candidate for vendoring |
+| facok/comfyui-krea2-controlnet | `main` (branch — resolved + stamped at fetch time, §9.1) | **NO-LICENSE** `[API-2026-09-14]` (no license file in repo → all-rights-reserved) | redistribution not permitted, ever | none triggered (we never redistribute); user installs from their own local copy or fetch with consent | gate holds |
+| T8mars/comfyui-minimax-h3-audio-T8 | `main` (branch — resolved + stamped at fetch time) | **GPL-3.0-or-later** `[API-2026-09-14]` (LICENSE file is an SPDX-notice, not full text) | policy: GPL packs are never vendored even though GPL-3.0 ↔ AGPLv3 are combining-compatible — vendoring would fold third-party GPL code into our distribution and couple our releases to an unmaintained-by-us contributor set; fetching the user their own copy triggers none of that | none triggered (we never redistribute); if we ever vendored: full GPL §4–§6 duties + combined-work terms | fetchable-but-flagged through the consent flow; pattern-adopt remains the rule for our own code; gate holds |
+| Larryvrh/ComfyUI-MiniMax-H3-Turbo | `4274783a23afcfdbea3b4876cb79effd6c510785` | Apache-2.0 `[API-2026-09-14]` | **not a license reason** — simply not vendored yet; user-fetch from a local copy or the fetcher until the vendoring increment | none beyond notices when vendored | candidate for vendoring |
 | scraed/LanPaint | — | **GPL-3.0** `[API-2026-09-14]` | same GPL policy as T8mars; deferred on quality/cost grounds anyway (krea2-edit-mode.md §5) | none while not distributed | watch tier |
+| ComfyUI (comfyanonymous — the fetcher's engine-checkout entry) | tag `v0.34.0` → `12d5279438bfefc058a269eae805ceab6047777f` `[API-2026-09-14]` | **GPL-3.0** | the reference checkout for the managed runtime's clone-on-demand seam: fetched onto the user's disk by consent, never vendored, never conveyed by us (the §8 analysis, applied to the whole engine instead of one file) | none triggered (we never redistribute ComfyUI); the checkout is the user's own working copy | fetchable-but-flagged; gate holds |
 
 ## 4. Documented-only / cited components (no code or asset flows)
 
@@ -126,6 +130,11 @@ model roots (symlink → junction → hardlink → refuse; never a byte-copy —
 | conradlocke/krea2-identity-edit (Identity Edit v1.2 LoRA) | `krea-2-community-license` `[API-2026-09-14]` | weights (planned edit mode) | derivative works under same license; commercial only <$1 M/yr revenue; moderation + AI-disclosure duties; author additionally disallows non-consensual use of real people (SFW-only training) — surface at adoption time, not just in docs | documented |
 | yijunwang2/krea2-anypaint (AnyPaint LoRA) | `krea-2-community-license` `[API-2026-09-14]` | weights (planned masked-edit mode) | same duties as above | documented |
 | LTX-2.5 / ACE-Step 1.5 / Z-Image weights | per their HF cards — verify at first-classing time `[DOC]` | weights | none recorded yet — §9.3 | open |
+| lllyasviel/Annotators (HED `ControlNetHED.pth`, MLSD `mlsd_large_512_fp32.pth`) | **NO-LICENSE** `[API-2026-09-14]` (repo carries only a `license: other` frontmatter tag, no license file) | weights (fetch-catalog preprocessors) | none triggered (we never redistribute; the user fetches their own copy with the license surfaced at consent) | fetchable-but-flagged |
+| yzd-v/DWPose (ONNX pair) + hr16/DWPose-TorchScript-BatchSize5 | Apache-2.0 `[API-2026-09-14]` | weights (fetch-catalog preprocessors) | notice | clean |
+| Comfy-Org/Depth-Anything-3 (Base) | Apache-2.0 `[API-2026-09-14]` | weights (fetch-catalog preprocessor, `geometry_estimation`) | notice | clean |
+| smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models (b25-49 int8) | inherits the MiniMax fl2va/ref2va terms (repo README) `[API-2026-09-14]` | weights (fetch-catalog OPTIONAL — runtime merge via the HybridLoader is preferred) | same class as the MiniMax base weights (§5 row 1); no additional grant | surfaced |
+| ComfyUI reference checkout | GPL-3.0 (tag `v0.34.0`) | engine checkout (fetch catalog, §3 row) | the checkout is the user's own GPL working copy; we convey nothing | fetchable-but-flagged |
 
 Node code that pairs with the Krea 2 LoRAs is permissive and already §4-clean:
 `lbouaraba/comfyui-krea2edit` Apache-2.0, `alexw5702-afk/krea2-anypaint` MIT
@@ -235,10 +244,13 @@ PROVENANCE IANAL stance continues):
 
 ## 9. Open items / follow-ups
 
-1. **facok pin is a moving target** — `pinnedRevision: 'main'` in the registry
-   is a branch, not a SHA. The consent-gated network fetcher (Flux task
-   hgjbea2) must record the actual HEAD SHA into the install marker at fetch
-   time; until then the marker inherits the registry string.
+1. ~~**facok pin is a moving target**~~ [Resolved 2026-09-14, task hgjbea2]:
+   the consent-gated fetcher resolves branch pins to the HEAD SHA at fetch
+   time and stamps that SHA into the install marker and the fetch install
+   record (`server/fetcher.ts` pin discipline; tested in
+   `scripts/test-fetcher.cjs` §d). Local-directory installs of a
+   branch-pinned pack still inherit the registry string — the branch flows
+   only through the fetcher.
 2. **Bundled-distribution notices** — if a minified/binary dist ever ships,
    generate third-party license notices from `node_modules` (extend
    `scripts/audit-licenses.cjs`, or a `vite-plugin-license`-class step) and
@@ -249,3 +261,11 @@ PROVENANCE IANAL stance continues):
    adoption time (HF shows no license tag today).
 5. **Upstreaming the block-loop hook** — §8 option 3; also removes the
    version-gate maintenance burden.
+
+The fetch catalog (`server/fetchCatalog.ts`, task hgjbea2) pins sizes and
+sha256 digests for its weight entries, all verified against the HF API on
+2026-09-14 (`[API-2026-09-14]`, `x-linked-etag` for LFS files). Its license
+verdicts are transcribed from this inventory (and single-sourced from
+`ENGINE_NODE_PACKS` for the pack rows — the fetcher suite's integrity
+section fails the build if a catalog row ships without a license verdict or
+drifts from the pack registry).

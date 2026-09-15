@@ -30,6 +30,8 @@ import { RuntimeManager, RuntimeConfigError } from './runtime'
 import { ENGINE_PATCH_IDS, revertEnginePatch, ENGINE_PATCHES } from './enginePatch'
 import { mergeEngineProfiles } from './engineProfiles'
 import { checkAllNodePacks, findNodePack, installNodePack, isUsableCheckout, resolveVendorRoot, uninstallNodePack } from './engineNodes'
+import { FETCH_ENTRY_IDS, findFetchEntry } from './fetchCatalog'
+import { FetchManager, transportForEnvironment } from './fetcher'
 import { createLlmService, type LlmService } from './llm'
 import { createRouterProvider } from './llm/providers/router'
 import { familyManifest, inferFamily } from './llm/registry'
@@ -460,6 +462,20 @@ export function createStudioServer(paths: StudioServerPaths) {
     },
   })
 
+  // Local-first fetcher (task hgjbea2): the ONLY place the studio touches
+  // the internet. Consent is checked inside the manager (not the route), the
+  // transport is the fixed-host HTTPS one (or the mock when the test env
+  // var is set), and progress rides the fabric's system channel so the
+  // Settings surface renders live download state.
+  const fetcher = new FetchManager({
+    homeDirectory: dirname(paths.settingsFile),
+    loadSettings,
+    logEvent,
+    logFailure,
+    transport: transportForEnvironment(),
+    onProgress: (progress) => realtimeHub.emitSystem('fetch', progress),
+  })
+
   function defaultSettings(): AppSettings {
     const root = join(paths.documentsDirectory, 'ComfyUI', 'models')
     return {
@@ -491,6 +507,10 @@ export function createStudioServer(paths: StudioServerPaths) {
       // launch profiles (default/vdn seeds) and an EMPTY patch-consent
       // ledger — no patch may ever apply without a recorded consent.
       engine: { mode: 'external', checkoutPath: '', pythonPath: '', portPreference: 0, autoStart: false, profile: 'default', profiles: mergeEngineProfiles({}, ENGINE_PATCH_IDS).profiles, patches: {} },
+      // Local-first fetcher (task hgjbea2): an EMPTY consent ledger — the
+      // network is never touched without a recorded, license-matching
+      // consent for a catalog id.
+      fetch: { consents: {} },
     }
   }
 
@@ -539,6 +559,27 @@ export function createStudioServer(paths: StudioServerPaths) {
                 consented: record.consented === true,
                 ...(typeof record.at === 'number' ? { at: record.at } : {}),
                 ...(typeof record.comfyVersion === 'string' ? { comfyVersion: record.comfyVersion } : {}),
+              }
+            }
+          }
+          return ledger
+        })(),
+      },
+      // Fetcher consent ledger (task hgjbea2): only well-formed records for
+      // KNOWN catalog ids survive, and each records the license it
+      // acknowledged — a catalog license change invalidates the consent.
+      fetch: {
+        consents: (() => {
+          const ledger: NonNullable<AppSettings['fetch']['consents']> = {}
+          const rawLedger = (raw.fetch?.consents && typeof raw.fetch.consents === 'object' ? raw.fetch.consents : {}) as Record<string, unknown>
+          for (const id of Object.keys(rawLedger)) {
+            if (!FETCH_ENTRY_IDS.has(id)) continue
+            const record = rawLedger[id] as { consented?: unknown; at?: unknown; licenseSpdx?: unknown } | null
+            if (record && typeof record === 'object' && typeof record.licenseSpdx === 'string' && record.licenseSpdx) {
+              ledger[id] = {
+                consented: record.consented === true,
+                licenseSpdx: record.licenseSpdx,
+                ...(typeof record.at === 'number' ? { at: record.at } : {}),
               }
             }
           }
@@ -1413,6 +1454,42 @@ export function createStudioServer(paths: StudioServerPaths) {
           if (!removed.removed) return sendJson(response, 404, { error: removed.reason ?? 'The pack is not installed.' })
           logEvent({ kind: 'engine.node-pack-uninstalled', pack: pack.id })
           return sendJson(response, 200, { pack: await checkAllNodePacks(settings.engine.checkoutPath, resolveVendorRoot()).then((packs) => packs.find((entry) => entry.id === pack.id)) })
+        }
+        // ---- Local-first fetcher (task hgjbea2) --------------------------------
+        // The only network-touching routes in the app. catalog is pure
+        // local state; consent RECORDS an explicit user acknowledgement
+        // (license text is surfaced by the caller BEFORE this is called);
+        // start refuses without a matching consent — the check is enforced
+        // again inside the FetchManager, so no caller can bypass it; remove
+        // takes back the studio's placements only.
+        if (url.pathname === '/api/lan/fetch/catalog' && request.method === 'GET') {
+          return sendJson(response, 200, { entries: await fetcher.catalogStatus() })
+        }
+        if (url.pathname === '/api/lan/fetch/consent' && request.method === 'POST') {
+          const body = await readJson(request, 10_000)
+          const entry = findFetchEntry(typeof body.id === 'string' ? body.id : '')
+          if (!entry) return sendJson(response, 400, { error: 'Unknown fetchable item id.' })
+          const consented = body.consented === true
+          const consents = { ...settings.fetch.consents }
+          if (consented) consents[entry.id] = { consented: true, licenseSpdx: entry.licenseSpdx, at: Date.now() }
+          else delete consents[entry.id]
+          await saveSettings({ ...settings, fetch: { consents } })
+          logEvent({ kind: 'fetcher.consent', entry: entry.id, consented, license: entry.licenseSpdx })
+          return sendJson(response, 200, { entries: await fetcher.catalogStatus() })
+        }
+        if (url.pathname === '/api/lan/fetch/start' && request.method === 'POST') {
+          const body = await readJson(request, 10_000)
+          const started = await fetcher.start(typeof body.id === 'string' ? body.id : '', {
+            destinationDir: typeof body.destinationDir === 'string' ? body.destinationDir : undefined,
+          })
+          if (!started.started) return sendJson(response, started.reason === 'Unknown fetchable item id.' ? 400 : started.reason === 'A fetch for this item is already running.' ? 409 : 403, { error: started.reason })
+          return sendJson(response, 200, { started: true, id: started.id })
+        }
+        if (url.pathname === '/api/lan/fetch/remove' && request.method === 'POST') {
+          const body = await readJson(request, 10_000)
+          const removed = await fetcher.remove(typeof body.id === 'string' ? body.id : '')
+          if (!removed.removed) return sendJson(response, 404, { error: removed.reason ?? 'The item could not be removed.' })
+          return sendJson(response, 200, { removed: true, notes: removed.notes, entries: await fetcher.catalogStatus() })
         }
         // ---- Consent patch tier: revert restores the pristine backup -------
         // (managed checkout only; revert is always safe — it undoes us.)

@@ -64,6 +64,7 @@ import { createServer as createTcpServer } from 'node:net'
 import { basename, isAbsolute, join, normalize, resolve } from 'node:path'
 import { EngineProcess, type EngineEvent, type EngineExitSummary } from './engineProcess'
 import { logger } from './logger'
+import { fetchExtraModelRoots } from './fetchCatalog'
 import { resolveActiveProfile } from './engineProfiles'
 import { ENGINE_PATCHES, applyEnginePatch, checkEnginePatch, type PatchCheck } from './enginePatch'
 import type { AppSettings, EngineLaunchHook, ManagedEngineHealth, ManagedEngineState, ManagedEngineStatus, ModelKind } from '../src/types'
@@ -151,9 +152,12 @@ export function extraModelPathsTarget(checkoutPath: string): string {
 
 export type ExtraModelPathsResult = { written: boolean; roots: string[]; skipped: ModelKind[] }
 
-/** Generates extra_model_paths.yaml into the checkout from settings.paths.
- *  Invalid roots are skipped (reported), never emitted; a foreign existing
- *  file is backed up exactly once; the write itself is tmp+rename atomic. */
+/** Generates extra_model_paths.yaml into the checkout from settings.paths —
+ *  plus the fetcher's extra model roots (model_patches, vdn, …) once they
+ *  exist on disk, so fetched weights are visible to the managed instance
+ *  without ever copying bytes. Invalid roots are skipped (reported), never
+ *  emitted; a foreign existing file is backed up exactly once; the write
+ *  itself is tmp+rename atomic. */
 export async function writeExtraModelPathsConfig(checkoutPath: string, settings: AppSettings): Promise<ExtraModelPathsResult> {
   const seen = new Set<string>()
   const roots: Array<{ key: string; path: string }> = []
@@ -166,6 +170,18 @@ export async function writeExtraModelPathsConfig(checkoutPath: string, settings:
     }
     seen.add(valid)
     roots.push({ key: MODEL_FOLDER_KEYS[kind], path: valid })
+  }
+  // Fetcher roots (task hgjbea2): only folders that exist are emitted — an
+  // empty configured tree mirrors as nothing until the first fetch creates
+  // it. The keys are ComfyUI folder names (yaml loader adds unknown keys).
+  // Settings without a usable modelRoot (pre-fetcher fixtures) mirror none.
+  if (typeof settings.modelRoot === 'string' && settings.modelRoot.trim()) {
+    for (const rootName of fetchExtraModelRoots()) {
+      const valid = validateModelRoot(join(settings.modelRoot, rootName))
+      if (!valid || seen.has(valid)) continue
+      seen.add(valid)
+      roots.push({ key: rootName, path: valid })
+    }
   }
   if (roots.length === 0) return { written: false, roots: [], skipped }
 

@@ -146,6 +146,92 @@ export type NodePackStatus = NodePackDefinition & {
   note?: string
 }
 
+// ---- Local-first fetcher (task hgjbea2) --------------------------------------
+
+/** How a fetch source is pinned. `branch` pins are MOVING: the fetch engine
+ *  resolves them to the HEAD SHA at fetch time and stamps that SHA into the
+ *  install record (the facok-pin lesson from the licensing pass). */
+export type FetchPin = { kind: 'sha'; value: string } | { kind: 'tag'; value: string } | { kind: 'branch'; value: string }
+
+export type FetchSource =
+  | { kind: 'hf'; repo: string; revision: FetchPin }
+  | { kind: 'git'; url: string; revision: FetchPin }
+
+/** Model roots beyond the six scanner kinds the fetcher places weights into
+ *  (ComfyUI folder names; resolved against settings.paths first, then
+ *  settings.modelRoot). */
+export type FetchModelRoot = ModelKind | 'model_patches' | 'vdn' | 'geometry_estimation' | 'checkpoints'
+
+export type FetchDestination =
+  | { kind: 'model-root'; root: FetchModelRoot; subpath?: string }
+  | { kind: 'pack-ckpt'; packDirectory: string; relativePath: string }
+  | { kind: 'node-pack'; packId: string }
+  | { kind: 'engine-checkout' }
+
+export type FetchCatalogGroup = 'node-packs' | 'weights' | 'preprocessors' | 'engine'
+
+/** One fetchable artifact (server-side DATA — server/fetchCatalog.ts). Node
+ *  packs reference the ENGINE_NODE_PACKS registry entry so the license
+ *  verdict and pin stay single-sourced. */
+export type FetchCatalogEntry = {
+  id: string
+  name: string
+  group: FetchCatalogGroup
+  description: string
+  licenseSpdx: string
+  licenseNote?: string
+  licenseUrl?: string
+  source: FetchSource
+  destination: FetchDestination
+  /** HF entries: the files to fetch (repo-relative paths) with size + sha256
+   *  pins where known. Git/engine entries fetch the whole tree. */
+  files?: Array<{ path: string; sizeBytes?: number; sha256?: string }>
+  /** Presence detection glob, matched against the destination root — a
+   *  locally staged file with a matching name counts as present without a
+   *  fetch (e.g. a quantized variant of the same checkpoint). */
+  detectGlob?: string
+  sizeBytes?: number
+  sizeClass: 'small' | 'medium' | 'large' | 'huge'
+  /** Explicitly optional (a preferred alternative exists). */
+  optional?: boolean
+  /** Needed by a committed experiment plan, not by the shipped features. */
+  experimentPrerequisite?: boolean
+  homepage?: string
+  /** Node-pack entries only: the ENGINE_NODE_PACKS id (assembled at load). */
+  packId?: string
+}
+
+/** Live state of one catalog entry against the machine. */
+export type FetchEntryStatus = FetchCatalogEntry & {
+  /** present = matching files already at the destination (not fetched by us);
+   *  placed = our install record with resolvable links; cached = bytes in the
+   *  fetch cache, not yet placed; absent = nothing on disk. */
+  state: 'present' | 'placed' | 'cached' | 'absent'
+  /** Resolved revision recorded at fetch time (pin-stamped), when placed. */
+  installedRevision?: string
+  /** Where the bytes were placed (links included), when placed. */
+  placedPaths?: string[]
+  /** Integrity level recorded at fetch time. */
+  verified?: 'sha256' | 'size' | 'none'
+  inFlight?: boolean
+  note?: string
+}
+
+/** Recorded user consent for one fetchable item. NOTHING is fetched from the
+ *  network without one of these, and the license recorded here must still
+ *  match the catalog entry (a license change re-consent is required). */
+export type FetchConsentRecord = { consented: boolean; at?: number; licenseSpdx: string }
+
+export type FetchProgress = {
+  id: string
+  phase: 'resolving' | 'downloading' | 'verifying' | 'placing' | 'done' | 'failed'
+  file?: string
+  bytes?: number
+  totalBytes?: number
+  message?: string
+  at: number
+}
+
 export type AppSettings = {
   comfyUrl: string
   ollamaUrl: string
@@ -182,6 +268,9 @@ export type AppSettings = {
   /** Self-managed engine runtime (increment 1); defaults keep external mode,
    *  which preserves today's behavior exactly. */
   engine: ManagedEngineConfig
+  /** Local-first fetcher (task hgjbea2): the consent ledger. The network is
+   *  touched only inside fetch routes, only for consented catalog ids. */
+  fetch: { consents: Record<string, FetchConsentRecord> }
 }
 
 export type ClipItem = { id: string; name: string; source: string; createdAt: number; start?: number; end?: number; duration?: number }
@@ -595,6 +684,10 @@ export type DesktopApi = {
   installEngineNodePack(id: string, sourceDirectory?: string): Promise<NodePackStatus>
   uninstallEngineNodePack(id: string): Promise<NodePackStatus>
   revertEnginePatch(id: string): Promise<{ reverted: boolean; patch: string }>
+  listFetchCatalog(): Promise<{ entries: FetchEntryStatus[] }>
+  setFetchConsent(id: string, consented: boolean): Promise<{ entries: FetchEntryStatus[] }>
+  startFetch(id: string, options?: { destinationDir?: string }): Promise<{ started: boolean; id: string }>
+  removeFetched(id: string): Promise<{ entries: FetchEntryStatus[] }>
 }
 
 /** One harvested community prompt (Civitai image metadata via the server's

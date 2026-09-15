@@ -21,13 +21,14 @@
     "test:llm": "node scripts/test-llm.cjs",
     "test:engine": "node scripts/test-engine-process.cjs",
     "test:runtime": "node scripts/test-runtime.cjs",
+    "test:fetcher": "node scripts/test-fetcher.cjs",
     "smoke:server": "node scripts/smoke-server.cjs",
     "test:e2e": "pnpm build && playwright test --project=e2e",
     "test:vision": "playwright test --project=vision",
     "vision:report": "node scripts/vision-e2e/report.cjs",
     "gate": "node scripts/run-gate.cjs",
     "license:audit": "node scripts/audit-licenses.cjs",
-    "test:all": "pnpm test && pnpm test:registry && pnpm test:e2e && pnpm test:storage && pnpm test:filmstrip && pnpm test:realtime && pnpm test:llm && pnpm test:engine && pnpm test:runtime && pnpm smoke:server && pnpm test:vision"
+    "test:all": "pnpm test && pnpm test:registry && pnpm test:e2e && pnpm test:storage && pnpm test:filmstrip && pnpm test:realtime && pnpm test:llm && pnpm test:engine && pnpm test:runtime && pnpm test:fetcher && pnpm smoke:server && pnpm test:vision"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

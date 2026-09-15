@@ -8,7 +8,8 @@
  *
  * Suites (each in its OWN process, output captured; streamed on failure):
  *   typecheck → lint → unit/node suites (test, test:registry, test:storage,
- *   test:realtime, test:filmstrip, test:llm, test:engine, test:runtime) →
+ *   test:realtime, test:filmstrip, test:llm, test:engine, test:runtime,
+ *   test:fetcher) →
  *   build → smoke:server → e2e (Playwright) → vision-capture (Playwright).
  *
  * Behavior:
@@ -52,6 +53,10 @@ const SUITES = [
   { name: 'test:llm', command: 'pnpm run test:llm', timeoutMs: 20 * MINUTE },
   { name: 'test:engine', command: 'pnpm run test:engine', timeoutMs: 20 * MINUTE },
   { name: 'test:runtime', command: 'pnpm run test:runtime', timeoutMs: 20 * MINUTE },
+  // Local-first fetcher (task hgjbea2): catalog integrity, consent gating,
+  // verification, pin stamping, placement, routes — transport mocked, zero
+  // real network.
+  { name: 'test:fetcher', command: 'pnpm run test:fetcher', timeoutMs: 20 * MINUTE },
   // build:web + build:server directly — typecheck already ran as its own suite
   // (the plain `build` script re-runs typecheck; redundant here).
   { name: 'build', command: 'pnpm run build:web && pnpm run build:server', timeoutMs: 15 * MINUTE, dependents: ['smoke:server', 'e2e', 'vision-capture'] },

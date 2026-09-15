@@ -733,6 +733,12 @@ export function createRealtimeHub(options: RealtimeHubOptions) {
     emitEngine(name: string, phase: EnginePhase, detail?: string, pid?: number) {
       pushChannel('engine', 'lifecycle', { name, phase, detail, pid, at: Date.now() } satisfies EngineLifecycleEvent)
     },
+    /** System channel emitter (task hgjbea2): studio-level progress events —
+     *  today the fetcher's download progress rides this channel as
+     *  `{type:'fetch'}` envelopes for the Settings surface. */
+    emitSystem(type: string, payload: unknown) {
+      pushChannel('system', type, payload)
+    },
     close() {
       if (drainTicker) clearInterval(drainTicker)
       if (pingTimer) clearInterval(pingTimer)

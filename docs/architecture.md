@@ -1,6 +1,6 @@
 # Architecture
 
-> Contributor-oriented overview of MiniMax Studio as a web application. For the migration history, see [migration.md](migration.md). Last verified 2026-09-14 (managed runtime + launch profiles/vendoring/patch tier, optimization registry, LLM layer, QA gate).
+> Contributor-oriented overview of MiniMax Studio as a web application. For the migration history, see [migration.md](migration.md). Last verified 2026-09-14 (managed runtime + launch profiles/vendoring/patch tier, the local-first fetcher, optimization registry, LLM layer, QA gate).
 
 ## What this is
 
@@ -41,7 +41,7 @@ Two modules:
 **Increment 2 adds the launch/extension machinery around that runtime:**
 
 - **Launch profiles** (`server/engineProfiles.ts`, seeded `default` + `vdn`): a profile is pure data — `{ env, hooks, portPolicy }` — resolved at launch; its env is injected into the spawn, its reserved ports widen the allocator skip-list, and its pre-launch hook steps run before the port is taken. The vdn profile carries NO env by default: the upstream `VDN_H3_*` variables are lab/ablation toggles read at runtime by the node, so the profile exposes only the seam a user would set. The active profile is recorded in `runtime-state.json` (boot posture) and in the status payload; stored profiles are validated hard (env-name allowlist minus process-critical vars; unknown hook ids dropped).
-- **Vendored node packs** (`server/engineNodes.ts`, payload under `vendor/nodes/`): the registry of custom-node packs the managed instance needs. Each entry carries repo URL + pinned revision + an SPDX license verdict and an install mode — `vendor` (shipped in our repo, license-verified permissive; install = code copied + weights LINKED + a studio marker; uninstall = delete folder; revision bump = delete + reinstall at the pin) or `user-fetch` (placed from a local copy the user nominates, for packs whose license forbids redistribution — a repo with no license file is recorded `NO-LICENSE` and can never be vendored). A foreign `custom_nodes/<name>` without our marker is refused, never replaced.
+- **Vendored node packs** (`server/engineNodes.ts`, payload under `vendor/nodes/`): the registry of custom-node packs the managed instance needs. Each entry carries repo URL + pinned revision + an SPDX license verdict and an install mode — `vendor` (shipped in our repo, license-verified permissive; install = code copied + weights LINKED + a studio marker; uninstall = delete folder; revision bump = delete + reinstall at the pin) or `user-fetch` (placed from a local copy the user nominates or fetched through the consent-gated [fetcher](#local-first-fetcher), for packs whose license forbids redistribution — a repo with no license file is recorded `NO-LICENSE` and can never be vendored). A foreign `custom_nodes/<name>` without our marker is refused, never replaced.
 - **Consent patch tier** (`server/enginePatch.ts`): the LongCache-class core-file patcher for MANAGED mode, ported from the maintainer's fork installer discipline — strict-regex layout detect (refuses unrecognized layouts with no file changed), pristine backup refreshed from any unpatched target, same-dir temp+rename atomic writes, structural validation always + real `python ast.parse` when the launch command is python, revert mode, and a `testedComfyVersion` gate (only 0.33.x/0.34.x layouts verified). NO patch runs without an explicit consent record in settings; every refusal degrades (VDN still works — you lose the LongCache tail cache) and is surfaced, never silent.
 - **Weight-symlinking invariant** (AC 35m2zvh): the managed instance LINKS weights, never copies them. `extra_model_paths.yaml` references the user's real model roots in place; `linkNeverCopy()` (symlink → junction → hardlink → refuse-with-reason, copy is never the fallback) is the rule for pack-carried weights and for any weight the studio places into a model root.
 
@@ -58,7 +58,7 @@ The server is authoritative for service URLs, the output directory, and the FFmp
 
 ## API surface
 
-All routes under `/api/lan/` (legacy prefix retained from the mobile-companion era). Representative routes: `bootstrap`, `settings` (GET/POST), `object-info`, `comfy-status` (SSRF-guarded), `prompt`, `history/{id}`, `cancel`, `events` (SSE⇄WS bridge), `ollama` + `ollama/structured` (fallback provider), `llm/{models,generate,prepare,vision,fragments}` (the LLM layer: router-primary provider selection, model-family manifests, layered prompt fragments, vision captioning), `engine/{status,start,stop}` (the managed runtime; start is refused outside managed mode and is idempotent — a repeated start never double-spawns), `video/{frame,frames,trim,join}`, `outputs/{resolve,save-image}`, `upload` / `upload-media` / `upload-output`, `media` (ComfyUI proxy or output-contained local serving with Range), `telemetry`, `characters`. Full contract table in [migration.md](migration.md).
+All routes under `/api/lan/` (legacy prefix retained from the mobile-companion era). Representative routes: `bootstrap`, `settings` (GET/POST), `object-info`, `comfy-status` (SSRF-guarded), `prompt`, `history/{id}`, `cancel`, `events` (SSE⇄WS bridge), `ollama` + `ollama/structured` (fallback provider), `llm/{models,generate,prepare,vision,fragments}` (the LLM layer: router-primary provider selection, model-family manifests, layered prompt fragments, vision captioning), `engine/{status,start,stop}` (the managed runtime; start is refused outside managed mode and is idempotent — a repeated start never double-spawns), `fetch/{catalog,consent,start,remove}` (the local-first fetcher — the app's ONLY network-touching routes), `video/{frame,frames,trim,join}`, `outputs/{resolve,save-image}`, `upload` / `upload-media` / `upload-output`, `media` (ComfyUI proxy or output-contained local serving with Range), `telemetry`, `characters`. Full contract table in [migration.md](migration.md).
 
 Security posture: **open on the LAN by default** (ComfyUI-consistent; a deliberate 2026-09-10 decision), token-gated via `--token` / `MINIMAX_LAN_TOKEN=1` for hostile networks. Input validation everywhere: path containment (`relative()`-based), numeric FFmpeg arguments (concat-directive injection guarded), MIME allowlists and size caps on uploads, SSRF guard on probe-able URLs.
 
@@ -89,6 +89,52 @@ Job state transitions live in the pure reducer `src/lib/jobReducer.ts` (terminal
 **Weights referenced by registry entries are LINKED, never copied (invariant, AC 35m2zvh):** the model files an entry detects or installs (turbo LoRAs, VDN branch checkpoints, pack-carried tensors like `h3_silu_temb_grid.safetensors`) exist exactly once on disk — in the user's real model roots or the vendored payload — and every other reference is a link (`server/engineNodes.ts` → `linkNeverCopy()`: symlink → junction → hardlink → refuse with a reason; a byte-for-byte copy is never the fallback). The scanner and `extra_model_paths.yaml` mirroring already index the user's roots in place; this extends the same no-duplicate-bytes rule to everything the studio itself places.
 
 `pnpm test:registry` runs the suite; it is part of `test:all`.
+
+## Local-first fetcher
+
+`server/fetchCatalog.ts` + `server/fetcher.ts` (task hgjbea2) implement the
+platform doctrine: **the internet is touched only on explicit user action**.
+Everything the studio can optionally fetch — node packs, model weights,
+preprocessor checkpoints, the reference ComfyUI checkout — is DATA in the
+fetch catalog (source repo + path, `sha | tag | branch` pin, size, sha256
+where pinned, SPDX verdict reusing LICENSES.md, destination, human
+description). NO-LICENSE and GPL items are fetchable-but-flagged: the license
+text surfaces at consent time; nothing non-permissive is ever vendored (the
+license gate is unchanged and still machine-checked).
+
+- **Consent gate (absolute).** `settings.fetch.consents[id]` must hold
+  `{ consented: true, licenseSpdx }` matching the catalog entry's CURRENT
+  license — enforced inside the `FetchManager` (not just the route), so no
+  caller can bypass it, and a license change invalidates stale consent.
+  Zero transport calls happen without it (tested).
+- **Pin discipline.** Branch pins are resolved to the immutable HEAD SHA at
+  fetch time and stamped into the install record and the node-pack marker.
+- **Verification.** Downloads verify against the CATALOG pins — sha256 where
+  recorded, size always; a mismatch discards the partial and fails the
+  fetch. Nothing unverified is ever placed. Downloads are resumable
+  (Range-continue from the `.part`), retried on 429/5xx with backoff, and
+  restricted to a fixed host allowlist (huggingface.co, hf.co CDNs, github
+  com/codeload/api/githubusercontent) that also validates every redirect hop.
+- **Placement.** Weights land in the studio fetch cache
+  (`<home>/fetches/<id>/`) and are LINKED into their destination via
+  `linkNeverCopy()` — model roots, or the installed preprocessor pack's own
+  ckpts tree. Node packs ride the existing `installNodePack` machinery from
+  an extracted codeload archive (weights linked, staging-then-rename, marker
+  with the stamped revision). A foreign file at any destination fails the
+  fetch; user files are never overwritten.
+- **Records.** `<home>/fetcher/fetch-state.json` (atomic writes) records
+  resolved revision, per-file size+sha, placement paths, license
+  acknowledged, verification level; remove takes back the studio's links and
+  fetched trees while the cache stays for re-linking without the network.
+- **Clone-on-demand seam.** The engine entry (`engine-comfyui`, tag-pinned,
+  GPL-3.0) fetches the reference ComfyUI revision as a checkout the user can
+  nominate for the managed runtime in one click; a non-empty destination is
+  refused — the studio never overwrites a checkout.
+- **Surfaces.** Settings → Fetchable items (grouped, searchable, per-item
+  license/size/status, consent dialog, live progress over the realtime
+  system channel, post-fetch rescan); the managed-instance
+  `extra_model_paths.yaml` mirrors the fetcher's extra model roots
+  (model_patches, vdn, geometry_estimation) once they exist.
 
 ## Renderer structure
 
@@ -141,11 +187,10 @@ Managed engine (UI).
    verdict (recorded in the entry's comment when non-obvious), a pinned
    revision, and an `installMode`. No pack reaches an install path except
    through the registry.
-2. **Consent.** Nothing is installed without the user acting: today the user
-   nominates a local directory holding the pack (the network
-   clone-on-consent fetcher is a later increment); then confirms. The
-   Settings row shows the SPDX badge at consent time — NO-LICENSE renders
-   with a warning class.
+2. **Consent.** Nothing is installed without the user acting: the user
+   nominates a local directory holding the pack, or fetches it through the
+   consent-gated fetcher (below); then confirms. The Settings row shows the
+   SPDX badge at consent time — NO-LICENSE renders with a warning class.
 3. **Weights link, never copy.** Pack-carried weight files and any weight the
    studio places into a model root go through `linkNeverCopy()`
    (symlink → junction → hardlink → refuse with a reason). A copy is never
@@ -154,8 +199,10 @@ Managed engine (UI).
 4. **Pin recording.** The install marker (`.studio-node.json`) records id +
    pinned revision; a registry pin bump is a delete-and-reinstall, never a
    merge. A foreign `custom_nodes/<name>` the studio did not place is
-   refused, never silently replaced. (Known gap: the facok entry's pin is the
-   `main` branch — the network fetcher must stamp the fetched HEAD SHA.)
+   refused, never silently replaced. Branch pins (facok's `main`, T8mars's
+   `main`) are resolved to the HEAD SHA at fetch time and the STAMPED sha is
+   what the marker records — never a moving target (the §9.1 gap in
+   LICENSES.md, closed by the fetcher).
 5. **Uninstall = delete the folder.** Marker-only installs never touch
    anything outside `custom_nodes/<name>`; linked weights in model roots are
    links — removing the pack leaves the user's own files alone.
@@ -177,6 +224,9 @@ pnpm start:server   # run the app on :4178
 pnpm dev            # vite HMR on :5173 (proxies /api to :4178)
 pnpm test           # assertion suite (workflows, reducer, persistence, poll kernel)
 pnpm test:registry  # optimization registry: inertness goldens, transforms, detection, pairing, expansion
+pnpm test:fetcher   # local-first fetcher: catalog integrity, consent gating, verification +
+                    # mismatch, pin stamping, install records, link placement, HTTP transport
+                    # (local stub origin), routes — zero real network
 pnpm smoke:server   # boots the built server on a scratch port; verifies routes + guards
 pnpm test:e2e       # builds, then Playwright: 14-view render sweep at 1920x1080
                     # with console-error tracking + per-view vision screenshots
@@ -193,8 +243,9 @@ pnpm gate           # the full chain through one harness: typecheck, lint,
 CI (`.github/workflows/ci.yml`) runs typecheck, lint, the license audit,
 unit, build, smoke, E2E and the vision capture on every push and PR
 (no browser downloads — the Playwright config launches the runner's system
-Chromium); the Windows Engine CI leg covers the server build + engine/runtime
-suites.
+Chromium); the Windows Engine CI leg covers the server build + the
+engine/runtime/fetcher suites (the fetcher suite exercises the OS-sensitive
+link placement and tar-extraction paths, with the transport mocked).
 
 ## Known debts / follow-ups
 
