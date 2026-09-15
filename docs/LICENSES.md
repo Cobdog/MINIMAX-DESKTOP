@@ -79,6 +79,31 @@ The vendored VDN pack's *weights* (~4.3 GB VDN checkpoints) are NOT vendored —
 they are user-fetched from Hugging Face and land as links (never copies) in the
 user's model roots (§5).
 
+### 2b. First-party custom node (our code — task k271ykk)
+
+| Component | Version / pin | SPDX | How consumed | Obligations | Status |
+| --- | --- | --- | --- | --- | --- |
+| `custom-nodes/minimax-lora-form-adapter/` (MiniMax-H3 LoRA Form Adapter) | `v1.0.0` (the node's own version) | **MIT** (LICENSE file in the pack) | first-class repo module; installs into a managed/external checkout from the studio's own payload (`installMode: 'first-party'`, no network) or via the consent-gated local-install fetch-catalog entry; independently releasable (copy the directory = the pack) | MIT notice (shipped) | clean |
+
+Licensing-aware asset posture (the §5-class question resolved conservatively,
+per docs/research/h3-lora-form-compatibility.md §5.6): the node ships **zero
+MiniMax-derived bytes** — the projection encoder is derived at first use from
+the user's own local artifacts (the model's live `adaln_t_table` + larryvrh's
+Apache-2.0 E-grid when installed, or a grid built by the pack's
+`tools/derive_projection.py` from the user's own full-width checkpoint).
+Precomputed matrices are a documented advanced option whose generation and
+posture the user owns. `pnpm license:audit` checks that first-party packs
+ship a LICENSE and stay permissive.
+
+**Test-only derived vectors** (small deterministic slices, ~740 KB, provenance
+in `custom-nodes/minimax-lora-form-adapter/tests/fixtures/FIXTURES.md`): the
+two canonical `adaln_t_table` grids, 64 columns of the Apache-2.0 E-grid,
+block-0 adaln tensors of the public larryvrh Turbo v4 LoRA, and block-0
+tensors of kijai's public Acc full/pruned pair. These are MiniMax-derived
+bytes committed for offline golden tests (explicitly sanctioned by the task —
+the alternative, a network-dependent golden, would silently skip in CI); they
+are not loadable model assets and never leave the test fixture.
+
 ## 3. User-fetch-only components (never vendored)
 
 The installable subset (facok, Larryvrh, T8mars) is tracked as data in

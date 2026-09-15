@@ -111,10 +111,13 @@ export type ManagedEngineStatus = {
 
 /** How a custom-node pack reaches an instance. 'vendor' = the studio ships
  *  the pack inside its own repo at a pinned revision (license-clean only);
+ *  'first-party' = the pack is OUR OWN code, shipped as a first-class module
+ *  of this repo (custom-nodes/<dir>) and independently releasable — installs
+ *  from the studio's own payload, no network, no third-party license at all;
  *  'user-fetch' = the user consents to it being fetched/copied into the
  *  instance's custom_nodes/ (for packs whose license does not permit
  *  redistribution, or that are not vendored yet). */
-export type NodePackInstallMode = 'vendor' | 'user-fetch'
+export type NodePackInstallMode = 'vendor' | 'first-party' | 'user-fetch'
 
 /** One registry entry (server-side data; the Settings surface renders it). */
 export type NodePackDefinition = {
@@ -131,11 +134,14 @@ export type NodePackDefinition = {
   homepage?: string
   /** Vendored payload directory (vendor mode only), relative to vendor root. */
   vendorDir?: string
+  /** First-party payload directory (first-party mode only), relative to the
+   *  repo's custom-nodes/ root. */
+  firstPartyDir?: string
 }
 
 /** Availability of one registry entry against a concrete checkout. */
 export type NodePackStatus = NodePackDefinition & {
-  /** The vendored payload is present in this install (vendor mode). */
+  /** The installable payload is present in this install (vendor + first-party modes). */
   vendored: boolean
   /** The pack is present in the checkout's custom_nodes/. */
   installed: boolean
@@ -199,6 +205,11 @@ export type FetchCatalogEntry = {
   homepage?: string
   /** Node-pack entries only: the ENGINE_NODE_PACKS id (assembled at load). */
   packId?: string
+  /** First-party node-pack entries (task k271ykk): the payload ships inside
+   *  the studio repo (custom-nodes/) and installs from it — the transport is
+   *  NEVER touched for this entry; the git source below is provenance only.
+   *  Consent still gates the catalog start (the doctrine is absolute). */
+  localInstall?: boolean
 }
 
 /** Live state of one catalog entry against the machine. */
@@ -367,6 +378,12 @@ export type ModelFile = {
   path?: string
   kind: ModelKind
   bytes: number
+  /** MiniMax-H3 adaln form, detected at scan time from the safetensors
+   *  header (tensor shapes, never the filename): diffusion models carry
+   *  'curve' | 'full'; LoRAs carry 'adaln-free' | 'curve-adaln' |
+   *  'full-width-adaln'. Undefined = not H3-shaped / not readable. See
+   *  server/modelForms.ts. */
+  h3Form?: string
 }
 
 export type MediaFile = {

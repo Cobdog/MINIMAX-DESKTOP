@@ -92,6 +92,26 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   nodePackEntry('h3-audio-t8'),
   nodePackEntry('krea2edit'),
   nodePackEntry('krea2-anypaint'),
+  // First-party pack (task k271ykk): installs from the studio's own
+  // custom-nodes/ payload — the fetch engine short-circuits to a local
+  // install and never touches the transport. License + repo stay
+  // single-sourced from ENGINE_NODE_PACKS (the integrity test's invariant).
+  {
+    id: 'pack:lora-form-adapter',
+    name: 'minimax-lora-form-adapter (first-party)',
+    group: 'node-packs',
+    description: 'The studio\'s own form-adaptive LoRA loader for MiniMax-H3 (MIT, our code): full-width→pruned adaln projection at load time. Installs from the studio\'s own payload — no download; the network is never touched for this entry (the source pin is provenance only). Also installable directly from the managed-engine node-packs settings.',
+    licenseSpdx: 'MIT',
+    licenseNote: 'Original work of this repo (custom-nodes/minimax-lora-form-adapter/LICENSE). Not a third-party fetch: localInstall.',
+    licenseUrl: 'https://github.com/Cobdog/MINIMAX-DESKTOP/blob/main/custom-nodes/minimax-lora-form-adapter/LICENSE',
+    source: { kind: 'git', url: 'https://github.com/Cobdog/MINIMAX-DESKTOP', revision: { kind: 'tag', value: 'v1.0.0' } },
+    destination: { kind: 'node-pack', packId: 'lora-form-adapter' },
+    sizeBytes: 80_000,
+    sizeClass: 'small',
+    homepage: 'https://github.com/Cobdog/MINIMAX-DESKTOP/tree/main/custom-nodes/minimax-lora-form-adapter',
+    packId: 'lora-form-adapter',
+    localInstall: true,
+  },
 
   // ---- Krea 2 edit mode (task t8u00uu — Identity Edit as a feature) -----
   // Weights first: the two edit LoRA lines the research committed to

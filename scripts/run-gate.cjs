@@ -57,6 +57,12 @@ const SUITES = [
   // verification, pin stamping, placement, routes — transport mocked, zero
   // real network.
   { name: 'test:fetcher', command: 'pnpm run test:fetcher', timeoutMs: 20 * MINUTE },
+  // Form-adapter node (task k271ykk): the node package's python suite
+  // (centered-fit math, both traps, the kijai golden) + the server-side
+  // registry/catalog/detection suites. Needs python3+numpy for the math
+  // half (CI installs it; the suite skips loudly when python is absent and
+  // FAILS when python exists without numpy).
+  { name: 'test:lora-form', command: 'pnpm run test:lora-form', timeoutMs: 20 * MINUTE },
   // build:web + build:server directly — typecheck already ran as its own suite
   // (the plain `build` script re-runs typecheck; redundant here).
   { name: 'build', command: 'pnpm run build:web && pnpm run build:server', timeoutMs: 15 * MINUTE, dependents: ['smoke:server', 'e2e', 'vision-capture'] },

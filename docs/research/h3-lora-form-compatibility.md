@@ -257,3 +257,38 @@ Read LoRA header (safetensors, no tensor load)
 20. Reddit r/StableDiffusion 1vecegy (pruned quality 1:1 thread), 1vgxf4x (drbaph turbo), 1vntltz (kijai pruned turbo loras); HF larryvrh/MiniMax-H3-Turbo-Lora discussion #27 (pruned version request).
 
 **Measurements made in this investigation [NUM]** (all reproducible: HF safetensors range-reads + local testbed bytes; scripts embedded in task log): table bit-identities (§2), kijai A/B forensics + projection cosines, span/residual figures (87.7 % uncentered vs 0.196 % `[C|1]`; E-in-span([C|1]) = 1.0000), hybrid overlay provenance, adaln-form inventory (§2 table).
+
+---
+
+## 8. Implementation addendum (task k271ykk, 2026-09-15)
+
+The node is built (`custom-nodes/minimax-lora-form-adapter/`, MIT) and every
+number above was re-derived from the same artifacts during implementation.
+One correction and three confirmations, all [NUM] from the implementation
+run (scripts: the pack's `tools/derive_test_fixtures.py`):
+
+1. **CORRECTION — kijai ships the bias delta.** §3.3 said "no bias-delta keys
+   are included (the ~2.7 % bias term is dropped)". The `..._pruned_comfy`
+   pair actually carries `*.adaln_proj.linear.diff_b [96768]` keys (F32, one
+   per adaln block; 50 extra tensors vs the full file — visible in the file
+   listing but missed by the header probe). Measured:
+   **cos(our Δb = B·(A·ē − A′·c̄), kijai's diff_b) = 1.000000**
+   (rel diff 6e-5 — bf16 storage rounding). kijai's conversion is exactly the
+   centered projection + bias delta this node implements, which STRENGTHENS
+   §4's recommendation: carry the bias term. (§3.3's cos 0.9968 / 0.9934 and
+   the 0.196 % / 87.7 % figures all reproduced exactly.)
+2. **Confirmed:** the two canonical tables extract locally with the exact
+   sha256s recorded in §2 (ac8727cd… / c02a6c11…); E-in-span([C|1]) =
+   0.999999; the Turbo LoRA projects at 0.14 % on-curve residual (the
+   0.196 %-class), uncentered at 96.9 %.
+3. **Trap anatomy (why 87.7 %):** the constant component carries ~90 % of
+   E's Frobenius energy (‖1·qᵀ‖/‖C·P‖ = 2.954) and 1 is orthogonal to
+   span(C) to 1e-9 — so any fit through C alone (uncentered, or centered
+   without the bias row) structurally loses most of the delta. The near-rank-6
+   centered spectrum (σ = 7.08 … 2.1e-3) is why the fit must use lstsq, not
+   normal equations.
+4. **Golden shipped offline:** the pair's block-0 tensors (A_full/A_prun/B
+   rows/diff_b rows), 64 E-grid columns, both tables and the fitted encoders
+   live in `tests/fixtures/h3_form_fixtures.npz` (~740 KB compressed,
+   provenance embedded + FIXTURES.md) so CI runs the golden with zero
+   network. Regenerate with the tool above (network, `--kijai`).

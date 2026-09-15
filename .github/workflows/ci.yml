@@ -17,6 +17,13 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      # Form-adapter node (task k271ykk): the math/golden suite runs on
+      # python3+numpy — numpy is not guaranteed on runner images, so install
+      # it explicitly (same precedent as the ffmpeg apt-get below).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: python -m pip install --disable-pip-version-check numpy
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
@@ -33,6 +40,9 @@ jobs:
       # the transport mocked throughout — catalog integrity, pin stamping,
       # verification, placement policy, routes. Zero real network in CI.
       - run: pnpm test:fetcher
+      # Form-adapter node (task k271ykk): python math/golden suite (numpy
+      # installed above) + the server-side detection/registry/catalog tests.
+      - run: pnpm test:lora-form
       # ffmpeg is required by the filmstrip capability (wave 2d: server-side
       # sprite-sheet thumbnails + the e2e video fixture). ubuntu-latest does
       # NOT ship it by default. Decision: install it rather than let the

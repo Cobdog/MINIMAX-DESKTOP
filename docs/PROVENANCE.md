@@ -80,3 +80,15 @@ License verdicts recorded by the same increment (registry entries in
 
 The current project name is a **placeholder**, chosen to be easy to `grep`/`sed`
 replace when a real name is decided.
+
+## First-party custom node (task k271ykk, 2026-09-15)
+
+`custom-nodes/minimax-lora-form-adapter/` is OUR code (MIT), not a vendored
+third-party payload: written in-repo, registered in `server/engineNodes.ts`
+as `installMode: 'first-party'`, and installed from the studio's own payload
+(no network, no upstream pin). The pack's runtime assets follow the
+licensing-conservative default recorded in docs/LICENSES.md §2b: zero
+MiniMax-derived bytes ship — the projection encoder is derived at first use
+from the user's own artifacts. Test-only golden vectors
+(`tests/fixtures/h3_form_fixtures.npz`) are documented in the pack's
+FIXTURES.md + LICENSES.md §2b.

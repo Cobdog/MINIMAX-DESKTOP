@@ -1,0 +1,17 @@
+[project]
+name = "minimax-lora-form-adapter"
+version = "1.0.0"
+description = "Form-adaptive LoRA loader for MiniMax-H3: full-width -> pruned (curve) adaln projection at load time"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "MiniMax Studio contributors" }]
+dependencies = []  # numpy ships with every torch install; torch + ComfyUI are the runtime host
+
+[project.urls]
+Homepage = "https://github.com/Cobdog/MINIMAX-DESKTOP/tree/main/custom-nodes/minimax-lora-form-adapter"
+
+[tool.comfy]
+PublisherId = "minimax-studio"
+DisplayName = "MiniMax-H3 LoRA Form Adapter"

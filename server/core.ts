@@ -30,6 +30,7 @@ import { RuntimeManager, RuntimeConfigError } from './runtime'
 import { ENGINE_PATCH_IDS, revertEnginePatch, ENGINE_PATCHES } from './enginePatch'
 import { mergeEngineProfiles } from './engineProfiles'
 import { checkAllNodePacks, findNodePack, installNodePack, isUsableCheckout, resolveVendorRoot, uninstallNodePack } from './engineNodes'
+import { h3FormForScannedFile } from './modelForms'
 import { FETCH_ENTRY_IDS, findFetchEntry } from './fetchCatalog'
 import { FetchManager, transportForEnvironment } from './fetcher'
 import { createLlmService, type LlmService } from './llm'
@@ -646,7 +647,7 @@ export function createStudioServer(paths: StudioServerPaths) {
   }
 
   async function scanDirectory(root: string, kind: ModelKind) {
-    const results: Array<{ name: string; path: string; kind: ModelKind; bytes: number }> = []
+    const results: Array<{ name: string; path: string; kind: ModelKind; bytes: number; h3Form?: string }> = []
     if (!root || !existsSync(root)) return results
     const pending = [normalize(root)]
     while (pending.length) {
@@ -666,7 +667,12 @@ export function createStudioServer(paths: StudioServerPaths) {
           // EACCES entry must not blank the model list.
           try {
             const info = await stat(fullPath)
-            results.push({ name: entry.name, path: fullPath, kind, bytes: info.size })
+            // H3 adaln form tag (task k271ykk): header-only read, one call
+            // per scanned file; an unreadable/exotic header degrades to "no
+            // tag", never to a failed scan. Diffusion models tag curve/full;
+            // LoRAs tag adaln-free/curve-adaln/full-width-adaln.
+            const h3Form = await h3FormForScannedFile(fullPath, kind)
+            results.push({ name: entry.name, path: fullPath, kind, bytes: info.size, ...(h3Form ? { h3Form } : {}) })
           } catch { /* Unreadable entry; leave it out. */ }
         }
       }
@@ -1087,10 +1093,11 @@ export function createStudioServer(paths: StudioServerPaths) {
             const ollamaModels = (ollama.models ?? []).filter((item) => item.name && !item.remote_model && item.size !== 342).map((item) => item.name as string)
             // Model paths are stripped: the renderer matches by name and kind, and
             // full filesystem paths are a recon leak to anyone who can reach the API.
-            const models = groups.flat().map((model) => ({ name: model.name, kind: model.kind, bytes: model.bytes }))
+            // The h3Form tag (when detected) rides along for LoRA×base guidance.
+            const models = groups.flat().map((model) => ({ name: model.name, kind: model.kind, bytes: model.bytes, ...(model.h3Form ? { h3Form: model.h3Form } : {}) }))
             return sendJson(response, 200, { connected: true, latencyMs: Date.now() - started, models, upscalers, ltxModel: latentUpscalers.find((name) => /ltx-2\.5.*spatial.*x2/i.test(name)) ?? '', ltxVae: vaes.find((name) => /ltx-2\.5.*video.*vae/i.test(name)) ?? '', ltxUpscaleReady: ltxUpscaleMissing.length === 0, ltxUpscaleMissing, ltxNativeReady: ltxNativeMissing.length === 0, ltxNativeMissing, ollamaModels, ollamaModel: settings.ollamaModel })
           } catch (error) {
-            return sendJson(response, 200, { connected: false, latencyMs: Date.now() - started, models: groups.flat().map((model) => ({ name: model.name, kind: model.kind, bytes: model.bytes })), error: error instanceof Error ? error.message : String(error) })
+            return sendJson(response, 200, { connected: false, latencyMs: Date.now() - started, models: groups.flat().map((model) => ({ name: model.name, kind: model.kind, bytes: model.bytes, ...(model.h3Form ? { h3Form: model.h3Form } : {}) })), error: error instanceof Error ? error.message : String(error) })
           }
         }
         if (url.pathname === '/api/lan/characters' && request.method === 'GET') return sendJson(response, 200, { characters: mobileCharacterLibrary })

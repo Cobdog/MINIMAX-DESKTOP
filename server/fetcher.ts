@@ -636,6 +636,37 @@ export class FetchManager {
   private async runFetch(entry: FetchCatalogEntry, settings: AppSettings, checkout: string | null, startOptions: { destinationDir?: string }): Promise<void> {
     const totalBytes = entry.files?.reduce((sum, file) => sum + (file.sizeBytes ?? 0), 0)
     try {
+      // FIRST-PARTY packs (task k271ykk, localInstall entries): the payload
+      // ships inside this repo (custom-nodes/) — install straight from it.
+      // The transport is never touched (resolveRevision included); consent
+      // was still required by start(), because the doctrine — every catalog
+      // fetch is consent-gated — holds for local installs too.
+      if (entry.localInstall) {
+        this.emit({ id: entry.id, phase: 'placing', message: 'installing the studio\'s own payload (no network)' })
+        const pack = entry.destination.kind === 'node-pack' ? findNodePack(entry.destination.packId) : null
+        if (!pack || !checkout) throw new Error('the node-pack registry entry or the configured checkout disappeared mid-install')
+        const installed = await installNodePack(pack, { checkout })
+        if (!installed.installed && !installed.alreadyInstalled) throw new Error(`the pack install refused: ${installed.notes.join(' ')}`)
+        const record: FetchInstallRecord = {
+          at: Date.now(),
+          revision: pack.pinnedRevision,
+          pinKind: entry.source.revision.kind,
+          sourceLabel: `first-party payload (custom-nodes)@${pack.pinnedRevision}`,
+          files: [],
+          placed: [{ path: join(resolve(checkout), 'custom_nodes', pack.name), kind: 'tree' }],
+          licenseSpdx: entry.licenseSpdx,
+          licenseAcknowledged: true,
+          verified: 'none',
+        }
+        await this.updateState((state) => {
+          const failures = { ...state.failures }
+          delete failures[entry.id]
+          return { version: 1, installs: { ...state.installs, [entry.id]: record }, failures }
+        })
+        this.emit({ id: entry.id, phase: 'done', message: `${entry.name} installed from the studio's own payload` })
+        this.options.logEvent({ kind: 'fetcher.installed', entry: entry.id, revision: record.revision, verified: 'none', files: 0 })
+        return
+      }
       this.emit({ id: entry.id, phase: 'resolving', message: `resolving ${labelForSource(entry)}` })
       const revision = await this.resolveRevision(entry)
       const record: FetchInstallRecord = {

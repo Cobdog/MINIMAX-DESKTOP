@@ -85,6 +85,21 @@ for (const dir of vendored) {
   console.log(`vendored ${dir}: LICENSE present ("${head.slice(0, 60)}…")`)
 }
 
+// --- 2b. first-party node packs (task k271ykk) --------------------------------
+// OUR OWN packs live at custom-nodes/<dir> — the same LICENSE discipline
+// applies (they ship in our releases and are independently releasable).
+const firstPartyRoot = path.join(repoRoot, 'custom-nodes')
+const firstPartyDirs = fs.existsSync(firstPartyRoot) ? fs.readdirSync(firstPartyRoot).filter((entry) => fs.statSync(path.join(firstPartyRoot, entry)).isDirectory()) : []
+for (const dir of firstPartyDirs) {
+  const license = path.join(firstPartyRoot, dir, 'LICENSE')
+  if (!fs.existsSync(license)) {
+    failures.push(`first-party pack ${dir}: no LICENSE file in custom-nodes/${dir} — our own packs ship their license`)
+    continue
+  }
+  const head = fs.readFileSync(license, 'utf8').split('\n').slice(0, 3).join(' ').replace(/\s+/g, ' ').trim()
+  console.log(`first-party ${dir}: LICENSE present ("${head.slice(0, 60)}…")`)
+}
+
 // --- 3. registry discipline (never vendor what we can't ship) -----------------
 const registryPath = path.join(repoRoot, 'server', 'engineNodes.ts')
 const registry = fs.readFileSync(registryPath, 'utf8')
@@ -105,7 +120,10 @@ if (!arrayMatch) {
     if (mode === 'vendor' && !VENDORABLE.has(spdx)) {
       failures.push(`registry entry ${id}: licenseSpdx ${spdx} is not vendorable but installMode is 'vendor' — we never vendor what we can't ship`)
     }
-    console.log(`registry ${id}: ${spdx} / ${mode} ${mode === 'vendor' && VENDORABLE.has(spdx) ? 'ok' : '(user-fetch — license gate holds)'}`)
+    if (mode === 'first-party' && !VENDORABLE.has(spdx)) {
+      failures.push(`registry entry ${id}: licenseSpdx ${spdx} is not permissive but installMode is 'first-party' — our own packs release under permissive terms`)
+    }
+    console.log(`registry ${id}: ${spdx} / ${mode} ${((mode === 'vendor' || mode === 'first-party') && VENDORABLE.has(spdx)) ? 'ok' : '(user-fetch — license gate holds)'}`)
   }
 }
 

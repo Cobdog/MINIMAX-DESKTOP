@@ -76,6 +76,18 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     homepage: 'https://github.com/Saganaki22/ComfyUI-VDN-H3',
   },
   {
+    id: 'lora-form-adapter',
+    name: 'minimax-lora-form-adapter',
+    description: 'The studio\'s own form-adaptive LoRA loader for MiniMax-H3 (first-party code, MIT, independently releasable): detects curve(pruned) vs full-width adaln forms from live tensor shapes on both the model and the LoRA, passes matching/adaln-free LoRAs through the stock machinery, and projects full-width adaln LoRAs onto curve bases at load time (centered [C|1] encoder + adaln bias delta, golden-tested against kijai\'s published conversion). Installs from the studio\'s own payload — no network, no third-party license.',
+    repoUrl: 'https://github.com/Cobdog/MINIMAX-DESKTOP',
+    pinnedRevision: 'v1.0.0',
+    licenseSpdx: 'MIT',
+    licenseNote: 'Original work of this repo (custom-nodes/minimax-lora-form-adapter, MIT LICENSE file). The release pin is the node\'s own version; install copies the studio\'s payload, never a network fetch.',
+    installMode: 'first-party',
+    firstPartyDir: 'minimax-lora-form-adapter',
+    homepage: 'https://github.com/Cobdog/MINIMAX-DESKTOP/tree/main/custom-nodes/minimax-lora-form-adapter',
+  },
+  {
     id: 'minimax-h3-turbo',
     name: 'ComfyUI-MiniMax-H3-Turbo',
     description: 'Larryvrh\'s turbo-LoRA loader node (the pack the optimization registry detects as larryvrhTurbo) plus the h3_silu_temb_grid fix for pruned bases. License-clean (Apache-2.0) but not vendored yet — install from a local copy of the repo.',
@@ -161,15 +173,39 @@ export function nodePackInstallDir(checkout: string, pack: NodePackDefinition): 
 export function resolveVendorRoot(): string | null {
   const override = process.env.MINIMAX_STUDIO_VENDOR_ROOT?.trim()
   if (override && isAbsolute(override) && existsSync(override)) return override
+  return walkUpFor('vendor', 'nodes')
+}
+
+/** The first-party payload root (task k271ykk): our OWN node packs live at
+ *  the repo's custom-nodes/<dir> — first-class modules, independently
+ *  releasable, installed from the studio's own payload without a network.
+ *  Same walk as resolveVendorRoot; env override for tests. */
+export function resolveFirstPartyRoot(): string | null {
+  const override = process.env.MINIMAX_STUDIO_FIRST_PARTY_ROOT?.trim()
+  if (override && isAbsolute(override) && existsSync(override)) return override
+  return walkUpFor('custom-nodes')
+}
+
+function walkUpFor(...segments: string[]): string | null {
   let directory = __dirname
   for (let depth = 0; depth < 6; depth += 1) {
-    const candidate = join(directory, 'vendor', 'nodes')
+    const candidate = join(directory, ...segments)
     if (existsSync(candidate)) return candidate
     const parent = dirname(directory)
     if (parent === directory) break
     directory = parent
   }
   return null
+}
+
+/** Where a FIRST-PARTY pack's installable payload lives, when present: the
+ *  repo's custom-nodes/<firstPartyDir>. Null = not a first-party pack or no
+ *  payload in this install. (Vendor packs keep their injected vendorRoot
+ *  seam; user-fetch packs have no studio payload by definition.) */
+export function firstPartyPayloadDir(pack: NodePackDefinition): string | null {
+  if (pack.installMode !== 'first-party' || !pack.firstPartyDir) return null
+  const root = resolveFirstPartyRoot()
+  return root && existsSync(join(root, pack.firstPartyDir)) ? join(root, pack.firstPartyDir) : null
 }
 
 /** The install marker: our record of what we placed and when. */
@@ -295,7 +331,11 @@ export async function nodePackInstalledRevision(pack: NodePackDefinition, checko
 }
 
 export async function checkNodePack(pack: NodePackDefinition, checkout: string | null, vendorRoot: string | null): Promise<NodePackStatus> {
-  const vendored = pack.installMode === 'vendor' && Boolean(pack.vendorDir && vendorRoot && existsSync(join(vendorRoot, pack.vendorDir)))
+  const vendored = pack.installMode === 'vendor'
+    ? Boolean(pack.vendorDir && vendorRoot && existsSync(join(vendorRoot, pack.vendorDir)))
+    : pack.installMode === 'first-party'
+      ? firstPartyPayloadDir(pack) !== null
+      : false
   const base: NodePackStatus = {
     ...pack,
     vendored,
@@ -322,14 +362,16 @@ export async function checkNodePack(pack: NodePackDefinition, checkout: string |
 }
 
 function withAvailability(status: NodePackStatus, pack: NodePackDefinition, vendored: boolean, note?: string): NodePackStatus {
-  const availability: NodePackStatus['availability'] = pack.installMode === 'vendor'
+  const availability: NodePackStatus['availability'] = pack.installMode === 'vendor' || pack.installMode === 'first-party'
     ? (vendored ? 'ready' : 'unavailable')
     : 'needs-source'
   const baseNote = pack.installMode === 'vendor' && !vendored
     ? 'the vendored payload is not present in this install (vendor/nodes not found); use user-fetch from a local copy or the fetcher.'
-    : pack.installMode === 'user-fetch' && !note
-      ? 'user-fetch: install from a local copy of the repository, or through the consent-gated fetcher (Settings → Fetchable items).'
-      : undefined
+    : pack.installMode === 'first-party' && !vendored
+      ? 'the first-party payload is not present in this install (custom-nodes not found).'
+      : pack.installMode === 'user-fetch' && !note
+        ? 'user-fetch: install from a local copy of the repository, or through the consent-gated fetcher (Settings → Fetchable items).'
+        : undefined
   const notes = [note, baseNote].filter((entry): entry is string => Boolean(entry))
   return { ...status, availability, note: notes.length ? notes.join(' ') : undefined }
 }
@@ -369,6 +411,14 @@ export async function installNodePack(pack: NodePackDefinition, options: Install
     sourceLabel = 'vendored payload'
     if (!sourceRoot || !existsSync(sourceRoot)) {
       return { status: await checkNodePack(pack, checkout, vendorRoot), installed: false, notes: ['the vendored payload is not present in this install.'] }
+    }
+  } else if (pack.installMode === 'first-party') {
+    // OUR OWN code: install from the studio's custom-nodes payload — no
+    // network, no third-party license, no sourceDirectory needed.
+    sourceRoot = firstPartyPayloadDir(pack)
+    sourceLabel = 'first-party payload (custom-nodes)'
+    if (!sourceRoot) {
+      return { status: await checkNodePack(pack, checkout, vendorRoot), installed: false, notes: ['the first-party payload is not present in this install (custom-nodes not found).'] }
     }
   } else {
     const nominated = options.sourceDirectory?.trim() ?? ''

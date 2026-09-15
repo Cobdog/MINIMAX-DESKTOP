@@ -21,6 +21,13 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      # Form-adapter node (task k271ykk): the math/golden suite runs on
+      # python3+numpy on both legs (the first-party install path is also
+      # symlink-sensitive — exactly why this suite runs on Windows too).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: python -m pip install --disable-pip-version-check numpy
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:server
       - run: node scripts/test-engine-process.cjs
@@ -30,3 +37,6 @@ jobs:
       # Local-first fetcher (task hgjbea2): both legs run it in full — symlink
       # placement and the tar extractor are exactly the OS-sensitive paths.
       - run: node scripts/test-fetcher.cjs
+      # Form-adapter suite (task k271ykk): math + golden (numpy) and the
+      # first-party pack install path on Windows symlinks/junctions.
+      - run: node scripts/test-lora-form.cjs
