@@ -2,11 +2,12 @@
  *  H3 stack report, generation defaults, the LLM layer (llama.cpp router +
  *  Ollama fallback), model locations, and output/clip paths. */
 import { useEffect, useState } from 'react'
-import { GitBranch, Wand2 } from 'lucide-react'
+import { Eraser, GitBranch, Wand2 } from 'lucide-react'
 import { Activity, AlertCircle, Check, ChevronDown, Cpu, Eye, Folder, FolderOpen, Gauge, HardDrive, LoaderCircle, Power, RefreshCw, Save, Scale, ServerCog, SlidersHorizontal, Sparkles, Stethoscope, Unplug } from 'lucide-react'
-import type { AppSettings, ComfyStatus, LlmModelsResult, ModelFile, ModelKind, NodePackStatus, OllamaModel, UpscaleMode } from '../types'
+import type { AppSettings, ComfyStatus, LlmModelsResult, MediaFile, ModelFile, ModelKind, NodePackStatus, OllamaModel, UpscaleMode } from '../types'
 import { choices, type ObjectInfo } from '../lib/comfyInfo'
-import { detectKrea2EditFamilies, detectOptimizations, KREA2_RECIPE_PINS } from '../lib/graph'
+import { detectKrea2EditFamilies, detectLtx23Utilities, detectOptimizations, KREA2_RECIPE_PINS } from '../lib/graph'
+import type { Ltx23UtilityKind } from '../lib/graph'
 import type { h3StackReport } from '../lib/h3Stack'
 import { SelectField, NumberField } from '../components/form'
 import { formatBytes } from '../lib/format'
@@ -14,7 +15,7 @@ import type { DoctorReport } from '../lib/doctor'
 import { FetchBrowser } from '../components/FetchBrowser'
 import { useSessionStore } from '../state/sessionStore'
 
-export function SettingsView({ settings, setSettings, info, models, h3Report, scanning, status, checking, diagnosticRunning, ollamaModels, onRefreshOllama, onScan, onCheck, onSave, onApplyDefaults, onRunDiagnostics }: { settings: AppSettings; setSettings(value: AppSettings): void; info: ObjectInfo; models: ModelFile[]; h3Report: ReturnType<typeof h3StackReport>; scanning: boolean; status: ComfyStatus; checking: boolean; diagnosticRunning: boolean; ollamaModels: OllamaModel[]; onRefreshOllama(): void; onScan(): void; onCheck(): void; onSave(): void; onApplyDefaults(): void; onRunDiagnostics(): void }) {
+export function SettingsView({ settings, setSettings, info, models, h3Report, scanning, status, checking, diagnosticRunning, ollamaModels, onRefreshOllama, onScan, onCheck, onSave, onApplyDefaults, onRunDiagnostics, onRunLtxUtility }: { settings: AppSettings; setSettings(value: AppSettings): void; info: ObjectInfo; models: ModelFile[]; h3Report: ReturnType<typeof h3StackReport>; scanning: boolean; status: ComfyStatus; checking: boolean; diagnosticRunning: boolean; ollamaModels: OllamaModel[]; onRefreshOllama(): void; onScan(): void; onCheck(): void; onSave(): void; onApplyDefaults(): void; onRunDiagnostics(): void; onRunLtxUtility?: (options: { tool: Ltx23UtilityKind; input: MediaFile | null; audio?: MediaFile | null; prompt?: string }) => Promise<string | null> }) {
   const pathRows: Array<{ kind: ModelKind; label: string; note: string }> = [
     { kind: 'diffusion_models', label: 'Diffusion models', note: 'FL2VA and Ref2VA checkpoints' },
     { kind: 'text_encoders', label: 'Text encoders', note: 'Qwen3-VL MiniMax encoder' },
@@ -33,6 +34,16 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
   const krea2EditModes = detectKrea2EditFamilies(info, models)
   const editModesReady = krea2EditModes.filter(({ detection }) => detection.available).length
   const [selectedKrea2EditMode, setSelectedKrea2EditMode] = useState('krea2edit.instruct')
+  // LTX-2.3 one-graph utilities (task 068xwy3): the same thin-surface pattern
+  // — availability-gated tool list over the template-faithful builders in
+  // src/lib/graph/ltx23.ts, with a minimal pick-input + run row.
+  const ltx23Tools = detectLtx23Utilities(info, models)
+  const ltx23Ready = ltx23Tools.filter(({ detection }) => detection.available).length
+  const [selectedLtx23Utility, setSelectedLtx23Utility] = useState('ltx23.remove-subtitles')
+  const [ltx23Input, setLtx23Input] = useState<MediaFile | null>(null)
+  const [ltx23Audio, setLtx23Audio] = useState<MediaFile | null>(null)
+  const [ltx23Prompt, setLtx23Prompt] = useState('')
+  const [ltx23Running, setLtx23Running] = useState(false)
   const defaults = settings.generationDefaults
   const updateDefaults = (patch: Partial<AppSettings['generationDefaults']>) => setSettings({ ...settings, generationDefaults: { ...defaults, ...patch } })
   const applyPreset = (preset: 'quality' | 'official-turbo' | 'preview') => {
@@ -259,6 +270,45 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
             <p>Dials: {family.dials.map((dial) => dialCopy[dial]).filter(Boolean).join(' · ') || 'pinned recipe — no dials'}</p>
             {family.ui.warning && <p>{family.ui.warning}</p>}
             {missing.length > 0 && <p>Missing: {missing.join('; ')}. {family.ui.installHint}</p>}
+          </div>
+        </div>
+      })()}
+    </section>
+    <section className="settings-section ltx23-utilities-section" aria-label="LTX video utilities">
+      <div className="settings-heading"><div><Eraser size={19} /><span><strong>LTX video utilities</strong><small>One-graph LTX-2.3 editing tools — official ComfyUI template topologies, availability-gated here. The canvas redesign owns the real pick-and-run surface; this thin run row exists so the tools are usable today (verdict docs/research/ltx-vs-h3-verdict.md: keep-utilities-only).</small></span></div><span className={`health-pill ${ltx23Ready === ltx23Tools.length ? 'online' : ''}`}>{ltx23Ready} of {ltx23Tools.length} ready</span></div>
+      <div className="preset-row" aria-label="LTX utility picker">
+        {ltx23Tools.map(({ utility, detection }) => <button type="button" className={selectedLtx23Utility === utility.id ? 'tier-selected' : ''} key={utility.id} onClick={() => setSelectedLtx23Utility(utility.id)}><strong>{utility.label}</strong><small>{detection.available ? 'template graph ready' : 'Needs setup'}</small></button>)}
+      </div>
+      {(() => {
+        const selected = ltx23Tools.find(({ utility }) => utility.id === selectedLtx23Utility) ?? ltx23Tools[0]
+        if (!selected) return null
+        const { utility, detection } = selected
+        const missing = [...detection.missingNodes.map((nodeClass) => `node ${nodeClass} (node pack)`), ...detection.missingModels]
+        const needsVideo = utility.kind !== 'ia2v'
+        const canRun = detection.available && onRunLtxUtility && ((needsVideo && ltx23Input) || (utility.kind === 'ia2v' && ltx23Input && ltx23Audio))
+        const pick = async (kind: 'video' | 'image' | 'audio') => {
+          try {
+            const picked = await window.minimax.chooseMedia(kind)
+            if (!picked) return
+            if (kind === 'audio') setLtx23Audio({ ...picked, kind })
+            else setLtx23Input({ ...picked, kind })
+          } catch { /* the bridge reports picker failures; a cancel is silent */ }
+        }
+        return <div className={`doctor-check ${detection.available ? 'ok' : 'warn'}`}>
+          <span>{detection.available ? <Check size={14} /> : <AlertCircle size={14} />}</span>
+          <div>
+            <strong>{utility.label}{detection.resolved?.checkpoint ? ` — ${detection.resolved.checkpoint}` : ''}</strong>
+            <small>{utility.ui.description}</small>
+            {utility.ui.promptGuidance && <p>Prompting: {utility.ui.promptGuidance}</p>}
+            <p>Input: {utility.ui.input}{utility.kind === 'ia2v' ? ' + an audio clip' : ''} · negative prompt pinned by the template</p>
+            {utility.ui.warning && <p>{utility.ui.warning}</p>}
+            {missing.length > 0 && <p>Missing: {missing.join('; ')}. {utility.ui.installHint}</p>}
+            {detection.available && onRunLtxUtility && <div className="connection-row">
+              <div className="field-group grow"><label htmlFor={`ltx23-input-${utility.id}`}>Input</label><button id={`ltx23-input-${utility.id}`} className="secondary-button" onClick={() => void pick(needsVideo ? 'video' : 'image')}>{ltx23Input ? ltx23Input.name : `Choose ${needsVideo ? 'video' : 'image'}…`}</button></div>
+              {utility.kind === 'ia2v' && <div className="field-group grow"><label htmlFor={`ltx23-audio-${utility.id}`}>Audio</label><button id={`ltx23-audio-${utility.id}`} className="secondary-button" onClick={() => void pick('audio')}>{ltx23Audio ? ltx23Audio.name : 'Choose audio…'}</button></div>}
+              <div className="field-group grow"><label htmlFor={`ltx23-prompt-${utility.id}`}>Prompt (optional — template default applies)</label><input id={`ltx23-prompt-${utility.id}`} value={ltx23Prompt} placeholder={utility.promptDefault.slice(0, 80)} onChange={(event) => setLtx23Prompt(event.target.value)} /></div>
+              <button className="primary-button" disabled={!canRun || ltx23Running} onClick={() => { setLtx23Running(true); void onRunLtxUtility({ tool: utility.kind, input: ltx23Input, audio: ltx23Audio, prompt: ltx23Prompt.trim() || undefined }).finally(() => setLtx23Running(false)) }}>{ltx23Running ? 'Queueing…' : 'Run'}</button>
+            </div>}
           </div>
         </div>
       })()}

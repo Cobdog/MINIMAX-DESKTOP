@@ -166,7 +166,7 @@ export type FetchSource =
 /** Model roots beyond the six scanner kinds the fetcher places weights into
  *  (ComfyUI folder names; resolved against settings.paths first, then
  *  settings.modelRoot). */
-export type FetchModelRoot = ModelKind | 'model_patches' | 'vdn' | 'geometry_estimation' | 'checkpoints'
+export type FetchModelRoot = ModelKind | 'model_patches' | 'vdn' | 'geometry_estimation' | 'checkpoints' | 'latent_upscale_models'
 
 export type FetchDestination =
   | { kind: 'model-root'; root: FetchModelRoot; subpath?: string }
@@ -425,6 +425,36 @@ export type Ltx25GenerationOptions = {
   filenamePrefix: string
 }
 
+/** Model resolution for the LTX-2.3 one-graph utilities (task 068xwy3).
+ *  The single-file dev checkpoint carries diffusion + video VAE + audio VAE
+ *  + text projection, so most tools need ONLY it plus the Gemma encoder,
+ *  the latent upscaler and their per-tool LoRA; the Obscura Remova tool is
+ *  the split-weights exception. Empty strings mark absences (availability
+ *  detection turns them into install guidance). */
+export type Ltx23ModelSelection = {
+  /** models/checkpoints — ltx-2.3-22b-dev(.safetensors | -fp8.safetensors). */
+  checkpoint: string
+  /** models/diffusion_models — Kijai's ltx-2.3-22b-dev_transformer_only_bf16 split (Obscura only). */
+  transformer: string
+  /** models/text_encoders — gemma_3_12B_it(.safetensors | _fp4_mixed.safetensors). */
+  textEncoder: string
+  /** models/text_encoders — ltx-2.3_text_projection_bf16 (Obscura only). */
+  textProjection: string
+  /** models/vae — LTX23_video_vae_bf16 (Obscura only). */
+  videoVae: string
+  /** models/vae — LTX23_audio_vae_bf16 (Obscura only). */
+  audioVae: string
+  /** models/latent_upscale_models — ltx-2.3-spatial-upscaler-x2-1.1. */
+  latentUpscaler: string
+  /** The distilled-acceleration LoRA shared with the official templates (any official variant). */
+  distilledLora: string
+  subtitlesRemoveLora: string
+  watermarkRemoveLora: string
+  archivalLora: string
+  obscuraLora: string
+  outpaintLora: string
+}
+
 export type AceStepModelSelection = {
   base: string
   sft: string
@@ -644,7 +674,7 @@ export type GenerationJob = {
   width: number
   height: number
   duration: number
-  provider?: 'minimax' | 'ltx25' | 'acestep' | 'music3'
+  provider?: 'minimax' | 'ltx25' | 'ltx23' | 'acestep' | 'music3'
   /** Reproducibility record attached at submit time (persisted). */
   manifest?: Record<string, unknown>
   /** Submit-side graph for in-memory auto-retry only — stripped before

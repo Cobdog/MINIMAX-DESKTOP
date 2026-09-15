@@ -191,7 +191,7 @@ async function main() {
     const validGroups = new Set(['node-packs', 'weights', 'preprocessors', 'engine'])
     const validDestinations = new Set(['model-root', 'pack-ckpt', 'node-pack', 'engine-checkout'])
     const validSizeClasses = new Set(['small', 'medium', 'large', 'huge'])
-    const validRoots = new Set(['diffusion_models', 'text_encoders', 'vae', 'loras', 'vae_approx', 'clip_vision', 'model_patches', 'vdn', 'geometry_estimation', 'checkpoints'])
+    const validRoots = new Set(['diffusion_models', 'text_encoders', 'vae', 'loras', 'vae_approx', 'clip_vision', 'model_patches', 'vdn', 'geometry_estimation', 'checkpoints', 'latent_upscale_models'])
     for (const entry of FETCH_CATALOG) {
       ok(!ids.has(entry.id) && /^[a-z0-9][a-z0-9._:-]*$/i.test(entry.id), `unique well-formed id: ${entry.id}`)
       ids.add(entry.id)

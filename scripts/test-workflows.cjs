@@ -10,7 +10,7 @@ const workflowModule = load('src/lib/workflow.ts')
 const { frameCount, buildMiniMaxWorkflow, extractOutputUrl, extractOutputFile, outputFileFromUrl, OFFICIAL_H3_SAMPLER, OFFICIAL_H3_SCHEDULER } = workflowModule
 const { buildZImage } = load('src/lib/zimage.ts')
 const { buildLtx25Workflow, ltx25FrameCount, LTX25_FIRST_STAGE_SIGMAS, LTX25_REFINER_SIGMAS } = load('src/lib/ltx25Workflow.ts')
-const { inferSelections, inferLtx25Selections } = load('src/lib/modelSelection.ts')
+const { inferSelections, inferLtx25Selections, inferLtx23Selections } = load('src/lib/modelSelection.ts')
 const { cropRect, fitWholeCharacter } = load('src/lib/imageCrop.ts')
 const { promptPresets, searchPromptPresets } = load('src/lib/promptPresets.ts')
 assert.equal(fitWholeCharacter({ path: 'character.png', name: 'Character', kind: 'image' }).crop.fit, 'contain')
@@ -134,6 +134,52 @@ const selectedLtx = inferLtx25Selections([
   { kind: 'vae', name: 'ltx-2.5-audio-vae-bf16.safetensors' },
 ], ['ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors'])
 assert.ok(Object.values(selectedLtx).every(Boolean))
+
+// LTX-2.3 utility inference (task 068xwy3): a DIFFERENT generation from the
+// 2.5 workspace — the 22B dev checkpoint slot resolves through the engine's
+// checkpoint combo list (models/checkpoints is outside the six scanner
+// kinds), the per-tool LoRAs through the scan, and the ladder preferences
+// follow the official templates' own pins.
+const selectedLtx23 = inferLtx23Selections([
+  { kind: 'text_encoders', name: 'gemma_3_12B_it.safetensors' },
+  { kind: 'text_encoders', name: 'gemma_3_12B_it_fp4_mixed.safetensors' },
+  { kind: 'text_encoders', name: 'ltx-2.3_text_projection_bf16.safetensors' },
+  { kind: 'diffusion_models', name: 'ltx-2.3-22b-dev_transformer_only_bf16.safetensors' },
+  { kind: 'vae', name: 'LTX23_video_vae_bf16.safetensors' },
+  { kind: 'vae', name: 'LTX23_audio_vae_bf16.safetensors' },
+  { kind: 'loras', name: 'ltx-2.3-22b-distilled-lora-384-1.1.safetensors' },
+  { kind: 'loras', name: 'ltx2.3-ic-subtitles-remove-general.safetensors' },
+  { kind: 'loras', name: 'ltx2.3-ic-watermark-remove-general.safetensors' },
+  { kind: 'loras', name: 'ltx-2.3-dearchive-lora_weights_step_05000.safetensors' },
+  { kind: 'loras', name: 'ltx23-obscura_remova.safetensors' },
+  { kind: 'loras', name: 'ltx-2.3-22b-ic-lora-outpaint.safetensors' },
+], {
+  checkpoints: ['ltx-2.3-22b-dev.safetensors', 'ltx-2.3-22b-dev-fp8.safetensors', 'some-other-checkpoint.safetensors'],
+  latentUpscalers: ['ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors', 'ltx-2.3-spatial-upscaler-x2-1.1.safetensors'],
+})
+assert.equal(selectedLtx23.checkpoint, 'ltx-2.3-22b-dev.safetensors', 'the bf16 dev checkpoint wins when present (the remove-family template pin)')
+assert.equal(selectedLtx23.textEncoder, 'gemma_3_12B_it.safetensors', 'the bf16 Gemma encoder is preferred over the fp4 cut')
+assert.equal(selectedLtx23.textProjection, 'ltx-2.3_text_projection_bf16.safetensors')
+assert.equal(selectedLtx23.videoVae, 'LTX23_video_vae_bf16.safetensors')
+assert.equal(selectedLtx23.audioVae, 'LTX23_audio_vae_bf16.safetensors')
+assert.equal(selectedLtx23.latentUpscaler, 'ltx-2.3-spatial-upscaler-x2-1.1.safetensors', 'the x2-1.1 upscaler is picked over the 2.5-era one')
+assert.equal(selectedLtx23.distilledLora, 'ltx-2.3-22b-distilled-lora-384-1.1.safetensors', 'distilled preference: 384-1.1 (Obscura pin) first')
+assert.equal(selectedLtx23.subtitlesRemoveLora, 'ltx2.3-ic-subtitles-remove-general.safetensors')
+assert.equal(selectedLtx23.watermarkRemoveLora, 'ltx2.3-ic-watermark-remove-general.safetensors')
+assert.equal(selectedLtx23.archivalLora, 'ltx-2.3-dearchive-lora_weights_step_05000.safetensors')
+assert.equal(selectedLtx23.obscuraLora, 'ltx23-obscura_remova.safetensors')
+assert.equal(selectedLtx23.outpaintLora, 'ltx-2.3-22b-ic-lora-outpaint.safetensors')
+const fp8OnlyLtx23 = inferLtx23Selections([], { checkpoints: ['ltx-2.3-22b-dev-fp8.safetensors'], latentUpscalers: [] })
+assert.equal(fp8OnlyLtx23.checkpoint, 'ltx-2.3-22b-dev-fp8.safetensors', 'the fp8 checkpoint satisfies the slot when bf16 is absent (documented deviation D7)')
+const emptyLtx23 = inferLtx23Selections([], { checkpoints: ['unrelated.safetensors'], latentUpscalers: [] })
+assert.equal(emptyLtx23.checkpoint, '', 'no official dev checkpoint → empty (detection turns it into install guidance)')
+const renamedDearchive = inferLtx23Selections([{ kind: 'loras', name: 'lora_weights_step_05000.safetensors' }], { checkpoints: [], latentUpscalers: [] })
+assert.equal(renamedDearchive.archivalLora, 'lora_weights_step_05000.safetensors', 'the dearchive repo\'s bare filename also resolves (the template renames it on placement)')
+const hfMirrorObscura = inferLtx23Selections([{ kind: 'loras', name: 'LTX23_Obscura_Remova_v1.safetensors' }], { checkpoints: [], latentUpscalers: [] })
+assert.equal(hfMirrorObscura.obscuraLora, 'LTX23_Obscura_Remova_v1.safetensors', 'the Obscura HF-mirror filename also resolves (the template renames it on placement)')
+const rank111Only = inferLtx23Selections([{ kind: 'loras', name: 'ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors' }], { checkpoints: [], latentUpscalers: [] })
+assert.equal(rank111Only.distilledLora, 'ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors', 'the Comfy-Org rank-111 repack satisfies the distilled slot (the IA2V template pin)')
+assert.ok(!Object.values(inferLtx23Selections([], { checkpoints: [], latentUpscalers: [] })).some(Boolean), 'an empty scan + no combos resolves nothing')
 
 const zimage = buildZImage('test', 1024, 1024, 7, 'z.safetensors', 'qwen.safetensors', 'ae.safetensors')
 assert.equal(zimage['2'].inputs.type, 'lumina2')

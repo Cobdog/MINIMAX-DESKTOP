@@ -10,6 +10,8 @@
  * - registry.ts— the entry list, registration, detection, provenance
  * - krea2edit.ts — Krea 2 edit graph families (instruct / removal /
  *                refine-masked / outpaint / two-ref) + recipe audit
+ * - ltx23.ts   — LTX-2.3 one-graph video utilities (template-faithful
+ *                ports of the six official template_ltx2_3_* tools)
  *
  * See docs/architecture.md → "Optimization registry" for how to add an entry. */
 export type { ComfyNode, ComfyPrompt, DetectionResult, EngineId, GraphContext, Link, OptimizationEntry, TransformOptions, TurboLoaderChoice, TurboPlan, WrapPoint } from './types'
@@ -35,3 +37,12 @@ export type {
   Krea2EditFamily, Krea2EditRequest, Krea2EditWorkflow, Krea2FitMode, Krea2LoraKind, Krea2ModelSelection,
   Krea2Padding, Krea2RecipeTriple,
 } from './krea2edit'
+// LTX-2.3 one-graph utilities (task 068xwy3): template-faithful ports of the
+// official ComfyUI editing templates + availability gating + topology audit.
+export {
+  KJNODES_USED, LTX23_PINS, LTX23_PROMPTS, LTX23_UTILITIES, LTXVIDEO_NODES, RADIANCE_NODES,
+  buildLtx23Ia2vGraph, buildLtx23OutpaintGraph, buildLtx23RemoveGraph, buildLtx23RemoveObjectGraph,
+  buildLtx23UtilityGraph, buildLtx23UtilityGraphWithAudit, detectLtx23Utilities, findLtx23Utility,
+  ltx23TopologyAudit, resolveLtx23Selection,
+} from './ltx23'
+export type { Ltx23Detection, Ltx23RemovePreset, Ltx23Utility, Ltx23UtilityKind, Ltx23UtilityRequest } from './ltx23'

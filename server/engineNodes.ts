@@ -62,7 +62,17 @@ import type { AppSettings, ModelKind, NodePackDefinition, NodePackStatus } from 
  *    code we have not deliberately vendored — same posture as Larryvrh's).
  *  - krea2-anypaint (alexw5702-afk, task t8u00uu): MIT (LICENSE file,
  *    verified 2026-09-14; NOTICE credits Rebels + ostris) — the AnyPaint
- *    mask nodes for the krea2_anypaint_rank32 functional adapter. User-fetch. */
+ *    mask nodes for the krea2_anypaint_rank32 functional adapter. User-fetch.
+ *  - ComfyUI-LTXVideo (Lightricks, task 068xwy3): LTX-2 Community License
+ *    (LICENSE file read from a fresh clone 2026-09-15) — the IC-LoRA guide
+ *    machinery behind the official LTX-2.3 editing templates. User-fetch
+ *    (custom license, never vendored).
+ *  - ComfyUI-KJNodes (kijai, task 068xwy3): GPL-3.0 (full text in the
+ *    clone) — three nodes (GetImageSizeAndCount, ImagePadKJ, VAELoaderKJ).
+ *    Fetchable-but-flagged like T8mars.
+ *  - radiance (FXTD Studios, task 068xwy3): GPL-3.0 — one node
+ *    (Float32ColorCorrect, load-bearing in the outpaint template).
+ *    Fetchable-but-flagged. */
 export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
   {
     id: 'vdn-h3',
@@ -140,6 +150,40 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     licenseNote: 'MIT (LICENSE file, verified 2026-09-14); reference-attention/K-V-cache code adapted from ComfyUI-Rebels-Krea2-Outpaint and ComfyUI-Krea2-Ostris-Edit per its NOTICE. The LoRA is a separate Krea-2-licensed fetch.',
     installMode: 'user-fetch',
     homepage: 'https://github.com/alexw5702-afk/krea2-anypaint',
+  },
+  // ---- LTX-2.3 utility packs (task 068xwy3, verdict keep-utilities-only) --
+  {
+    id: 'ltxvideo',
+    name: 'ComfyUI-LTXVideo',
+    description: 'Lightricks\' own LTX node pack — the IC-LoRA machinery the official template_ltx2_3_* editing templates are built on: LTXICLoRALoaderModelOnly + LTXAddVideoICLoRAGuide (the in-context video guide), LTXVSetAudioRefTokens (joint audio-video reference tokens), LTXVTiledVAEDecode and LTXFloatToInt. Required by the remove-subtitles / remove-watermark / restore-archival / remove-object / outpaint utility families.',
+    repoUrl: 'https://github.com/Lightricks/ComfyUI-LTXVideo',
+    pinnedRevision: '15d09abb5a187a8dcaea2fc31fe51ee96e6c9d0d',
+    licenseSpdx: 'LTX-2-Community-License',
+    licenseNote: 'The repo ships the LTX-2 Community License Agreement (LICENSE file, read from a fresh clone 2026-09-15 — the same terms as the LTX-2.3 weights). A custom permissive-with-conditions license, not SPDX-listed: user-fetch, never vendored. The node INPUT schemas ported in src/lib/graph/ltx23.ts were verified against this exact revision.',
+    installMode: 'user-fetch',
+    homepage: 'https://github.com/Lightricks/ComfyUI-LTXVideo',
+  },
+  {
+    id: 'kjnodes',
+    name: 'ComfyUI-KJNodes',
+    description: 'kijai\'s kitchen-sink node collection — the LTX-2.3 utilities use three of its nodes: GetImageSizeAndCount (the frame-count split the remove family counts with), ImagePadKJ (the outpaint aspect pad) and VAELoaderKJ (the Obscura Remova tool\'s split bf16 VAE loader with device/dtype control).',
+    repoUrl: 'https://github.com/kijai/ComfyUI-KJNodes',
+    pinnedRevision: 'd3cfe21625e5170126ce06fbfcfe1d88108688c3',
+    licenseSpdx: 'GPL-3.0',
+    licenseNote: 'GPL-3.0 (full LICENSE text, read from a fresh clone 2026-09-15). Same fetchable-but-flagged policy as T8mars: GPL-3.0 combines with our AGPLv3 but we never vendor or redistribute it — the user fetches their own copy through the consent flow. We use three nodes out of the pack.',
+    installMode: 'user-fetch',
+    homepage: 'https://github.com/kijai/ComfyUI-KJNodes',
+  },
+  {
+    id: 'radiance',
+    name: 'radiance',
+    description: 'FXTD Studios\' 32-bit color science suite — the LTX-2.3 outpaint template uses one node, Float32ColorCorrect, and it is generation-load-bearing there (the gamma-2 correction of the padded in-context guide; not demo scaffolding). The outpaint tool\'s availability gates on this node.',
+    repoUrl: 'https://github.com/fxtdstudios/radiance',
+    pinnedRevision: '64fee4144cd4818a087b4269effe6c40d6f6fe2f',
+    licenseSpdx: 'GPL-3.0',
+    licenseNote: 'GPL-3.0 (GitHub API license record, verified 2026-09-15). Fetchable-but-flagged like every GPL pack: user-fetch only, never vendored; one node used.',
+    installMode: 'user-fetch',
+    homepage: 'https://github.com/fxtdstudios/radiance',
   },
 ]
 

@@ -399,7 +399,7 @@ function App() {
     notify,
     onQueued: (target) => { if (target) setView(target) },
   })
-  const { generateLtx, generateAceStep, runH3Diagnostics, generateMusic3, generateCharacterSheet, submitting, ltxSubmitting, aceSubmitting, music3Submitting, diagnosticRunning } = flows
+  const { generateLtx, generateLtxUtility, generateAceStep, runH3Diagnostics, generateMusic3, generateCharacterSheet, submitting, ltxSubmitting, aceSubmitting, music3Submitting, diagnosticRunning } = flows
   const generate = () => flows.generate({
     mode: useWorkspaceStore.getState().upscaleMode, model: upscaleModel, vae: upscaleVae, lbhModel, missingNodes: missingLtxUpscaleNodes,
   })
@@ -616,7 +616,7 @@ function App() {
           setActiveJobId(null); setView('create')
           notify('success', target === 'i2v' ? `Frame loaded from ${clip.name} as the I2V first frame. The new render will remain a separate video until you add and export it in Clip Editor.` : 'Extracted frame loaded into Create.')
         }} /></ErrorBoundary>}
-        {view === 'settings' && <ErrorBoundary label="settings"><SettingsView settings={settings} setSettings={session.setSettings} info={info} models={models} h3Report={h3Report} scanning={session.scanning} status={status} checking={checking} diagnosticRunning={diagnosticRunning} ollamaModels={ollamaModels} onRefreshOllama={() => { void refreshOllama(settings); void refreshLlm() }} onScan={() => void scanModels(settings)} onCheck={() => void checkConnection(settings.comfyUrl)} onSave={() => void saveAppSettings()} onApplyDefaults={applyGenerationDefaults} onRunDiagnostics={() => void runH3Diagnostics()} /></ErrorBoundary>}
+        {view === 'settings' && <ErrorBoundary label="settings"><SettingsView settings={settings} setSettings={session.setSettings} info={info} models={models} h3Report={h3Report} scanning={session.scanning} status={status} checking={checking} diagnosticRunning={diagnosticRunning} ollamaModels={ollamaModels} onRefreshOllama={() => { void refreshOllama(settings); void refreshLlm() }} onScan={() => void scanModels(settings)} onCheck={() => void checkConnection(settings.comfyUrl)} onSave={() => void saveAppSettings()} onApplyDefaults={applyGenerationDefaults} onRunDiagnostics={() => void runH3Diagnostics()} onRunLtxUtility={generateLtxUtility} /></ErrorBoundary>}
         {view === 'diagnostics' && <ErrorBoundary label="diagnostics"><DiagnosticsView /></ErrorBoundary>}
       </main>
       <AiChatHead available={llmAvailable} ollamaModel={llmModelLabel || settings.ollamaModel} onUseImage={(imagePrompt) => {
