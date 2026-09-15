@@ -175,3 +175,23 @@ copies, plus pixel inspection of asset/pose.jpg) renders **white dots r3
 only, no links**. Also: "stickwidth 4" is a cv2 **semi-axis** (~8px strokes),
 not a 4px total width. The rig implements the code-verified behavior; a
 flagged `faceLinks` option exists for the doc-text interpretation.
+
+---
+
+## ADDENDUM — E-FC1 MEASURED (2026-09-15, Flux ma59y73): topology-TOLERANT, not topology-agnostic
+
+The zero-gated conditioning reads a quadruped skeleton AS a quadruped (39/39
+animal detections, zero humanization — the SD-era "needs a dedicated animal
+controlnet" precedent does NOT carry over to H3), but pose fidelity degrades
+~3× vs human skeletons (B: 40.7/73.8 px vs A: 13.9/26.0 px round-trip) and
+1.4–2× vs the sprite ceiling (D: 29.3/36.3 px). Arbitrary/conflicting
+topology (C, humanoid-mimic) gets envelope-following only — a spectral
+creature rides the trajectory, zero articulation. Rig consequence: non-human
+defaults to SPRITE/REGION mode; the AP-10K template unlocks as first-class
+NON-DEFAULT with honest labeling ("looser adherence ~2–3× human skeletons,
+1.4–2× sprite; no humanization"); free-form templates must not promise
+per-limb articulation at v1. The AP-10K LoRA on the control branch remains
+the documented path to parity later. Operational: controlnet_aux estimator
+models load to CUDA OUTSIDE ComfyUI's management (/free cannot unload them,
+~0.5 GB residue until process exit) — restart the testbed before any
+sampling phase that follows estimator runs.
