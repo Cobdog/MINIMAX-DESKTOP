@@ -81,35 +81,77 @@ landing spot for every absorbed capability.
 
 ---
 
-## 2. Document model (CO-DRAFTING with schema spec o0xw49r — stub)
+## 2. Document model (DRAFTED — for review; co-designed with docs/specs/canvas-document-model.md)
 
-Covers: chains; forks as output→input references (incl. multi-ref, substrate
-choice, lock state; multi-substrate-fork allowance = ledger row); append-only
-takes with canonical-pointer supersession; op stacks with settings-results
-separation; control tracks; persisted staleness; **plan documents** (Director
-Suite §6); **keyframe guides as chain settings** (inventory Q7 — AddGuide
-params with validation semantics must survive in the model); **asset
-reference-sets vs takes alignment** (inventory Q8 — one model, not two);
-**macro/chain-template records** (inventory Q6 — same machinery serves
-Director-Suite shot emission); sessions (open canvases, camera positions,
-always-autosave); blob discipline (media + latents on disk, references in
-DB); FTS surfaces (palette, index); **control-track policy** (research
-recommendation: one control track per shot + optional inpaint mask — carry as
-model constraint); **undo/history semantics for op stacks** (per-op undo,
-stack reordering, bake irreversibility marker — second-audit S10); **per
-decisions audit (yhepvdi): document-level soft-delete/tombstones (F5),
-failure-propagation semantics + partial-take validation (F6), blob
-content-hash + re-link flow (F8), schemaVersion + append-only document
-migrations + loud-fail on unknown-newer (F9), chain hop-count + drift metrics
-(F1), cross-project asset scope decision (F3)** — all schema-blocking or
-schema-shaping; none decided yet. **Identity payload (DECIDED 2026-09-14,
-maintainer): chains carry an identity anchor — reference set / RefMods +
-verbatim subject text — re-injected into every window the chain generates,
-with USER-DRIVEN strength** (a dial: down when reminders over-constrain —
-stiffness, motion fighting, union artifacts; up when drift shows; no
-auto-ramping — the E7 dosage arm calibrates the DEFAULT). Strength is chain
-settings (persisted, rerun-stable per settings-results separation);
-per-RefMod slot strength composes with the chain-level dial.
+The document IS the graph of chains; every view — canvas, timeline, library,
+queue index — is a projection of it. The model below defines entities and
+invariants; the schema spec defines tables, migrations, and FTS.
+
+### 2.1 Entities
+
+- **Project** (= one canvas): id, name, `schemaVersion`, camera state
+  (position/zoom — autosaved always), `deletedAt` tombstone. Projects are the
+  unit of open/close/sessions/export (L32).
+- **Session**: the multi-canvas shell state — open project ids + order,
+  active canvas. Survives restarts.
+- **Chain**: id, projectId, input spec, op-stack reference, settings blob,
+  lock state, `hopCount`, per-hop drift metrics (F1 decided: drift is a
+  first-class column, not a UI guess). Kinds: media / generation / plan-emitted.
+- **Input spec** (the Item-3 recursion): `fresh {prompt | media}` |
+  `outputRef {outputId, substrate}` | `outputRefs[]` (multi — transitions,
+  L17 open-confirmed). Substrate: latents | decoded | crop/mask projection |
+  extracted frame | audio stem.
+- **Output** (the fork take-off): id, chainId, available substrates.
+- **Take**: append-only generation result (job ref, artifact paths, latent
+  path, metrics, createdAt) + `supersededBy` pointer. Canonical take =
+  pointer switch (F5/takes decision); nothing is ever overwritten; priors
+  evictable-with-marker per retention tiers, GC liveness walks fork edges.
+- **Op stack**: ordered ops on a chain's source (crop, mask, trim, adjust,
+  control track, stabilize). Per-op undo + reorder; bake = explicit
+  irreversible marker (S10). Settings live with the op; rendered results are
+  takes — the separation the registry already proves.
+- **Identity payload** (decided): reference set / RefMods + verbatim subject
+  text + the user-driven strength dial; re-injected into every window;
+  per-RefMod slot strength composes with the chain dial.
+- **Control track**: one per shot + optional inpaint mask (research-pinned).
+  Keyframe guides (AddGuide params, validation semantics — inventory Q7)
+  persist as chain settings.
+- **Asset (global store, F3 decided)**: characters/locations/wardrobes/
+  refmods live ABOVE projects; projects hold fork-into-project records
+  (consent-gated copies with lineage back to the global asset — one model
+  with takes, not two: asset reference-sets unify on the takes semantics,
+  inventory Q8/L13).
+- **Plan document** (Director Suite): the MoviePlanner inheritance — brief,
+  segments→chain refs, gap transitions, per-segment reference handoffs;
+  emitted chains are ordinary chains (macro records L12 = inspectable
+  chain templates).
+- **Job**: existing jobs table, extended: `queued-for-GPU` as a first-class
+  state (L26 decided — serialize by default, one active generation).
+- **Trash**: tombstones + restore for chains/canvases/projects (F5 decided);
+  session-scoped prune = bulk-evict non-canonical non-locked takes.
+
+### 2.2 Invariants (schema-enforced)
+
+1. Settings-results separation everywhere (reruns are settings-stable).
+2. Takes append-only; one canonical pointer per output; supersession never
+   deletes.
+3. Locks gate propagation: upstream change marks downstream stale (persisted
+   derived state); nothing auto-executes.
+4. GC never evicts a live-referenced take's latents (fork-edge liveness).
+5. Edits are ops; sources are never silently altered (bake is explicit).
+6. Every write carries schemaVersion; unknown-newer fails loudly (F9).
+7. Identity payloads ride every window; strength is chain settings.
+8. Jobs serialize by default; queued-for-GPU is visible object state.
+9. Blob references carry content hashes (F8); missing blobs degrade to
+   placeholder + re-link flow, never silent breakage.
+10. Everything autosaved, always — including camera positions (lock 6).
+
+### 2.3 Companion spec
+
+`docs/specs/canvas-document-model.md` (schema spec, Flux o0xw49r): tables,
+foreign keys (incl. the global-asset fork records), migrations, retention/GC
+mechanics, FTS surfaces (palette, queue index, library), and the
+failure-propagation semantics table (F6 — open, shaped here).
 
 ## 3. Canvas surface architecture (stub)
 
