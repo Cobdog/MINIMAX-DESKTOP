@@ -164,3 +164,14 @@ ffmpeg remains the outside-the-graph fallback (resample to 24fps, crop to multip
 18. `docs/research/h3-node-ecosystem-sweep.md` (T8mars trajectory pipeline context, GPL-3.0 posture: re-implement, don't vendor)
 19. Our prior art — commit `63a09c2` (`src/lib/zImageControlnet.ts`: CONTROL_PREPROCESSORS registry, mode gating, native-Canny default, gated aux nodes; `QwenImageDiffsynthControlnet` apply topology)
 20. Testbed readiness — union checkpoint staged at `/home/agent/work/VS Proj/Kreatine/testbed/ComfyUI/models/model_patches/minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors`; engine rule: experiments target 8189 (probe first), never 8188
+
+---
+
+## CORRECTION (2026-09-15, code-verified during the rig build — Flux 41ebvfo, commit 3cb0de7)
+
+§3.1's summary said face renders as "white dots + pink links" — **wrong**: the
+trainer's `draw_facepose` (and controlnet_aux, ComfyUI core, and VideoX-Fun's
+copies, plus pixel inspection of asset/pose.jpg) renders **white dots r3
+only, no links**. Also: "stickwidth 4" is a cv2 **semi-axis** (~8px strokes),
+not a 4px total width. The rig implements the code-verified behavior; a
+flagged `faceLinks` option exists for the doc-text interpretation.
