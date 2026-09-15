@@ -206,3 +206,20 @@ Order: E4 (decode-only, ~free) → E1 → E2 → E3 → E6 → E5 → E7 → E8.
 | Recommended handoff | 22 frames (~0.92 s) general; 39 (~1.625 s) when phase-exact audio matters; ≈⅕ of segment length |
 | Ref limits | ≤9 images + ≤3 videos + ≤3 audios, 12 files; 2048 px short edge; prompts ≤7000 chars |
 | RefMod | ~1.1–1.6 MB, ≤8192 tokens, 8 persona slots, 8–20 source images |
+
+---
+
+## ADDENDUM — MEASURED on our stack (tranche 1, 2026-09-14/15, 8189 testbed, Flux qx1e45p)
+
+11 generations, fixed seeds, cheap tier; artifacts: `test-results/experiments/tranche1/`.
+
+| Question | Measured verdict | Numbers |
+|---|---|---|
+| E4 latent crossfade (§1/Q1) | **PRODUCT PATH** — the zero-prior-art branch works | decode-only ≡ pixel dissolve (29–36.6 dB; endpoints 36.5 = round-trip class); sampled arm preserves pinned synthesized rows (31.5–39.8 dB); defect: back-loaded pacing (tunable) |
+| E1 bridge vs cut vs FLF (§1/Q2–Q3) | **No seamless model-generated joins exist** — every Strategy-B arm renders a well-formed internal cut; FLF is the splice champion (the latent-continuation pattern), bridge diegetic-only | FLF joins 36.2/34.3 dB (timeline-invisible); bridge 19.1/15.9 dB; replay anchors 36.5/31.5 dB; hard cut 9.8 dB |
+| E2 black-frame boundary (§1/Q4a) | **Validated as a dip-to-black transition with audio benefits** — the ~0.7 s dip is STRUCTURAL (temporal-VAE grid), not a defect to engineer away; guided black halves the audio boundary step; audio survives all black boundaries | dip windows 15–18 frames; audio step 0.199 guided vs 0.420 control |
+| E3 audio pinning (§4/§5) | **Replicated on our stack**; airlock is not a seam tool on ambient content; guided-boundary video seams invisible in all arms | corr 0.037→0.87 pinned (Motion-Context published 0.45→0.95+); seams ratio 0.88–1.26 @ 31–33 dB; airlock holds never froze (min MAD 1.1) |
+| Survey cost (LTX verdict hinge) | turbo-8 dense MISSES the 2–3 min target (282–306 s/10 s @ 0.4 MP); VDN-8 MEETS it (2:05, from the maintainer's own 3090 validation — stages not local, substitution documented) | turbo 28.7 s/step; VDN 15.7 s/step |
+
+**Consequences recorded:** hard-cuts-default (L28) now MEASURED, not inferred; the Director Suite's gap menu = hard cut / NLE transition / FLF-continuation splice (36 dB class) / dip-to-black (E2) / diegetic bridge (opt-in). Synthetic latent transitions enter the roadmap as a real capability (E4) with pacing tuning as the open knob. Operational notes: dynamic VRAM >> static residency on 24 GB (9 gens, zero failures, ~2.4× faster/step) — runbook amendment pending maintainer; turbo LoRA requires merge mode on 24 GB; post-OOM memory accounting needs a process restart; insightface absent — install before any identity-metric arm (E7).
+
