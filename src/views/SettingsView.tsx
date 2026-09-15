@@ -2,11 +2,11 @@
  *  H3 stack report, generation defaults, the LLM layer (llama.cpp router +
  *  Ollama fallback), model locations, and output/clip paths. */
 import { useEffect, useState } from 'react'
-import { GitBranch } from 'lucide-react'
+import { GitBranch, Wand2 } from 'lucide-react'
 import { Activity, AlertCircle, Check, ChevronDown, Cpu, Eye, Folder, FolderOpen, Gauge, HardDrive, LoaderCircle, Power, RefreshCw, Save, Scale, ServerCog, SlidersHorizontal, Sparkles, Stethoscope, Unplug } from 'lucide-react'
 import type { AppSettings, ComfyStatus, LlmModelsResult, ModelFile, ModelKind, NodePackStatus, OllamaModel, UpscaleMode } from '../types'
 import { choices, type ObjectInfo } from '../lib/comfyInfo'
-import { detectOptimizations } from '../lib/graph'
+import { detectKrea2EditFamilies, detectOptimizations, KREA2_RECIPE_PINS } from '../lib/graph'
 import type { h3StackReport } from '../lib/h3Stack'
 import { SelectField, NumberField } from '../components/form'
 import { formatBytes } from '../lib/format'
@@ -28,6 +28,11 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
   // validated-stack report so provenance is visible without generating.
   const detectedTurboFamilies = detectOptimizations(info, models)
     .filter(({ entry, detection }) => entry.kind === 'turbo' && detection.available)
+  // Krea 2 edit families (task t8u00uu): availability-gated per-workflow edit
+  // graphs over the factory data — the picker below stays a thin surface.
+  const krea2EditModes = detectKrea2EditFamilies(info, models)
+  const editModesReady = krea2EditModes.filter(({ detection }) => detection.available).length
+  const [selectedKrea2EditMode, setSelectedKrea2EditMode] = useState('krea2edit.instruct')
   const defaults = settings.generationDefaults
   const updateDefaults = (patch: Partial<AppSettings['generationDefaults']>) => setSettings({ ...settings, generationDefaults: { ...defaults, ...patch } })
   const applyPreset = (preset: 'quality' | 'official-turbo' | 'preview') => {
@@ -222,6 +227,39 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
         const tested = settings.testedComfyVersion
         const newer = Boolean(connected && tested && connected !== tested)
         return <div className={`doctor-check ${newer ? 'warn' : 'ok'}`}><span>{newer ? <AlertCircle size={14} /> : <Check size={14} />}</span><div><strong>{newer ? 'ComfyUI updated since verification' : 'Graphs verified against this engine'}</strong><small>{connected ? `Connected engine: ${connected}. ` : 'Engine offline — version unknown. '}{tested ? `Graphs last verified against: ${tested}.` : 'No verification recorded yet; it is captured on the next successful connection.'}{newer ? ' Node changes in newer ComfyUI builds can break graphs — re-run the H3 Quality Test before trusting new renders, then the record updates on save.' : ''}</small></div></div>
+      })()}
+    </section>
+    <section className="settings-section krea2-edit-section" aria-label="Krea 2 edit modes">
+      <div className="settings-heading"><div><Wand2 size={19} /><span><strong>Krea 2 edit modes</strong><small>Per-workflow edit graphs over the resident Krea 2 checkpoint pair — availability-gated here; the canvas redesign owns the real editing UI.</small></span></div><span className={`health-pill ${editModesReady === krea2EditModes.length ? 'online' : ''}`}>{editModesReady} of {krea2EditModes.length} ready</span></div>
+      <div className="preset-row" aria-label="Edit mode picker">
+        {krea2EditModes.map(({ family, detection }) => <button type="button" className={selectedKrea2EditMode === family.id ? 'tier-selected' : ''} key={family.id} onClick={() => setSelectedKrea2EditMode(family.id)}><strong>{family.label}</strong><small>{detection.available ? `${family.checkpoint === 'raw' ? 'RAW' : 'Turbo'} · ${family.recipe.steps} steps · CFG ${family.recipe.cfg}` : 'Needs setup'}</small></button>)}
+      </div>
+      {(() => {
+        const selected = krea2EditModes.find(({ family }) => family.id === selectedKrea2EditMode) ?? krea2EditModes[0]
+        if (!selected) return null
+        const { family, detection } = selected
+        const dialCopy: Record<string, string> = {
+          groundingPx: `grounding_px ${KREA2_RECIPE_PINS.groundingPx.default} (dial ${KREA2_RECIPE_PINS.groundingPx.min}–${KREA2_RECIPE_PINS.groundingPx.max}: lower = stronger edits, higher = stronger identity)`,
+          refBoost: `ref_boost ${KREA2_RECIPE_PINS.refBoost.default} (likeness; UI cap ${KREA2_RECIPE_PINS.refBoost.uiCap} — above ${KREA2_RECIPE_PINS.refBoost.removalBreakAbove} breaks removals)`,
+          refBoostA: 'ref_boost_a — the same likeness dial for the scene reference',
+          fitMode: `fit geometry '${KREA2_RECIPE_PINS.fitMode.default}' ('${KREA2_RECIPE_PINS.fitMode.legacy}' only for older weights)`,
+          steps: `steps ${family.recipe.steps} (band ${KREA2_RECIPE_PINS.turboStepsBand.min}–${KREA2_RECIPE_PINS.turboStepsBand.max})`,
+          cfg: 'CFG — above 1 the negative is grounded automatically (empty prompt + same image)',
+          mask: 'mask: white generates, black is preserved (Mask Editor)',
+          padding: `padding per side on a ${KREA2_RECIPE_PINS.anypaint.paddingStep}px grid; mask + padding in one request = mixed`,
+        }
+        const missing = [...detection.missingNodes.map((nodeClass) => `node ${nodeClass} (node pack)`), ...detection.missingModels]
+        return <div className={`doctor-check ${detection.available ? 'ok' : 'warn'}`}>
+          <span>{detection.available ? <Check size={14} /> : <AlertCircle size={14} />}</span>
+          <div>
+            <strong>{family.label}{detection.available && detection.resolved ? ` — ${detection.resolved.diffusion} + ${detection.resolved.lora}` : ''}</strong>
+            <small>{family.ui.description}</small>
+            <p>{family.recipe.sampler}+{family.recipe.scheduler} · LoRA @{family.recipe.loraStrength} · {family.recipeTriple.carrier}</p>
+            <p>Dials: {family.dials.map((dial) => dialCopy[dial]).filter(Boolean).join(' · ') || 'pinned recipe — no dials'}</p>
+            {family.ui.warning && <p>{family.ui.warning}</p>}
+            {missing.length > 0 && <p>Missing: {missing.join('; ')}. {family.ui.installHint}</p>}
+          </div>
+        </div>
       })()}
     </section>
     <section className="settings-section gpu-tier-section">

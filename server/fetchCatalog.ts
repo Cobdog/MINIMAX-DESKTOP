@@ -13,8 +13,12 @@
  *
  * Seed policy — every entry is something our own research committed to:
  *  - the ENGINE_NODE_PACKS user-fetch list (facok NO-LICENSE, T8mars
- *    GPL-3.0, Larryvrh turbo Apache-2.0), single-sourced from that
- *    registry (license verdicts live THERE, not duplicated here);
+ *    GPL-3.0, Larryvrh turbo Apache-2.0, krea2edit Apache-2.0, anypaint
+ *    MIT), single-sourced from that registry (license verdicts live
+ *    THERE, not duplicated here);
+ *  - the Krea 2 edit-mode weights (task t8u00uu): the Identity Edit v1.2
+ *    LoRA line + the AnyPaint rank-32 adapter that docs/research/
+ *    krea2-edit-mode.md committed the edit families to;
  *  - experiment prerequisites from the committed research docs (Fun
  *    Control union checkpoint, DWPose/DA3/HED/MLSD preprocessor weights,
  *    OpenVDN stage files — docs/research/fun-control-input-surface.md,
@@ -86,6 +90,50 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   nodePackEntry('minimax-h3-turbo'),
   nodePackEntry('krea2-controlnet'),
   nodePackEntry('h3-audio-t8'),
+  nodePackEntry('krea2edit'),
+  nodePackEntry('krea2-anypaint'),
+
+  // ---- Krea 2 edit mode (task t8u00uu — Identity Edit as a feature) -----
+  // Weights first: the two edit LoRA lines the research committed to
+  // (docs/research/krea2-edit-mode.md §2–3). Both are Krea 2 derivatives
+  // under the Krea 2 Community License; the node packs above carry the
+  // Apache-2.0/MIT code halves.
+  {
+    id: 'krea2-identity-edit',
+    name: 'Krea 2 Identity Edit v1.2 (+ low-VRAM cuts)',
+    group: 'weights',
+    description: 'conradlocke\'s instruction-based identity-preserving edit LoRA for Krea 2 — the inference standard behind the Instruct, removal and two-reference edit families. This entry fetches the full v1.2 weights plus the SVD rank-reduced _r128/_r64 cuts (>99% weight energy; the low-VRAM fallbacks the edit-mode detection resolves automatically). Requires the comfyui-krea2edit node pack.',
+    licenseSpdx: 'krea-2-community-license',
+    licenseNote: 'Derivative Model of Krea 2 under the Krea 2 Community License Agreement (repo LICENSE.pdf + NOTICE): commercial use permitted under the revenue threshold (§2.3, currently <$1M/yr), content-moderation duty (§4.2), AI-disclosure duties where required (§4.3). SFW-only training; the author disallows non-consensual use of real people.',
+    licenseUrl: 'https://huggingface.co/conradlocke/krea2-identity-edit/blob/main/LICENSE.pdf',
+    source: { kind: 'hf', repo: 'conradlocke/krea2-identity-edit', revision: { kind: 'sha', value: '89e9e7a09ee2e5c9331e952063d79b1b8a703280' } },
+    destination: { kind: 'model-root', root: 'loras' },
+    files: [
+      { path: 'krea2_identity_edit_v1_2.safetensors', sizeBytes: 1_828_256_432, sha256: '6adf9a69cc9502d286db7b69964d37da7e9cfe4b05b4d004bc275f087d3fd3cf' },
+      { path: 'krea2_identity_edit_v1_2_r128.safetensors', sizeBytes: 914_159_744, sha256: 'f53db0bb4b081d638f196865cbc9f055379704fafb788336784fc1ccde18d825' },
+      { path: 'krea2_identity_edit_v1_2_r64.safetensors', sizeBytes: 457_111_048, sha256: 'f794b47142555c929cf536a2f1e4f335174b9aedbb08572b07d45814d4242423' },
+    ],
+    detectGlob: '*krea2_identity_edit_v1_2*',
+    sizeBytes: 3_199_527_224,
+    sizeClass: 'huge',
+    homepage: 'https://huggingface.co/conradlocke/krea2-identity-edit',
+  },
+  {
+    id: 'krea2-anypaint',
+    name: 'Krea 2 AnyPaint rank-32',
+    group: 'weights',
+    description: 'yijunwang2\'s AnyPaint functional adapter (rank/alpha 32/32, trained on RAW, run on Turbo) — arbitrary-mask inpaint, outpaint and mixed edits with per-step latent restoration and a 32-px boundary blend band, no post-hoc composite. Requires the krea2-anypaint node pack. A functional adapter, not a plain LoRA — stock importers do not apply it; only the pack\'s nodes do.',
+    licenseSpdx: 'krea-2-community-license',
+    licenseNote: 'Krea 2 derivative under the Krea 2 Community License (repo LICENSE.pdf; the pipeline code it ships carries its own PIPELINE_LICENSE — only the adapter weights land here). Training data not disclosed; unofficial.',
+    licenseUrl: 'https://huggingface.co/yijunwang2/krea2-anypaint/blob/main/LICENSE.pdf',
+    source: { kind: 'hf', repo: 'yijunwang2/krea2-anypaint', revision: { kind: 'sha', value: '1a9fb37a304c27523939c44fc2b770c11472451b' } },
+    destination: { kind: 'model-root', root: 'loras' },
+    files: [{ path: 'krea2_anypaint_rank32.safetensors', sizeBytes: 228_587_752, sha256: '3a7d09f6b27f8ead160d340f2f59c11f4ee635c4a1ee87ffd8b1b9f9ba412f7a' }],
+    detectGlob: '*krea2_anypaint*',
+    sizeBytes: 228_587_752,
+    sizeClass: 'large',
+    homepage: 'https://huggingface.co/yijunwang2/krea2-anypaint',
+  },
 
   // ---- Experiment prerequisites: Fun Control input surface ---------------
   {

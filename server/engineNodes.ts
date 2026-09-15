@@ -54,7 +54,15 @@ import type { AppSettings, ModelKind, NodePackDefinition, NodePackStatus } from 
  *    (LICENSE file is an SPDX notice — docs/LICENSES.md §3). GPL packs are
  *    never vendored (pattern-adopt policy) but ARE fetchable-but-flagged
  *    through the consent-gated fetcher: the user fetches their own copy,
- *    we redistribute nothing. */
+ *    we redistribute nothing.
+ *  - comfyui-krea2edit (lbouaraba, task t8u00uu): Apache-2.0 (GitHub API
+ *    license record + LICENSE file, verified 2026-09-14) — the Identity
+ *    Edit node pack (dual-conditioning carrier for the Identity Edit v1.2
+ *    LoRA). User-fetch: permissive, but not vendored (we ship no third-party
+ *    code we have not deliberately vendored — same posture as Larryvrh's).
+ *  - krea2-anypaint (alexw5702-afk, task t8u00uu): MIT (LICENSE file,
+ *    verified 2026-09-14; NOTICE credits Rebels + ostris) — the AnyPaint
+ *    mask nodes for the krea2_anypaint_rank32 functional adapter. User-fetch. */
 export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
   {
     id: 'vdn-h3',
@@ -98,6 +106,28 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     licenseNote: 'LICENSE file is an SPDX notice, not full text (docs/LICENSES.md §3, API-verified 2026-09-14). GPL-3.0 is combining-compatible with our AGPLv3, but vendoring third-party GPL code couples our releases to a contributor set we do not control — user-fetch only.',
     installMode: 'user-fetch',
     homepage: 'https://github.com/T8mars/comfyui-minimax-h3-audio-T8',
+  },
+  {
+    id: 'krea2edit',
+    name: 'comfyui-krea2edit',
+    description: 'lbouaraba\'s Identity Edit node pack for Krea 2 (Krea2EditModelPatch + Krea2EditGroundedEncode) — the dual-conditioning carrier the krea2_identity_edit_v1_2 LoRA was trained with: the source rides both the in-context VAE latent path (RoPE frame 1) and the image-grounded Qwen3-VL encode. Powers the Instruct, removal and two-reference edit families.',
+    repoUrl: 'https://github.com/lbouaraba/comfyui-krea2edit',
+    pinnedRevision: '86f886dac23013d88996e3a2e99093ba44d322fb',
+    licenseSpdx: 'Apache-2.0',
+    licenseNote: 'Apache-2.0 (LICENSE file + GitHub API license record, verified 2026-09-14). Nodes only — the LoRA weights are a separate Krea-2-licensed fetch. Solo-maintained with a v2 retrain in progress: pinned by SHA; expect re-verification at v2.',
+    installMode: 'user-fetch',
+    homepage: 'https://github.com/lbouaraba/comfyui-krea2edit',
+  },
+  {
+    id: 'krea2-anypaint',
+    name: 'krea2-anypaint',
+    description: 'alexw5702-afk\'s AnyPaint nodes (Krea2AnyPaintPrepare/Encode/ModelPatch) for the krea2_anypaint_rank32 functional adapter — arbitrary-mask inpaint/outpaint/mixed edits on Krea 2 Turbo with per-step latent restoration, a 384px semantic reference and an isolated reference K/V cache. Powers the refine and outpaint edit families.',
+    repoUrl: 'https://github.com/alexw5702-afk/krea2-anypaint',
+    pinnedRevision: '675be5a91eadbf8b8997b21c0e8e1848310b9571',
+    licenseSpdx: 'MIT',
+    licenseNote: 'MIT (LICENSE file, verified 2026-09-14); reference-attention/K-V-cache code adapted from ComfyUI-Rebels-Krea2-Outpaint and ComfyUI-Krea2-Ostris-Edit per its NOTICE. The LoRA is a separate Krea-2-licensed fetch.',
+    installMode: 'user-fetch',
+    homepage: 'https://github.com/alexw5702-afk/krea2-anypaint',
   },
 ]
 
