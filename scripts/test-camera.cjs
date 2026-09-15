@@ -4,8 +4,10 @@
 // v19.1 @ 846880d, Apache-2.0; see scripts/fixtures/camera-goldens.json
 // _provenance and camera-goldens.py for regeneration). Sections:
 //   (a) validate_path error taxonomy + option (_choice) errors — 27 + 6 rows
-//   (b) interpolation parity — 9 series × 23 samples, EXACT float equality
-//       against Python-computed values, plus monotonicity/endpoint props
+//   (b) interpolation parity — 9 series × 23 samples vs Python-computed
+//       values within 1e-12 (pow is implementation-approximated per
+//       ECMAScript — CPython uses libm; deltas are ≤ few ulps), plus
+//       monotonicity/endpoint props
 //   (c) golden prompts — 15 canonical cases: compiled_prompt, minimax_prompt,
 //       info, storyboard_json and options compared BYTE-for-byte
 //   (d) parity helpers — pyFloatRepr / pyFormatG / pyRound vs Python reprs
@@ -134,6 +136,11 @@ console.log('(a) validate_path taxonomy')
 
 console.log('(b) interpolation parity (monotone PCHIP / smoothstep / linear)')
 {
+  // Numeric parity tolerance: pow() is implementation-approximated (see the
+  // trajectoryMath note), so sampled poses compare within 1e-12 relative —
+  // several orders above the observed ulp-level deltas, tight enough to
+  // catch any real interpolation divergence.
+  const CLOSE = (a, b) => Math.abs(a - b) <= 1e-12 * Math.max(1, Math.abs(a), Math.abs(b))
   for (const series of FIXTURE.interpolation) {
     const key = `${series.path}|${series.interpolation}|${series.detail}`
     for (const sample of series.samples) {
@@ -141,12 +148,12 @@ console.log('(b) interpolation parity (monotone PCHIP / smoothstep / linear)')
         pathFromName(series.path), sample.time,
         series.interpolation, series.detail,
       )
-      assert.strictEqual(pose.azimuth, sample.azimuth, `${key} t=${sample.time} azimuth`)
-      assert.strictEqual(pose.elevation, sample.elevation, `${key} t=${sample.time} elevation`)
-      assert.strictEqual(pose.distance, sample.distance, `${key} t=${sample.time} distance`)
+      assert.ok(CLOSE(pose.azimuth, sample.azimuth), `${key} t=${sample.time} azimuth`)
+      assert.ok(CLOSE(pose.elevation, sample.elevation), `${key} t=${sample.time} elevation`)
+      assert.ok(CLOSE(pose.distance, sample.distance), `${key} t=${sample.time} distance`)
     }
     passed += 1
-    console.log(`  ok - ${key}: ${series.samples.length} samples bit-identical to Python`)
+    console.log(`  ok - ${key}: ${series.samples.length} samples within 1e-12 of Python`)
   }
   // Properties the golden table also implies, stated explicitly: the monotone
   // cubic stays within each segment's endpoint pair on every axis (the
@@ -168,12 +175,13 @@ console.log('(b) interpolation parity (monotone PCHIP / smoothstep / linear)')
   ok(contained, 'PCHIP never overshoots its segment endpoints on the reversal path')
   for (const sample of FIXTURE.slope_samples.samples) {
     const pose = lib.interpolatePose(slopePath, sample.time, 'smooth', 'extended contracts')
-    assert.strictEqual(pose.azimuth, sample.azimuth, `slope t=${sample.time} azimuth`)
-    assert.strictEqual(pose.elevation, sample.elevation, `slope t=${sample.time} elevation`)
-    assert.strictEqual(pose.distance, sample.distance, `slope t=${sample.time} distance`)
+    const closeSlope = (a, b) => Math.abs(a - b) <= 1e-12 * Math.max(1, Math.abs(a), Math.abs(b))
+    assert.ok(closeSlope(pose.azimuth, sample.azimuth), `slope t=${sample.time} azimuth`)
+    assert.ok(closeSlope(pose.elevation, sample.elevation), `slope t=${sample.time} elevation`)
+    assert.ok(closeSlope(pose.distance, sample.distance), `slope t=${sample.time} distance`)
   }
   passed += 1
-  console.log('  ok - slope stress path: 41 samples bit-identical to Python')
+  console.log('  ok - slope stress path: 41 samples within 1e-12 of Python')
   for (const row of FIXTURE.interp_errors) {
     if (row.label !== 'nan_time') continue
     assert.throws(() => lib.interpolatePose(pathFromName('video_00063'), NaN, 'smooth', 'extended contracts'),
@@ -236,9 +244,13 @@ console.log('(e) camera vocabulary')
     same(lib.aspectLabel(row.aspect), row.label, `aspectLabel(${row.aspect})`)
   }
   for (const row of FIXTURE.helpers.horizontal_fov) {
-    assert.strictEqual(lib.horizontalFov(row.aspect), row.fov, `horizontalFov(${row.aspect})`)
+    // atan/tan are implementation-approximated like pow — numeric parity
+    // within 1e-12 (the parallax TEXT built from these values is compared
+    // byte-exactly above and sits far from any rounding boundary).
+    const fov = lib.horizontalFov(row.aspect)
+    assert.ok(Math.abs(fov - row.fov) <= 1e-12 * Math.max(1, Math.abs(row.fov)), `horizontalFov(${row.aspect})`)
     passed += 1
-    console.log(`  ok - horizontalFov(${row.aspect}) bit-identical`)
+    console.log(`  ok - horizontalFov(${row.aspect}) within 1e-12`)
   }
   for (const row of FIXTURE.helpers.direction_contract) {
     same(lib.directionContract(pathFromName(row.path)), row.text, `directionContract(${row.path})`)

@@ -82,10 +82,18 @@ export function interpolatePose(
           distance: left.distance + (right.distance - left.distance) * ease,
         }
       }
-      const h00 = 2 * u ** 3 - 3 * u ** 2 + 1
-      const h10 = u ** 3 - 2 * u ** 2 + u
-      const h01 = -2 * u ** 3 + 3 * u ** 2
-      const h11 = u ** 3 - u ** 2
+      // Hermite basis via Math.pow (explicit: the VM harness transpiles `**`
+      // to Math.pow anyway). ECMAScript leaves pow implementation-approximated,
+      // so V8 versions can differ from each other and from CPython's libm pow
+      // at the last ulps — sampled interpolation therefore compares against
+      // the Python goldens with a 1e-12 tolerance in the test (the compiled
+      // prompts never route through this function and stay byte-exact).
+      const u2 = Math.pow(u, 2)
+      const u3 = Math.pow(u, 3)
+      const h00 = 2 * u3 - 3 * u2 + 1
+      const h10 = u3 - 2 * u2 + u
+      const h01 = -2 * u3 + 3 * u2
+      const h11 = u3 - u2
       const axis = (name: (typeof AXES)[number], i: number): number => {
         const value =
           h00 * path[i][name] + h10 * h * slope(path, index, name)
