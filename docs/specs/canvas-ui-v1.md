@@ -227,46 +227,73 @@ toast-spamming what is now on-canvas state.
 future projection render failure/staleness/queued states and navigate via
 radar — the no-silent-failure rule applies everywhere work is visible.
 
-## 5. Tool families (stubs)
+## 5. Tool families (DRAFTED — for review)
 
-- **5.1 Modal editor + op stacks** (Item 2 v1: crop + rotate + brush mask +
-  ctx.filter adjustments; ImageCrop data is the first op; live-update vs
-  frozen = ledger row; inline chips vs modal-only = ledger row).
-- **5.2 Control-input tool family** (epic 66xhflw): create control inputs
-  (canny/depth/HED/MLSD/pose/mask) from media or scratch, all-or-selected;
-  the **IK pose rig** (2.5D three.js viewport, palette-exact renderer);
-  non-human skeletons pending E-FC1; trajectory-plan UI pending E-MD1.
-- **5.3 Camera editor** (locked placement per directive b309fad7: the editor
-  is a canvas-phase component; the compiler port is its own in-repo task
-  ving89w — whose scope split relative to this epic is staged for the
-  maintainer on task 0rtwaj4).
-- **5.4 Engines-as-ops** (engines are op choices, not destinations —
-  **pending ledger closure**, row L4).
+- **5.1 Modal editor + op stacks** (Item 2 v1): crop + rotate + brush mask +
+  ctx.filter adjustments; ImageCrop's non-destructive crop data is the first
+  op; VideoReferenceClipper's trim becomes the video op; per-op undo +
+  reorder; bake = explicit irreversible marker. Live-update vs frozen tile =
+  L3 (rec: live-update); inline chips vs modal-only = L8 (rec: modal-only
+  v1). The **Focus primitive** (L7) resolves here against the output-
+  substrate selector — likely subsumed.
+- **5.2 Control-input tool family** (epic 66xhflw, Fun Control first-class):
+  create control inputs (canny/depth/HED/MLSD/pose/mask) from media
+  (server-driven preprocessors — the extraction matrix is native-core
+  verified) or from scratch, all-or-selected; the **IK pose rig** — 2.5D
+  three.js viewport, analytic two-bone + FABRIK spine, palette-exact DWPose
+  renderer (round-trip exact by construction; client-render default,
+  `__value__` server bridge as version-pinned option per E-FC0.5), preset
+  pose library first, webcam mocap later; skeleton templates pluggable —
+  human-134 default, AP-10K if E-FC1's arm B wins, freeform if
+  topology-agnostic. Trajectory-plan UI pending E-MD1.
+- **5.3 Camera editor** (directive b309fad7): canvas-phase component; the
+  compiler port is its own task (ving89w, split decided 2026-09-14).
+- **5.4 Engines-as-ops** (L4 DECIDED — dissolve): selection decides the
+  surface (t2v/i2v/frames/ref2v); LTX survives as the 2.3-dev utility family
+  + transitional survey builder (keep-utilities-only verdict); the general
+  Ltx25Workspace retires in Phase 4; LocationStudio migrates to H3 Ref2V.
 - **5.5 Prompt surfaces**: SmartPromptEditor as the universal prompt field
-  (seed node, ops, copilot); prompt-library placement = ledger row.
+  (seed node, ops, copilot) — its type-directed-insertion interaction is the
+  same shape as typed-hole menus (inventory seed row). Prompt-library
+  placement = L11 (rec: both launcher-adjacent + properties insert).
 
-## 6. Director Suite (stub — Item 4)
+## 6. Director Suite (DRAFTED — for review)
 
-Timeline as summonable projection over the chain DAG; plan documents (the
-MoviePlanner inheritance); segments map to chains; gaps = transition seats
-(model-generated = multi-input forks; NLE = export-time ops); references
-handed per segment; camera editor as a segment tool (§5.3); **export/
-assembly surface home** (inventory Q4 — project-level op vs summoned
-assembly view = ledger row).
+Timeline = summonable projection over the chain DAG; plan documents (the
+MoviePlanner inheritance: brief, segments→chain refs, gap definitions,
+per-segment reference handoffs); segments execute one timescale at a time
+(serialized per L26); **gap menu, measured** (tranche 1): hard cut / NLE
+transition / FLF-continuation splice (36 dB class — the champion) /
+dip-to-black (structural, audio-friendly) / diegetic bridge (opt-in).
+Identity payloads hand off per segment (E2/E3-informed). Camera editor is a
+segment tool (§5.3). Export/assembly surface = L16 (rec: project-level
+export op + summoned assembly projection). Plan execution failure semantics
+= F6 (schema spec §5).
 
-## 7. Keyboard map (stub — inventory Q2)
+## 7. Keyboard map (DRAFTED base — for review)
 
-The full canvas shortcut map, written in-spec: prototypes' base (J/K cycle,
-B branch, P pin, R rerun, V projection flip, Space play, ←/→ scrub, digits
-jump-to-take, Escape deselect) + launcher focus, palette summon, camera
-bookmarks; Blender's "shortcuts printed on affordances" rule (`Kbd` pattern
-already prototyped). Gates the e2e rewrite.
+Prototypes' proven base: J/K cycle selection, B branch/fork, P pin
+(lock/unlock), R rerun-stale, V projection flip (canvas↔timeline↔library),
+Space play/pause (selected tile), ←/→ scrub, digits 1–9 jump-to-take,
+Escape deselect. Plus: launcher focus (global `/` or click), palette ⌘K,
+camera bookmarks (⇧1–9 set / 1–9 with modifier go), modal open on selection
+(Enter), op modal undo (⌘Z per-op). **Shortcuts printed on affordances**
+(the `Kbd` pattern, prototyped) — every discoverable surface shows its keys.
+The full table lands with §10's blessing; it gates the e2e rewrite.
 
-## 8. Migration phases (stub — from inventory §3)
+## 8. Migration phases (DRAFTED — from inventory §3, confirmed)
 
-Six phases behind `?canvas=1` (the proven `?proto=` route pattern); hard
-ordering dependencies (Settings-first-run, queue-synthesis-as-a-unit,
-flows-before-CreateView-retires); e2e/vision coverage transitions per phase.
+Phase 0 foundation (document store lands beside jobs/workspace) → Phase 1
+substrate + launcher + spatial queue behind `?canvas=1` → Phase 2 generation
+arrives on canvas (properties panel absorbs bindings; both surfaces share
+stores) → Phase 3 ops/forks/takes (then CreateView/JobsView/ClipEditor/
+FrameBookmark/Library views retire behind the flag) → Phase 4 engines-as-ops
++ libraries + Settings docked (LTX workspace retires; LocationStudio
+migrates) → Phase 5 Director Suite + old shell deleted (`View` union dies).
+Hard dependencies D1–D7 stand as written (inventory §3), with D3 the
+cardinal one: radar + on-object state + summonable index ship as a unit
+before JobsView retires. e2e/vision coverage rewrites per phase before each
+retirement (D6).
 
 ## 9. Parked-questions ledger — RECONCILED UNION (per audit L1)
 
