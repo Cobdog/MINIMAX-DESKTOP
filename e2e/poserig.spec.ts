@@ -64,13 +64,17 @@ test('poserig — route loads, preset applies, timeline wired', async ({ page })
   await expect(page.locator('[data-poserig-preview]')).toBeVisible()
   await expect(page.locator('[data-poserig-timeline]')).toBeVisible()
 
-  // Eight presets render; the disabled pending templates are visible as
-  // documented slots, the shipped one selected.
+  // Eight presets render; the template picker has the human DEFAULT
+  // selected, AP-10K selectable (E-FC1 unlock), and the free-form slot
+  // disabled with the measured reason in its tooltip.
   await expect(page.locator('[data-poserig-preset]').nth(0)).toBeVisible()
   expect(await page.locator('[data-poserig-preset]').count()).toBe(8)
   const templateSelect = page.locator('[data-poserig-template]')
   await expect(templateSelect).toBeVisible()
-  expect(await templateSelect.locator('option[disabled]').count()).toBe(2)
+  await expect(templateSelect).toHaveValue('human-134')
+  expect(await templateSelect.locator('option[disabled]').count()).toBe(1)
+  await expect(templateSelect.locator('option[disabled]')).toHaveAttribute('title', /E-FC1 arm C/)
+  await expect(templateSelect.locator('option[value="ap10k-quadruped"]')).toBeEnabled()
 
   // The server-render bridge is OFF with its E-FC0.5 note.
   const serverButton = page.locator('[data-poserig-export-server]')
@@ -172,6 +176,58 @@ test('poserig — exports are deterministic and shape-correct', async ({ page })
   expect(sheet1.startsWith('data:image/png')).toBe(true)
   expect(sheet1.length).toBeGreaterThan(20_000)
   expect(sheet1).toBe(sheet2)
+
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('poserig — AP-10K template: selectable, non-default, measured label (E-FC1)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await page.goto('/?poserig=1')
+  await expect(page.locator('[data-poserig="app"]')).toBeVisible()
+
+  const templateSelect = page.locator('[data-poserig-template]')
+
+  // Switching to AP-10K renders the MEASURED label at selection time (the
+  // exact E-FC1 wording) and swaps the rig's topology to the quadruped.
+  await templateSelect.selectOption('ap10k-quadruped')
+  const note = page.locator('[data-poserig-template-note]')
+  await expect(note).toContainText('Looser adherence — measured ~2–3× human-skeleton error, 1.4–2× sprite mode')
+  await expect(note).toContainText('renders true quadrupeds, no humanization (E-FC1, 2026-09-15)')
+
+  const state = await page.evaluate(() => {
+    const h = (window as unknown as { __poserig: PoserigHook }).__poserig
+    return { pose: h.pose(), timeline: h.timeline(), frames: h.exportJson() }
+  })
+  // Quadruped joints in, human joints gone; the timeline resets to the new
+  // template's rest keyframe (poses are joint-id keyed per template) while
+  // canvas size + duration persist.
+  expect(state.pose.back).toBeTruthy()
+  expect(state.pose.neck).toBeTruthy()
+  expect(state.pose.midHip).toBeUndefined()
+  expect(state.timeline.canvas.width).toBe(512)
+  expect(state.timeline.keyframes.length).toBe(1)
+  // The preset library is human-only — the panel is replaced by a note.
+  expect(await page.locator('[data-poserig-preset]').count()).toBe(0)
+
+  // Export format: the AnimalPose ESTIMATOR dict (E-FC1) — version 'ap10k',
+  // one animal, 17 [x, y, score] triples per frame, authored scores of 1.
+  expect(state.frames.length).toBe(state.timeline.totalFrames)
+  const f0 = state.frames[0] as { version: string; animals: number[][][] }
+  expect(f0.version).toBe('ap10k')
+  expect(f0.animals.length).toBe(1)
+  expect(f0.animals[0].length).toBe(17)
+  expect(f0.animals[0].every((k) => k.length === 3 && k[2] === 1)).toBe(true)
+
+  // The animal render path is live and deterministic (contact sheet ×2).
+  const sheet1 = await page.evaluate(() => (window as unknown as { __poserig: PoserigHook }).__poserig.renderSheetDataUrl())
+  const sheet2 = await page.evaluate(() => (window as unknown as { __poserig: PoserigHook }).__poserig.renderSheetDataUrl())
+  expect(sheet1.length).toBeGreaterThan(20_000)
+  expect(sheet1).toBe(sheet2)
+
+  // Switching back restores the human default path (presets panel returns).
+  await templateSelect.selectOption('human-134')
+  await expect(note).toContainText('Default template')
+  expect(await page.locator('[data-poserig-preset]').count()).toBe(8)
 
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })

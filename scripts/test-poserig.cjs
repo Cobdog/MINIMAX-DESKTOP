@@ -21,9 +21,14 @@
 //   (j) JSON round-trip — shape, scores, re-render fingerprint IDENTICAL
 //       (export → parse → ops), import lifts body flat
 //   (k) server bridge — OFF by default, throws, graph pins draw_feet=true
-//   (l) template registry — one shipped + two documented pending slots
-//   (m) goldens — canonical preset fingerprints vs the committed fixture
-//       (UPDATE=1 node scripts/test-poserig.cjs regenerates)
+//   (l) template registry — E-FC1 verdict applied: AP-10K unlocked
+//       (selectable, NON-DEFAULT, measured label) + free-form disabled
+//       with the measured reason
+//   (n) AP-10K quadruped — 17-keypoint layout, AnimalPose render ops
+//       (17 lines, no dots), estimator-dict export, rig invariants
+//   (o) goldens — canonical preset fingerprints + the AP-10K rest pose vs
+//       the committed fixture (UPDATE=1 node scripts/test-poserig.cjs
+//       regenerates)
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -386,20 +391,102 @@ console.log('(k) server-render bridge (E-FC0.5)')
   eq(graphSpec.inputs.stick_width, 4, 'bridge graph pins stick_width=4')
 }
 
-console.log('(l) template registry')
+console.log('(l) template registry — E-FC1 verdict applied')
 {
   const shipped = templateMod.TEMPLATES.filter((t) => t.status === 'shipped')
   const pending = templateMod.TEMPLATES.filter((t) => t.status === 'pending')
-  eq(shipped.length, 1, 'exactly one shipped template (human-134)')
-  eq(shipped[0].id, 'human-134', 'shipped template id')
-  eq(pending.length, 2, 'two documented pending slots')
-  ok(pending.every((t) => typeof t.pendingNote === 'string' && t.pendingNote.includes('E-FC1')), 'pending slots cite E-FC1')
+  eq(templateMod.DEFAULT_TEMPLATE_ID, 'human-134', 'default template stays human-134 (AP-10K is NON-default)')
+  eq(shipped.length, 2, 'two selectable templates (human-134 + ap10k-quadruped)')
+  eq(templateMod.templateById('ap10k-quadruped').status, 'shipped', 'AP-10K is selectable (shipped)')
+  const ap10k = templateMod.AP10K_TEMPLATE
+  eq(ap10k.output, 'ap10k', 'AP-10K declares the ap10k output contract')
+  eq(
+    ap10k.note,
+    'Looser adherence — measured ~2–3× human-skeleton error, 1.4–2× sprite mode; renders true quadrupeds, no humanization (E-FC1, 2026-09-15)',
+    'AP-10K measured label verbatim (the UI renders it at selection time)',
+  )
+  ok(!ap10k.presetSet, 'AP-10K has no human preset library (UI hides the preset panel)')
+  eq(pending.length, 1, 'one disabled slot (freeform)')
+  const freeform = templateMod.templateById('freeform')
+  ok(freeform.status === 'pending', 'free-form slot stays disabled')
+  ok(
+    freeform.pendingNote.includes('E-FC1 arm C') && freeform.pendingNote.includes('Envelope-following only'),
+    'free-form reason is the MEASURED finding (arm C: envelope-following only)',
+  )
   eq(templateMod.templateById('human-134').label, 'Human (DWPose 134)', 'templateById resolves')
   ok(templateMod.templateById('nope') === undefined, 'unknown id → undefined')
   eq(presets.PRESETS.length, 8, 'eight preset archetypes ship')
 }
 
-console.log('(m) golden fingerprints (canonical poses)')
+console.log('(n) AP-10K quadruped template — layout, render ops, export format')
+{
+  const ap10k = templateMod.AP10K_TEMPLATE
+  const names = spec.AP10K_KEYPOINT_NAMES
+  eq(names.length, 17, 'AP-10K name table: 17 keypoints')
+  eq(spec.AP10K_LIMB_COLORS.length, spec.AP10K_LIMB_SEQ.length, 'one color per AP-10K limb (testbed colorsList)')
+
+  const rest = templateMod.restPositions(ap10k)
+  const kp = ap10k.deriveKeypoints(rest)
+  eq(kp.kind, 'ap10k', 'derived set targets the ap10k contract')
+  eq(kp.body.length, 17, '17 body keypoints (AP-10K estimator layout)')
+  ok(kp.feet.length === 0 && kp.face.length === 0 && kp.handRight.length === 0 && kp.handLeft.length === 0, 'no human attachments (no humanization)')
+  ok(kp.body.every((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z)), 'all 17 slots filled')
+  eq(kp.body[3], rest.neck, 'slot 3 = neck')
+  eq(kp.body[4], rest.tailRoot, 'slot 4 = tail root')
+  eq(kp.body[5], rest.lFrontShoulder, 'slot 5 = left front shoulder')
+  eq(kp.body[16], rest.rBackPaw, 'slot 16 = right back paw')
+  ok(kp.body[2].z > rest.neck.z, 'nose derives forward of the neck (back→neck line)')
+  ok(kp.body[0].x > 0 && kp.body[1].x < 0, 'left eye +x / right eye −x (animal left = +x)')
+
+  // Edge list sanity vs the name table — the renderer's own 1-based list
+  // decremented (poseSpec provenance): front legs hang off the NECK, back
+  // legs off the TAIL ROOT, eyes+nose form the head triangle.
+  const idx = (name) => names.indexOf(name)
+  ok(spec.AP10K_LIMB_SEQ.some((e) => e[0] === idx('neck') && e[1] === idx('lFrontShoulder')), 'edge: neck→lFrontShoulder')
+  ok(spec.AP10K_LIMB_SEQ.some((e) => e[0] === idx('tailRoot') && e[1] === idx('rBackHip')), 'edge: tailRoot→rBackHip')
+  ok(spec.AP10K_LIMB_SEQ.some((e) => e[0] === idx('lEye') && e[1] === idx('rEye')), 'edge: lEye→rEye')
+  ok(spec.AP10K_LIMB_SEQ.some((e) => e[0] === idx('neck') && e[1] === idx('tailRoot')), 'edge: neck→tailRoot (the back line)')
+
+  // Render ops: the AnimalPose line renderer — 17 lines, width 5, full
+  // colors in edge order, NO joint dots.
+  const renderer = model.makeRenderer(ap10k, { yaw: 0, pitch: 0.12 }, { width: 512, height: 512 })
+  const projected = renderer(rest)
+  eq(projected.kind, 'ap10k', 'output kind rides through projection')
+  const ops = draw.buildDrawOps(projected)
+  eq(ops.length, spec.AP10K_LIMB_SEQ.length, 'one op per AP-10K limb')
+  ok(ops.every((op) => op.kind === 'line'), 'all ops are LINES (the animalpose renderer draws no joint dots)')
+  ok(ops.every((op) => op.width === spec.AP10K_LINE_WIDTH), 'line width 5 (cv2 thickness — not a DWPose semi-axis)')
+  let colorsMatch = true
+  for (let i = 0; i < ops.length; i += 1) if (JSON.stringify(ops[i].color) !== JSON.stringify(spec.AP10K_LIMB_COLORS[i])) colorsMatch = false
+  ok(colorsMatch, 'limb colors = the testbed renderer\'s colorsList verbatim, in edge order')
+
+  // Export format: the estimator's own dict (version 'ap10k', animals).
+  const tl = model.createTimeline(ap10k, 1, { width: 512, height: 512 })
+  const frames = model.exportAp10kJson(tl, ap10k, renderer)
+  eq(frames.length, tl.totalFrames, 'one estimator dict per frame')
+  const f0 = frames[0]
+  eq(f0.version, 'ap10k', 'version marker ap10k')
+  eq(f0.canvas_width, 512, 'canvas_width')
+  eq(f0.canvas_height, 512, 'canvas_height')
+  eq(f0.animals.length, 1, 'one animal authored')
+  eq(f0.animals[0].length, 17, '17 keypoints per animal')
+  ok(f0.animals[0].every((k) => k.length === 3 && k[2] === 1), 'flat [x, y, score] triples, score 1 (authored)')
+
+  // Rig invariants on the quadruped: rest is bone-exact, drags preserve
+  // limb lengths, mirror is an involution that swaps L/R.
+  close(model.poseBoneLengthError(ap10k, rest), 0, 1e-9, 'AP-10K rest pose is bone-length exact')
+  const posed = templateMod.restPositions(ap10k)
+  const l1 = ik.vdist(rest.lFrontShoulder, rest.lFrontKnee)
+  const l2 = ik.vdist(rest.lFrontKnee, rest.lFrontPaw)
+  rigMod.dragJoint(ap10k, posed, 'lFrontPaw', v3(0.25, 0.30, 0.40))
+  close(ik.vdist(posed.lFrontShoulder, posed.lFrontKnee), l1, 1e-9, 'front-paw drag: upper bone preserved (two-bone IK)')
+  close(ik.vdist(posed.lFrontKnee, posed.lFrontPaw), l2, 1e-9, 'front-paw drag: lower bone preserved')
+  const mirrored = rigMod.mirrorPose(ap10k, posed)
+  ok(Math.abs(mirrored.lFrontPaw.x - -posed.rFrontPaw.x) < 1e-9, 'mirror swaps L/R (lFrontPaw ← rFrontPaw)')
+  eq(rigMod.mirrorPose(ap10k, mirrored), posed, 'mirror is an involution')
+}
+
+console.log('(o) golden fingerprints (canonical poses + AP-10K rest)')
 {
   const fixturePath = path.join(__dirname, 'fixtures', 'poserig-goldens.json')
   const canonical = presets.PRESETS.map((preset) => {
@@ -407,6 +494,11 @@ console.log('(m) golden fingerprints (canonical poses)')
     const renderer = model.makeRenderer(HUMAN, { yaw: 0, pitch: 0.12 }, { width: 512, height: 512 })
     return { id: preset.id, fingerprint: draw.opsFingerprint(draw.buildDrawOps(renderer(pose))) }
   })
+  // E-FC1: the AP-10K rest pose rides the same golden harness (the animal
+  // renderer's op list — 17 lines — is as contract-bound as the human's).
+  const ap10kRest = templateMod.restPositions(templateMod.AP10K_TEMPLATE)
+  const ap10kRenderer = model.makeRenderer(templateMod.AP10K_TEMPLATE, { yaw: 0, pitch: 0.12 }, { width: 512, height: 512 })
+  canonical.push({ id: 'ap10k-rest', fingerprint: draw.opsFingerprint(draw.buildDrawOps(ap10kRenderer(ap10kRest))) })
   if (process.env.UPDATE === '1' || !fs.existsSync(fixturePath)) {
     fs.writeFileSync(fixturePath, `${JSON.stringify({ note: 'canonical pose render fingerprints — regenerate with UPDATE=1 node scripts/test-poserig.cjs', poses: canonical }, null, 2)}\n`)
     console.log(`  wrote golden fixture: ${fixturePath}`)

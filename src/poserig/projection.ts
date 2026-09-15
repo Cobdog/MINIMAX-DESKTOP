@@ -86,16 +86,19 @@ export function screenDeltaToWorld(dx: number, dy: number, basis: { right: Vec3;
   return vadd(vscale(basis.right, dx / scale), vscale(basis.up, -dy / scale))
 }
 
-/** A 134-keypoint set after projection — every part is Vec2 pixels. */
+/** A 134-keypoint set after projection — every part is Vec2 pixels.
+ *  `kind` rides along from the keypoint set (ap10k sets carry 17 body
+ *  points and empty feet/face/hands). */
 export type ProjectedKeypoints = {
   body: Vec2[]
   feet: Vec2[]
   face: Vec2[]
   handRight: Vec2[]
   handLeft: Vec2[]
+  kind?: KeypointSet134['kind']
 }
 
-/** Project a full 134-keypoint set. */
+/** Project a full keypoint set. */
 export function projectKeypoints(kp: KeypointSet134, view: OrbitView, fit: ProjectionFit, width: number, height: number): ProjectedKeypoints {
   const basis = viewBasis(view)
   const projectAll = (points: Vec3[]): Vec2[] => points.map((p) => projectPoint(p, basis, fit, width, height))
@@ -105,6 +108,7 @@ export function projectKeypoints(kp: KeypointSet134, view: OrbitView, fit: Proje
     face: projectAll(kp.face),
     handRight: projectAll(kp.handRight),
     handLeft: projectAll(kp.handLeft),
+    kind: kp.kind,
   }
 }
 

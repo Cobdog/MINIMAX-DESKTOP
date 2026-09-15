@@ -13,11 +13,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PersonStanding, Play, Plus, Square, Trash2, Download, FileJson, Image as ImageIcon, RotateCcw, FlipHorizontal2, Camera } from 'lucide-react'
 import { PRESETS, presetToPose } from './presets'
-import { HUMAN_TEMPLATE, TEMPLATES } from './template'
+import { DEFAULT_TEMPLATE_ID, HUMAN_TEMPLATE, TEMPLATES, templateById } from './template'
 import { clonePose, type RigPose } from './rig'
 import {
-  addKeyframe, createTimeline, deleteKeyframe, exportOpenPoseJson, frameCount, gridFrames, makeRenderer, MAX_TOTAL_FRAMES,
-  moveKeyframe, parseOpenPoseJson, poseFromFrame, samplePose, snapToGrid, SERVER_RENDER_BRIDGE, type PoseTimeline,
+  addKeyframe, createRestPose, createTimeline, deleteKeyframe, exportAp10kJson, exportOpenPoseJson, frameCount, gridFrames,
+  makeRenderer, MAX_TOTAL_FRAMES, moveKeyframe, parseOpenPoseJson, poseFromFrame, samplePose, snapToGrid, SERVER_RENDER_BRIDGE,
+  type PoseTimeline,
 } from './poseModel'
 import { buildDrawOps, paintDrawOps } from './drawPose'
 import { createRigScene, type RigSceneHandle } from './rigScene'
@@ -35,7 +36,10 @@ const CANVAS_PRESETS = [
 const DURATIONS = [1, 2, 3, 5, 8, 15] as const
 
 export default function PoseRigApp() {
-  const template = HUMAN_TEMPLATE
+  // E-FC1: human-134 stays the DEFAULT; AP-10K is a first-class selectable
+  // alternative (never the initial rig), labeled with its measured adherence.
+  const [templateId, setTemplateId] = useState(DEFAULT_TEMPLATE_ID)
+  const template = templateById(templateId) ?? HUMAN_TEMPLATE
   const [timeline, setTimeline] = useState<PoseTimeline>(() => createTimeline(template, 2))
   const [currentFrame, setCurrentFrame] = useState(5)
   const [selectedJoint, setSelectedJoint] = useState<string | null>(null)
@@ -69,7 +73,7 @@ export default function PoseRigApp() {
     const container = viewportRef.current
     if (!container) return
     const scene = createRigScene(container, template, {
-      pose: presetToPose(PRESETS[0], template),
+      pose: template.presetSet === 'human' ? presetToPose(PRESETS[0], template) : createRestPose(template),
       view: timeline.view,
       onSelect: (jointId) => setSelectedJoint(jointId),
       onCommit: (pose, reason) => {
@@ -84,8 +88,8 @@ export default function PoseRigApp() {
       sceneRef.current = null
       scene.dispose()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- scene mounts once; canvas-size changes ride setPreviewSize below
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the scene remounts on TEMPLATE switch (joints/IK differ per template); canvas-size changes ride setPreviewSize below
+  }, [template])
 
   useEffect(() => {
     sceneRef.current?.setPreviewSize(canvas.width, canvas.height)
@@ -176,6 +180,24 @@ export default function PoseRigApp() {
   }, [playing, template])
 
   // ---- actions ---------------------------------------------------------------
+  // Template switch (E-FC1: AP-10K selectable, never the default). Poses and
+  // keyframes are joint-id keyed PER TEMPLATE, so a switch resets authored
+  // keyframes to the new template's rest pose while keeping canvas size,
+  // duration, and view.
+  const changeTemplate = useCallback((id: string) => {
+    const next = templateById(id)
+    if (!next || next.status !== 'shipped' || id === templateId) return
+    setTemplateId(id)
+    setSelectedJoint(null)
+    setTimeline((prev) => ({ ...createTimeline(next), totalFrames: prev.totalFrames, canvas: prev.canvas, view: prev.view }))
+    setLastPose(createRestPose(next))
+    setStatus(
+      next.output === 'ap10k'
+        ? `template: ${next.label} — keypoint JSON targets the AP-10K estimator format (17 keypoints)`
+        : `template: ${next.label}`,
+    )
+  }, [templateId])
+
   const applyPreset = useCallback((presetId: string) => {
     const preset = PRESETS.find((entry) => entry.id === presetId)
     if (!preset) return
@@ -195,6 +217,12 @@ export default function PoseRigApp() {
 
   const importJson = useCallback(async (file: File) => {
     try {
+      // Loud, early rejection — human-format JSON silently lifted onto a
+      // quadruped would fill every joint from REST (wrong pose, no error).
+      if (template.output === 'ap10k') {
+        setStatus('import: keypoint-JSON pose transfer is human-134 only — AP-10K import is a follow-up')
+        return
+      }
       const text = await file.text()
       const parsed = parseOpenPoseJson(JSON.parse(text))
       if ('error' in parsed) {
@@ -216,6 +244,15 @@ export default function PoseRigApp() {
   // ---- export ------------------------------------------------------------------
   const exportJson = useCallback(() => {
     const renderer = makeRenderer(template, timeline.view, timeline.canvas)
+    if (template.output === 'ap10k') {
+      // E-FC1: the AP-10K template's keypoint JSON targets the AP-10K
+      // estimator format (version 'ap10k', animals[17×3]) — NOT OpenPose-134.
+      const frames = exportAp10kJson(timeline, template, renderer)
+      const blob = new Blob([JSON.stringify(frames)], { type: 'application/json' })
+      triggerDownload(blob, `poserig-ap10k-${timeline.canvas.width}x${timeline.canvas.height}.json`)
+      setStatus(`exported ${frames.length} keypoint frames (AP-10K 17, estimator format)`)
+      return frames
+    }
     const frames = exportOpenPoseJson(timeline, template, renderer)
     const blob = new Blob([JSON.stringify(frames)], { type: 'application/json' })
     triggerDownload(blob, `poserig-keypoints-${timeline.canvas.width}x${timeline.canvas.height}.json`)
@@ -322,26 +359,37 @@ export default function PoseRigApp() {
         <aside className="poserig-panel poserig-panel-left">
           <section>
             <h3>Presets</h3>
-            <div className="poserig-presets">
-              {PRESETS.map((preset) => (
-                <button key={preset.id} type="button" data-poserig-preset={preset.id} onClick={() => applyPreset(preset.id)} title={preset.hint}>
-                  <PersonStanding size={14} />
-                  <span>{preset.label}</span>
-                </button>
-              ))}
-            </div>
+            {template.presetSet === 'human' ? (
+              <div className="poserig-presets">
+                {PRESETS.map((preset) => (
+                  <button key={preset.id} type="button" data-poserig-preset={preset.id} onClick={() => applyPreset(preset.id)} title={preset.hint}>
+                    <PersonStanding size={14} />
+                    <span>{preset.label}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="poserig-note">the human preset library does not apply here — pose the quadruped directly (drag joints, IK) or keyframe its rest pose.</p>
+            )}
           </section>
 
           <section>
             <h3>Skeleton template</h3>
-            <select data-poserig-template defaultValue={template.id} disabled={TEMPLATES.filter((entry) => entry.status === 'shipped').length <= 1}>
+            <select data-poserig-template value={templateId} onChange={(event) => changeTemplate(event.target.value)}>
               {TEMPLATES.map((entry) => (
-                <option key={entry.id} value={entry.id} disabled={entry.status !== 'shipped'} title={entry.pendingNote ?? ''}>
-                  {entry.label}{entry.status === 'pending' ? ' — pending E-FC1' : ''}
+                <option
+                  key={entry.id}
+                  value={entry.id}
+                  disabled={entry.status !== 'shipped'}
+                  title={entry.status === 'pending' ? entry.pendingNote ?? '' : entry.note ?? ''}
+                >
+                  {entry.label}{entry.status === 'pending' ? ' — disabled' : ''}
                 </option>
               ))}
             </select>
-            <p className="poserig-note">human-134 ships now; AP-10K / freeform land after E-FC1&apos;s verdict.</p>
+            <p className="poserig-note" data-poserig-template-note>
+              {template.status === 'pending' ? template.pendingNote : template.note}
+            </p>
           </section>
 
           <section>
@@ -376,6 +424,9 @@ export default function PoseRigApp() {
                 <Camera size={14} /><span>Server render</span>
               </button>
             </div>
+            <p className="poserig-note">
+              non-human default path = sprite/region compositing — E-FC1 measured it BEST in class (1.4–2× tighter than AP-10K skeletons); reference: the tranche scripts in test-results/experiments/efc1/scripts. Skeleton templates are the explicit-pose alternative.
+            </p>
             <div className="poserig-canvas-picker">
               {CANVAS_PRESETS.map((preset) => (
                 <button
@@ -422,7 +473,9 @@ export default function PoseRigApp() {
               <canvas ref={previewRef} className="poserig-preview" data-poserig-preview width={canvas.width} height={canvas.height} />
             </div>
             <p className="poserig-note">
-              §3 contract: 18-color limbs ×0.6 · r4 joints · HSV hands · white face dots · feet on · black bg · {canvas.width}×{canvas.height}
+              {template.output === 'ap10k'
+                ? `AP-10K contract: 17 full-color limb lines · width 5 · no joint dots · black bg · ${canvas.width}×${canvas.height}`
+                : `§3 contract: 18-color limbs ×0.6 · r4 joints · HSV hands · white face dots · feet on · black bg · ${canvas.width}×${canvas.height}`}
             </p>
           </section>
           <section>

@@ -32,6 +32,10 @@
     {
       "id": "victory",
       "fingerprint": "fnv1a-f9483482-191"
+    },
+    {
+      "id": "ap10k-rest",
+      "fingerprint": "fnv1a-fb871ee-17"
     }
   ]
 }

@@ -10,6 +10,8 @@
  * Serialization format = the OpenPose/SDPose frame dict the native
  * `SDPoseDrawKeypoints` node consumes (per-frame canvas size, one person,
  * flat [x, y, score] triples; see poseSpec.ts header for the slot layout).
+ * AP-10K templates (output 'ap10k') instead export the AnimalPose
+ * estimator's own dict — see Ap10kFrame below.
  *
  * Pure data logic — no three.js / DOM (node-testable).
  */
@@ -19,6 +21,7 @@ import { vdist } from './ik'
 import { clonePose, lerpPose, normalizePose, type RigPose } from './rig'
 import { restPositions, type SkeletonTemplate } from './template'
 import { flattenKeypoints, type OrbitView, type ProjectedKeypoints, type Vec2, fitProjection, projectKeypoints } from './projection'
+import { AP10K_JSON_VERSION } from './poseSpec'
 import { buildDrawOps, opsFingerprint, type PoseDrawOptions } from './drawPose'
 
 export const FPS = 24
@@ -198,6 +201,38 @@ export function exportOpenPoseJson(timeline: PoseTimeline, template: SkeletonTem
   const frames: OpenPoseFrame[] = []
   for (let frame = 0; frame < timeline.totalFrames; frame += 1) {
     frames.push(frameFromPose(derive(samplePose(timeline, frame, template)), timeline.canvas))
+  }
+  return frames
+}
+
+// ---------------------------------------------------------------------------
+// AP-10K keypoint JSON — the AnimalPose estimator's own dict shape
+// ---------------------------------------------------------------------------
+
+/** One AP-10K frame in the estimator's openpose_dict format: EXACTLY what
+ *  controlnet_aux's AnimalPosePreprocessor emits as openpose_json (verified
+ *  against the testbed's dwpose/animalpose.py — version marker 'ap10k',
+ *  `animals` instead of `people`, one flat [x, y, score] triple per AP-10K
+ *  keypoint in estimator order). The rig authors exactly one animal; scores
+ *  are 1.0 (authored keypoints — the rig "detects" its own output). */
+export type Ap10kFrame = {
+  version: typeof AP10K_JSON_VERSION
+  canvas_width: number
+  canvas_height: number
+  animals: Array<Array<[number, number, number]>>
+}
+
+export function ap10kFrameFromPose(kp: ProjectedKeypoints, canvas: { width: number; height: number }): Ap10kFrame {
+  const animal: Array<[number, number, number]> = []
+  for (const p of kp.body) animal.push([Math.trunc(p.x), Math.trunc(p.y), 1])
+  return { version: AP10K_JSON_VERSION, canvas_width: canvas.width, canvas_height: canvas.height, animals: [animal] }
+}
+
+/** AP-10K full-timeline export: one estimator dict per video frame. */
+export function exportAp10kJson(timeline: PoseTimeline, template: SkeletonTemplate, derive: (pose: RigPose) => ProjectedKeypoints): Ap10kFrame[] {
+  const frames: Ap10kFrame[] = []
+  for (let frame = 0; frame < timeline.totalFrames; frame += 1) {
+    frames.push(ap10kFrameFromPose(derive(samplePose(timeline, frame, template)), timeline.canvas))
   }
   return frames
 }

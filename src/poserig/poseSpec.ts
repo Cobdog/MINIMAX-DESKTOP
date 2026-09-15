@@ -106,6 +106,62 @@ export const BODY_KEYPOINT_NAMES = [
 
 /** HSV→RGB exactly as matplotlib/colorsys do it, with the same int()
  *  truncation the ecosystem renderers apply. h ∈ [0, 1), s = v = 1. */
+// ---------------------------------------------------------------------------
+// AP-10K (AnimalPose quadruped) render contract — E-FC1, research-pinned.
+//
+// Extracted verbatim from the testbed's own AnimalPose renderer — the exact
+// code path E-FC1 arm B drove (custom_nodes/comfyui_controlnet_aux/src/
+// custom_controlnet_aux/dwpose/animalpose.py, AnimalPoseImage.__call__):
+// 17 cv2.line limbs drawn in the order below, each in its FULL-STRENGTH
+// color (no ×0.6 — that alpha rule is DWPose-body-only), thickness
+// int(5 // 1.0) = 5, NO joint dots, and no eps guard — the renderer draws
+// every edge unconditionally. Its 1-based pair list is decremented to
+// 0-based here exactly as its drawBetweenKeypoints does (`ind = i - 1`).
+// The estimator's keypoint-JSON dict is {version: 'ap10k', animals:
+// [17×[x, y, score]], canvas_width, canvas_height} (see poseModel.ts).
+// ---------------------------------------------------------------------------
+
+/** AP-10K keypoint names in estimator order (the RTMPose ap10k checkpoint's
+ *  output order — mmpose AP-10K spec; left/right = the ANIMAL's). Indices
+ *  0-4 head/back, 5-7 left front leg, 8-10 right front leg, 11-13 left back
+ *  leg, 14-16 right back leg. The topology this implies is cross-checked
+ *  against the renderer's edge list below. */
+export const AP10K_KEYPOINT_NAMES = [
+  'lEye', 'rEye', 'nose', 'neck', 'tailRoot',
+  'lFrontShoulder', 'lFrontKnee', 'lFrontPaw',
+  'rFrontShoulder', 'rFrontKnee', 'rFrontPaw',
+  'lBackHip', 'lBackKnee', 'lBackPaw',
+  'rBackHip', 'rBackKnee', 'rBackPaw',
+] as const
+
+/** The 17 AP-10K limbs as 0-based keypoint pairs, in the renderer's draw
+ *  order: head triangle, neck→right-front leg, neck→left-front leg, back
+ *  line, tail→right-back leg, tail→left-back leg. */
+export const AP10K_LIMB_SEQ: ReadonlyArray<readonly [number, number]> = [
+  [0, 1], [1, 2], [0, 2], [2, 3],
+  [3, 8], [8, 9], [9, 10],
+  [3, 5], [5, 6], [6, 7],
+  [3, 4],
+  [4, 14], [14, 15], [15, 16],
+  [4, 11], [11, 12], [12, 13],
+]
+
+/** Full-strength limb colors, one per AP10K_LIMB_SEQ entry (the renderer's
+ *  colorsList, verbatim — 17 entries). */
+export const AP10K_LIMB_COLORS: ReadonlyArray<readonly [number, number, number]> = [
+  [255, 255, 255], [100, 255, 100], [150, 255, 255], [100, 50, 255],
+  [50, 150, 200], [0, 255, 255], [0, 150, 0], [0, 0, 255],
+  [0, 0, 150], [255, 50, 255], [255, 0, 255], [255, 0, 0],
+  [150, 0, 0], [255, 255, 100], [0, 150, 0], [255, 255, 0],
+  [150, 150, 150],
+]
+
+/** AP-10K limb line thickness (a cv2 LINE width, not a DWPose semi-axis). */
+export const AP10K_LINE_WIDTH = 5
+
+/** The AP-10K estimator JSON's version marker (its openpose_dict). */
+export const AP10K_JSON_VERSION = 'ap10k'
+
 export function hsvToInts(h: number): readonly [number, number, number] {
   const hh = ((h % 1) + 1) % 1
   const sector = Math.floor(hh * 6)

@@ -33,8 +33,9 @@
  */
 
 import {
-  BODY_LIMB_SEQ, CANVAS_BACKGROUND, FACE_DOT_COLOR, FACE_DOT_RADIUS, HAND_DOT_COLOR, HAND_DOT_RADIUS,
-  HAND_EDGES, HAND_LINE_WIDTH, JOINT_RADIUS, STICK_WIDTH, handEdgeColor, limbFillColor, POSE_PALETTE,
+  AP10K_LIMB_COLORS, AP10K_LIMB_SEQ, AP10K_LINE_WIDTH, BODY_LIMB_SEQ, CANVAS_BACKGROUND, FACE_DOT_COLOR,
+  FACE_DOT_RADIUS, HAND_DOT_COLOR, HAND_DOT_RADIUS, HAND_EDGES, HAND_LINE_WIDTH, JOINT_RADIUS, STICK_WIDTH,
+  handEdgeColor, limbFillColor, POSE_PALETTE,
 } from './poseSpec'
 import type { ProjectedKeypoints } from './projection'
 
@@ -159,8 +160,35 @@ function drawFace(kp: ProjectedKeypoints, ops: DrawOp[], options: PoseDrawOption
 /** The pure, deterministic draw list for one frame. This is the golden-
  * fixtured artifact: same keypoints + options → identical op list on every
  * platform, independent of canvas anti-aliasing. */
+/** AP-10K renderer — the AnimalPose line drawing (E-FC1, poseSpec.ts
+ *  provenance): 17 limbs in the testbed renderer's edge order, FULL-color
+ *  lines of width 5, NO joint dots, no eps guard (its loop draws every edge
+ *  unconditionally). Round line caps come from paintDrawOps's global cap —
+ *  cv2's default butt cap differs only at end pixels, the same sub-pixel
+ *  delta the module header already documents for the DWPose path. */
+function drawAnimalLimbs(kp: ProjectedKeypoints, ops: DrawOp[]): void {
+  for (let i = 0; i < AP10K_LIMB_SEQ.length; i += 1) {
+    const a = kp.body[AP10K_LIMB_SEQ[i][0]]
+    const b = kp.body[AP10K_LIMB_SEQ[i][1]]
+    if (!a || !b) continue
+    ops.push({
+      kind: 'line',
+      x1: Math.trunc(a.x),
+      y1: Math.trunc(a.y),
+      x2: Math.trunc(b.x),
+      y2: Math.trunc(b.y),
+      width: AP10K_LINE_WIDTH,
+      color: AP10K_LIMB_COLORS[i],
+    })
+  }
+}
+
 export function buildDrawOps(kp: ProjectedKeypoints, options: PoseDrawOptions = {}): DrawOp[] {
   const ops: DrawOp[] = []
+  if (kp.kind === 'ap10k') {
+    drawAnimalLimbs(kp, ops)
+    return ops
+  }
   drawBodyLimbs(kp, ops)
   drawJointDots(kp, ops)
   drawHand(kp.handLeft, ops)

@@ -2,19 +2,18 @@
  *
  * fun-control-input-surface.md §5.2 #4: "the renderer is dumb — the
  * template defines joints/limbs/palette". This module owns the HUMAN_134
- * template (the only shipped one) and the interface future templates
- * implement. Slots below are DOCUMENTED PENDING, not stubbed:
- *   - AP-10K quadruped (17 kp)  — pending E-FC1 arm B (does the human-pose
- *     prior articulate a quadruped skeleton?)
- *   - freeform creature (arbitrary colored graph) — pending E-FC1 verdict
- *     on topology-agnostic generalization.
+ * template (the default) and the AP-10K quadruped template (E-FC1 verdict,
+ * 2026-09-15: topology-TOLERANT, not agnostic — AP-10K unlocks as a
+ * first-class NON-DEFAULT template with the measured label; free-form
+ * stays disabled, envelope-following only). E-FC1 numbers: Flux ma59y73.
  *
  * Pure data + pure functions: no three.js, no DOM (node-testable).
  *
  * Coordinate system: y up, character faces +z, character's LEFT = +x (so a
  * default camera on +z looking back sees the character mirrored the way a
  * real person faces you — their left hand on your right). Units ≈ meters,
- * rest pose is a relaxed standing figure ~1.75 tall.
+ * rest pose is a relaxed standing figure ~1.75 tall (human) / a standing
+ * quadruped ~0.75 at the back (AP-10K).
  */
 
 import { vcross, vadd, vsub, vscale, vnorm, v3, vdist, type Vec3 } from './ik'
@@ -24,12 +23,21 @@ import { vcross, vadd, vsub, vscale, vnorm, v3, vdist, type Vec3 } from './ik'
 // consumes its orthographic 2D projection; poseModel.ts serializes it.
 // ---------------------------------------------------------------------------
 
+/** Which estimator contract a keypoint set (and its template) targets —
+ *  the 2D render branch and the keypoint-JSON export key off this. Default
+ *  (undefined) = the human 134 format. */
+export type KeypointOutput = 'openpose134' | 'ap10k'
+
 export type KeypointSet134 = {
-  body: Vec3[] // 18
-  feet: Vec3[] // 6
-  face: Vec3[] // 68
-  handRight: Vec3[] // 21
-  handLeft: Vec3[] // 21
+  /** openpose134: 18 slots. ap10k: 17 slots in AP-10K estimator order
+   *  (poseSpec.AP10K_KEYPOINT_NAMES). */
+  body: Vec3[]
+  feet: Vec3[] // 6 (openpose134; empty for ap10k)
+  face: Vec3[] // 68 (openpose134; empty for ap10k)
+  handRight: Vec3[] // 21 (openpose134; empty for ap10k)
+  handLeft: Vec3[] // 21 (openpose134; empty for ap10k)
+  /** The contract this set targets; undefined = openpose134. */
+  kind?: KeypointOutput
 }
 
 export type TemplateJoint = {
@@ -40,7 +48,10 @@ export type TemplateJoint = {
   /** Parent joint id (kinematic tree root = midHip); enables subtree
    *  rotation and mirrors. */
   parent?: string
-  /** The OpenPose body index this joint maps to, if any (nose=0 … lAnkle=13). */
+  /** The output body-slot index this joint maps to, if any: the OpenPose
+   *  body index for human-134 (nose=0 … lAnkle=13) or the AP-10K keypoint
+   *  index for ap10k templates. Joints without one are rig-only (posing
+   *  helpers) or procedurally derived (see the template's deriveKeypoints). */
   bodyIndex?: number
 }
 
@@ -66,6 +77,16 @@ export interface SkeletonTemplate {
   label: string
   status: 'shipped' | 'pending'
   pendingNote?: string
+  /** Honest-label slot: rendered by the UI whenever THIS template is
+   *  selected (pending slots use pendingNote instead). The AP-10K entry
+   *  carries its E-FC1-measured adherence label here — keep it verbatim. */
+  note?: string
+  /** Estimator contract the template's keypoint JSON targets (default
+   *  'openpose134'). Also selects the 2D render contract. */
+  output?: KeypointOutput
+  /** The preset library that applies to this template ('human' = the shipped
+   *  archetype presets). Absent → the UI hides the preset panel. */
+  presetSet?: 'human'
   joints: ReadonlyArray<TemplateJoint>
   /** Display bones for the 3D viewport. */
   bones: ReadonlyArray<TemplateBone>
@@ -75,8 +96,9 @@ export interface SkeletonTemplate {
   spineChain: ReadonlyArray<string>
   /** The single-bone "swing" joints (radial clamp only): head = nose. */
   swingJoints: ReadonlyArray<{ base: string; tip: string }>
-  /** Derive the full 134-keypoint output from rig joint positions
-   *  (procedural attachment of face / hands / feet / eyes / ears). */
+  /** Derive the keypoint output from rig joint positions (procedural
+   *  attachment of face / hands / feet / eyes / ears — or, for ap10k, the
+   *  head keypoints from the back→neck line). */
   deriveKeypoints: (positions: Record<string, Vec3>) => KeypointSet134
 }
 
@@ -244,6 +266,8 @@ export const HUMAN_TEMPLATE: SkeletonTemplate = {
   id: 'human-134',
   label: 'Human (DWPose 134)',
   status: 'shipped',
+  note: 'Default template — the palette-exact DWPose 134 contract (§3), the measured-baseline pose path.',
+  presetSet: 'human',
   joints: HUMAN_JOINTS,
   bones: [
     { from: 'midHip', to: 'spine', colorIndex: 6 },
@@ -312,13 +336,109 @@ export const HUMAN_TEMPLATE: SkeletonTemplate = {
   },
 }
 
-/** Registry — human-134 only; the two pending slots are visible here as
- *  DOCUMENTED entries (E-FC1) so the UI and tests can enumerate them
- *  without stub code that pretends to work. */
+// ---------------------------------------------------------------------------
+// AP10K — the E-FC1-unlocked quadruped template (NON-DEFAULT)
+// ---------------------------------------------------------------------------
+
+/** Editable rig joints for the quadruped. 14 of the 17 AP-10K keypoints are
+ *  directly poseable (their `bodyIndex` = the AP-10K slot, see
+ *  poseSpec.AP10K_KEYPOINT_NAMES); the two eyes and the nose derive
+ *  procedurally from the back→neck line. `back` is a rig-only root joint
+ *  (the AP-10K skeleton's neck—tail edge passes through it). Rest pose: a
+ *  relaxed standing dog-type quadruped, ~0.75 at the back, facing +z. */
+export const AP10K_JOINTS: ReadonlyArray<TemplateJoint> = [
+  { id: 'back', label: 'Back (root)', rest: v3(0, 0.62, 0), parent: undefined },
+  { id: 'neck', label: 'Neck', rest: v3(0, 0.68, 0.28), parent: 'back', bodyIndex: 3 },
+  { id: 'tailRoot', label: 'Tail root', rest: v3(0, 0.62, -0.28), parent: 'back', bodyIndex: 4 },
+  { id: 'lFrontShoulder', label: 'L front shoulder', rest: v3(0.10, 0.55, 0.24), parent: 'neck', bodyIndex: 5 },
+  { id: 'lFrontKnee', label: 'L front knee', rest: v3(0.105, 0.30, 0.20), parent: 'lFrontShoulder', bodyIndex: 6 },
+  { id: 'lFrontPaw', label: 'L front paw', rest: v3(0.11, 0.05, 0.21), parent: 'lFrontKnee', bodyIndex: 7 },
+  { id: 'rFrontShoulder', label: 'R front shoulder', rest: v3(-0.10, 0.55, 0.24), parent: 'neck', bodyIndex: 8 },
+  { id: 'rFrontKnee', label: 'R front knee', rest: v3(-0.105, 0.30, 0.20), parent: 'rFrontShoulder', bodyIndex: 9 },
+  { id: 'rFrontPaw', label: 'R front paw', rest: v3(-0.11, 0.05, 0.21), parent: 'rFrontKnee', bodyIndex: 10 },
+  { id: 'lBackHip', label: 'L hip', rest: v3(0.10, 0.58, -0.24), parent: 'tailRoot', bodyIndex: 11 },
+  { id: 'lBackKnee', label: 'L back knee', rest: v3(0.105, 0.33, -0.17), parent: 'lBackHip', bodyIndex: 12 },
+  { id: 'lBackPaw', label: 'L back paw', rest: v3(0.11, 0.05, -0.23), parent: 'lBackKnee', bodyIndex: 13 },
+  { id: 'rBackHip', label: 'R hip', rest: v3(-0.10, 0.58, -0.24), parent: 'tailRoot', bodyIndex: 14 },
+  { id: 'rBackKnee', label: 'R back knee', rest: v3(-0.105, 0.33, -0.17), parent: 'rBackHip', bodyIndex: 15 },
+  { id: 'rBackPaw', label: 'R back paw', rest: v3(-0.11, 0.05, -0.23), parent: 'rBackKnee', bodyIndex: 16 },
+]
+
+/** The E-FC1 verdict template. UNLOCKED (renders true quadrupeds, zero
+ *  humanization — arm B) but NON-DEFAULT: measured ~2–3× the human-skeleton
+ *  round-trip error and 1.4–2× the sprite/region ceiling. The `note` is the
+ *  measured label, rendered at selection time — keep it verbatim. Its
+ *  keypoint JSON targets the AP-10K estimator format (poseModel.ts), and
+ *  its 2D render is the AnimalPose line renderer (poseSpec + drawPose). */
+export const AP10K_TEMPLATE: SkeletonTemplate = {
+  id: 'ap10k-quadruped',
+  label: 'AP-10K quadruped (dog-type)',
+  status: 'shipped',
+  output: 'ap10k',
+  note: 'Looser adherence — measured ~2–3× human-skeleton error, 1.4–2× sprite mode; renders true quadrupeds, no humanization (E-FC1, 2026-09-15)',
+  joints: AP10K_JOINTS,
+  bones: [
+    { from: 'back', to: 'neck', colorIndex: 0 },
+    { from: 'back', to: 'tailRoot', colorIndex: 7 },
+    { from: 'neck', to: 'lFrontShoulder', colorIndex: 1 },
+    { from: 'lFrontShoulder', to: 'lFrontKnee', colorIndex: 2 },
+    { from: 'lFrontKnee', to: 'lFrontPaw', colorIndex: 3 },
+    { from: 'neck', to: 'rFrontShoulder', colorIndex: 4 },
+    { from: 'rFrontShoulder', to: 'rFrontKnee', colorIndex: 5 },
+    { from: 'rFrontKnee', to: 'rFrontPaw', colorIndex: 6 },
+    { from: 'tailRoot', to: 'lBackHip', colorIndex: 8 },
+    { from: 'lBackHip', to: 'lBackKnee', colorIndex: 9 },
+    { from: 'lBackKnee', to: 'lBackPaw', colorIndex: 10 },
+    { from: 'tailRoot', to: 'rBackHip', colorIndex: 11 },
+    { from: 'rBackHip', to: 'rBackKnee', colorIndex: 12 },
+    { from: 'rBackKnee', to: 'rBackPaw', colorIndex: 13 },
+  ],
+  limbs: [
+    // Front carpi fold BACK, hind stifles fold FORWARD (dog anatomy).
+    { root: 'lFrontShoulder', mid: 'lFrontKnee', end: 'lFrontPaw', pole: v3(0, -1, -1) },
+    { root: 'rFrontShoulder', mid: 'rFrontKnee', end: 'rFrontPaw', pole: v3(0, -1, -1) },
+    { root: 'lBackHip', mid: 'lBackKnee', end: 'lBackPaw', pole: v3(0, -1, 1) },
+    { root: 'rBackHip', mid: 'rBackKnee', end: 'rBackPaw', pole: v3(0, -1, 1) },
+  ],
+  // FABRIK topline (tail→back→neck): dragging the head bends the whole
+  // back like the human's spine chain; no swing joints — the head keypoints
+  // derive procedurally from the back→neck line instead.
+  spineChain: ['tailRoot', 'back', 'neck'],
+  swingJoints: [],
+  deriveKeypoints: (positions) => {
+    // Poseable keypoints land in their AP-10K slot.
+    const body: Vec3[] = new Array(17)
+    for (const joint of AP10K_JOINTS) {
+      if (joint.bodyIndex !== undefined) body[joint.bodyIndex] = positions[joint.id]
+    }
+    // Procedural head: the muzzle continues the back→neck line; the eyes
+    // sit either side of the skull base (animal's left = +x at rest).
+    const dir = vnorm(vsub(positions.neck, positions.back))
+    let side = vcross(v3(0, 1, 0), dir)
+    if (Math.abs(side.x) + Math.abs(side.y) + Math.abs(side.z) < 1e-6) side = v3(1, 0, 0)
+    side = vnorm(side)
+    body[2] = vadd(positions.neck, vscale(dir, 0.17))
+    body[0] = vadd(vadd(positions.neck, vscale(dir, 0.07)), vscale(side, 0.048))
+    body[1] = vadd(vadd(positions.neck, vscale(dir, 0.07)), vscale(side, -0.048))
+    return { kind: 'ap10k', body, feet: [], face: [], handRight: [], handLeft: [] }
+  },
+}
+
+/** Registry — human-134 is the DEFAULT; AP-10K is first-class NON-DEFAULT
+ *  (E-FC1); the free-form slot stays a DOCUMENTED PENDING entry so the UI
+ *  and tests can enumerate it without stub code that pretends to work. */
+export const DEFAULT_TEMPLATE_ID = 'human-134'
+
 export const TEMPLATES: ReadonlyArray<SkeletonTemplate> = [
   HUMAN_TEMPLATE,
-  { ...HUMAN_TEMPLATE, id: 'ap10k-quadruped', label: 'AP-10K quadruped (pending E-FC1)', status: 'pending', pendingNote: 'Ships only if E-FC1 arm B wins: does the human-pose prior articulate a quadruped skeleton instead of humanizing it?' },
-  { ...HUMAN_TEMPLATE, id: 'freeform', label: 'Freeform creature (pending E-FC1)', status: 'pending', pendingNote: 'Arbitrary colored-graph template — pending the E-FC1 topology-agnostic verdict.' },
+  AP10K_TEMPLATE,
+  {
+    ...HUMAN_TEMPLATE,
+    id: 'freeform',
+    label: 'Freeform creature (disabled)',
+    status: 'pending',
+    pendingNote: 'Envelope-following only — E-FC1 arm C: zero per-limb articulation with conflicting topology (a humanoid-mimic skeleton over a dog trajectory rendered a spectral figure riding the path; DWPose found a person in 0/39 frames). Per-limb articulation for arbitrary graphs is NOT promisable at v1.',
+  },
 ]
 
 export function templateById(id: string): SkeletonTemplate | undefined {
