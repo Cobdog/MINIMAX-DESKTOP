@@ -153,34 +153,79 @@ foreign keys (incl. the global-asset fork records), migrations, retention/GC
 mechanics, FTS surfaces (palette, queue index, library), and the
 failure-propagation semantics table (F6 — open, shaped here).
 
-## 3. Canvas surface architecture (stub)
+## 3. Canvas surface architecture (DRAFTED — for review)
 
-Substrate: DOM + CSS transforms, d3-zoom camera applied via rAF (store
-outside React), viewport+margin culling + content-visibility; semantic-zoom
-bands (far → thumbnail + status ring; near → metadata, op chips, latent
-blocks — visibility per ledger row); tile anatomy; derived SVG edges culled
-to viewport; endpoint objects + typed-hole option menus (**availability-aware
-option lists** — per-graph gating + install guidance per t8u00uu/ul1l4j7);
-floating panels (react-rnd) + focus semantics.
-**Navigation & auto-placement (per audit M7):** zoom-to-attention on every
-needs-attention affordance; camera bookmarks; overview/minimap as the
-far-zoom projection; zoom-to-fit; search; adjacency placement of new
-artifacts near parents.
+**Substrate** (lock): DOM tiles under one CSS-transform root; **d3-zoom**
+camera feeding a store-outside-React camera applied via rAF (the proven
+transient discipline — 60fps pan/zoom with zero React renders); viewport +
+margin culling with `content-visibility`; SVG derived-edge layer culled to
+the viewport; floating panels via **react-rnd** (Base UI dialog semantics
+when modal); three.js reserved for the IK-rig viewport; PixiJS held in
+reserve (flip only on a measured DOM bottleneck — see the rendering budget,
+L26-adjacent open measurement).
 
-## 4. Entry moment & attention model (stub)
+**Semantic zoom** = content swap by zoom band (the culling and LOD are one
+mechanism): far = thumbnail + status ring; mid = + metadata strip + op-chip
+row; near = + latent blocks (L9: zoom-gated, confirm) + drift-budget readout
++ per-take strip. The overview/minimap IS the far-zoom projection — one
+document, many renderings.
 
-Empty-canvas launcher (prompt bar, drop-anything, minimal chips — set
-confirmed against the proven intents per inventory Q10, resume cards →
-multi-canvas session); spatial per-job state (failure contract §1.4, seed
-tile); titlebar radar (aggregate; click = zoom-to-attention); summonable
-index; contextual bottom-bar contexts (not "modes"); **notice-routing
-policy** (inventory Q9: what is durable-on-object vs radar vs ambient toast
-— absorbed flows must stop toast-spamming on-canvas state); **concurrency
-policy L26: queued-for-GPU as a first-class on-object state with radar
-semantics — the queue's honest shape on a single 24GB card**; **projections
-inherit the attention/failure contracts (audit F7): timeline and library
-surfaces render failure/staleness/queued states and navigate via radar —
-the no-silent-failure rule applies everywhere work is visible**.
+**Tile anatomy** (a media node): preview surface (filmstrip/poster via the
+pool), status ring (idle/queued-for-GPU/running/stale/failed-durable), op
+chips (stacked, per-op undo in the modal), take strip (canonical starred,
+priors visible — Auditions pattern), endpoint affordances at head/tail (the
+Item-3 typed holes: click = option-space menu in the working direction).
+
+**Derived edges**: SVG paths from fork records; read-only; direction
+rendered; multi-ref edges (transitions) fan from the gap.
+
+**Option menus (typed holes)**: type-directed filter over the op/graph
+registry — **availability-aware** (per-graph gating + install guidance per
+the registry/fetch-catalog machinery; adaln-form gating included). Parameter-
+directed constraints (17k+5 grids, 32px multiples, ≤15s, 39f phase-exact)
+surface as affordance hints inside the menu (decisions-audit refinement).
+Ranking per L19.
+
+**Navigation & auto-placement**: zoom-to-attention on every needs-attention
+affordance (radar, stale badges, search results); camera bookmarks (named,
+in the palette); zoom-to-fit (selection/project); FTS search (palette L6);
+adjacency placement of new artifacts near parents (L25: default
+adjacency + cluster-on-batch-completion, open-confirmed).
+
+## 4. Entry moment & attention model (DRAFTED — for review)
+
+**Launcher** (lock): empty canvas = prompt bar + drop-anything zone (the
+drop routes itself by media kind) + minimal chips (set confirmed against the
+three proven intents + drop, L15) + resume cards (the multi-canvas session —
+recent projects, camera state restored). First generation spawns the seed
+tile at the prompt bar (spatial-queue contract c) — the launcher comes
+alive, no mode switch.
+
+**Spatial per-job state**: progress on the objects the job touches;
+failure durable-on-object until dismissed, reason attached (contract a);
+queued-for-GPU = first-class on-object state (L26) — a busy day shows the
+queue stacked spatially, honestly parked on its chains.
+
+**Titlebar radar**: aggregate "N running · M queued · K needs attention";
+click = zoom-to-attention on the worst item; engine chip + GPU meter live
+inside it (the one fixed-chrome survival).
+
+**Summonable index** (⌘K-class): flat list across all jobs (retry/cancel/
+rerun-stale), navigates-to-region on select. FTS-backed.
+
+**Contextual bottom bar**: 100% contextual (lock) — contexts, not modes:
+nothing-selected = launcher/generation surface; media selected = transport +
+op controls + properties entry; multi-select = batch gestures; chain
+selected = identity payload + drift budget + fork history. Program-monitor
+question (L1) remains open with the playing-as-tile-state lean.
+
+**Notice routing** (L14): failures → durable-on-object + radar ping;
+aggregates → radar; ambient info only → toast. Absorbed flows stop
+toast-spamming what is now on-canvas state.
+
+**Projections inherit the contracts** (F7): timeline, library, and any
+future projection render failure/staleness/queued states and navigate via
+radar — the no-silent-failure rule applies everywhere work is visible.
 
 ## 5. Tool families (stubs)
 
