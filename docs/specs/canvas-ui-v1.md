@@ -51,9 +51,11 @@ rows: **28 REFACTOR-ABSORB** (re-home into the canvas model), **29 KEEP**
 (survive shell-free as infrastructure), **12 SEED** (become explicit inputs to
 the new build — the substrate, op-stack chips, projection soul, crop data,
 prompt editor, filmstrip layout), and **3 REMOVE** (the nav model itself).
-Migration is **re-homing + unwinding singleton state**, not rewriting
-capability. The spec's job: define the new shell precisely and name the
-landing spot for every absorbed capability.
+(Counts as of the inventory; L4's dissolve decision reclassifies the
+per-engine views at migration time — the inventory remains the row-level
+source of truth.) Migration is **re-homing + unwinding singleton state**, not
+rewriting capability. The spec's job: define the new shell precisely and name
+the landing spot for every absorbed capability.
 
 **Design principles (each traceable to a lock or recorded research finding):**
 1. State lives with its objects; tools come to your attention. You never
@@ -118,9 +120,9 @@ invariants; the schema spec defines tables, migrations, and FTS.
   persist as chain settings.
 - **Asset (global store, F3 decided)**: characters/locations/wardrobes/
   refmods live ABOVE projects; projects hold fork-into-project records
-  (consent-gated copies with lineage back to the global asset — one model
-  with takes, not two: asset reference-sets unify on the takes semantics,
-  inventory Q8/L13).
+  (consent-gated copies with lineage back to the global asset). Whether
+  asset reference-sets unify on the takes semantics or stay curated sets
+  is **L13 — proposal (unify on takes), OPEN**.
 - **Plan document** (Director Suite): the MoviePlanner inheritance — brief,
   segments→chain refs, gap transitions, per-segment reference handoffs;
   emitted chains are ordinary chains (macro records L12 = inspectable
@@ -142,8 +144,9 @@ invariants; the schema spec defines tables, migrations, and FTS.
 6. Every write carries schemaVersion; unknown-newer fails loudly (F9).
 7. Identity payloads ride every window; strength is chain settings.
 8. Jobs serialize by default; queued-for-GPU is visible object state.
-9. Blob references carry content hashes (F8); missing blobs degrade to
-   placeholder + re-link flow, never silent breakage.
+9. Blob references carry content hashes; missing blobs degrade to
+   placeholder + re-link flow, never silent breakage (F8 open-shaped —
+   mechanics land at schema review).
 10. Everything autosaved, always — including camera positions (lock 6).
 
 ### 2.3 Companion spec
@@ -188,9 +191,21 @@ Ranking per L19.
 
 **Navigation & auto-placement**: zoom-to-attention on every needs-attention
 affordance (radar, stale badges, search results); camera bookmarks (named,
-in the palette); zoom-to-fit (selection/project); FTS search (palette L6);
-adjacency placement of new artifacts near parents (L25: default
-adjacency + cluster-on-batch-completion, open-confirmed).
+in the palette); zoom-to-fit (selection/project); FTS search (palette —
+scope L6, proposal: actions/objects/ops primary); adjacency placement of new
+artifacts near parents (L25 proposal). Seed input nodes stay visible as
+chain heads (L18 proposal). Backwards-authoring menus offer
+"what can extend/produce this" only in v1 (L20 proposal). Floating
+inspectors float freely, optionally follow selection (L24 proposal).
+Screen-size adaptation threshold: L5 OPEN (collapse point TBD, not
+pre-decided).
+
+**Rendering budget (F4 restored, third-audit O2)**: a measurement task on
+the Stage seed (100/500/1000/2000 objects, fps + interaction latency +
+filmstrip-scroll budgets) produces the budget table THIS section owns; the
+PixiJS-flip criterion in the substrate lock is testable only against it.
+Runs in Phase 0/1 alongside the substrate promotion; DOM-vs-Pixi stays
+decided-by-data, not by preference.
 
 ## 4. Entry moment & attention model (DRAFTED — for review)
 
@@ -233,8 +248,9 @@ radar — the no-silent-failure rule applies everywhere work is visible.
   ctx.filter adjustments; ImageCrop's non-destructive crop data is the first
   op; VideoReferenceClipper's trim becomes the video op; per-op undo +
   reorder; bake = explicit irreversible marker. Live-update vs frozen tile =
-  L3 (rec: live-update); inline chips vs modal-only = L8 (rec: modal-only
-  v1). The **Focus primitive** (L7) resolves here against the output-
+  L3 (proposal: live-update); inline chips vs modal-only = L8 (proposal:
+  modal-only v1). "Decompose an output" v1 = frame extraction (L22
+  proposal). The **Focus primitive** (L7) resolves here against the output-
   substrate selector — likely subsumed.
 - **5.2 Control-input tool family** (epic 66xhflw, Fun Control first-class):
   create control inputs (canny/depth/HED/MLSD/pose/mask) from media
@@ -326,6 +342,7 @@ section. Closed when the maintainer decides; deferred rows need rationale.
 | L22 | "Decompose an output" v1 primitive | §5.1 | frame-extraction v1 (one candidate); shot-split/latent-split later | OPEN |
 | L23 | Budget-unit extension (tool/find/summon rows) | §1 | extend as proposed | OPEN |
 | L24 | Floating-inspector behavior | §3/§5 | floats freely, follows selection optionally | OPEN |
+| L33 | **Rendering-performance budget** (F4 restored — third-audit O2): Stage-seed measurement task (100/500/1000/2000 objects; fps, interaction latency, scroll budgets) → §3's budget table → DOM/Pixi flip decided by data | §3 | run at Phase 0/1; the substrate lock's escape hatch is untestable without it | OPEN (measurement task) |
 | L25 | **Placement policy for batch/new outputs** (adjacency default vs clusters vs grid; the direction doc's open placement question, inventory row 16) | §3 | adjacency-near-parent default + cluster-on-batch-completion; confirm | OPEN |
 | L26 | **Concurrency / GPU-arbitration policy** (decisions audit F2 — most dangerous missing: serialize vs interleave, "queued-for-GPU" as on-object state + radar semantics, VRAM arbitration; the #14076 canary decides) | §4 | serialize generations by default (1 active), queued-for-GPU as first-class object state, interleave only after benchmark | **DECIDED (maintainer, 2026-09-14): assistant's pick approved** |
 | L27 | **Cross-project asset scope** (audit F3: libraries are global today, one-canvas-per-project isolates — where do shared characters/locations live?) | §2 | global asset store above projects + explicit fork-into-project (consent-gate pattern) | **DECIDED (maintainer via Q&A, 2026-09-14): global store + fork-into-project** |
@@ -338,7 +355,7 @@ section. Closed when the maintainer decides; deferred rows need rationale.
 ## 10. Acceptance (how this spec completes)
 
 Every section individually blessed; **§9 ledger complete against BOTH sources,
-demonstrated by enumeration** — pre-brainstorm parked list (11 items):
+demonstrated by enumeration** — pre-brainstorm parked list (10 items):
 latent-blocks→L9, presets→L2, timeline→RESOLVED-in-register, engine-views→L4,
 canvases→RESOLVED-in-register, screen-size→L5, palette→L6, Focus→L7,
 modal-live→L3, inline-chips→L8, + the register's own open sub-questions

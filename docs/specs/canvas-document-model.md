@@ -36,11 +36,13 @@ versioned migrations, copy-never-destroy** (foundation stack, unchanged;
   source (extracted | authored | fetched), input_ref (blob), mask_ref
   (nullable), params (json).
 - `asset` (GLOBAL — above projects): id, kind (character/location/wardrobe/
-  refmod/prompt), fields (json), canonical_reference_set (→ takes, unified
-  per L13), created_at, deleted_at.
+  refmod/prompt), fields (json), canonical_reference_set (whether this
+  unifies on takes semantics is **L13 — OPEN proposal**, not decided),
+  created_at, deleted_at.
 - `asset_fork`: project_id FK, asset_id FK, forked_settings_snapshot (json),
-  lineage (points home; global asset changes surface as upstream-stale on
-  forks — same staleness machinery as chains), consent_at.
+  lineage (points home; stale-propagation from global-asset changes to
+  forks is a PROPOSAL reusing the chain staleness machinery — semantics not
+  yet decided), consent_at.
 - `plan`: id, project_id FK, document (json: MoviePlanner inheritance —
   brief, segments[{chain_ref, time range}], gaps[{kind: cut|nle|flf|black|
   bridge}], per-segment reference handoffs).
@@ -73,9 +75,8 @@ versioned migrations, copy-never-destroy** (foundation stack, unchanged;
 ## 4. FTS surfaces
 
 Existing FTS5 index extended: chain prompts + asset fields + plan briefs
-(command palette, L6), take/job metadata (summonable index), library
-projection. Prompt-content search is a surface, not the palette's primary
-role (L6 open-confirmed scope).
+(command palette — scope is L6 OPEN; proposal: actions/objects/ops primary),
+take/job metadata (summonable index), library projection.
 
 ## 5. Open shapes (blocked on nothing, decided by schema-review)
 
@@ -85,3 +86,38 @@ role (L6 open-confirmed scope).
 - F8 re-link UX: hash-match auto-relink over user-nominated roots.
 - Macro/chain-template records (L12): likely a `chain_template` view over
   chains with fork-me markers — final shape at schema review.
+
+## 6. Import from current stores (DRAFT design — third-audit O3; the load-bearing D5/R3 item)
+
+Copy-never-destroy, verify-then-mark (the established migration pattern):
+
+- **jobs → outputs/takes**: every existing completed job becomes an output +
+  canonical take on a synthesized `legacy` chain per job (settings imported
+  from the job manifest where present — settings-results separation holds by
+  construction: manifest = settings, artifacts = take). Failed jobs import
+  as outputs with failure state (durable-on-object contract applies
+  retroactively — visible, dismissable, never silent).
+- **workspace → project settings**: the server workspace store seeds one
+  initial project's chain-settings defaults; the old surface keeps reading
+  the same tables until Phase 5.
+- **libraries → global assets**: characters/locations/wardrobes/accessories
+  import as global assets with their approved-reference sets (the L13
+  question applies to the import shape — decided at schema review, before
+  import ships).
+- **prompt library → assets (kind: prompt)**: verbatim content, attribution
+  footer follows (L11).
+- **localStorage remnants**: the copy-verify-mark pattern from the
+  foundation pass, unchanged.
+- **Verification**: import runs once on first canvas boot; counts asserted
+  (N jobs → N takes; blob hashes spot-verified); a `legacy_import` marker
+  records completion; failures leave the source intact and retry clean.
+
+## 7. Project archive format (L32 — defined early per its own rationale)
+
+Export = one project's DB rows (project, chains, outputs, takes, ops,
+control tracks, plan, asset_forks — NOT global assets; they ride by id +
+hash manifest) + the blob tree (media + latents by content hash) in a single
+archive (zip/zstd). Import = reverse, honoring schemaVersion (unknown-newer
+refuses loudly per F9). The v1 export UI may be minimal; the FORMAT is fixed
+now — every always-autosaved document created before this exists makes
+retrofit harder.
