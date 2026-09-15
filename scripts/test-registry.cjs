@@ -23,8 +23,10 @@
  *      base-t2i inertness, golden equality, research-pinned defaults,
  *      hand-asserted dual-conditioning / AnyPaint wiring, the
  *      encode/transport/LoRA recipe-triple audit (incl. the t=0 carrier
- *      trap and the no-composite rule), dial validation at the research
- *      limits, and availability gating per family.
+ *      trap, the E-K1 index-pairing rule and the no-composite rule), the
+ *      E-K1 honesty-label + scene-style prompt-contract surface strings,
+ *      dial validation at the research limits, and availability gating
+ *      per family.
  *
  * `node scripts/test-registry.cjs --update-golden` re-snapshots BOTH fixtures
  * from the CURRENT builders — only for intentional base-graph changes, and
@@ -441,6 +443,22 @@ function run() {
     }
     ok(!optimizationEntries().some((entry) => entry.id.startsWith('krea2edit.')), 'edit families live in their own registry — the H3 optimization list is untouched')
 
+    // (f1b) E-K1 corrections as surface-string pins (Flux 7ed5ewa, E-K1 on
+    // the 8189 testbed, 2026-09-15): the instruct honesty label and the
+    // scene-style prompt contract are evidence-backed — their load-bearing
+    // content is pinned so it cannot silently drift.
+    {
+      const byId = {}
+      for (const family of KREA2_EDIT_FAMILIES) byId[family.id] = family
+      const instructUi = byId['krea2edit.instruct'].ui
+      ok(instructUi.description.includes('semantic regeneration of the whole frame'), 'instruct honesty label: the description states whole-frame semantic regeneration')
+      ok(instructUi.warning.includes('NOT region-preserving') && instructUi.warning.includes('26.5 dB'), 'instruct honesty label: measured 26.5 dB outside-region drift surfaced, identity- vs region-preservation distinguished')
+      ok(instructUi.warning.includes('0.94') && instructUi.warning.includes('Refine'), 'instruct honesty label: the measured identity band (0.94–0.98) and the deterministic mask-path pointer are both there')
+      ok((instructUi.promptGuidance ?? '').includes('whole resulting scene'), 'instruct prompt contract: scene-style guidance — describe the whole resulting scene, not just the changed object')
+      ok((byId['krea2edit.refine'].ui.promptGuidance ?? '').includes('complete finished image'), 'refine prompt contract: describe the complete finished image, never just the masked object (the measured AnyPaint contract — object-local prompts painted planks, not the bowl)')
+      ok((byId['krea2edit.outpaint'].ui.promptGuidance ?? '').length > 0, 'outpaint carries the scene-style prompt guidance too (the grown canvas described as one scene)')
+    }
+
     // (f2) Inertness: stripping `edit` from any config rebuilds the base t2i
     // golden, and the two base entry points agree byte-for-byte.
     for (const { name, options, models } of KREA2_MATRIX) {
@@ -544,9 +562,18 @@ function run() {
     {
       const instruct = buildKrea2Graph(matrixByName['instruct-default'].options, KREA2_MODELS)
       const withT0 = { ...instruct, '50': { class_type: 'Edit Model Reference Method', inputs: { method: 'index_timestep_zero' } } }
-      ok(krea2RecipeAudit(withT0).some((violation) => violation.includes('t=0 carrier')), 'the audit catches the identity LoRA on the t=0 carrier (the measured 8.18→50.06 meanAD trap)')
+      ok(krea2RecipeAudit(withT0).some((violation) => violation.includes('t=0 carrier')), 'the audit catches the identity LoRA on the t=0 carrier (Kreatine 8.18→50.06; replicated 5.30→40.06 on our int8 stack)')
       const withDanglingRef = { ...instruct, '51': { class_type: 'ReferenceLatent', inputs: {} } }
       ok(krea2RecipeAudit(withDanglingRef).some((violation) => violation.includes('silently dropped')), 'the audit catches ReferenceLatent without its method node (the silent no-op footgun)')
+      // The E-K1 index-pairing rule (Flux 7ed5ewa): a ReferenceLatent carrier
+      // with the identity LoRA must pin the method to 'index' — measured
+      // meanAD 5.30 (index) vs 40.06 (index_timestep_zero) through core nodes
+      // on our int8 runtime. The adversarial fixture proves the rule fires;
+      // the on-recipe carrier proves it stays quiet.
+      const withCarrierT0 = { ...instruct, '51': { class_type: 'ReferenceLatent', inputs: {} }, '50': { class_type: 'Edit Model Reference Method', inputs: { method: 'index_timestep_zero' } } }
+      ok(krea2RecipeAudit(withCarrierT0).some((violation) => violation.includes("method 'index'")), 'the E-K1 pairing rule fires: ReferenceLatent + identity LoRA demands Edit Model Reference Method index (measured 5.30 vs 40.06)')
+      const withCarrierIndex = { ...instruct, '51': { class_type: 'ReferenceLatent', inputs: {} }, '50': { class_type: 'Edit Model Reference Method', inputs: { method: 'index' } } }
+      ok(krea2RecipeAudit(withCarrierIndex).length === 0, 'the on-recipe core carrier (ReferenceLatent + method index) audits clean')
       const wrongLora = buildKrea2Graph(matrixByName['instruct-default'].options, { ...KREA2_MODELS, identityEditLora: 'krea2_anypaint_rank32.safetensors' })
       ok(krea2RecipeAudit(wrongLora).length >= 2, 'the audit rejects a mismatched encode/transport/LoRA triple')
       const withComposite = { ...instruct, '52': { class_type: 'ImageCompositeMasked', inputs: {} } }
@@ -680,7 +707,7 @@ function main() {
     return
   }
   const done = run()
-  console.log(`PASS: optimization registry (${done} assertions) — inertness vs pre-registry goldens across the ${GOLDEN_MATRIX.length}-config matrix, transform correctness (plain + dedicated larryvrh pairing swap, LBH/LTX/RTX chains, preview override), detection against mock object_info/scans, family pairing contracts (steps/sampler enforced, 8-step keeps res_multistep+simple), family-ranked selection inference (official > lightx2v newest-first, explicit family constraint, Ref2VA 8-step), painless expansion (a hypothetical 5-step family registered, detected, transformed, paired and proven inert via registry data alone), and the five Krea 2 edit families (base-t2i inertness, per-family goldens, research-pinned recipes, hand-asserted dual-conditioning/AnyPaint wiring, recipe-triple audit incl. the t=0 carrier trap + no-composite rule + patcher mutual exclusion, dial validation at the research limits, and per-family availability gating with low-VRAM LoRA fallback)`)
+  console.log(`PASS: optimization registry (${done} assertions) — inertness vs pre-registry goldens across the ${GOLDEN_MATRIX.length}-config matrix, transform correctness (plain + dedicated larryvrh pairing swap, LBH/LTX/RTX chains, preview override), detection against mock object_info/scans, family pairing contracts (steps/sampler enforced, 8-step keeps res_multistep+simple), family-ranked selection inference (official > lightx2v newest-first, explicit family constraint, Ref2VA 8-step), painless expansion (a hypothetical 5-step family registered, detected, transformed, paired and proven inert via registry data alone), and the five Krea 2 edit families (base-t2i inertness, per-family goldens, research-pinned recipes, hand-asserted dual-conditioning/AnyPaint wiring, E-K1 honesty-label + scene-style prompt-contract pins, recipe-triple audit incl. the t=0 carrier trap + the E-K1 index-pairing rule + no-composite rule + patcher mutual exclusion, dial validation at the research limits, and per-family availability gating with low-VRAM LoRA fallback)`)
 }
 
 main()

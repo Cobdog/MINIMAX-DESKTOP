@@ -255,6 +255,7 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
             <strong>{family.label}{detection.available && detection.resolved ? ` — ${detection.resolved.diffusion} + ${detection.resolved.lora}` : ''}</strong>
             <small>{family.ui.description}</small>
             <p>{family.recipe.sampler}+{family.recipe.scheduler} · LoRA @{family.recipe.loraStrength} · {family.recipeTriple.carrier}</p>
+            {family.ui.promptGuidance && <p>Prompting: {family.ui.promptGuidance}</p>}
             <p>Dials: {family.dials.map((dial) => dialCopy[dial]).filter(Boolean).join(' · ') || 'pinned recipe — no dials'}</p>
             {family.ui.warning && <p>{family.ui.warning}</p>}
             {missing.length > 0 && <p>Missing: {missing.join('; ')}. {family.ui.installHint}</p>}

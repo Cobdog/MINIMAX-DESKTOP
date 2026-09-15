@@ -35,9 +35,13 @@
  *  2. RECIPE TRIPLE — encode + transport + LoRA must match as a triple
  *     (the measured index-vs-t0 trap: the identity LoRA on a t=0 carrier
  *     silently destroys the reference region, meanAD 8.18 -> 50.06, with
- *     plausible-looking output). krea2RecipeAudit() walks a built graph and
- *     reports any mismatch; the two whole-pipeline forward patchers
- *     (Krea2EditModelPatch, Krea2AnyPaintModelPatch) are mutually exclusive.
+ *     plausible-looking output; replicated on our int8 stack through core
+ *     nodes as 5.30 -> 40.06 — E-K1, Flux 7ed5ewa). krea2RecipeAudit() walks
+ *     a built graph and reports any mismatch — including the positive E-K1
+ *     pairing rule: a ReferenceLatent carrier with the identity LoRA must
+ *     carry Edit Model Reference Method 'index'; the two whole-pipeline
+ *     forward patchers (Krea2EditModelPatch, Krea2AnyPaintModelPatch) are
+ *     mutually exclusive.
  */
 import type { ObjectInfo } from '../comfyInfo'
 import type { ModelFile } from '../../types'
@@ -166,7 +170,15 @@ export type Krea2EditFamily = {
   recipeTriple: Krea2RecipeTriple
   requiredNodes: readonly string[]
   detect(info: ObjectInfo | undefined, files: ModelFile[]): Krea2EditDetection
-  ui: { description: string; warning?: string; installHint?: string }
+  ui: {
+    description: string
+    warning?: string
+    installHint?: string
+    /** Prompt contract for the surface that shows prompt instructions
+     * (E-K1: prompts are scene-style — describe the whole resulting
+     * scene/image, never just the changed or masked object). */
+    promptGuidance?: string
+  }
 }
 
 export type Krea2EditDetection = {
@@ -672,9 +684,10 @@ export const KREA2_EDIT_FAMILIES: Krea2EditFamily[] = [
     requiredNodes: KREA2EDIT_NODES,
     detect: familyDetect('turbo', KREA2EDIT_NODES, 'identity-edit'),
     ui: {
-      description: 'Plain-language instruction + source image → edited image with texture-faithful identity. Dual conditioning on the resident Turbo checkpoint; most edits land in ~1 minute at 2MP.',
-      warning: 'Weak classes (documented): semantic interaction edits, full background replacement, pose retention in clothes swaps — route those to Refine with a mask. Edits can occasionally leak outside the target region.',
+      description: 'Plain-language instruction + source image → edited image with texture-faithful identity. The edit is a semantic regeneration of the whole frame, not a local patch — identity holds (measured 0.94–0.98 through the edit) while pixels everywhere are free to move. Dual conditioning on the resident Turbo checkpoint; most edits land in ~1 minute at 2MP.',
+      warning: 'Identity-preserving (measured 0.94–0.98 through the edit), NOT region-preserving (E-K1, measured on int8): content outside the edit region drifted 26.5 dB — roughly 10× the VAE floor — because the whole frame regenerates. When untouched regions must stay pixel-exact, use Refine (masked), which measured at the VAE floor (40–47 dB) outside the mask. Weak classes (documented): semantic interaction edits, full background replacement, pose retention in clothes swaps.',
       installHint: 'Settings → Fetchable items: the comfyui-krea2edit node pack + the Identity Edit v1.2 LoRA (Krea 2 Community License), then rescan.',
+      promptGuidance: 'Scene-style: describe the whole resulting scene, not just the changed object — the model regenerates the entire frame, so everything you want kept or changed belongs in the prompt ("the same kitchen counter, now with a copper kettle beside the lemons"). An object-local prompt leaves the regenerated rest of the frame under-specified.',
     },
   },
   {
@@ -707,6 +720,7 @@ export const KREA2_EDIT_FAMILIES: Krea2EditFamily[] = [
       description: 'Arbitrary-mask inpainting with per-step latent restoration: known tokens are restored at the matching noise level every step and a 32-px boundary band blends the seam. White mask pixels generate, black is preserved.',
       warning: 'The output is the raw decode — never add a source composite on top (the boundary blend is the encode\'s own property and does not survive one). Do not stack the identity-edit LoRA here; the untested combination is refused by the recipe audit.',
       installHint: 'Settings → Fetchable items: the krea2-anypaint node pack + the AnyPaint rank-32 LoRA (Krea 2 Community License), then rescan.',
+      promptGuidance: 'Scene-style prompt required (E-K1, measured): describe the complete finished image — surroundings, lighting, and the masked content in place — never just the masked object. An object-local prompt ("a bowl of lemons") regenerates surface texture instead of inserting the object: the measurement painted plausible planks, no bowl.',
     },
   },
   {
@@ -723,6 +737,7 @@ export const KREA2_EDIT_FAMILIES: Krea2EditFamily[] = [
       description: 'Canvas growth on any side via AnyPaint padding; a mask plus padding in one request is mixed in+outpaint. Padding moves in 16-px steps like the node\'s own grid.',
       warning: 'Same no-composite rule as Refine — the padded boundary band is the blend mechanism.',
       installHint: 'Settings → Fetchable items: the krea2-anypaint node pack + the AnyPaint rank-32 LoRA (Krea 2 Community License), then rescan.',
+      promptGuidance: 'Scene-style prompt (E-K1): describe the complete finished image across the grown canvas — the original content and the extension as one coherent scene — not just the new region.',
     },
   },
   {
@@ -771,9 +786,16 @@ export const KREA2_WHOLE_PIPELINE_PATCHERS = ['Krea2EditModelPatch', 'Krea2AnyPa
 /** The core-native t=0 carrier pair (ReferenceLatent + Edit Model Reference
  * Method). Legitimate for ostris-recipe LoRAs, silent destruction for the
  * identity LoRA, and a ReferenceLatent WITHOUT a method node silently drops
- * references entirely (Krea 2 sets no default_ref_method). */
+ * references entirely (Krea 2 sets no default_ref_method). E-K1 replicated
+ * the trap on our int8 stack through these core nodes: meanAD 5.30 at
+ * 'index' (on-recipe) vs 40.06 at 'index_timestep_zero' — same ~8×
+ * destruction class as Kreatine's 8.18 vs 50.06 — with plausible-looking
+ * output, so only an audit catches it. */
 const REFERENCE_CARRIER_NODES = { latent: 'ReferenceLatent', method: 'Edit Model Reference Method' } as const
 const T0_METHOD_VALUE = 'index_timestep_zero'
+/** The only reference-latent method that pairs with the identity-edit LoRA
+ * (the E-K1-measured pairing: in-context source tokens at frame 1). */
+const INDEX_METHOD_VALUE = 'index'
 
 export function krea2LoraKindOfFilename(filename: string): Krea2LoraKind | undefined {
   if (KREA2_FILE_PATTERNS.identityEditLora.some((pattern) => pattern.test(filename))) return 'identity-edit'
@@ -805,8 +827,22 @@ export function krea2RecipeAudit(graph: ComfyPrompt): string[] {
     if (!classes.includes(IDENTITY_TRIPLE.encode)) violations.push(`identity-edit LoRA without its grounded encode ${IDENTITY_TRIPLE.encode} — the semantic half of the dual conditioning is missing`)
     if (!classes.includes(IDENTITY_TRIPLE.transport)) violations.push(`identity-edit LoRA without its transport ${IDENTITY_TRIPLE.transport} — ${IDENTITY_TRIPLE.carrier}`)
     const method = nodes.find((node) => node.class_type === REFERENCE_CARRIER_NODES.method)
-    if (method && method.inputs.method === T0_METHOD_VALUE) {
-      violations.push(`identity-edit LoRA on the t=0 carrier (${REFERENCE_CARRIER_NODES.method} method '${T0_METHOD_VALUE}') — the measured recipe trap: the reference region is silently destroyed (meanAD 8.18 → 50.06) with plausible-looking output`)
+    const methodValue = typeof method?.inputs.method === 'string' ? method.inputs.method : ''
+    // Wrong method VALUE with the identity LoRA (t=0 is the measured trap;
+    // any other off-recipe value is the same silent-destruction class).
+    if (method && methodValue !== INDEX_METHOD_VALUE) {
+      violations.push(
+        methodValue === T0_METHOD_VALUE
+          ? `identity-edit LoRA on the t=0 carrier (${REFERENCE_CARRIER_NODES.method} method '${T0_METHOD_VALUE}') — the measured recipe trap: the reference region is silently destroyed (meanAD 5.30 → 40.06 on our int8 stack; Kreatine's 8.18 → 50.06) with plausible-looking output`
+          : `${REFERENCE_CARRIER_NODES.method} method '${methodValue}' does not pair with the identity-edit LoRA — the reference carrier must be '${INDEX_METHOD_VALUE}' (measured meanAD 5.30 at index vs 40.06 at ${T0_METHOD_VALUE}); the wrong graph still renders plausibly`,
+      )
+    }
+    // The E-K1 pairing rule, stated positively: a ReferenceLatent carrier
+    // with the identity LoRA MUST carry the method node pinned to 'index' —
+    // a validation rule, not a convention (a missing node also trips the
+    // generic silent-drop check below).
+    if (classes.includes(REFERENCE_CARRIER_NODES.latent) && methodValue !== INDEX_METHOD_VALUE) {
+      violations.push(`${REFERENCE_CARRIER_NODES.latent} with the identity-edit LoRA must carry ${REFERENCE_CARRIER_NODES.method} method '${INDEX_METHOD_VALUE}' (${methodValue === '' ? 'no method node present' : `got '${methodValue}'`}) — the E-K1-measured pairing: meanAD 5.30 at index vs 40.06 off-recipe on our int8 stack`)
     }
   }
   if (anypaintActive) {
