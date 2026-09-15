@@ -1,4 +1,12 @@
-# Canvas UI v1 — specification (DRAFT v0.2)
+# Canvas UI v1 — specification (BLESSED 2026-09-15)
+
+**Status:** **BLESSED §1–§10 by the maintainer (2026-09-15, via structured
+Q&A): both ledger bundles accepted wholesale (21 rows DECIDED as
+recommended); build tasks are cut from this spec and Phases 0–2 begin.
+Section-level amendment rights retained throughout the build — the blessing
+starts the work, it does not freeze the doc.** Prior status: DRAFT v0.2.2
+through three adversarial audits (m2sdz9r, 2zkir0u, 5hkenmv — all findings
+applied). Companion: docs/specs/canvas-document-model.md. Flux: 0rtwaj4.
 
 **Status:** DRAFT — section-by-section review with the maintainer. Flux task
 0rtwaj4. v0.2 = post blind-adversarial-audit revision (Flux m2sdz9r): all
@@ -316,6 +324,15 @@ before JobsView retires. e2e/vision coverage rewrites per phase before each
 retirement (D6).
 
 ## 9. Parked-questions ledger — RECONCILED UNION (per audit L1)
+
+**[BLESSED 2026-09-15 — maintainer accepted both bundles wholesale via
+structured Q&A: Bundle A (interaction: L1, L3, L8, L9, L18, L19, L20, L24)
+and Bundle B (surfaces/scope: L2, L5, L6, L10, L11, L12, L14, L15, L16, L17,
+L22, L23, L25) — all DECIDED as recommended below. Remaining non-decided:
+L7 (Focus — deferred to §5.1 co-design per its recorded disposition), L13
+(asset reference-set unification — OPEN for schema review as recorded), L33
+(rendering-budget measurement task — a task, not a decision). L21 previously
+RESOLVED; L26–L29 previously DECIDED; L4/L27 previously DECIDED.]**
 
 Every known-open question from both sources, each tagged with its home
 section. Closed when the maintainer decides; deferred rows need rationale.
