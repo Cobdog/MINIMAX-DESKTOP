@@ -261,7 +261,11 @@ radar — the no-silent-failure rule applies everywhere work is visible.
   `__value__` server bridge as version-pinned option per E-FC0.5), preset
   pose library first, webcam mocap later; skeleton templates pluggable —
   human-134 default, AP-10K if E-FC1's arm B wins, freeform if
-  topology-agnostic. Trajectory-plan UI pending E-MD1.
+  topology-agnostic. **Trajectory-plan UI builds on the measured AddGuide
+  path** (E-MD1, tranche 3a: positional composites at frames 0/17/34 track
+  plans at 0.0–1.7% error with zero extra weights — beating the Fun Control
+  sprite ceiling, which scene-roulettes; the mask variant adds +1 dB with a
+  clean grid check; guides survive VDN architecture intact).
 - **5.3 Camera editor** (directive b309fad7): canvas-phase component; the
   compiler port is its own task (ving89w, split decided 2026-09-14).
 - **5.4 Engines-as-ops** (L4 DECIDED — dissolve): selection decides the
