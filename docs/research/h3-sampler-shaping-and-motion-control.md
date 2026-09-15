@@ -149,3 +149,33 @@ Feeds the experiment ladder from `h3-transitions-and-latent-continuity.md` §6 a
 31. `docs/research/speed-quality-and-imagegen-paths.md` §1.6 — pinned-row hazard, VDN boundary anchors, #15981
 32. `docs/research/h3-node-ecosystem-sweep.md` — FL-MiniMaxH3 masked-latent bridge/TemporalReshot/PromptTimeline, MotionRefine dual-clock refine, ShotMotionContext
 33. App source — `src/lib/workflow.ts:15-16` (official sampler pin), `src/lib/workspace.ts:52` (shift defaults 12/3), `src/state/workspaceStore.ts` (sigmaShiftMode)
+
+---
+
+## ADDENDUM — E-MD1 MEASURED (tranche 3a, 2026-09-15, Flux muwufpp): the positional-guide movement director is the PRODUCT PATH
+
+- **Arm B (AddGuide composites at frames 0/17/34)**: ball tracks the 25/50/75%
+  plan at **0.0–1.7% width error**, zero backtrack/teleport events, both
+  seeds, near-linear between anchors; background locked at 36+ dB.
+- **Arm A (control, direction unstated)**: both seeds rolled the WRONG WAY
+  (errors to 69%) — the premise confirmed: unstated direction is unclaimed.
+- **Arm C (path-band mask)**: identical tracking +1 dB preservation;
+  **#15981 grid-artifact check CLEAN** (the naive alarm was ball content).
+- **Arm D (Fun Control sprite ceiling)**: direction correct but scene
+  roulette (bg 8–16 dB, each seed invents a scene) — **B beats the shipped
+  ceiling at zero extra weights**.
+- **Arm E (VDN architecture + guides)**: B-identical at 120 s — AddGuide
+  keyframes survive the VDN hybrid-attention patch (boundary-anchor
+  hypothesis HOLDS).
+- **Decision per the spec's rule**: the movement director builds on the
+  AddGuide path; trajectory-plan UI (spec §5.2) proceeds.
+
+## ADDENDUM — Ref2VA turbo bake-off MEASURED (same tranche)
+
+**Default = larryvrh v4_step600_ema (= drbaph-main lineage)**: best quality
+at 8 steps, 117 s vs 221 s anchor. lightx2v 8-step = close runner-up
+(~80–85%, darker/warmer/softer). Official ref2v 4-step: NOT usable at 4
+steps in merge mode (dark sepia collapse both seeds; bypass retest = open
+caveat). PDD: deterministic KeyError without its head loader (confirmed
+first-hand). **Turbo costs no identity** — all options in the anchor's own
+ArcFace band (0.12–0.37).
