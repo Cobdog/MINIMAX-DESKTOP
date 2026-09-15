@@ -70,7 +70,11 @@ export function normalizeWorkspace(stored: Partial<PersistedWorkspace>): Persist
   // Reference mode had no 8-step LoRA before lightx2v's Ref2VA 8-step: reset
   // legacy 8-step reference choices, but preserve an explicit Ref2VA 8-step
   // family pick (the one supported path to 8-step reference generation).
-  if (workspace.mode === 'reference' && workspace.turbo === '8' && stored.turboFamily !== 'turbo.lightx2v-ref2v-8') workspace.turbo = 'off'
+  // The fast tier has two measured families since the 2026-09-15 bake-off
+  // (task muwufpp): larryvrh v4_step600_ema is the default, lightx2v Ref2VA
+  // 8-step the runner-up — both survive a reload.
+  const REF2V_TURBO8_FAMILIES = new Set(['turbo.larryvrh-v4-8', 'turbo.lightx2v-ref2v-8'])
+  if (workspace.mode === 'reference' && workspace.turbo === '8' && !REF2V_TURBO8_FAMILIES.has(stored.turboFamily ?? '')) workspace.turbo = 'off'
   workspace.steps = Math.max(16, Math.min(30, Number(workspace.steps) || 30))
   if (stored.steps === 20) workspace.steps = 30
   return workspace

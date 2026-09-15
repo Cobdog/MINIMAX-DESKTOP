@@ -108,7 +108,10 @@ const REAL_TURBO_FILES = [
   ['minimax_h3_ref2v_turbo_4step_v0.1_comfyui_resized_avg_rank_21_bf16.safetensors', 'turbo.ref2v-4', 4],
   ['minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors', 'turbo.lightx2v-ref2v-8', 8],
   ['minimax_h3_turbo_4step_ema_ckpt850_pruned_comfyui.safetensors', 'turbo.drbaph-4', 4],
-  ['minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors', 'turbo.drbaph-4', 4],
+  // v4_step600 is a 6-8-step family (bake-off 2026-09-15, task muwufpp) —
+  // split from drbaph-4 into its own 8-step family, not a 4-step one.
+  ['minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors', 'turbo.larryvrh-v4-8', 8],
+  ['minimax_h3_turbo_v4_step600_pruned_comfyui.safetensors', 'turbo.larryvrh-v4-8', 8],
   ['MiniMax-H3-FL2VA-Acc-8Step.safetensors', 'turbo.pdd-fl2va-8', 8],
   ['MiniMax-H3-Ref2VA-Acc-8Step.safetensors', 'turbo.pdd-ref2va-8', 8],
 ]
@@ -192,7 +195,7 @@ function run() {
     ok(entry.ui.description.length > 0, `${entry.id} has a UI description`)
     ok(entry.appliesTo.includes('minimax'), `${entry.id} applies to the H3 engine`)
   }
-  for (const required of ['turbo.official-fl2v-8', 'turbo.lightx2v-fl2v-4', 'turbo.lightx2v-ref2v-8', 'turbo.pdd-fl2va-8', 'turbo.pdd-ref2va-8', 'turbo.drbaph-4', 'turbo.ref2v-4', 'upscale.ltx2x', 'upscale.lbh2d', 'upscale.lbh3d', 'upscale.rtx', 'preview.h3-override']) {
+  for (const required of ['turbo.official-fl2v-8', 'turbo.lightx2v-fl2v-4', 'turbo.lightx2v-ref2v-8', 'turbo.pdd-fl2va-8', 'turbo.pdd-ref2va-8', 'turbo.drbaph-4', 'turbo.larryvrh-v4-8', 'turbo.ref2v-4', 'upscale.ltx2x', 'upscale.lbh2d', 'upscale.lbh3d', 'upscale.rtx', 'preview.h3-override']) {
     ok(Boolean(findOptimization(required)), `registry contains ${required}`)
   }
   assert.throws(() => registerOptimization(entries[0]), /duplicate id/, 'duplicate registration is rejected')
@@ -305,6 +308,12 @@ function run() {
     }
     ok(classifyTurboFamily('my_custom_lora.safetensors') === undefined, 'unrecognized LoRAs classify as no family')
     ok(turboProvenance('my_custom_lora.safetensors') === undefined, 'unrecognized LoRAs have no provenance')
+    // Measured-basis note: the Ref2VA fast-tier default states its basis
+    // (bake-off 2026-09-15) and its tier scope; families without a measured
+    // claim carry no note.
+    const v4Provenance = turboProvenance('minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors')
+    ok(v4Provenance && /bake-off 2026-09-15/.test(v4Provenance.note ?? '') && /quality tier/.test(v4Provenance.note ?? ''), 'larryvrh v4 provenance note carries the bake-off date and the quality-tier framing')
+    ok(turboProvenance('minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors')?.note === undefined, 'the lightx2v runner-up carries no measured-basis note')
     // Dedicated-sampler pairings are declared only by 4-step families (the
     // official Ref2V 4-step keeps res_multistep — that direction is allowed).
     for (const entry of optimizationEntries()) {
@@ -355,19 +364,33 @@ function run() {
     ok(inferSelections([light412, light410], '4').fl2vLora === light412.name, '4-step ranking prefers the newest lightx2v version (v1.2 default speed)')
     ok(inferSelections([light412, light8, official8], 'off').fl2vLora === official8.name, 'off keeps the official-first ranking')
     ok(inferSelections([ref8, ref4], '8').ref2vLora === ref8.name, 'reference mode selects the lightx2v Ref2VA 8-step when present')
-    ok(inferSelections([ref4], '8').ref2vLora === '', 'reference 8-step stays empty without the Ref2VA 8-step LoRA')
+    // Ref2VA 8-step FAST TIER (bake-off 2026-09-15, task muwufpp): larryvrh
+    // v4_step600_ema outranks lightx2v; lightx2v stays the fallback; the
+    // promotion is Ref2VA-specific and an explicit pick overrides it.
+    const larryV4 = loraFile('minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors')
+    ok(inferSelections([larryV4, ref8], '8').ref2vLora === larryV4.name, 'Ref2VA 8-step fast tier ranks larryvrh v4_step600_ema above lightx2v (bake-off 2026-09-15)')
+    ok(inferSelections([ref8], '8').ref2vLora === ref8.name, 'lightx2v Ref2VA 8-step stays the fast-tier fallback when the v4 LoRA is absent')
+    ok(inferSelections([larryV4, ref8], '8', 'turbo.lightx2v-ref2v-8').ref2vLora === ref8.name, 'an explicit lightx2v family pick overrides the fast-tier default ranking')
+    ok(inferSelections([larryV4], '8').fl2vLora === '' && inferSelections([larryV4, official8], '8').fl2vLora === official8.name, 'FL2V ranking unchanged: the v4 file is never auto-selected for FL2V')
+    ok(inferSelections([ref4], '8').ref2vLora === '', 'reference 8-step stays empty without a Ref2VA 8-step LoRA')
     ok(inferSelections([ref4], '4').ref2vLora === ref4.name, 'reference 4-step keeps the official LoRA')
     ok(inferSelections([official8, pddFl], '8', 'turbo.pdd-fl2va-8').fl2vLora === pddFl.name, 'an explicit family choice constrains inference to it')
     ok(inferSelections([official8, pddFl], '8', 'turbo.official-fl2v-8').fl2vLora === official8.name, 'explicit official family still wins with PDD installed')
     // Ranking patterns are registry data: the 4-step list prefers v1.2 first.
     const ranked = turboLoraPatterns('fl2v', '4')
     ok(ranked[0].test('minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors') && !ranked[0].test('minimax_h3_fl2v_turbo_4step_v1.1_768p_comfyui_bf16.safetensors'), 'ranking patterns expose the version preference')
+    // …and the Ref2VA 8-step list puts the measured larryvrh v4 EMA
+    // checkpoint above lightx2v (fast-tier default, bake-off 2026-09-15).
+    const refRanked = turboLoraPatterns('ref2v', '8')
+    ok(refRanked[0].test('minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors') && !refRanked[0].test('minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors'), 'ref2v 8-step ranking puts the measured larryvrh v4 EMA checkpoint first')
+    ok(refRanked[1].test('minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors'), 'lightx2v Ref2VA 8-step remains the runner-up ranking pattern')
 
     // Workspace normalization: legacy reference+8 resets, an explicit
     // Ref2VA 8-step family pick survives a reload.
     const { normalizeWorkspace } = loadTs('src/lib/workspace.ts')
     ok(normalizeWorkspace({ mode: 'reference', turbo: '8' }).turbo === 'off', 'legacy reference 8-step choices reset on reload')
     ok(normalizeWorkspace({ mode: 'reference', turbo: '8', turboFamily: 'turbo.lightx2v-ref2v-8' }).turbo === '8', 'explicit Ref2VA 8-step family survives reload')
+    ok(normalizeWorkspace({ mode: 'reference', turbo: '8', turboFamily: 'turbo.larryvrh-v4-8' }).turbo === '8', 'explicit larryvrh v4 fast-tier family survives reload')
     ok(normalizeWorkspace({ mode: 'text', turbo: '8' }).turbo === '8', 'non-reference 8-step untouched')
   }
 
@@ -707,7 +730,7 @@ function main() {
     return
   }
   const done = run()
-  console.log(`PASS: optimization registry (${done} assertions) — inertness vs pre-registry goldens across the ${GOLDEN_MATRIX.length}-config matrix, transform correctness (plain + dedicated larryvrh pairing swap, LBH/LTX/RTX chains, preview override), detection against mock object_info/scans, family pairing contracts (steps/sampler enforced, 8-step keeps res_multistep+simple), family-ranked selection inference (official > lightx2v newest-first, explicit family constraint, Ref2VA 8-step), painless expansion (a hypothetical 5-step family registered, detected, transformed, paired and proven inert via registry data alone), and the five Krea 2 edit families (base-t2i inertness, per-family goldens, research-pinned recipes, hand-asserted dual-conditioning/AnyPaint wiring, E-K1 honesty-label + scene-style prompt-contract pins, recipe-triple audit incl. the t=0 carrier trap + the E-K1 index-pairing rule + no-composite rule + patcher mutual exclusion, dial validation at the research limits, and per-family availability gating with low-VRAM LoRA fallback)`)
+  console.log(`PASS: optimization registry (${done} assertions) — inertness vs pre-registry goldens across the ${GOLDEN_MATRIX.length}-config matrix, transform correctness (plain + dedicated larryvrh pairing swap, LBH/LTX/RTX chains, preview override), detection against mock object_info/scans, family pairing contracts (steps/sampler enforced, 8-step keeps res_multistep+simple), family-ranked selection inference (official > lightx2v newest-first, explicit family constraint, Ref2VA 8-step fast tier — larryvrh v4 default per bake-off 2026-09-15), painless expansion (a hypothetical 5-step family registered, detected, transformed, paired and proven inert via registry data alone), and the five Krea 2 edit families (base-t2i inertness, per-family goldens, research-pinned recipes, hand-asserted dual-conditioning/AnyPaint wiring, E-K1 honesty-label + scene-style prompt-contract pins, recipe-triple audit incl. the t=0 carrier trap + the E-K1 index-pairing rule + no-composite rule + patcher mutual exclusion, dial validation at the research limits, and per-family availability gating with low-VRAM LoRA fallback)`)
 }
 
 main()

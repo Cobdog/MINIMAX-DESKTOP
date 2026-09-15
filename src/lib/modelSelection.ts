@@ -24,7 +24,9 @@ export function inferSelections(files: ModelFile[], turbo: 'off' | '4' | '8', fa
     // family choice (registry entry id) constraining the patterns to it.
     fl2vLora: find('loras', turboLoraPatterns('fl2v', turbo, family)),
     // Reference mode: the official 4-step LoRA (ComfyUI's template pair), or
-    // the lightx2v Ref2VA 8-step when 8-step reference mode is requested.
+    // the 8-step fast tier when 8-step reference mode is requested — ranked
+    // larryvrh v4_step600_ema first per the 2026-09-15 bake-off (task
+    // muwufpp), lightx2v Ref2VA 8-step as the measured runner-up.
     ref2vLora: find('loras', turboLoraPatterns('ref2v', turbo, family)),
   }
 }

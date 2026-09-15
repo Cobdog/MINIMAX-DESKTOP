@@ -135,12 +135,35 @@ export const TURBO_ENTRIES: OptimizationEntry[] = [
   turboEntry({
     id: 'turbo.drbaph-4',
     label: 'drbaph 4-step (larryvrh lineage)',
-    patterns: [/^minimax_h3_turbo_(?:v4_step600(?:_ema)?|4step(?:_ema)?_ckpt\d+)_pruned_comfyui\.safetensors$/i],
+    patterns: [/^minimax_h3_turbo_4step(?:_ema)?_ckpt\d+_pruned_comfyui\.safetensors$/i],
     pairing: { sampler: 'res_multistep', scheduler: 'simple', samplerNode: 'MiniMaxH3TurboSampler', steps: 4 },
     ui: {
-      description: 'drbaph ComfyUI conversions of larryvrh\'s original 4-step (v4 step-600 EMA recommended). Pairs with the larryvrh Turbo Sampler.',
+      description: 'drbaph ComfyUI conversions of larryvrh\'s 4-step checkpoints. Pairs with the larryvrh Turbo Sampler.',
       warning: 'The pruned conversions need the matching pruned base model — check drbaph\'s README pairing table.',
       installHint: 'huggingface.co/drbaph/MiniMax-H3-Turbo-Lora-ComfyUI',
+    },
+  }),
+  turboEntry({
+    // REF2VA FAST-TIER DEFAULT — bake-off 2026-09-15 (task muwufpp): the
+    // drbaph-pruned larryvrh v4_step600_ema is the best-quality 8-step turbo
+    // on Ref2VA at our tier (closest-to-baseline exposure and detail, 117 s
+    // vs the 20-step anchor's 221 s, identity cos inside the anchor's own
+    // band — turbo costs no identity), with lightx2v's Ref2VA 8-step the
+    // close runner-up. Scoped to the FAST tier only (maintainer steer
+    // 2026-09-15): the full-step native path remains the quality tier.
+    // v4 is a 6-8-step family (4-step smears on motion — research
+    // speed-quality-and-imagegen-paths.md §1.3), so the pairing enforces 8
+    // and no dedicated sampler node (the 4-step-only invariant); these
+    // pruned conversions drop the adaln delta (compat doc §3.4) and load
+    // through the stock plain loader.
+    id: 'turbo.larryvrh-v4-8',
+    label: 'larryvrh v4 8-step (drbaph conversion)',
+    patterns: [/^minimax_h3_turbo_v4_step600(?:_ema)?_pruned_comfyui\.safetensors$/i],
+    pairing: { sampler: 'res_multistep', scheduler: 'simple', steps: 8 },
+    ui: {
+      description: 'larryvrh v4_step600 (drbaph pruned conversion) — the measured Ref2VA fast-tier default: best quality at 8 steps, 117 s vs 221 s at the 20-step anchor, identity unaffected (bake-off 2026-09-15). Runs on FL2VA and Ref2VA.',
+      note: 'Ref2VA fast-tier default — bake-off 2026-09-15: best quality at 8 steps; the native-step path remains the quality tier',
+      installHint: 'huggingface.co/drbaph/MiniMax-H3-Turbo-Lora-ComfyUI — minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors',
     },
   }),
   turboEntry({
@@ -223,7 +246,10 @@ export function resolveTurboPlan(input: {
 /** Ranked LoRA-filename patterns for model-selection inference. When a family
  * is explicitly chosen only its patterns run; otherwise the per-step ranking
  * picks the best installed file (official first, then lightx2v newest-first;
- * PDD/drbaph are detected and surfaced but selected only explicitly). */
+ * PDD/drbaph are detected and surfaced but selected only explicitly). The
+ * one measured exception: the Ref2VA 8-step FAST tier ranks larryvrh
+ * v4_step600_ema first per the 2026-09-15 bake-off (task muwufpp) — scoped
+ * to that tier only, never the FL2V ranking. */
 export function turboLoraPatterns(target: 'fl2v' | 'ref2v', turbo: 'off' | '4' | '8', family?: string, entries: readonly OptimizationEntry[] = TURBO_ENTRIES): RegExp[] {
   if (family) {
     const entry = entries.find((candidate) => candidate.id === family)
@@ -231,7 +257,17 @@ export function turboLoraPatterns(target: 'fl2v' | 'ref2v', turbo: 'off' | '4' |
   }
   if (target === 'ref2v') {
     return turbo === '8'
-      ? [/^minimax_h3_ref2v_turbo_8step/i]
+      ? [
+          // FAST-TIER DEFAULT (bake-off 2026-09-15, task muwufpp): larryvrh
+          // v4_step600_ema (drbaph pruned) first — best quality at 8 steps
+          // (117 s vs the 20-step anchor's 221 s, identity unaffected) —
+          // then lightx2v's Ref2VA 8-step, the close runner-up. Only the
+          // measured EMA checkpoint is promoted over lightx2v; the fast
+          // tier stays a tier, not the product default (maintainer steer
+          // 2026-09-15 — the full-step path is the quality tier).
+          /^minimax_h3_turbo_v4_step600_ema_pruned_comfyui\.safetensors$/i,
+          /^minimax_h3_ref2v_turbo_8step/i,
+        ]
       : [/^minimax_h3_ref2v_turbo_4step/i]
   }
   if (turbo === '4') {

@@ -64,11 +64,13 @@ export function detectOptimizations(info: ObjectInfo | undefined, files: ModelFi
 }
 
 /** Turbo provenance for a (selected or scanned) LoRA filename — powers the
- * "which family/steps is this LoRA" UI line. */
-export function turboProvenance(filename: string): { entryId: string; label: string; steps: number; samplerNode?: string } | undefined {
+ * "which family/steps is this LoRA" UI line. `note` carries the entry's
+ * measured-basis note when it has one (tier defaults say so, with the
+ * measurement date). */
+export function turboProvenance(filename: string): { entryId: string; label: string; steps: number; samplerNode?: string; note?: string } | undefined {
   const family = classifyTurboFamily(filename)
   if (!family) return undefined
-  return { entryId: family.id, label: family.label, steps: family.pairing?.steps ?? 0, samplerNode: family.pairing?.samplerNode }
+  return { entryId: family.id, label: family.label, steps: family.pairing?.steps ?? 0, samplerNode: family.pairing?.samplerNode, note: family.ui.note }
 }
 
 /** Registry-scoped wrappers: classification, selection ranking and plan

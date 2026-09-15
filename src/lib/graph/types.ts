@@ -93,7 +93,10 @@ export type OptimizationEntry = {
   }
   detect(info: ObjectInfo | undefined, files: ModelFile[]): DetectionResult
   transform(graph: ComfyPrompt, ctx: GraphContext, opts: TransformOptions): void
-  ui: { description: string; warning?: string; installHint?: string }
+  /** `note` = the measured-basis provenance line shown next to a selection
+   * (e.g. a family that is a tier default by measurement says so, with the
+   * measurement date). Optional; most families have none. */
+  ui: { description: string; warning?: string; installHint?: string; note?: string }
 }
 
 /** Role-addressed node map + chain-wrap helpers for one graph build. Built by
