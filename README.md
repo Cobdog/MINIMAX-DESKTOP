@@ -40,7 +40,7 @@ failure; a failed `build` skips only its dependents (smoke/e2e/vision).
 Order: `typecheck` → `lint` → `license:audit` → `test` → `test:registry` →
 `test:storage` → `test:realtime` → `test:filmstrip` → `test:llm` →
 `test:engine` → `test:runtime` → `test:fetcher` → `test:lora-form` →
-`test:poserig` →
+`test:poserig` → `test:camera` →
 `build` → `smoke:server` →
 e2e (Playwright) → vision-capture (Playwright). `pnpm test:all` is the same
 chain without the harness niceties. `license:audit` classifies every direct
@@ -59,6 +59,13 @@ tests. `test:poserig` runs the IK pose rig's pure client modules through
 the VM harness — analytic two-bone + FABRIK solver contracts, the §3
 palette-exact draw-op goldens, the OpenPose-134 JSON round-trip and 17n+5
 grid snapping (the three.js/React shell is covered by the e2e suite).
+`test:camera` runs the camera-path compiler port (`src/lib/camera/`, from
+bruxosdovfx Camera H3 v19.1, Apache-2.0) through the VM harness — compiled
+prompts, options and storyboards byte-compared against goldens generated
+by the upstream Python itself (`scripts/fixtures/camera-goldens.json`; the
+generator is committed beside it), monotone-PCHIP interpolation parity,
+the validation error taxonomy and the 17k+5 resampling math. No Python
+needed at test time.
 
 ### System Chromium (no bundled browser)
 

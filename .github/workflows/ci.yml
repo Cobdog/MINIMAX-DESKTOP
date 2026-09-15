@@ -47,6 +47,11 @@ jobs:
       # harness — IK solvers, palette-exact draw ops vs goldens, keypoint
       # JSON round-trip, grid snapping. No engine, no browser needed.
       - run: pnpm test:poserig
+      # Camera path compiler (task ving89w): the bruxosdovfx v19.1 port —
+      # golden prompts byte-compared against upstream-generated fixtures
+      # (committed; the Python generator lives beside them for regeneration).
+      # No python needed at test time.
+      - run: pnpm test:camera
       # ffmpeg is required by the filmstrip capability (wave 2d: server-side
       # sprite-sheet thumbnails + the e2e video fixture). ubuntu-latest does
       # NOT ship it by default. Decision: install it rather than let the
