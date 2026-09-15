@@ -183,3 +183,19 @@ The fresh-eyes sweep and the Kreatine prior art **converge on the same field map
 33. RealRebelAI outpaint port: https://github.com/RealRebelAI/ComfyUI-Rebels-Krea2-Outpaint · ComfyUI-Angelo (remove brush, listed only): https://github.com/shootthesound/ComfyUI-Angelo
 34. YouTube walkthroughs (verifiable outcomes in-video): Krea 2 Image Editing Workflow https://www.youtube.com/watch?v=JoB5_2_-ohc · Identity Edit LoRA https://www.youtube.com/watch?v=CncpXHcqlRM · Identity Edit in ComfyUI https://www.youtube.com/watch?v=8bcQKvcwbKc · Krea2 inpainting (LanPaint) https://www.youtube.com/watch?v=iOSQzKyCYyw · Edit v1.2 storyboard/inpainting https://www.youtube.com/watch?v=U2PCLhfmV1o · VAE trick / object removal https://www.youtube.com/watch?v=M_NWStvz9YQ
 35. Krea2T-Enhancer Reddit: https://www.reddit.com/r/StableDiffusion/comments/1uel6gw/ · Krita discussion: https://github.com/Acly/krita-ai-diffusion/discussions/2543
+
+---
+
+## ADDENDUM — E-K1 measured on our int8 stack (2026-09-15, Flux 7ed5ewa): RELEASE = GO with three corrections
+
+Identity Edit instruct: identity 0.94–0.98 held; **NOT region-preserving —
+the leak quantified at 26.5 dB outside the edit region** (honesty label
+required). Removal on RAW/CFG3: cleaner far-field confirmed. **AnyPaint on
+int8-convrot preserves outside-mask at the VAE floor (40–47 dB) — the
+quantization caveat is CLEAN** (bf16 showcase not required). Prompt contract
+discovered: scene-style, not object-local (templating correction). Kreatine's
+recipe A/B replicated via core nodes: 5.30 vs 40.06 meanAD (same ~8×
+destruction class as 8.18 vs 50.06). Corrections to ship: (1) "edits are
+semantic regeneration" honesty label on Instruct; (2) scene-style prompt
+templating; (3) `reference_latents_method=index` emitted as a validation
+rule (t8u00uu).

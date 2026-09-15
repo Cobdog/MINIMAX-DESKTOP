@@ -223,3 +223,29 @@ Order: E4 (decode-only, ~free) → E1 → E2 → E3 → E6 → E5 → E7 → E8.
 
 **Consequences recorded:** hard-cuts-default (L28) now MEASURED, not inferred; the Director Suite's gap menu = hard cut / NLE transition / FLF-continuation splice (36 dB class) / dip-to-black (E2) / diegetic bridge (opt-in). Synthetic latent transitions enter the roadmap as a real capability (E4) with pacing tuning as the open knob. Operational notes: dynamic VRAM >> static residency on 24 GB (9 gens, zero failures, ~2.4× faster/step) — runbook amendment pending maintainer; turbo LoRA requires merge mode on 24 GB; post-OOM memory accounting needs a process restart; insightface absent — install before any identity-metric arm (E7).
 
+
+---
+
+## ADDENDUM 2 — tranche 2 measured (2026-09-15, Flux 7ed5ewa; 28 gens; artifacts test-results/experiments/tranche2/)
+
+- **E6 — single-pass multi-shot WINS at our tier** (against the community
+  consensus framing): cuts land within 1–4 frames of instructed times, zero
+  shot-looping (self-similarity 10–14 dB = unrelated class), audio 4–20×
+  smoother than hard-cut concat. `<scenetrans>` + audio clauses bought
+  nothing measurable. Cut-together's standalone clip LOST the pot — no
+  cross-shot object carry — at 0.78× cost. Identity across shots weak in
+  BOTH regimes (ArcFace 0.14–0.44) → identity payloads matter more, not
+  less, in multi-shot. Director Suite gains: single-pass multi-shot as a
+  first-class segment strategy for short multi-beat content.
+- **E5 — the handoff triangle (not a ranking)**: ref_video = the story
+  engine (all beats on schedule, 10 dB anchors, identity dies first at
+  0.12); AddGuide pixel replay = balanced (35–36 dB anchors, +30% wall);
+  raw latent handoff = the continuity engine (39–42 dB pinned rows,
+  invisible seams — via a new nested video+audio noise-mask shim) BUT pins
+  DRAG content back to the source scene (the 39f pin lost the hallway beat
+  entirely). loopforge's latent>pixel ordering replicated. 22-vs-39: pin
+  quality flat, audio joins smoother at 39, content drag worse at 39 →
+  chain guidance: 22f default, 39f when audio phase-exactness matters.
+- **E4 pacing (follow-up)**: honest negative — crossover moved LATER
+  (f24→f34); arrival is governed by B-side pin strength; the tranche-1 ramp
+  stands as the recommendation.
