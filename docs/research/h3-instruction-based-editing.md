@@ -169,3 +169,19 @@ Order when GPU frees: E-ED1 (double verdict, highest information) → E-ED3 (che
 31. `docs/research/h3-sampler-shaping-and-motion-control.md` — resolution-adherence collapse (≤576p authoring), plague fixes
 32. `docs/research/fun-control-input-surface.md` — wire format, apply-node surface, extraction matrix, E-FC series
 33. Kreatine: `docs/research/2026-09-14-core-ref-ab.md` (Krea 2 recipe A/B, measured), `2026-09-12-identity-edit-survey.md`, `2026-08-25-edit-inpaint-outpaint-survey.md`, `h3-model.md` §2/§5 (image-gen/edit mechanics; **one attribution correction noted in §3 above**)
+
+---
+
+## ADDENDUM — E-ED1 measured (2026-09-16, Flux a80ekav): the hybrid edit hypothesis is SOFT-POSITIVE
+
+First measured edit A/B on H3 (scottmudge HybridLoader, FL2VA-base +
+Ref2VA-adaln b25-49 runtime merge over the two local pruned-int8 parents;
+int8 TE — nvfp4 trap avoided). Subject-preserving edit (wardrobe swap):
+**hybrid wins every pixel metric simultaneously** — +3.4 dB whole, +1.3–3.5 dB
+per third, identity-through-edit 0.31–0.35 vs stock 0.12–0.25 (~2.5×), zero
+wall cost. Scene-replacing edit (background): no advantage (tie; stock held
+framing better). All four edits kept BOTH on-screen text elements legible
+(first-hand counter-evidence to "small text drifts" at this size). Neither
+arm pixel-preserves (10–13 dB = semantic re-synthesis class — the UI must
+never promise pixel preservation). Scoped: 1 seed, 1 edit pair — directional.
+Consequence: hybrid = the recommended reference/identity mode.

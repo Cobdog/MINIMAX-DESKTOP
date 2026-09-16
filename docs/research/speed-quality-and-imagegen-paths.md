@@ -345,3 +345,26 @@ File sizes are [DOC]/[COMM]/[DOC-local] as cited above; *co-residency* rows are 
 3. Anima quant options and official steps/CFG: not published.
 4. Exact healthy-instance H3→image→H3 switch seconds on 0.34/0.35 with our file set: unmeasured — benchmark harness should own it (also the #14076 canary).
 5. Whether ComfyUI core will add a block-loop extension point (would obsolete the LongCache hook) — watch changelog; not present through v0.35.1.
+
+---
+
+## ADDENDUM — tranche 3b measured (2026-09-16, Flux a80ekav): tier ladder at held seed + VDN first-hand + MATLOWAI fused-turbo
+
+- **Held-seed tiers**: same seed across tiers = a SIBLING TAKE (pairwise 18.2–25.0 dB,
+  motion lag 0, ArcFace flat 0.09–0.24). Two independent blind passes ranked
+  **8-step turbo SHARPEST** (t8 > vdn20 > t25 > t20; t20 "waxy, no weave", t25
+  "milky haze") — plain 20/25-step tiers buy NO visible still detail at 480p
+  ref-mode; 25 costs +23% wall over 20. Tier value beyond turbo = motion/audio/
+  pinned-row robustness, NOT sharpness. UI: "lock→rerun-at-hero" labeled SIBLING
+  TAKE; preview tier is not a still-detail sacrifice; full tier stays at 20.
+- **VDN-8 first-hand** (our staged config): 23.0 s/step exact ×8 = 189s sampling,
+  270s wall-with-reload @10s/0.4MP. Gap to the maintainer's 15.74 = their
+  int8-convrot STAGE + AutoLongCache (both identified upgrades; the LongCache
+  hook is our consent-patch tier).
+- **MATLOWAI fused-turbo**: ref2va-at-4-step VERIFIES decisively — blind
+  clear-gap over larryvrh-v4@8, ArcFace 0.37–0.40 (highest identity band of any
+  arm measured), 0.75× wall (87.9s vs 117.3s). Counters: Mystic v2.0 folded in
+  (style-opinionated checkpoint); no VRAM saving at 480p. Mechanism:
+  merged-then-quantized beats quantize-then-LoRA-merge on the shipped path.
+  New Ref2VA fast-tier DEFAULT CANDIDATE — maintainer call: default vs
+  labeled-option given the baked style.
