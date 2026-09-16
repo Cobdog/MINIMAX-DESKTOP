@@ -21,6 +21,7 @@ const { spawnSync } = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
+const { pathToFileURL } = require('node:url')
 const assert = require('node:assert/strict')
 
 const REPO = path.join(__dirname, '..')
@@ -38,7 +39,8 @@ function tmpdir() {
 }
 
 async function importLib(name) {
-  return import(path.join(BENCH, 'lib', name))
+  // Windows: absolute paths must be file:// URLs for the ESM loader
+  return import(pathToFileURL(path.join(BENCH, 'lib', name)).href)
 }
 
 // 1x1 PNG (transparent) — the blind-bundle fixture image
