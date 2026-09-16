@@ -1,0 +1,57 @@
+{
+  "name": "ref2va-bakeoff",
+  "family": "Ref2VA-class speed/identity bake-off (turbo LoRAs and fused checkpoints)",
+  "origin": "tranche 3a bake-off (Flux muwufpp 66a2ji6) + tranche 3b MATLOWAI arm (a80ekav zhgg33m); scripts ported from test-results/experiments/{tranche3a,tranche3b}/scripts/*bakeoff*/build|run|analyze* and *matlowai*",
+  "measures": "ArcFace identity vs the reference still at f0/f62/f123 (buffalo_l), wall-clock per arm, and the blind pairwise vision read. Same reference scene, matched prompt+seed across all arms.",
+  "fixtures": {
+    "scene": "canonical kitchen ref2va (shared with tier-ladder)",
+    "referenceImage": "input/exp_bake/ref.png (derived: tranche-1 srcA frame 40; prep step extracts it if absent)",
+    "prompt": "The woman in <Picture 1>, the same person. A pale woman in her early thirties with a short black bob haircut, thin silver hoop earrings, faint freckles, wearing an oversized rust-orange wool coat over a charcoal turtleneck. She stands at a weathered wooden counter in a small sunlit kitchen, slowly stirring a copper pot of soup with a wooden spoon, late-afternoon light through a window to her left; the camera holds a steady medium shot. Audio: gentle simmering, the wooden spoon tapping the copper pot, a quiet kitchen fan hum.",
+    "width": 864,
+    "height": 480,
+    "length": 124,
+    "seeds": [421337, 421338],
+    "sampleFrames": [0, 62, 123],
+    "models": {
+      "textEncoder": "qwen3vl_32b_int8_convrot.safetensors",
+      "unetRef2va": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "vaeVideo": "minimax_h3_video_vae_fp16.safetensors",
+      "vaeAudio": "minimax_h3_audio_vae_fp32.safetensors",
+      "loraT4": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+      "loraL8": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+      "loraMain": "minimax_h3_turbo_v4_step600_ema.safetensors",
+      "loraPdd": "MiniMax-H3-Ref2VA-Acc-8Step.safetensors",
+      "fusedCheckpoint": "minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors",
+      "fusedCatalogId": "matlowai-fused-turbo-int8"
+    }
+  },
+  "arms": {
+    "main8": {"label": "larryvrh v4_step600_ema @8-step MERGE — the measured DEFAULT of the fast tier (neutral-look)", "incumbent": true, "role": "incumbent-neutral"},
+    "fused4": {"label": "MATLOWAI fused-turbo @4-step (catalog matlowai-fused-turbo-int8) — the measured styled candidate entry (fastest + best identity; Mystic v2.0 style folded in)", "incumbent": true, "role": "incumbent-styled", "catalogId": "matlowai-fused-turbo-int8"},
+    "l8": {"label": "lightx2v Ref2VA 8-step v1.0 768p — close runner-up (historical arm)", "incumbent": false},
+    "t4": {"label": "official ref2v 4-step (lightx2v publish) — measured NOT usable at 4-step in merge mode (historical arm)", "incumbent": false},
+    "pdd8": {"label": "alibaba-pai PDD Ref2VA-Acc-8Step — measured unloadable on the pruned base (deterministic KeyError; the failure IS the datapoint)", "incumbent": false},
+    "ref20": {"label": "no turbo, euler/simple 20 steps — the quality/identity anchor", "incumbent": false, "role": "anchor"}
+  },
+  "candidateSlot": {
+    "description": "A new Ref2VA-class speed option slots in at the pinned scene+seed and is measured against main8 (neutral incumbent) and fused4 (styled incumbent). Two measured classes: a turbo LoRA applied to the pruned base (quantize-then-patch path) or a fused/merged checkpoint loaded by the stock UNETLoader (merged-then-quantized path).",
+    "kinds": ["turbo-lora", "fused-checkpoint"],
+    "requires": ["file", "steps"],
+    "slotFields": {
+      "file": "model file name present in the testbed models tree (loras/ for turbo-lora, diffusion_models/ for fused-checkpoint)",
+      "steps": "sampling steps for the turbo sampler",
+      "catalogId": "optional fetch-catalog id — run.mjs fetches it first (consent pre-recorded per experimentPrerequisite) and surfaces the license at run start"
+    }
+  },
+  "metrics": ["arcface_vs_ref_f0_f62_f123", "wall_s", "blind_pairwise_read"],
+  "rubric": {
+    "pair": "Two labeled columns (LEFT/RIGHT), same scene and seed. Judge: (1) identity fidelity to the described woman — bob haircut, silver hoop earrings, freckles — are the markers visible and stable? (2) general quality: color fidelity to a sunlit late-afternoon kitchen (no sepia/amber collapse, no waxy smear), distinct hues, no banding; (3) micro-motion naturalness. State which column wins and whether the gap is clear or marginal.",
+    "contact": "12-up contact sheet: judge identity markers, exposure fidelity vs a sunlit kitchen, detail retention, banding."
+  },
+  "limits": [
+    "Identity scores ride the reference-mode ceiling (pose/lighting/resolution bound, not step count) — tranche 3a measured every option inside the 0.12-0.37 ArcFace band with seed spread exceeding between-option gaps; a single seed is directional only.",
+    "turbo LoRA arms measure the MERGE path (low_vram=True, the 24GB constraint); a bypass-mode candidate would need the node's non-merge path — record which path a candidate used.",
+    "fused checkpoints fold style opinions (e.g. Mystic v2.0 @0.7 in fused4) — a blind win does not mean 'neutral look'; check the style counter before shipping a default.",
+    "Walls include per-run /free reload overhead."
+  ]
+}

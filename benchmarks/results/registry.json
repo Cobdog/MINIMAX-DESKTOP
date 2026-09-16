@@ -1,0 +1,1234 @@
+{
+  "version": 1,
+  "baselineEnvironmentId": "2026-09-rtx3090-testbed",
+  "environments": [
+    {
+      "id": "2026-09-rtx3090-testbed",
+      "gpu": "NVIDIA GeForce RTX 3090",
+      "driver": "615.71.09",
+      "comfyui": "0.34.x (Kreatine testbed @8189; gpu/driver recorded at backfill time, 2026-09-16 — 24 GB card)",
+      "quant": [
+        "DiT: minimax_h3_{fl2va,ref2va}_pruned_int8_convrot",
+        "TE: qwen3vl_32b_int8_convrot (never nvfp4 — known-bad path)",
+        "Krea2 arms: krea2_turbo_int8_convrot / krea2_raw bf16"
+      ],
+      "adapters": [
+        "turbo: minimax_h3_turbo_v4_step600_ema (larryvrh, MERGE mode on 24 GB)",
+        "VDN: OpenVDN stage-dmd-step-250 (bf16 pin; turbo adapter OFF for hero tier)",
+        "Krea2: krea2_identity_edit_v1_2 + krea2_anypaint_rank32 (sha-verified)",
+        "Fun Control union: pruned int8 convrot patch"
+      ],
+      "note": "Backfilled environment block for the tranche measurements (tranches 1-3b, 2026-09-14..16). GPU/driver recorded at backfill time; ComfyUI version is the testbed pin. Every row's provenance cites its Flux task comment.",
+      "source": "backfill",
+      "capturedAt": "2026-09-16"
+    }
+  ],
+  "rows": [
+    {
+      "id": "2026-09-16.transitions-e1e4.e1-flf",
+      "suite": "transitions-e1e4",
+      "recordedAt": "2026-09-16T15:28:49.907Z",
+      "candidate": {
+        "id": "e1-flf",
+        "label": "FLF splice (last-of-A + first-of-B stills)",
+        "kind": "arm"
+      },
+      "incumbent": true,
+      "metrics": {
+        "join_psnr_db": [
+          36.2,
+          34.3
+        ],
+        "class": "timeline-invisible (latent-continuation class)"
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E1: FLF is the splice champion — no seamless model-generated joins exist (every Strategy-B arm renders a well-formed internal cut); FLF joins are timeline-invisible."
+      },
+      "provenance": {
+        "flux": "qx1e45p",
+        "doc": "docs/research/h3-transitions-and-latent-continuity.md ADDENDUM",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.transitions-e1e4.e1-bridge",
+      "suite": "transitions-e1e4",
+      "recordedAt": "2026-09-16T15:28:49.907Z",
+      "candidate": {
+        "id": "e1-bridge",
+        "label": "AddGuide bridge (A-tail@0 + B-head@-22)",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "join_psnr_db": [
+          19.1,
+          15.9
+        ]
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E1: bridge renders a well-formed INTERNAL CUT, not a seamless join — diegetic-only. Replay anchors 36.5/31.5 dB; hard cut 9.8 dB."
+      },
+      "provenance": {
+        "flux": "qx1e45p",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.transitions-e1e4.e1-cut",
+      "suite": "transitions-e1e4",
+      "recordedAt": "2026-09-16T15:28:49.909Z",
+      "candidate": {
+        "id": "e1-cut",
+        "label": "hard cut + post (ffmpeg concat)",
+        "kind": "arm"
+      },
+      "incumbent": true,
+      "metrics": {
+        "join_psnr_db": [
+          9.8
+        ]
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E1: the baseline — a hard cut measures ~13 dB class against unrelated spans 11-15 dB; the gap menu default."
+      },
+      "provenance": {
+        "flux": "qx1e45p",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.transitions-e1e4.e2-flash",
+      "suite": "transitions-e1e4",
+      "recordedAt": "2026-09-16T15:28:49.910Z",
+      "candidate": {
+        "id": "e2-flash",
+        "label": "black-frame boundary (prompt flash + guided black)",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "dip_window_frames": [
+          15,
+          18
+        ],
+        "audio_boundary_step_guided": 0.199,
+        "audio_boundary_step_control": 0.42
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E2: validated as a dip-to-black transition — the ~0.7 s dip is STRUCTURAL (temporal-VAE grid), not a defect; guided black halves the audio boundary step; audio survives all black boundaries."
+      },
+      "provenance": {
+        "flux": "qx1e45p",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.transitions-e1e4.e3-airlock",
+      "suite": "transitions-e1e4",
+      "recordedAt": "2026-09-16T15:28:49.910Z",
+      "candidate": {
+        "id": "e3-airlock",
+        "label": "airlock + audio pinning 2x2",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "join_corr_unpinned": 0.037,
+        "join_corr_pinned": 0.87,
+        "seam_ratios": [
+          0.88,
+          1.26
+        ],
+        "seam_psnr_db_range": [
+          31,
+          33
+        ],
+        "min_airlock_mad": 1.1
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E3: Motion-Context audio-pinning replicated on our stack (published 0.45->0.95+); airlock is not a seam tool on ambient content; guided-boundary video seams invisible in all arms."
+      },
+      "provenance": {
+        "flux": "qx1e45p",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.transitions-e1e4.e4-crossfade",
+      "suite": "transitions-e1e4",
+      "recordedAt": "2026-09-16T15:28:49.911Z",
+      "candidate": {
+        "id": "e4-crossfade",
+        "label": "synthetic latent crossfade (decode-only + sampled)",
+        "kind": "arm"
+      },
+      "incumbent": true,
+      "metrics": {
+        "decode_psnr_db_range": [
+          29,
+          36.6
+        ],
+        "endpoint_psnr_db": 36.5,
+        "sampled_pinned_rows_psnr_db": [
+          31.5,
+          39.8
+        ]
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E4: PRODUCT PATH — the zero-prior-art synthetic-latent transition works: decode-only == pixel dissolve (round-trip class at endpoints); the sampled arm preserves pinned synthesized rows. Open knob: back-loaded pacing (tranche-2 follow-up moved the crossover LATER, f24->f34; the tranche-1 ramp stands as the recommendation)."
+      },
+      "provenance": {
+        "flux": "qx1e45p + 7ed5ewa E4-pacing follow-up",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.transitions-e1e4.e5-ref-video",
+      "suite": "transitions-e1e4",
+      "recordedAt": "2026-09-16T15:28:49.911Z",
+      "candidate": {
+        "id": "e5-ref-video",
+        "label": "E5 chain A22: ref_video continuation (ref2va)",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "anchor_db": 10,
+        "arcface_hop1": 0.12,
+        "wall_multiplier_vs_replay": 0.77
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E5: ref_video = the STORY engine — all beats on schedule, weakest anchors, identity dies first; not a continuity tool."
+      },
+      "provenance": {
+        "flux": "7ed5ewa",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.transitions-e1e4.e5-replay",
+      "suite": "transitions-e1e4",
+      "recordedAt": "2026-09-16T15:28:49.912Z",
+      "candidate": {
+        "id": "e5-replay",
+        "label": "E5 chain B22: AddGuide pixel replay (fl2va)",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "anchor_db": [
+          35,
+          36
+        ],
+        "wall_penalty_pct": 30
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E5: replay = the balanced default — strong anchors at +30% wall."
+      },
+      "provenance": {
+        "flux": "7ed5ewa",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.transitions-e1e4.e5-latent-handoff",
+      "suite": "transitions-e1e4",
+      "recordedAt": "2026-09-16T15:28:49.913Z",
+      "candidate": {
+        "id": "e5-latent-handoff",
+        "label": "E5 chains C22/C39: raw latent handoff (nested noise-mask shim)",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "anchor_db": [
+          39,
+          42
+        ],
+        "window_22_vs_39": "pin quality flat; audio joins smoother at 39; content drag worse at 39"
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E5: latent handoff = the continuity engine (loopforge's latent>pixel ordering replicated) BUT pins DRAG content back to the source scene (the 39f pin lost the hallway beat entirely). Chain guidance: 22f default, 39f when audio phase-exactness matters."
+      },
+      "provenance": {
+        "flux": "7ed5ewa",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.transitions-e1e4.e6-singlepass",
+      "suite": "transitions-e1e4",
+      "recordedAt": "2026-09-16T15:28:49.914Z",
+      "candidate": {
+        "id": "e6-singlepass",
+        "label": "E6: single-pass multi-shot (timed shots, <scenetrans>)",
+        "kind": "arm"
+      },
+      "incumbent": true,
+      "metrics": {
+        "cut_adherence_frames": [
+          1,
+          4
+        ],
+        "shot_looping_self_sim_db": [
+          10,
+          14
+        ],
+        "audio_smoothness_vs_hardcut_x": [
+          4,
+          20
+        ],
+        "cost_vs_cut_together": 0.78,
+        "arcface_cross_shot": [
+          0.14,
+          0.44
+        ]
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E6: single-pass multi-shot WINS at our tier — cuts land within 1-4 frames of instruction, zero looping, audio 4-20x smoother than hard-cut concat; <scenetrans>+audio clauses bought NOTHING measurable; identity weak in BOTH regimes (identity payloads matter more, not less)."
+      },
+      "provenance": {
+        "flux": "7ed5ewa",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.preservation-k1.vae_floor",
+      "suite": "preservation-k1",
+      "recordedAt": "2026-09-16T15:28:49.914Z",
+      "candidate": {
+        "id": "vae_floor",
+        "label": "VAE round-trip floor",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "psnr_db": [
+          46.32,
+          45.73
+        ],
+        "de76": [
+          0.52,
+          0.55
+        ]
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E-K1: the measurement floor — any outside-region number must be read against ~46 dB."
+      },
+      "provenance": {
+        "flux": "7ed5ewa",
+        "artifacts": "test-results/experiments/tranche2/e_k1_metrics.json",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.preservation-k1.ie_instruct",
+      "suite": "preservation-k1",
+      "recordedAt": "2026-09-16T15:28:49.915Z",
+      "candidate": {
+        "id": "ie_instruct",
+        "label": "Identity Edit v1_2 on Turbo — coat change",
+        "kind": "arm"
+      },
+      "incumbent": true,
+      "metrics": {
+        "outside_psnr_db": 26.45,
+        "outside_de76": 4.78,
+        "outside_excl_ring_psnr_db": 26.61,
+        "arcface": 0.9362
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E-K1: instruction edits LEAK ~26 dB outside the edit region (identity holds at 0.9362) — regenerative, not localized."
+      },
+      "provenance": {
+        "flux": "7ed5ewa",
+        "artifacts": "e_k1_metrics.json",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.preservation-k1.ie_removal",
+      "suite": "preservation-k1",
+      "recordedAt": "2026-09-16T15:28:49.916Z",
+      "candidate": {
+        "id": "ie_removal",
+        "label": "Identity Edit on RAW — handbag removal",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "outside_psnr_db": 27.66,
+        "outside_excl_ring_psnr_db": 33.94,
+        "outside_de76": 1.95,
+        "arcface": 0.9759
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E-K1: removal on RAW is the cleaner edit path (33.9 dB excl-ring, identity 0.976)."
+      },
+      "provenance": {
+        "flux": "7ed5ewa",
+        "artifacts": "e_k1_metrics.json",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.preservation-k1.ap_inpaint",
+      "suite": "preservation-k1",
+      "recordedAt": "2026-09-16T15:28:49.917Z",
+      "candidate": {
+        "id": "ap_inpaint",
+        "label": "AnyPaint masked inpaint — lemons bowl",
+        "kind": "arm"
+      },
+      "incumbent": true,
+      "metrics": {
+        "outside_psnr_db": 40.25,
+        "outside_excl_ring_psnr_db": 47.12,
+        "outside_de76": 0.63,
+        "inside_psnr_db": 11.44
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E-K1: the measured preservation CEILING — outside the 32-px blend band the image is VAE-floor-class (47 dB)."
+      },
+      "provenance": {
+        "flux": "7ed5ewa",
+        "artifacts": "e_k1_metrics.json",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.preservation-k1.ap_outpaint",
+      "suite": "preservation-k1",
+      "recordedAt": "2026-09-16T15:28:49.918Z",
+      "candidate": {
+        "id": "ap_outpaint",
+        "label": "AnyPaint outpaint pad-right 512",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "orig_region_psnr_db": 43.09,
+        "orig_region_excl_ring_psnr_db": 45.58
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E-K1: outpaint preserves the original region at 43-45.6 dB — near-floor."
+      },
+      "provenance": {
+        "flux": "7ed5ewa",
+        "artifacts": "e_k1_metrics.json",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.preservation-k1.recipe_t0",
+      "suite": "preservation-k1",
+      "recordedAt": "2026-09-16T15:28:49.919Z",
+      "candidate": {
+        "id": "recipe_t0",
+        "label": "ReferenceLatent index_timestep_zero (off-recipe)",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "meanad": 40.06,
+        "psnr_db": 12.89,
+        "recipe_index_meanad": 5.3,
+        "recipe_index_psnr_db": 30.42
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E-K1: the ostris recipe is off-recipe for the identity LoRA — 40 meanAD vs 5.3 for the on-recipe index method."
+      },
+      "provenance": {
+        "flux": "7ed5ewa",
+        "artifacts": "e_k1_metrics.json",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.nonhuman-fc1.A",
+      "suite": "nonhuman-fc1",
+      "recordedAt": "2026-09-16T15:28:49.919Z",
+      "candidate": {
+        "id": "A",
+        "label": "human baseline (DWPose render -> Fun Control)",
+        "kind": "arm"
+      },
+      "incumbent": true,
+      "metrics": {
+        "err_px_mean": [
+          13.9,
+          26
+        ],
+        "err_pct_frame_diag": [
+          1.45,
+          2.7
+        ],
+        "detections": "39/39 both seeds"
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E-FC1: the human-path calibration floor — 13.9-26.0 px round-trip error."
+      },
+      "provenance": {
+        "flux": "ma59y73",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.nonhuman-fc1.B",
+      "suite": "nonhuman-fc1",
+      "recordedAt": "2026-09-16T15:28:49.920Z",
+      "candidate": {
+        "id": "B",
+        "label": "AP-10K quadruped skeleton -> Fun Control",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "err_px_mean": [
+          40.7,
+          73.8
+        ],
+        "err_pct_subject_bbox": [
+          7.62,
+          13.94
+        ],
+        "detections": "39/39 animal, both seeds",
+        "vs_A_multiplier": [
+          2.9,
+          3
+        ]
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E-FC1: the pose surface is topology-TOLERANT, not agnostic — a real articulated dog every time (NEVER humanized), at ~3x the human-skeleton error."
+      },
+      "provenance": {
+        "flux": "ma59y73",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.nonhuman-fc1.C",
+      "suite": "nonhuman-fc1",
+      "recordedAt": "2026-09-16T15:28:49.921Z",
+      "candidate": {
+        "id": "C",
+        "label": "authored humanoid riding dog torso trajectory",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "person_detections": "0/39 both seeds",
+        "vision_tag": "humanized creature / envelope-followed only"
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E-FC1: skeleton structure is followed as a loose envelope when topology and prompt disagree — zero human articulation."
+      },
+      "provenance": {
+        "flux": "ma59y73",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.nonhuman-fc1.D",
+      "suite": "nonhuman-fc1",
+      "recordedAt": "2026-09-16T15:28:49.923Z",
+      "candidate": {
+        "id": "D",
+        "label": "sprite/region composite (the shipped workaround)",
+        "kind": "arm"
+      },
+      "incumbent": true,
+      "metrics": {
+        "err_px_mean": [
+          29.3,
+          36.3
+        ],
+        "centroid_err_pct_width": 4,
+        "vs_B_multiplier": [
+          1.4,
+          2
+        ]
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E-FC1: sprite/region stays the reliable non-human DEFAULT (1.4-2x tighter than the AP-10K skeleton); the AP-10K template unlocks as first-class NON-DEFAULT with the measured label."
+      },
+      "provenance": {
+        "flux": "ma59y73",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.movement-md1.A",
+      "suite": "movement-md1",
+      "recordedAt": "2026-09-16T15:28:49.924Z",
+      "candidate": {
+        "id": "A",
+        "label": "control — direction unstated",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "checkpoint_err_pct_width_max": 69,
+        "backtracks": 17,
+        "teleports": 2,
+        "bg_psnr_db_range": [
+          9.5,
+          18.1
+        ]
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E-MD1: unguided = direction roulette (both seeds rolled the WRONG way) with path jitter and depth drift; re-renders the scene (unrelated-instance class)."
+      },
+      "provenance": {
+        "flux": "muwufpp tjyuteu",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.movement-md1.B",
+      "suite": "movement-md1",
+      "recordedAt": "2026-09-16T15:28:49.925Z",
+      "candidate": {
+        "id": "B",
+        "label": "AddGuide positional stills at 0/17/34 (25/50/75%)",
+        "kind": "arm"
+      },
+      "incumbent": true,
+      "metrics": {
+        "checkpoint_err_pct_width_max": 1.65,
+        "backtracks": 0,
+        "teleports": 0,
+        "bg_psnr_db_range": [
+          32.5,
+          36.5
+        ],
+        "interanchor_linearity": "36.8% @f8 / 63.3% @f26 vs linear 37.3/63.2",
+        "wall_s": [
+          66.2,
+          66.3
+        ]
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E-MD1: the maintainer's idea is a MOVEMENT DIRECTOR, full stop — plan landed to 0.0-1.65% width at every checkpoint, zero events, near-linear between anchors; BEATS the Fun-Control ceiling on this test; the movement director and the look-lock are the SAME mechanism (guides pin composition AND trajectory)."
+      },
+      "provenance": {
+        "flux": "muwufpp tjyuteu",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.movement-md1.C",
+      "suite": "movement-md1",
+      "recordedAt": "2026-09-16T15:28:49.926Z",
+      "candidate": {
+        "id": "C",
+        "label": "guides + spatial path-band mask (rows 14-22 feather 0.5)",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "bg_psnr_db_range": [
+          37.1,
+          37.5
+        ],
+        "grid_fft_lattice_ratios_vs_B": [
+          1.004,
+          1.067
+        ],
+        "wall_s": [
+          93.3,
+          93.5
+        ]
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E-MD1: path-band mask adds ~1 dB preservation with identical tracking and NO grid artifact (#15981 lattice check clean)."
+      },
+      "provenance": {
+        "flux": "muwufpp tjyuteu",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.movement-md1.D",
+      "suite": "movement-md1",
+      "recordedAt": "2026-09-16T15:28:49.927Z",
+      "candidate": {
+        "id": "D",
+        "label": "Fun Control union over sprite control video",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "positions_vision_read_pct": [
+          27,
+          44,
+          69,
+          82
+        ],
+        "bg_psnr_db_range": [
+          8.4,
+          15.7
+        ],
+        "wall_s": [
+          117.6,
+          120.3
+        ]
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E-MD1: good trajectory, wrong movie — shapes the PATH but anchors nothing else (each seed invents its own scene; ball renders maroon)."
+      },
+      "provenance": {
+        "flux": "muwufpp tjyuteu",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.movement-md1.E",
+      "suite": "movement-md1",
+      "recordedAt": "2026-09-16T15:28:49.928Z",
+      "candidate": {
+        "id": "E",
+        "label": "VDN-arch + guides (turbo adapter OFF, 20 steps)",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "checkpoint_err_pct_width_max": 1.56,
+        "backtracks": 0,
+        "teleports": 0,
+        "bg_psnr_db_range": [
+          36.2,
+          36.4
+        ],
+        "wall_s": [
+          120.3,
+          126.3
+        ]
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E-MD1: boundary-anchor hypothesis HOLDS — AddGuide keyframes survive the VDN hybrid-attention patch intact (B-identical tracking)."
+      },
+      "provenance": {
+        "flux": "muwufpp tjyuteu",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.ref2va-bakeoff.t4",
+      "suite": "ref2va-bakeoff",
+      "recordedAt": "2026-09-16T15:28:49.930Z",
+      "candidate": {
+        "id": "t4",
+        "label": "official ref2v 4-step (lightx2v publish), MERGE mode",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "arcface_mean": 0.208,
+        "wall_s": 78.6,
+        "vision": "DEGRADED both seeds: sepia collapse 2-3 stops, smeared detail, banding 6.5-7/10 on s1"
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "3a bake-off: the official 4-step is NOT usable at 4 steps in merge mode — later overturned in general by fused4 (the failure was THAT checkpoint, not the step count)."
+      },
+      "provenance": {
+        "flux": "muwufpp 66a2ji6",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.ref2va-bakeoff.l8",
+      "suite": "ref2va-bakeoff",
+      "recordedAt": "2026-09-16T15:28:49.931Z",
+      "candidate": {
+        "id": "l8",
+        "label": "lightx2v Ref2VA 8-step v1.0 768p",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "arcface_mean": 0.276,
+        "wall_s": 115.2,
+        "vision": "~80-85% of main8; darker/warmer/softer, waxy fabric"
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "3a bake-off: the close runner-up — legitimate option, darker/warmer out of the box."
+      },
+      "provenance": {
+        "flux": "muwufpp 66a2ji6",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.ref2va-bakeoff.main8",
+      "suite": "ref2va-bakeoff",
+      "recordedAt": "2026-09-16T15:28:49.932Z",
+      "candidate": {
+        "id": "main8",
+        "label": "larryvrh v4_step600_ema @8-step MERGE (drbaph-main lineage)",
+        "kind": "arm"
+      },
+      "incumbent": true,
+      "metrics": {
+        "arcface_mean": 0.268,
+        "arcface_f062_f123_s421337": [
+          0.245,
+          0.24
+        ],
+        "wall_s": 117.3,
+        "vision": "BEST turbo: closest to baseline exposure, most detail, steadiest frames"
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "3a bake-off + maintainer steer: the DEFAULT OF THE FAST TIER ONLY (neutral look) — identity indistinguishable from l8 (inside seed spread 0.12-0.37); 0.53x the 20-step wall. Turbo costs NO identity on Ref2VA."
+      },
+      "provenance": {
+        "flux": "muwufpp 66a2ji6 + yr2fcde",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.ref2va-bakeoff.pdd8",
+      "suite": "ref2va-bakeoff",
+      "recordedAt": "2026-09-16T15:28:49.933Z",
+      "candidate": {
+        "id": "pdd8",
+        "label": "alibaba-pai PDD Ref2VA-Acc-8Step",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "load_error": "KeyError 'transformer_blocks.0.adaln_proj.linear.lora_A.weight' (deterministic x2)"
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "3a bake-off: PDD/Acc is not currently a Ref2VA option for us — fails to load on the pruned base via the stock node, exactly as the compat doc predicts (needs a PDD head loader/sampler)."
+      },
+      "provenance": {
+        "flux": "muwufpp 66a2ji6",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.ref2va-bakeoff.ref20",
+      "suite": "ref2va-bakeoff",
+      "recordedAt": "2026-09-16T15:28:49.935Z",
+      "candidate": {
+        "id": "ref20",
+        "label": "no turbo, euler/simple 20 steps (anchor)",
+        "kind": "arm"
+      },
+      "incumbent": false,
+      "metrics": {
+        "arcface_mean": 0.154,
+        "wall_s": 220.6,
+        "vision": "quality ceiling 9/10, crisp, correct sunlit grade"
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "3a bake-off: the quality/identity anchor — and the proof the reference-mode identity ceiling is set by pose/lighting/resolution, not step count (0.154 sits INSIDE the turbo band 0.12-0.37)."
+      },
+      "provenance": {
+        "flux": "muwufpp 66a2ji6",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.ref2va-bakeoff.fused4",
+      "suite": "ref2va-bakeoff",
+      "recordedAt": "2026-09-16T15:28:49.936Z",
+      "candidate": {
+        "id": "fused4",
+        "label": "MATLOWAI fused-turbo @4-step (catalog matlowai-fused-turbo-int8, sha-verified fetch)",
+        "kind": "arm",
+        "catalogId": "matlowai-fused-turbo-int8"
+      },
+      "incumbent": true,
+      "metrics": {
+        "arcface_f0_f62_f123_s421337": [
+          0.3834,
+          0.4017,
+          0.3655
+        ],
+        "wall_s": 87.9,
+        "peak_vram_gib_in_use": 23.3,
+        "blind": "RIGHT column WINS CLEARLY (identity markers all visible, clean color) vs main8 (shadow-buried face, amber collapse)"
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "3b: the ref2va-at-4-step claim VERIFIES decisively — highest identity band of ANY arm (0.37-0.40 vs 0.09-0.24 everywhere else), 0.75x wall vs main8, blind clear-gap. COUNTERS (honest): Mystic v2.0 @0.7 folded in = STYLE-OPINIONATED (not a neutral default); no VRAM saving at 480p (23.3 vs 22.2 GiB). New Ref2VA fast-tier default CANDIDATE; main8 stays the neutral fallback. Mechanism: merged-then-quantized beats quantize-then-patch on the path we ship."
+      },
+      "provenance": {
+        "flux": "a80ekav zhgg33m",
+        "recordedAt": "2026-09-16",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.tier-ladder.t8",
+      "suite": "tier-ladder",
+      "recordedAt": "2026-09-16T15:28:49.937Z",
+      "candidate": {
+        "id": "t8",
+        "label": "turbo tier (larryvrh v4 MERGE + TurboSampler, 8 steps)",
+        "kind": "arm"
+      },
+      "incumbent": true,
+      "metrics": {
+        "wall_s": 117.3,
+        "arcface_f0_f62_f123": [
+          0.1023,
+          0.2416,
+          0.2
+        ],
+        "blind_rank_fullres": 1,
+        "blind_rank_contact": 1
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "3b held-seed tier arm: the 8-step turbo tier is the SHARPEST at full-res (two independent blind passes: t8 > vdn20 > t25 > t20) — the 'quality tiers' buy NO visible still detail at 480p ref-mode; tier value beyond turbo = motion/audio/pinned-row robustness, NOT sharpness."
+      },
+      "provenance": {
+        "flux": "a80ekav sqzwroy",
+        "recordedAt": "2026-09-16",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.tier-ladder.t20",
+      "suite": "tier-ladder",
+      "recordedAt": "2026-09-16T15:28:49.939Z",
+      "candidate": {
+        "id": "t20",
+        "label": "plain euler/simple 20 steps",
+        "kind": "arm"
+      },
+      "incumbent": true,
+      "metrics": {
+        "wall_s": 220.6,
+        "arcface_f0_f62_f123": [
+          0.1271,
+          0.1318,
+          0.1307
+        ],
+        "blind_rank_fullres": 4,
+        "blind_note": "uniform waxy denoised look, almost no weave"
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "3b: read SOFTEST of all four tiers at full-res — keep the full tier at 20 steps only for the unmeasured robustness axes, never for sharpness."
+      },
+      "provenance": {
+        "flux": "a80ekav sqzwroy",
+        "recordedAt": "2026-09-16",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.tier-ladder.t25",
+      "suite": "tier-ladder",
+      "recordedAt": "2026-09-16T15:28:49.940Z",
+      "candidate": {
+        "id": "t25",
+        "label": "plain euler/simple 25 steps",
+        "kind": "arm"
+      },
+      "incumbent": true,
+      "metrics": {
+        "wall_s": 272.5,
+        "arcface_f0_f62_f123": [
+          0.1559,
+          0.0912,
+          0.0927
+        ],
+        "blind_rank_fullres": 3,
+        "pairwise_psnr_vs_t8_f0": 18.66
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "3b: 25-step costs +23% wall over 20-step for nothing blind-visible ('milky haze/bloom flattening micro-contrast')."
+      },
+      "provenance": {
+        "flux": "a80ekav sqzwroy",
+        "recordedAt": "2026-09-16",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.tier-ladder.vdn20",
+      "suite": "tier-ladder",
+      "recordedAt": "2026-09-16T15:28:49.942Z",
+      "candidate": {
+        "id": "vdn20",
+        "label": "VDN-arch hero (stage-dmd-step-250, turbo adapter OFF, 20 steps)",
+        "kind": "arm"
+      },
+      "incumbent": true,
+      "metrics": {
+        "wall_s": 279.5,
+        "arcface_f0_f62_f123": [
+          0.1315,
+          0.2023,
+          0.13
+        ],
+        "blind_rank_fullres": 2,
+        "blind_note": "richest copper patina, near-t8"
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "3b: near-tie with turbo on stills at 2.4x its wall — the VDN tier's value is the 10s-class architecture claim, not this 5s scene."
+      },
+      "provenance": {
+        "flux": "a80ekav sqzwroy",
+        "recordedAt": "2026-09-16",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.tier-ladder.held-seed-divergence",
+      "suite": "tier-ladder",
+      "recordedAt": "2026-09-16T15:28:49.943Z",
+      "candidate": {
+        "id": "held-seed-divergence",
+        "label": "same-seed cross-tier divergence (the sibling-take measurement)",
+        "kind": "measurement"
+      },
+      "incumbent": false,
+      "metrics": {
+        "pairwise_psnr_f0_range_db": [
+          18.19,
+          25.02
+        ],
+        "motion_pearson_r_range": [
+          0.7559,
+          0.8288
+        ],
+        "best_lag_frames": 0,
+        "peak_frame_delta_range": [
+          51,
+          59
+        ],
+        "arcface_band_all_tiers": [
+          0.09,
+          0.24
+        ]
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "3b (the maintainer's question answered): same seed across tiers = a SIBLING TAKE, not a refinement — 18-25 dB divergence with changed set dressing; motion timing unchanged (lag 0); identity flat across ALL tiers. UI consequence: 'lock take -> rerun at hero' must be labeled SIBLING TAKE (append-only keeps both)."
+      },
+      "provenance": {
+        "flux": "a80ekav sqzwroy + jqqn6mv",
+        "recordedAt": "2026-09-16",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.tier-ladder.vdn8-10s",
+      "suite": "tier-ladder",
+      "recordedAt": "2026-09-16T15:28:49.945Z",
+      "candidate": {
+        "id": "vdn8-10s",
+        "label": "VDN-8 first-hand timing (10 s @ 0.4 MP, sanctioned recipe, int8 TE)",
+        "kind": "measurement"
+      },
+      "incumbent": false,
+      "metrics": {
+        "steady_step_s": 23,
+        "sampling_span_s": 189,
+        "wall_with_reload_s": 270.4,
+        "maintainer_reference_step_s": 15.74
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "3b: first-party hero-tier number — 23.0 s/step steady x8; gap to the maintainer's 15.74 decomposes into their int8-convrot VDN stage + AutoLongCache policy (both staged upgrades, not bugs). ~4.5 min wall end-to-end for 10 s @0.4MP."
+      },
+      "provenance": {
+        "flux": "a80ekav jlwmt85",
+        "recordedAt": "2026-09-16",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.hybrid-ab.stock-wardrobe",
+      "suite": "hybrid-ab",
+      "recordedAt": "2026-09-16T15:28:49.946Z",
+      "candidate": {
+        "id": "stock-wardrobe",
+        "label": "stock Ref2VA — wardrobe swap",
+        "kind": "arm"
+      },
+      "incumbent": true,
+      "metrics": {
+        "thirds_psnr_whole_mean": 10,
+        "thirds_top_mid_bot": [
+          9.11,
+          8.86,
+          13.27
+        ],
+        "arcface_f0_f19_f38": [
+          0.1182,
+          0.2462,
+          0.1984
+        ],
+        "wall_s": 78.3
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E-ED1: stock lands the edit but is a full semantic re-synthesis (10 dB whole = re-render class); identity-through-edit 0.12-0.25."
+      },
+      "provenance": {
+        "flux": "a80ekav evrgzi8",
+        "artifacts": "e_ed1_metrics.json",
+        "recordedAt": "2026-09-16",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.hybrid-ab.hybrid-wardrobe",
+      "suite": "hybrid-ab",
+      "recordedAt": "2026-09-16T15:28:49.948Z",
+      "candidate": {
+        "id": "hybrid-wardrobe",
+        "label": "FL2VA+Ref2VA-adaln b25-49 (HybridLoader) — wardrobe swap",
+        "kind": "arm"
+      },
+      "incumbent": true,
+      "metrics": {
+        "thirds_psnr_whole_mean": 13.37,
+        "thirds_top_mid_bot": [
+          12.58,
+          13.19,
+          14.57
+        ],
+        "arcface_f0_f19_f38": [
+          0.314,
+          0.3492,
+          0.3485
+        ],
+        "wall_s": 78.3,
+        "delta_vs_stock_whole_db": 3.37
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E-ED1: hybrid WINS the subject-preserving edit on every pixel metric simultaneously (+3.4 dB whole, +1.3-3.5 dB every third, identity ~2.5x) at ZERO wall cost — the recommended reference-mode for identity work (directional: 1 seed, 1 pair)."
+      },
+      "provenance": {
+        "flux": "a80ekav evrgzi8",
+        "artifacts": "e_ed1_metrics.json",
+        "recordedAt": "2026-09-16",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.hybrid-ab.stock-vs-hybrid-background",
+      "suite": "hybrid-ab",
+      "recordedAt": "2026-09-16T15:28:49.950Z",
+      "candidate": {
+        "id": "stock-vs-hybrid-background",
+        "label": "background swap: stock 10.16 vs hybrid 10.38 dB whole (tie)",
+        "kind": "measurement"
+      },
+      "incumbent": false,
+      "metrics": {
+        "stock_whole_mean": 10.16,
+        "hybrid_whole_mean": 10.38,
+        "text_survival": "CREMA 4/4 + SOUP 5 4/4 LEGIBLE",
+        "one_additive_drift": "stock background gen hallucinated 3-4 extra chalk lines"
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "E-ED1: NO hybrid advantage on scene-replacing edits (tie; stock held framing/counter better) + the first measured edit A/B on H3; text through edits survived legibly in all four gens — counter-evidence to the 'small text drifts' doctrine at this size; neither arm ever pixel-preserves."
+      },
+      "provenance": {
+        "flux": "a80ekav evrgzi8",
+        "recordedAt": "2026-09-16",
+        "source": "backfill"
+      }
+    },
+    {
+      "id": "2026-09-16.transitions-e1e4.cost-survey",
+      "suite": "transitions-e1e4",
+      "recordedAt": "2026-09-16T15:28:49.952Z",
+      "candidate": {
+        "id": "cost-survey",
+        "label": "turbo-8 vs VDN-8 cost (survey-calibration rows)",
+        "kind": "measurement"
+      },
+      "incumbent": false,
+      "metrics": {
+        "turbo_step_s": 28.7,
+        "vdn_step_s": 15.7,
+        "vdn_note": "maintainer's own 3090 validation (stages not local at the time; substitution documented)"
+      },
+      "environmentId": "2026-09-rtx3090-testbed",
+      "verdict": {
+        "text": "Tranche 1 cost row: turbo-8 dense MISSES the 2-3 min target (282-306 s/10 s @0.4MP); VDN-8 MEETS it (2:05)."
+      },
+      "provenance": {
+        "flux": "qx1e45p",
+        "recordedAt": "2026-09-15",
+        "source": "backfill"
+      }
+    }
+  ],
+  "generatedNote": "Append-only. Rows are never edited or removed; corrections append a superseding row. Regenerate LEADERBOARD.md with `node benchmarks/run.mjs --regen-leaderboard`."
+}

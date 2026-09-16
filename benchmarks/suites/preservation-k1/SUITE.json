@@ -1,0 +1,65 @@
+{
+  "name": "preservation-k1",
+  "family": "Krea 2 measured-preservation ladder on image edits (E-K1)",
+  "origin": "tranche 2 (Flux 7ed5ewa); scripts ported from test-results/experiments/tranche2/scripts/{build_k1,run_k1,analyze_k1,t1_metrics}.py — vocabulary docs/research/krea2-edit-mode.md §4",
+  "measures": "Outside-region PSNR + dE76 (32-px boundary band excluded then included — separates AnyPaint's blend band from true drift), meanAD, VAE round-trip floor as the measurement floor, ArcFace identity through edits.",
+  "fixtures": {
+    "scene": "1024x1024 stills: src1 woman+handbag portrait (kitchen window bench), src2 rustic kitchen counter",
+    "sourcePrompts": {
+      "src1": "Studio portrait of a woman in her early thirties with a short black bob haircut and thin silver hoop earrings, wearing a rust-orange wool coat, seated on a wooden bench beside a sunlit kitchen window; a bright red leather handbag sits on the bench to her right, fully visible. Soft warm daylight, photographic, sharp focus.",
+      "src2": "A rustic kitchen counter scene in late-afternoon light: a copper pot of soup with steam rising at center-left, a wooden cutting board with lemons at right, weathered wooden counter surface, a window with white curtains behind. Photographic, sharp focus, no people."
+    },
+    "editPairs": {
+      "instruct": "Change her coat from rust-orange to a deep forest-green wool coat.",
+      "removal": "Remove the red leather handbag from the bench.",
+      "inpaint": "a bowl of ripe lemons on the wooden counter, consistent lighting and detail",
+      "outpaint": "a complete coherent image, consistent lighting, perspective, and detail: the rustic kitchen continues naturally with more wooden counter, a dresser with ceramic jars, and the window light falling across it"
+    },
+    "maskBoxes": "boxes.json (committed) — src1_handbag / src1_coat / src2_counter_right pixel boxes",
+    "seed": 421337,
+    "inputAssets": "testbed input/exp_k1/ (src1.png, src2.png + derived masks — staged by run_k1.py src|masks)",
+    "models": {
+      "textEncoder": "qwen3-vl-4b.safetensors (bf16 with vision tower; fp8_scaled not on testbed — substitution documented)",
+      "unetTurbo": "krea2_turbo_int8_convrot.safetensors",
+      "unetRaw": "krea2_raw.safetensors",
+      "vae": "qwen_image_vae.safetensors",
+      "loraIdentityEdit": "krea2_identity_edit_v1_2.safetensors (sha-verified)",
+      "loraAnypaint": "krea2_anypaint_rank32.safetensors (sha-verified)",
+      "packs": "comfyui-krea2edit @86f886da, anypaint @675be5a (pinned, verified)"
+    }
+  },
+  "arms": {
+    "ie_instruct": {"label": "Identity Edit on Turbo (8 steps CFG1, grounding 768, ref_boost 1)", "incumbent": true, "role": "incumbent-edit"},
+    "ap_inpaint": {"label": "AnyPaint masked refine — the measured preservation ceiling (47.1 dB excl-ring outside-mask)", "incumbent": true, "role": "incumbent-ceiling"},
+    "ie_removal": {"label": "Identity Edit on RAW (CFG3, 20 steps, grounded negative)", "incumbent": false},
+    "ap_outpaint": {"label": "AnyPaint pad-right 512", "incumbent": false},
+    "recipe_index": {"label": "core ReferenceLatent carrier via EditModelReferenceMethod(index) — on-recipe", "incumbent": false},
+    "recipe_t0": {"label": "index_timestep_zero — ostris recipe, off-recipe (measured BAD: meanAD 40)", "incumbent": false},
+    "vae_floor": {"label": "VAEEncode->VAEDecode round trip — the measurement floor (~46 dB)", "incumbent": false, "role": "floor"}
+  },
+  "candidateSlot": {
+    "description": "A candidate EDIT PATH on the same source+instruction: a new identity-edit LoRA version, an alternative unet, or a recipe tweak (steps/cfg/grounding/ref_boost/instruction). Measured against ie_instruct (the edit incumbent) with the AnyPaint ceiling and the VAE floor as reference rows.",
+    "kinds": ["edit-path"],
+    "requires": [],
+    "slotFields": {
+      "lora": "LoRA file name (default the identity-edit v1_2 incumbent)",
+      "unet": "unet file (default turbo int8 convrot)",
+      "instruction": "default the instruct edit pair",
+      "steps": "default 8",
+      "cfg": "default 1.0 (CFG>1 grounds the negative per the pack docs)",
+      "groundingPx": "default 768",
+      "refBoost": "default 1.0",
+      "catalogId": "optional fetch-catalog id — run.mjs fetches it first and surfaces the license at run start"
+    }
+  },
+  "metrics": ["outside_region_psnr_db", "outside_region_de76", "meanad", "boundary_ring_32px_excl_incl", "arcface_identity", "vae_floor_referenced"],
+  "rubric": {
+    "pair": "Edited still vs its source. Judge: (1) did the instruction land (green coat / handbag gone / lemons bowl / extended kitchen)? (2) OUTSIDE the edit region: face identity, earrings, bench, counter, window — preserved pixel-faithfully or re-synthesized? (3) boundary: visible seam/blend band at the edit edge?"
+  },
+  "limits": [
+    "1024x1024 STILLS — video preservation is a different regime (see hybrid-ab for H3 video edits).",
+    "Outside-region PSNR conflates edit leakage and compression; the 32-px ring exclusion separates AnyPaint's intentional blend band.",
+    "The identity-edit v1_2 LoRA is a single version; a candidate version bump may also need its pack's node updates (record pack pins).",
+    "dE76 via manual sRGB->Lab (D65) — accurate enough for drift comparison, not colorimetry."
+  ]
+}

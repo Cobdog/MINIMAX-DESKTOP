@@ -1,0 +1,9 @@
+{
+  "_provenance": "vision-read bboxes (zai analyze_image, 2026-09-15) on input/exp_k1/src{1,2}.png (1024x1024, generated in-frame on krea2_turbo_int8_convrot, seed 421337)",
+  "src1_handbag": [85, 570, 330, 900],
+  "src1_coat": [285, 285, 795, 1024],
+  "src1_face": [445, 112, 600, 308],
+  "src2_board_lemons": [597, 425, 983, 703],
+  "src2_pot": [150, 515, 560, 858],
+  "src2_counter_right": [555, 715, 1020, 1015]
+}

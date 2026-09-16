@@ -1,0 +1,65 @@
+{
+  "name": "nonhuman-fc1",
+  "family": "Fun Control pose-surface topology generalization (E-FC1)",
+  "origin": "efc1 tranche (Flux ma59y73); scripts ported from test-results/experiments/efc1/scripts/{build,run,assets,analyze}.py — spec docs/research/fun-control-input-surface.md §3.2",
+  "measures": "Estimator round-trip keypoint error vs each arm's control keypoints (mean/median px, % of frame diag, % of subject-bbox diag, p50/p90), detection counts, manual vision tags (quadruped rendered vs humanized vs envelope-only), wall-clock.",
+  "fixtures": {
+    "scene": "portrait room crossing, 39f @ 480x832, res_multistep + simple shifts 12/3, guidance 1.0 (BasicGuider), turbo OFF, caches OFF",
+    "prompts": {
+      "dance": "A dancer moves across the room.",
+      "dog": "A dog trots across the room.",
+      "creature": "A strange tall creature walks across the room."
+    },
+    "width": 480,
+    "height": 832,
+    "length": 39,
+    "armSeeds": [421337, 421338],
+    "sourceSeed": 421337,
+    "stepsArm": 40,
+    "stepsSource": 20,
+    "strength": 1.0,
+    "endPercent": 0.6,
+    "shifts": [12.0, 3.0],
+    "inputAssets": "testbed input/efc1/ (source frames, control renders, authored humanoid skeleton, sprite composite — derived by assets.py)",
+    "models": {
+      "textEncoder": "qwen3vl_32b_int8_convrot.safetensors",
+      "unetFl2va": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "vaeVideo": "minimax_h3_video_vae_fp16.safetensors",
+      "vaeAudio": "minimax_h3_audio_vae_fp32.safetensors",
+      "funControlPatch": "minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors"
+    },
+    "estimatorCatalogIds": {
+      "ap10kPose": "AP-10K rtmpose-m torchscript (fetches on first use via pack ckpts — recorded in the fetch log)",
+      "yoloxAnimal": "yolox_l.torchscript animal-class detector (COCO classes 14-23)"
+    }
+  },
+  "arms": {
+    "A": {"label": "human baseline — DWPose render of the dance clip -> Fun Control (the path that must work end-to-end)", "incumbent": true, "role": "baseline"},
+    "B": {"label": "AP-10K quadruped skeleton of the dog trot -> Fun Control (the topology question)", "incumbent": false},
+    "C": {"label": "authored humanoid skeleton riding the dog torso trajectory (format-vs-semantics control)", "incumbent": false},
+    "D": {"label": "sprite/region composite of the dog along the trot path (the shipped-workaround ceiling)", "incumbent": true, "role": "incumbent-ceiling"}
+  },
+  "candidateSlot": {
+    "description": "A candidate CONTROL METHOD or SKELETON FORMAT: a prebuilt control-video frame folder + the estimator used to score it (dwpose body-18 or ap10k 17), or an alternative fun-control recipe (strength/endPercent/steps). Slots in against arms A (human parity) and D (workaround ceiling).",
+    "kinds": ["control-video", "recipe"],
+    "requires": [],
+    "slotFields": {
+      "controlDir": "testbed input subdir with f%06d.png control frames (control-video)",
+      "prompt": "the arm prompt (control-video; default fixtures.prompts.dog)",
+      "estimator": "dwpose | animalpose — which estimator scores the round trip (control-video)",
+      "strength": "default 1.0 (recipe)",
+      "endPercent": "default 0.6 (recipe)",
+      "steps": "default 40 (recipe)"
+    }
+  },
+  "metrics": ["roundtrip_keypoint_err_px_mean_med", "err_pct_frame_diag", "err_pct_subject_bbox_diag", "p50_p90_px", "detections_per_39", "vision_tag"],
+  "rubric": {
+    "contact": "Contact sheet of a room-crossing generation. Tag: (1) is a QUADRUPED rendered with proper quadruped articulation (never a bent human, never a draped spectral figure)? (2) does it follow the left-to-right crossing path? (3) pose fidelity vs the control render: stride/limb placement plausibility."
+  },
+  "limits": [
+    "Round-trip error conflates control adherence and estimator noise; the human baseline A calibrates the floor (measured: A 13.9-26.0 px).",
+    "Estimator torchscripts load to CUDA outside ComfyUI management — the estimator-restart rule applies between phases (restart or free_verified slack 900 MiB before sampling).",
+    "The resolution=480 trick (k=1 on 480x832) is what keeps AP-10K keypoint JSON in native pixel coordinates — do not change resolution without remapping.",
+    "Single subject class (dog); AP-10K covers more, untested here."
+  ]
+}

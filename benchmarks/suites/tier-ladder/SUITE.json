@@ -1,0 +1,59 @@
+{
+  "name": "tier-ladder",
+  "family": "speed/quality tier ordering at a held seed",
+  "origin": "tranche 3b item 1 (Flux a80ekav sqzwroy) + tranche 3a bake-off reuse; scripts ported from test-results/experiments/tranche3b/scripts/{build,run,analyze}_tiers.py",
+  "measures": "Same-seed cross-tier divergence (pairwise PSNR at f0/f62/f123), ArcFace identity vs the reference still, motion-timing delta (Pearson r, best lag, peak-activity index), per-tier wall-clock, and the blind tier-quality rank (two independent passes: 288px contact sheets + full-res grid).",
+  "fixtures": {
+    "scene": "canonical kitchen ref2va",
+    "referenceImage": "input/exp_bake/ref.png (testbed input asset; the tranche-1 srcA f40 still of the woman, ArcFace det 0.87)",
+    "prompt": "The woman in <Picture 1>, the same person. A pale woman in her early thirties with a short black bob haircut, thin silver hoop earrings, faint freckles, wearing an oversized rust-orange wool coat over a charcoal turtleneck. She stands at a weathered wooden counter in a small sunlit kitchen, slowly stirring a copper pot of soup with a wooden spoon, late-afternoon light through a window to her left; the camera holds a steady medium shot. Audio: gentle simmering, the wooden spoon tapping the copper pot, a quiet kitchen fan hum.",
+    "width": 864,
+    "height": 480,
+    "length": 124,
+    "seed": 421337,
+    "sampleFrames": [0, 62, 123],
+    "models": {
+      "textEncoder": "qwen3vl_32b_int8_convrot.safetensors",
+      "unetRef2va": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "vaeVideo": "minimax_h3_video_vae_fp16.safetensors",
+      "vaeAudio": "minimax_h3_audio_vae_fp32.safetensors",
+      "turboLora": "minimax_h3_turbo_v4_step600_ema.safetensors",
+      "vdnStage": "stage-dmd-step-250"
+    }
+  },
+  "arms": {
+    "t8": {"label": "turbo tier — larryvrh v4_step600_ema MERGE + TurboSampler, 8 steps", "incumbent": true},
+    "t20": {"label": "plain euler/simple 20 steps", "incumbent": true},
+    "t25": {"label": "plain euler/simple 25 steps", "incumbent": true},
+    "vdn20": {"label": "VDN-arch hero — ApplyVDNH3_24GB stage-dmd-step-250, turbo adapter OFF, 20 steps", "incumbent": true}
+  },
+  "incumbentReuse": {
+    "note": "t8/t20 are bit-config-identical to the ref2va-bakeoff main8/ref20 arms at the same seed — the runner reuses those videos instead of re-spending GPU (deterministic graph + fixed noise seed).",
+    "t8": {"video": "tranche3a/bake_main8_s421337_00001_.mp4", "wallS": 117.3},
+    "t20": {"video": "tranche3a/bake_ref20_s421337_00001_.mp4", "wallS": 220.6}
+  },
+  "candidateSlot": {
+    "description": "A candidate TIER (a sampler/step/LoRA/VDN configuration) becomes a new arm at the held seed and is compared against the four incumbents on every metric. This is the slot for a new distill/stage/quant claiming a better speed/quality point.",
+    "kinds": ["tier-config"],
+    "requires": ["steps"],
+    "slotFields": {
+      "steps": "sampling steps (required)",
+      "sampler": "euler+simple (default) | turbo (MiniMaxH3TurboSampler)",
+      "loraFile": "turbo LoRA file name in the testbed loras root (sampler=turbo)",
+      "unetFile": "alternative base checkpoint file name (default: fixtures.models.unetRef2va)",
+      "vdnCheckpoint": "VDN stage name (the VDN-arch path; excludes loraFile)",
+      "vdnTurboAdapter": "bool, default false"
+    }
+  },
+  "metrics": ["walls", "pairwise_psnr_f0_f62_f123", "arcface_vs_ref", "motion_timing_pearson_lag_peak", "blind_tier_rank"],
+  "rubric": {
+    "contactSheet": "12-up contact sheet of the clip. Judge overall render quality: fabric/hair micro-detail, face definition, color fidelity to a sunlit late-afternoon kitchen (no color collapse, no waxy smear), absence of banding. Rank against the other labeled sheets.",
+    "fullRes": "Full-resolution center frame. Judge STILL-FRAME fine detail and micro-contrast only (a still frame cannot see motion smoothness or audio quality — those are NOT part of this rubric)."
+  },
+  "limits": [
+    "STILLS-SHARPNESS ONLY: the 2026-09-16 blind finding ranks still-frame detail; turbo's documented costs live on the motion/audio/pinned-row-robustness axes, which this suite does not measure (the robustness-axes caveat).",
+    "Single scene, single seed — tranche 3a measured seed spread up to 0.12-0.37 ArcFace within one option, so tier ordering at other seeds may wobble.",
+    "Walls include per-run /free reload overhead; contact-sheet pass downsamples to 288px tiles.",
+    "t8/t20 rows are REUSED bit-identical artifacts from ref2va-bakeoff at the same seed (deterministic graph + fixed noise)."
+  ]
+}

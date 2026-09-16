@@ -40,3 +40,9 @@ jobs:
       # Form-adapter suite (task k271ykk): math + golden (numpy) and the
       # first-party pack install path on Windows symlinks/junctions.
       - run: node scripts/test-lora-form.cjs
+      # Benchmark harness offline suite (task cp96zdm): registry/leaderboard,
+      # CLI, catalog bridge, mock-candidate build smoke (python+numpy above —
+      # the suite passes BENCH_PYTHON=python on Windows), metric fixtures.
+      - run: node scripts/test-benchmarks.cjs
+        env:
+          BENCH_PYTHON: python

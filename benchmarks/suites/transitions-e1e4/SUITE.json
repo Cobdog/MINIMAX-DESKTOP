@@ -1,0 +1,70 @@
+{
+  "name": "transitions-e1e4",
+  "family": "transition battery: bridge vs cut vs FLF, black-frame boundary, audio pinning, latent crossfade (E1-E4) + the chaining arms E5/E6",
+  "origin": "tranche 1 (Flux qx1e45p) + tranche 2 E5/E6 (7ed5ewa); scripts ported from test-results/experiments/tranche1/scripts/{build,crossfade,e3_analyze}.py and tranche2/scripts/{build->build_chains, prep, handoff, run_e5, run_e6, analyze_e5, analyze_e6, t1_metrics}.py",
+  "measures": "Seam quality at splice boundaries (seam PSNR dB + seam ratio = frame-delta at splice / median local motion), anchor fidelity dB of pinned regions, audio join cross-correlation + RMS level step, ArcFace across boundaries, handoff-chain drift trajectories (E5), shot-boundary adherence + looping + audio continuity (E6).",
+  "fixtures": {
+    "scene": "kitchen (A) -> rain-slicked dusk street (B), same canonical woman",
+    "prompts": {
+      "A": "A pale woman in her early thirties with a short black bob haircut, thin silver hoop earrings, faint freckles, wearing an oversized rust-orange wool coat over a charcoal turtleneck. She stands at a weathered wooden counter in a small sunlit kitchen, slowly stirring a copper pot of soup with a wooden spoon. Late-afternoon light falls through a window to her left, dust motes in the beam. The camera pushes in slowly from a medium shot to a medium close-up; she tastes the soup and smiles slightly. Natural handheld micro-motion throughout. Audio: gentle simmering, the wooden spoon tapping the copper pot, a quiet kitchen fan hum, soft piano notes from a radio in the next room.",
+      "B": "A pale woman in her early thirties with a short black bob haircut, thin silver hoop earrings, faint freckles, wearing an oversized rust-orange wool coat over a charcoal turtleneck. She steps out of a doorway onto a rain-slicked city street at dusk, pulling her collar up against the drizzle. Neon signs reflect in the wet pavement. The camera tracks laterally at walking pace, medium shot, keeping her centered as she walks; a bus passes in the foreground. Natural handheld micro-motion throughout. Audio: steady rain on pavement, distant traffic hum, her boots on wet concrete, a passing bus whoosh.",
+      "bridge": "One continuous motion: she sets down the wooden spoon on the counter, wipes her hands, turns toward the kitchen doorway and walks through it, and steps outside onto the rain-slicked dusk street, pulling her collar up as neon reflections appear around her. Camera follows her from behind at walking pace, medium shot. Natural handheld micro-motion throughout. Audio: continuous from shot to shot - the simmering and spoon fade as her boots sound on the floor, then rain on pavement rises as the door opens; audio continues across the cut.",
+      "flash": "Two shots. [Shot 1] kitchen stirring, camera pushing in. At 00:04.8 the frame flashes to black for a split second - a single-frame hard blackout - then the camera cuts to [Shot 2 At 00:05.0] the same woman stepping onto the rain-slicked dusk street. Audio continues across the blackout without a gap.",
+      "crossfadeSample": "A smooth continuous transition: she turns away from the kitchen counter and, in one flowing camera move, the scene dissolves around her into the rain-slicked dusk street where she pulls her collar up and begins to walk."
+    },
+    "keyframePlan": {
+      "srcA": "243f turbo-8 with saved latent (A_turbo8_10s.safetensors) — shared by E1/E3/E4/E5",
+      "srcB": "124f turbo-8",
+      "keyframes": "A_last.png (final frame of srcA), B_first.png (frame 0 of srcB)",
+      "bridgeGuides": "A-tail 22f guided at frame_idx 0; B-head 22f guided at frame_idx -22 (the javawock Bridge pattern)",
+      "e3Grid": "{plain, airlock} x {audio pinned, not} — A-tail 22f @0",
+      "e4Window": "39-frame crossfade window on grid boundaries (the only phase-exact length)"
+    },
+    "width": 864,
+    "height": 480,
+    "seed": 421337,
+    "inputAssets": "testbed input/exp_t1/ (A_last/B_first keyframes, srcA_tail frames+wav, srcB_head frames — derived by run_battery keyframes/tail phases)",
+    "models": {
+      "textEncoder": "qwen3vl_32b_int8_convrot.safetensors",
+      "unetFl2va": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "unetRef2va": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "vaeVideo": "minimax_h3_video_vae_fp16.safetensors",
+      "vaeAudio": "minimax_h3_audio_vae_fp32.safetensors",
+      "turboLora": "minimax_h3_turbo_v4_step600_ema.safetensors (unpinned arms only — turbo mispredicts pinned rows)"
+    }
+  },
+  "arms": {
+    "e1-flf": {"label": "FLF splice (last-of-A + first-of-B stills) — the MEASURED splice champion (36.2/34.3 dB joins)", "incumbent": true, "role": "incumbent-winner"},
+    "e1-cut": {"label": "hard cut + post (ffmpeg concat) — the default doctrine", "incumbent": true, "role": "baseline"},
+    "e1-bridge": {"label": "AddGuide bridge A-tail@0 + B-head@-22 — diegetic-only (19.1/15.9 dB)", "incumbent": false},
+    "e2-flash": {"label": "prompt-only flash-to-black (structural ~0.7s dip; guided black halves the audio boundary step 0.199 vs 0.420)", "incumbent": false},
+    "e3-airlock": {"label": "airlock hold + audio pinning (corr 0.037->0.87 pinned; Motion-Context targets replicated)", "incumbent": false},
+    "e4-crossfade": {"label": "synthetic latent crossfade — the zero-prior-art PRODUCT PATH (decode 29-36.6 dB; sampled preserves pinned rows 31.5-39.8 dB)", "incumbent": true, "role": "incumbent-new-capability"},
+    "e5-latent-handoff": {"label": "raw latent handoff — the continuity engine (39-42 dB anchors; but pins drag content) — via run_e5.py C22/C39", "incumbent": false},
+    "e5-replay": {"label": "AddGuide pixel replay — balanced (35-36 dB anchors, +30% wall) — via run_e5.py B22", "incumbent": false},
+    "e6-singlepass": {"label": "single-pass multi-shot — cuts land within 1-4 frames of instruction, zero looping — via run_e6.py a1/a2", "incumbent": true, "role": "incumbent-shortform"}
+  },
+  "candidateSlot": {
+    "description": "A candidate TRANSITION/CONTINUATION METHOD slots onto the same A/B scene and keyframe plan: a bridge guide configuration, an FLF variant, a latent crossfade recipe (ramp/row weights), or a chain-handoff method. Measured against the FLF champion and the hard-cut baseline on seam dB at both boundaries + ArcFace.",
+    "kinds": ["bridge-config", "flf-config", "crossfade-config"],
+    "requires": [],
+    "slotFields": {
+      "prompt": "transition prompt (default fixtures.prompts.bridge)",
+      "headAt": "B-head guide frame_idx (bridge-config; default -22)",
+      "blackAt": "optional guided black still at this frame_idx (bridge-config)",
+      "steps": "default 20 (pinned arms: no turbo)",
+      "rowWeights": "denoise ramp for the crossfade rows (crossfade-config)"
+    }
+  },
+  "metrics": ["seam_psnr_db_both_boundaries", "seam_ratio", "anchor_fidelity_db", "audio_join_corr_and_level_step", "arcface_across_boundary", "drift_per_hop_e5", "cut_adherence_frames_e6"],
+  "rubric": {
+    "pair": "Transition segment vs its A/B sources. Judge: (1) is the boundary at the splice invisible (matching framing, lighting direction, subject scale)? (2) identity: same woman (bob, earrings, coat) at both ends and through the middle? (3) motion continuity vs a visible jolt; (4) audio: does the join click or flow?"
+  },
+  "limits": [
+    "Pinned-row arms must run turbo OFF at 20 steps (turbo mispredicts pinned rows — documented); unpinned arms run turbo-8.",
+    "E4's crossfade window is 39 frames (phase-exact grid point); other windows are off-phase on audio.",
+    "Seam ratio is content-relative (divided by median local motion) — compare only within the same scene.",
+    "E5 chains condition on their OWN previous output (drift compounds); seg1 is the tranche-1 srcA latent by design.",
+    "E6 arms measure PROMPT adherence (cut timing/looping), not seam quality."
+  ]
+}

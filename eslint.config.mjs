@@ -9,6 +9,9 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   { files: ['scripts/**/*.cjs'], languageOptions: { globals: { ...globals.node, WebSocket: 'readonly', fetch: 'readonly' } }, rules: { '@typescript-eslint/no-require-imports': 'off' } },
+  // Benchmark harness CLI (task cp96zdM): node CLI modules with top-level
+  // await; same node globals as the scripts/*.cjs suites.
+  { files: ['benchmarks/**/*.mjs'], languageOptions: { globals: { ...globals.node } } },
   {
     files: ['**/*.{ts,tsx}'],
     languageOptions: {

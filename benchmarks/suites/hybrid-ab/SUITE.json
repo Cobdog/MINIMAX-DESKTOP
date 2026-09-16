@@ -1,0 +1,55 @@
+{
+  "name": "hybrid-ab",
+  "family": "adaln-hybrid vs stock model on instruction edits (E-ED1)",
+  "origin": "tranche 3b item 2 (Flux a80ekav evrgzi8); scripts ported from test-results/experiments/tranche3b/scripts/{build,run,analyze}_ed1.py",
+  "measures": "Instruction-edit adherence and preservation: whole + horizontal-thirds PSNR vs the source clip (where did the edit land), ArcFace identity-through-edit vs the source face, wall-clock; blind vision read for edit landing + text survival.",
+  "fixtures": {
+    "scene": "canonical kitchen woman + product + text (CREMA jar, SOUP 5 chalkboard)",
+    "sourcePrompt": "A pale woman in her early thirties with a short black bob haircut, thin silver hoop earrings, faint freckles, wearing an oversized rust-orange wool coat over a charcoal turtleneck. She stands at a weathered wooden counter in a small sunlit kitchen, slowly stirring a copper pot of soup with a wooden spoon. On the counter beside the pot stands a plain white ceramic jar with a small black label that reads CREMA in clear capital letters. On the wall behind her hangs a small dark chalkboard with the word SOUP and the number 5 written in neat white chalk. Late-afternoon light through a window to her left; the camera holds a steady medium shot. Audio: gentle simmering, the wooden spoon tapping the copper pot, a quiet kitchen fan hum.",
+    "editPairs": {
+      "wardrobe": "In <Video 1>, change only the woman's rust-orange wool coat: replace it with a forest-green waxed-cotton jacket of the same oversized fit, worn over the same charcoal turtleneck. Keep everything else exactly the same: her face, black bob haircut, silver hoop earrings, the weathered wooden counter, the copper pot of soup, her stirring motion with the wooden spoon, the white ceramic jar with its black CREMA label, the chalkboard reading SOUP and 5, the plain kitchen wall, the late-afternoon window light from her left, and the steady medium-shot camera. Audio: unchanged, the same gentle simmering, spoon taps and kitchen fan hum.",
+      "background": "In <Video 1>, replace only the background wall behind the woman: the plain kitchen wall becomes a dark-green subway-tiled cafe wall with two brass shelves of glass jars. Keep everything else exactly the same: the woman, her rust-orange wool coat, charcoal turtleneck, face, black bob haircut, silver hoop earrings, the weathered wooden counter, the copper pot of soup, her stirring motion with the wooden spoon, the white ceramic jar with its black CREMA label, the late-afternoon window light from her left, and the steady medium-shot camera. The chalkboard reading SOUP and 5 stays in frame, now hanging on the tiled wall. Audio: unchanged, the same gentle simmering, spoon taps and kitchen fan hum."
+    },
+    "width": 864,
+    "height": 480,
+    "length": 39,
+    "seed": 421337,
+    "steps": 20,
+    "sampleFrames": [0, 19, 38],
+    "inputAssets": "testbed input/exp_ed1/ (39 source frames + src.wav, derived from the source clip by the runner)",
+    "models": {
+      "textEncoder": "qwen3vl_32b_int8_convrot.safetensors (NEVER the nvfp4 TE — root-caused community trap)",
+      "unetFl2va": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "unetRef2va": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "hybridOverlayPreset": "block_range_adaln 25-49 (the smhfacct b25-49 equivalent at runtime; scottmudge MiniMaxH3HybridLoader, MIT)",
+      "vaeVideo": "minimax_h3_video_vae_fp16.safetensors",
+      "vaeAudio": "minimax_h3_audio_vae_fp32.safetensors"
+    }
+  },
+  "arms": {
+    "stock": {"label": "stock Ref2VA edit (both parents: pruned int8)", "incumbent": true},
+    "hybrid": {"label": "FL2VA base + Ref2VA adaln overlay b25-49 via HybridLoader — the measured WINNER for subject-preserving edits", "incumbent": true, "role": "incumbent-winner"}
+  },
+  "candidateSlot": {
+    "description": "A candidate MODEL CHAIN for instruction edits: an alternative checkpoint (fused/hybrid/quant) loaded by the stock UNETLoader, or an alternative hybrid overlay config. Slots in on the same source + edit pair and is measured against stock and hybrid.",
+    "kinds": ["checkpoint", "hybrid-config"],
+    "requires": ["file"],
+    "slotFields": {
+      "file": "checkpoint file name in the testbed diffusion_models root (checkpoint kind) or the base checkpoint for hybrid-config",
+      "overlayFile": "overlay checkpoint (hybrid-config kind; default fixtures unetRef2va)",
+      "blockRangeStart": "default 25 (hybrid-config)",
+      "blockRangeEnd": "default 49 (hybrid-config)",
+      "catalogId": "optional fetch-catalog id — run.mjs fetches it first and surfaces the license at run start"
+    }
+  },
+  "metrics": ["thirds_psnr_vs_source_whole_top_mid_bot", "arcface_vs_source_f0_f19_f38", "wall_s", "blind_edit_read"],
+  "rubric": {
+    "strip": "Three frames (start/middle/end) of an edit arm against the source strip. Judge: (1) did the requested edit land (green waxed-cotton jacket / dark-green tiled cafe wall with brass shelves)? (2) preservation: face, bob haircut, hoop earrings, counter, copper pot, CREMA label, SOUP 5 chalkboard — text must remain LEGIBLE; (3) additive or destructive drift beyond the request (extra text lines, reframing, prop moves)."
+  },
+  "limits": [
+    "Both arms are semantic re-synthesis (10-13 dB whole-frame), never pixel preservation — PSNR here measures CHANGE LOCALIZATION, not fidelity quality.",
+    "Single seed, one edit pair per class — directional, not conclusive (the measured verdict is explicitly scoped so).",
+    "Subject-preserving (wardrobe) vs scene-replacing (background) edits behave differently: hybrid won only the former.",
+    "TE must stay qwen3vl int8 convrot — the nvfp4 TE is a known-bad path."
+  ]
+}

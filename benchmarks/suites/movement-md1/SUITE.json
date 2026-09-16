@@ -1,0 +1,67 @@
+{
+  "name": "movement-md1",
+  "family": "positional-guide movement director vs control methods (E-MD1)",
+  "origin": "tranche 3a (Flux muwufpp tjyuteu); scripts ported from test-results/experiments/tranche3a/scripts/{assets,build_md1,run_md1,analyze_md1}.py — spec docs/research/h3-sampler-shaping-and-motion-control.md §3",
+  "measures": "Trajectory adherence: ball-centroid x error vs the plan at the checkpoints (pixel HSV tracker, cross-checked against direct pixel measurement), backtrack/teleport event counts, background PSNR vs the base render (appearance lock), wall-clock.",
+  "fixtures": {
+    "scene": "locked-tripod empty wooden table; direction NEVER stated in any prompt",
+    "sceneText": "Locked tripod medium shot of a plain weathered wooden table under soft even daylight from a nearby window, an empty tabletop, a plain wall in the background. No people, no camera movement. ",
+    "audioClause": "Audio: a quiet room tone hum. non_diegetic_music: N/A",
+    "promptControl": "<sceneText>A red ball rolls across the table. <audio>",
+    "promptGuided": "<sceneText>The ball moves across the table. <audio>",
+    "width": 864,
+    "height": 480,
+    "length": 39,
+    "seeds": [421337, 421338],
+    "keyframePlan": {
+      "description": "ball centroid at 25%/50%/75% of width at frames 0/17/34, linear between, extrapolated to f38 = 80.88%",
+      "guideFrames": [0, 17, 34],
+      "guideFractions": [0.25, 0.5, 0.75],
+      "checkpointFrames": [0, 17, 34, 38],
+      "checkpointFractions": [0.25, 0.5, 0.75, 0.8088],
+      "ballRadius": 36,
+      "ballY": 288,
+      "bandRows": [14, 22],
+      "bandFeather": 0.5
+    },
+    "inputAssets": "testbed input/exp_md1/ (sprite.png, base/f*.png, guide_f*.png, spritectl/f*.png, base_audio.wav — derived by assets_md1.py from the base render)",
+    "models": {
+      "textEncoder": "qwen3vl_32b_int8_convrot.safetensors",
+      "unetFl2va": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "vaeVideo": "minimax_h3_video_vae_fp16.safetensors",
+      "vaeAudio": "minimax_h3_audio_vae_fp32.safetensors",
+      "funControlPatch": "minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors",
+      "vdnStage": "stage-dmd-step-250"
+    }
+  },
+  "arms": {
+    "A": {"label": "control — no guides, direction unstated (direction roulette)", "incumbent": false},
+    "B": {"label": "AddGuide positional stills at 0/17/34 — the MEASURED WINNER (0.0-1.7% error, zero events; the product movement director)", "incumbent": true, "role": "incumbent-winner"},
+    "C": {"label": "guides + spatial path-band denoise mask (init latent = encoded base, rows 14-22 feather 0.5; +1 dB preservation, no grid artifact)", "incumbent": false},
+    "D": {"label": "Fun Control union over sprite control video (correct direction, scene roulette)", "incumbent": false},
+    "E": {"label": "VDN-arch + guides (boundary-anchor hypothesis: B-identical tracking on the VDN patch)", "incumbent": false}
+  },
+  "candidateSlot": {
+    "description": "A candidate MOVEMENT-CONTROL METHOD slots in on the same scene+plan: an alternative guide keyframe plan (positions/frames), or an alternative control-video provider (a new controlnet/sprite composite), or a VDN/config variant.",
+    "kinds": ["guide-plan", "control-video", "tier-config"],
+    "requires": [],
+    "slotFields": {
+      "guideFrames": "guide keyframe frame indices (guide-plan)",
+      "guideFractions": "ball x as fraction of width at the guide frames (guide-plan)",
+      "controlDir": "testbed input dir with f%06d.png control frames (control-video)",
+      "strength": "control strength (control-video; default 0.8)",
+      "endPercent": "control end percent (control-video; default 0.6)",
+      "steps": "sampling steps",
+      "vdnCheckpoint": "VDN stage name (tier-config variant)"
+    }
+  },
+  "metrics": ["centroid_x_error_pct_at_checkpoints", "backtracks_teleports", "bg_psnr_vs_base_f0_f17_f38", "wall_s"],
+  "rubric": {
+    "contact": "12-up contact sheet of a table scene with a red ball. Judge: (1) does the ball travel left-to-right across the frame; (2) is the scene a plain weathered wooden table under even daylight (no invented set dressing, no relocated window, no color drift); (3) is the ball RED (not maroon/near-black)."
+  },
+  "limits": [
+    "The HSV tracker cannot follow arms that render the ball off-color (measured: arm D renders maroon) — those positions are vision-read from full-res frames and labeled as such; contact-sheet vision position estimates were measured ±16% wrong at 288px tiles (trust pixel metrics for positions, vision for semantics).",
+    "Arm C depends on the t3a_shims (T3aEncodeH3AVLatent + T3aSetH3SpatialNoiseMask) living on the testbed (gitignored there).",
+    "Trajectory quality is judged against a LINEAR plan; a candidate whose value is expressive non-linear motion needs a plan-aware metric before the verdict is meaningful."
+  ]
+}

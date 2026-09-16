@@ -78,3 +78,9 @@ jobs:
       # test-results/vision/. Judgment (JUDGE.md subagent) never runs in CI;
       # `pnpm vision:report` is the local pre-release gate for the verdicts.
       - run: pnpm test:vision
+      # Benchmark harness (task cp96zdm): offline suite — registry/leaderboard,
+      # CLI handling, the fetch-catalog bridge (snapshot + dist-server built
+      # above), mock-candidate build smoke for every suite (python+numpy
+      # installed above), metric math fixtures, blind-bundle/vision:report
+      # compatibility. GPU validation is a staged local follow-up, never CI.
+      - run: pnpm test:benchmarks

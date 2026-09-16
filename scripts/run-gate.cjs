@@ -82,6 +82,12 @@ const SUITES = [
   // radar attention ordering — the pure substrate modules via the VM harness.
   // The React shell is covered by e2e/canvas.spec.ts.
   { name: 'test:canvas', command: 'pnpm run test:canvas', timeoutMs: 10 * MINUTE },
+  // Benchmark harness (task cp96zdm): offline suite — registry/leaderboard
+  // invariants, CLI handling, the fetch-catalog bridge (snapshot; zero
+  // network), mock-candidate build smoke for every suite (python+numpy), pure
+  // metric math fixtures, blind-bundle/vision:report compatibility. GPU
+  // validation is a staged local follow-up, never part of the gate.
+  { name: 'test:benchmarks', command: 'pnpm run test:benchmarks', timeoutMs: 10 * MINUTE },
   // build:web + build:server directly — typecheck already ran as its own suite
   // (the plain `build` script re-runs typecheck; redundant here).
   { name: 'build', command: 'pnpm run build:web && pnpm run build:server', timeoutMs: 15 * MINUTE, dependents: ['smoke:server', 'e2e', 'vision-capture'] },
