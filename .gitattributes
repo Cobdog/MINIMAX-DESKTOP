@@ -5,6 +5,6 @@
 # Generated benchmark artifacts are byte-compared (LEADERBOARD.md must be
 # byte-identical to a fresh regeneration) — pin LF so Windows checkouts with
 # core.autocrlf=true cannot diverge from what the generator writes.
-benchmarks/LEADERBOARD.md text eol=lf
+benchmarks/results/LEADERBOARD.md text eol=lf
 benchmarks/results/registry.json text eol=lf
 benchmarks/data/*.json text eol=lf
