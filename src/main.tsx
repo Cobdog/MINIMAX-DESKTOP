@@ -26,6 +26,12 @@ const PrototypeShell = lazy(() => import('./prototypes/PrototypeShell'))
 // Wired into the canvas at §5.2 integration time.
 const PoseRigApp = lazy(() => import('./poserig/PoseRigApp'))
 
+// Canvas Phase 1 (task jl4ye8x, docs/specs/canvas-ui-v1.md §3/§4) — the
+// video-canvas substrate behind ?canvas=1: own lazy chunk (canvas + css +
+// d3-zoom + react-rnd), never imported by normal routes. The old shell stays
+// the default and untouched until Phase 5.
+const CanvasApp = lazy(() => import('./canvas/CanvasApp').then((m) => ({ default: m.CanvasApp })))
+
 // The renderer always runs in a browser against the app's own web server
 // (server/index.ts); the HTTP client is the only bridge.
 installWebApiClient()
@@ -35,6 +41,7 @@ const mobile = params.get('mobile') === '1'
 const proto = params.get('proto')
 const protoRoute = proto === 'bench' || proto === 'stage' || proto === 'score'
 const poserigRoute = params.get('poserig') === '1'
+const canvasRoute = params.get('canvas') === '1'
 document.documentElement.classList.toggle('mobile-route', mobile)
 
 const viewFallback = <div className="boot"><LoaderCircle className="spin" /><span>Loading…</span></div>
@@ -52,13 +59,15 @@ const onCaughtError = (error: unknown) => {
 createRoot(document.getElementById('root')!, { onCaughtError }).render(
   <StrictMode>
     <ErrorBoundary label="root">
-      {poserigRoute
-        ? <Suspense fallback={viewFallback}><PoseRigApp /></Suspense>
-        : protoRoute
-          ? <Suspense fallback={viewFallback}><PrototypeShell /></Suspense>
-          : mobile
-            ? <Suspense fallback={viewFallback}><MobileApp /></Suspense>
-            : <App />}
+      {canvasRoute
+        ? <Suspense fallback={viewFallback}><CanvasApp /></Suspense>
+        : poserigRoute
+          ? <Suspense fallback={viewFallback}><PoseRigApp /></Suspense>
+          : protoRoute
+            ? <Suspense fallback={viewFallback}><PrototypeShell /></Suspense>
+            : mobile
+              ? <Suspense fallback={viewFallback}><MobileApp /></Suspense>
+              : <App />}
     </ErrorBoundary>
   </StrictMode>,
 )

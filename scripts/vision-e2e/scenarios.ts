@@ -226,4 +226,40 @@ export const SCENARIOS: VisionScenario[] = [
       },
     ],
   },
+  {
+    // Canvas Phase 1 (task jl4ye8x) — the ?canvas=1 route: seed tile on the
+    // substrate + the in-route titlebar radar. Deterministic: fresh session,
+    // one prompt submit, settle. Cleanup deletes the created canvas so the
+    // shared test-home stays tidy.
+    id: 'canvas-phase1',
+    label: 'Canvas Phase 1 — seed tile on the substrate + titlebar radar',
+    run: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+      await page.goto('/?canvas=1')
+      await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+      await page.locator('[data-canvas-prompt]').fill('a lone drummer on a night train, windows streaked with rain')
+      await page.locator('[data-canvas-submit]').click()
+      await expect(page.locator('[data-canvas-tile]').first()).toBeVisible({ timeout: 10_000 })
+      await page.waitForTimeout(1_100) // fly-to + ring paint settle
+    },
+    after: async (page) => {
+      // Close the session's canvases (tombstones keep test-home tidy via a
+      // later trash empty; closing is enough for determinism of other specs).
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
+    },
+    checkpoints: [
+      {
+        id: 'canvas-phase1-1080p',
+        label: 'Canvas — seed tile rendered with queued ring + radar visible at 1080p',
+        rubric: [
+          'Context: a dark-theme desktop studio at 1920x1080 on the ?canvas=1 canvas route — NO left sidebar (this surface replaces the shell chrome; a slim top titlebar + an infinite dotted-grid canvas below is the intended design).',
+          'Top titlebar (slim, dark): left side shows one canvas tab (a name like "Canvas <date>" with an × close affordance); center-left a pill-shaped RADAR button with a pulse/activity icon reading "1 queued" (muted gray-blue styling, a queue count is expected — the seed job is a Phase-2-pending mock, CORRECT not a defect); a dashed-outline "engine · Phase 2" chip (dashed/disabled is intended — the canvas consumes no engine yet); right side an "index ⌘K" button.',
+          'Canvas surface: a subtle evenly-spaced dot grid on a very dark background; ONE media tile card floating on it — a rounded dark card with a 1px border containing: a 16:9 preview area showing the prompt text on a dashed placeholder (no thumbnail yet — the seed has no take; intended), a visible status ring around the tile (border highlight — queued state, muted), small head/tail dot affordances at the tile\'s left and right edges, and a metadata strip + op-chip row ("no ops") below the preview.',
+          'A floating inspector panel may be visible at the right side of the canvas (drag handle header with the tile title, a small facts table, an X close button) — intended Phase-1 shell.',
+          'The tile may be partially overlapped by nothing; text on the tile must be readable, not clipped mid-glyph.',
+          'Defects to flag: no radar/button visible in the titlebar, no tile card on the canvas, the tile border-less or invisible against the grid, overlapping titlebar controls, empty canvas with no objects, any pure-white or pure-black dead region covering the surface.',
+        ].join(' '),
+      },
+    ],
+  },
 ]

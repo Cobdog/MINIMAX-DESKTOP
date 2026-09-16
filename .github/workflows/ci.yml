@@ -57,6 +57,10 @@ jobs:
       # (committed; the Python generator lives beside them for regeneration).
       # No python needed at test time.
       - run: pnpm test:camera
+      # Canvas Phase 1 (task jl4ye8x): the pure substrate modules — camera
+      # store discipline, zoom bands, culling math, tile/edge derivation,
+      # status-ring ladder, radar attention. The route shell is e2e (below).
+      - run: pnpm test:canvas
       # ffmpeg is required by the filmstrip capability (wave 2d: server-side
       # sprite-sheet thumbnails + the e2e video fixture). ubuntu-latest does
       # NOT ship it by default. Decision: install it rather than let the

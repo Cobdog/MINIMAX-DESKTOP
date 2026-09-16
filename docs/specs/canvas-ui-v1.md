@@ -208,12 +208,31 @@ inspectors float freely, optionally follow selection (L24 proposal).
 Screen-size adaptation threshold: L5 OPEN (collapse point TBD, not
 pre-decided).
 
-**Rendering budget (F4 restored, third-audit O2)**: a measurement task on
-the Stage seed (100/500/1000/2000 objects, fps + interaction latency +
-filmstrip-scroll budgets) produces the budget table THIS section owns; the
-PixiJS-flip criterion in the substrate lock is testable only against it.
-Runs in Phase 0/1 alongside the substrate promotion; DOM-vs-Pixi stays
-decided-by-data, not by preference.
+**Rendering budget (F4 restored, third-audit O2) — MEASURED (L33, Phase 1)**:
+the measurement task ran against the shipped Phase-1 substrate (`?canvas=1`,
+d3-zoom camera, viewport+600px-margin culling, `content-visibility`) staging
+100/500/1000/2000 synthetic objects (harness `?canvas=1&bench=1`, driver
+`node scripts/canvas-budget.cjs`, raw data
+`docs/research/canvas-rendering-budget.json`). Headless system Chromium
+1920×1080 on the dev VM (software rendering — absolute fps is a FLOOR; the
+scaling behavior is the signal):
+
+| staged objects | derived edges | idle fps | drift fps (renders) | fast-pan fps (jank, renders) | zoom-sweep fps (renders) | tiles in DOM |
+|---|---|---|---|---|---|---|
+| 100 | 32 | 61 | 52 (8) | 56 (27%, 69) | 49 (41) | 52 |
+| 500 | 136 | 61 | 49 (4) | 51 (33%, 86) | 43 (37) | 60 |
+| 1000 | 303 | 61 | 57 (4) | 54 (29%, 82) | 43 (36) | 58 |
+| 2000 | 612 | 61 | 54 (4) | 47 (35%, 74) | 43 (36) | 55 |
+
+Budget verdicts (data, not preference): (1) the transient discipline holds
+at scale — idle renders are 0 at every N, gentle-pan renders ≈ 0 (the 4–8
+are cull-boundary straddles), and pan/zoom renders are culling-membership
+and band-crossing changes only, never per-frame (e2e-asserted separately in
+`e2e/canvas.spec.ts`); (2) culling keeps the DOM flat — 52–60 tiles mounted
+regardless of N; (3) interactive fps stays ≥ 43 at 2000 objects even on
+software rendering, so **the PixiJS flip is NOT justified at v1 scale** —
+re-run the harness on target hardware when tiles carry real filmstrip
+media, and flip only on a measured breach.
 
 ## 4. Entry moment & attention model (DRAFTED — for review)
 
@@ -363,7 +382,7 @@ section. Closed when the maintainer decides; deferred rows need rationale.
 | L22 | "Decompose an output" v1 primitive | §5.1 | frame-extraction v1 (one candidate); shot-split/latent-split later | OPEN |
 | L23 | Budget-unit extension (tool/find/summon rows) | §1 | extend as proposed | OPEN |
 | L24 | Floating-inspector behavior | §3/§5 | floats freely, follows selection optionally | OPEN |
-| L33 | **Rendering-performance budget** (F4 restored — third-audit O2): Stage-seed measurement task (100/500/1000/2000 objects; fps, interaction latency, scroll budgets) → §3's budget table → DOM/Pixi flip decided by data | §3 | run at Phase 0/1; the substrate lock's escape hatch is untestable without it | OPEN (measurement task) |
+| L33 | **Rendering-performance budget** (F4 restored — third-audit O2): Stage-seed measurement task (100/500/1000/2000 objects; fps, interaction latency, scroll budgets) → §3's budget table → DOM/Pixi flip decided by data | §3 | run at Phase 0/1; the substrate lock's escape hatch is untestable without it | **MEASURED (Phase 1, task jl4ye8x): §3 budget table landed from `?canvas=1&bench=1`; DOM holds (≥43fps interactive at 2000 objects, culling keeps 52–60 tiles mounted, idle renders 0) — no Pixi flip at v1 scale; re-measure when tiles carry real media** |
 | L25 | **Placement policy for batch/new outputs** (adjacency default vs clusters vs grid; the direction doc's open placement question, inventory row 16) | §3 | adjacency-near-parent default + cluster-on-batch-completion; confirm | OPEN |
 | L26 | **Concurrency / GPU-arbitration policy** (decisions audit F2 — most dangerous missing: serialize vs interleave, "queued-for-GPU" as on-object state + radar semantics, VRAM arbitration; the #14076 canary decides) | §4 | serialize generations by default (1 active), queued-for-GPU as first-class object state, interleave only after benchmark | **DECIDED (maintainer, 2026-09-14): assistant's pick approved** |
 | L27 | **Cross-project asset scope** (audit F3: libraries are global today, one-canvas-per-project isolates — where do shared characters/locations live?) | §2 | global asset store above projects + explicit fork-into-project (consent-gate pattern) | **DECIDED (maintainer via Q&A, 2026-09-14): global store + fork-into-project** |

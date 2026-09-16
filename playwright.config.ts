@@ -105,8 +105,10 @@ export default defineConfig({
   },
   projects: [
     // e2e: the app suite + the pose-rig dev surface (task 41ebvfo —
-    // deterministic hook-driven interactions + palette-pixel assertions).
-    { name: 'e2e', testMatch: /(app|poserig)\.spec\.ts/ },
+    // deterministic hook-driven interactions + palette-pixel assertions) +
+    // the canvas Phase-1 route (task jl4ye8x — launcher/seed/radar/index +
+    // the pan/zoom zero-render canary against the production build).
+    { name: 'e2e', testMatch: /(app|poserig|canvas)\.spec\.ts/ },
     { name: 'vision', testMatch: /vision-capture\.spec\.ts/ },
   ],
   webServer: {

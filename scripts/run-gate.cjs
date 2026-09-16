@@ -77,6 +77,11 @@ const SUITES = [
   // the upstream Python, interpolation parity, validation taxonomy. Pure
   // modules via the VM harness; no Python needed at test time.
   { name: 'test:camera', command: 'pnpm run test:camera', timeoutMs: 10 * MINUTE },
+  // Canvas Phase 1 (task jl4ye8x): camera store discipline, semantic-zoom
+  // bands, culling math, document→tile/edge derivation, status-ring ladder,
+  // radar attention ordering — the pure substrate modules via the VM harness.
+  // The React shell is covered by e2e/canvas.spec.ts.
+  { name: 'test:canvas', command: 'pnpm run test:canvas', timeoutMs: 10 * MINUTE },
   // build:web + build:server directly — typecheck already ran as its own suite
   // (the plain `build` script re-runs typecheck; redundant here).
   { name: 'build', command: 'pnpm run build:web && pnpm run build:server', timeoutMs: 15 * MINUTE, dependents: ['smoke:server', 'e2e', 'vision-capture'] },

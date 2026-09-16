@@ -1,0 +1,79 @@
+{
+  "_comment": "L33 rendering-budget measurement (canvas-ui-v1 §3). Produced by scripts/canvas-budget.cjs driving ?canvas=1&bench=1 (src/canvas/Benchmark.tsx): the REAL substrate, synthetic document, staged objects. fps = delivered rAF frames/sec; jank = fraction of pan frames > 20 ms; renders = substrate React re-renders (band/cull-set changes only — pan must be ~0); DOM = tiles mounted after culling. Re-run on target hardware when the substrate changes materially.",
+  "meta": {
+    "date": "2026-09-16T00:54:21.722Z",
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+    "stages": [
+      100,
+      500,
+      1000,
+      2000
+    ]
+  },
+  "results": [
+    {
+      "staged": 100,
+      "edges": 32,
+      "idleFps": 61.25,
+      "driftFps": 52,
+      "rendersDrift": 8,
+      "panFps": 55.5,
+      "panJank": 0.2702702702702703,
+      "zoomFps": 48.5,
+      "rendersIdle": 0,
+      "rendersPan": 69,
+      "rendersZoom": 41,
+      "mountedTiles": 52,
+      "stageMs": 6695.4000000059605
+    },
+    {
+      "staged": 500,
+      "edges": 136,
+      "idleFps": 61.25,
+      "driftFps": 48.666666666666664,
+      "rendersDrift": 4,
+      "panFps": 51,
+      "panJank": 0.3333333333333333,
+      "zoomFps": 43,
+      "rendersIdle": 0,
+      "rendersPan": 86,
+      "rendersZoom": 37,
+      "mountedTiles": 60,
+      "stageMs": 6796.0999999940395
+    },
+    {
+      "staged": 1000,
+      "edges": 303,
+      "idleFps": 61.25,
+      "driftFps": 56.666666666666664,
+      "rendersDrift": 4,
+      "panFps": 53.5,
+      "panJank": 0.2897196261682243,
+      "zoomFps": 42.5,
+      "rendersIdle": 0,
+      "rendersPan": 82,
+      "rendersZoom": 36,
+      "mountedTiles": 58,
+      "stageMs": 6759.200000017881
+    },
+    {
+      "staged": 2000,
+      "edges": 612,
+      "idleFps": 61.25,
+      "driftFps": 54,
+      "rendersDrift": 4,
+      "panFps": 47,
+      "panJank": 0.35106382978723405,
+      "zoomFps": 42.5,
+      "rendersIdle": 0,
+      "rendersPan": 74,
+      "rendersZoom": 36,
+      "mountedTiles": 55,
+      "stageMs": 6777.899999976158
+    }
+  ]
+}
