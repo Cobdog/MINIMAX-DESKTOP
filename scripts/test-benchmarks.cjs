@@ -284,3 +284,12 @@ main().catch((e) => {
   console.error(`\nbenchmarks offline suite FAILED: ${e.message}`)
   process.exit(1)
 })
+
+// Windows-leg guard: no tracked file may be CRLF-exposed (a CRLF checkout
+// breaks byte-identity assertions — the 2026-09-16 failure class).
+{
+  const { execFileSync } = require('node:child_process')
+  const eol = execFileSync('git', ['ls-files', '--eol'], { encoding: 'utf8' })
+  const exposed = eol.split('\n').filter((line) => /w\/ *crlf/.test(line))
+  ok(exposed.length === 0, `CRLF-exposed tracked files would break Windows byte-identity: ${exposed.slice(0, 5).join('; ')}`)
+}

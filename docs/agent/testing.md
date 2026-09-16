@@ -101,3 +101,12 @@ fallback).
 
 Something on this box squats on port 4321 — always probe-and-verify free
 ports (freePort pattern in test-storage/test-realtime).
+
+## Windows-leg failure classes (learned 2026-09-16 — read before writing file-generating or file-importing code)
+
+The Windows CI leg catches what a Linux checkout structurally cannot. Two classes so far; both have standing fixes — use them proactively:
+
+1. **ESM `import()` of absolute paths** — Windows rejects `import('D:\...\x.mjs')` style absolute specifiers. Fix: `pathToFileURL(p).href` (committed pattern in benchmarks/run.mjs). Applies to ANY dynamic import built from `path.join`/`__dirname`.
+2. **CRLF vs byte-identity** — git autocrlf converts text files on Windows checkout; any test asserting byte-identity of a *committed generated artifact* (leaderboards, goldens, fixtures) will pass on Linux and fail on Windows. Fix: pin the file in `.gitattributes` (`eol=lf`) when you commit generated artifacts; the repo currently has zero CRLF-exposed files — keep it that way. `git ls-files --eol | grep 'w/ *crlf'` must stay empty (asserted in test:benchmarks).
+
+Rule of thumb: if your code builds a filesystem path dynamically and either imports it or byte-compares it, assume the Windows leg will treat it differently — fix preemptively, don't wait for the red.
