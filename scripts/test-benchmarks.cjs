@@ -115,8 +115,13 @@ async function main() {
   const committed = fs.readFileSync(path.join(BENCH, 'LEADERBOARD.md'), 'utf8')
   const fresh = path.join(tmp, 'LEADERBOARD-fresh.md')
   leaderboard.regenerateLeaderboard(undefined, fresh, suitesMap)
-  ok(committed === fs.readFileSync(fresh, 'utf8'),
-    'committed LEADERBOARD.md is byte-identical to a fresh regeneration (never hand-edited)')
+  // EOL-insensitive: the test's purpose is catching hand-edits, and a
+  // Windows autocrlf checkout may hold the committed file with CRLF while
+  // regeneration writes LF — normalize both before comparing (platform-
+  // proof; content differences still fail).
+  const norm = (s) => s.replace(/\r\n/g, '\n')
+  ok(norm(committed) === norm(fs.readFileSync(fresh, 'utf8')),
+    'committed LEADERBOARD.md matches a fresh regeneration (EOL-insensitive, never hand-edited)')
   ok(committed.startsWith('# Benchmark leaderboard — GENERATED, do not edit'),
     'leaderboard carries the do-not-edit header')
 
