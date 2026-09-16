@@ -1,20 +1,25 @@
 /**
- * Canvas Phase 1 — the route root behind ?canvas=1 (§3/§4).
+ * Canvas Phase 2 — the route root behind ?canvas=1 (§3/§4/§5.4).
  *
  * Mounts ONLY under the canvas route (main.tsx lazily loads this module like
  * the prototypes; every normal app route never imports it). Own titlebar
- * (radar + canvas tabs), the substrate, the launcher overlay for empty
- * canvases, the floating inspector, the summonable index, ambient toasts,
- * session wiring (open/close/order + camera autosave through the documents
- * API), and the drop-anything routing. NO engine usage — the canvas renders
- * media from the document store; generation itself is Phase 2.
+ * (radar + canvas tabs), the engine host (Phase 2: the shared session/queue
+ * hooks — real generation), the substrate, the launcher overlay for empty
+ * canvases, the properties panel, the contextual bottom bar, the summonable
+ * index, ambient toasts, session wiring (open/close/order + camera autosave
+ * through the documents API), and the drop-anything ingestion (bytes →
+ * content-addressed blobs).
  *
  * ?canvas=1&bench=1 mounts the L33 rendering-budget harness instead
  * (Benchmark.tsx) — same substrate, synthetic document, measurement protocol.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { BottomBar } from './BottomBar'
+import { CanvasEngineHost } from './EngineHost'
+import { EndpointMenu } from './EndpointMenu'
+import { ForkMenu } from './ForkMenu'
 import { IndexOverlay } from './IndexOverlay'
-import { Inspector } from './Inspector'
+import { PropertiesPanel } from './PropertiesPanel'
 import { Launcher } from './Launcher'
 import { Radar } from './Radar'
 import { Substrate } from './Substrate'
@@ -33,9 +38,11 @@ export function CanvasApp() {
   const toasts = useCanvasStore((state) => state.toasts)
   const boot = useCanvasStore((state) => state.boot)
   const select = useCanvasStore((state) => state.select)
-  const dropMedia = useCanvasStore((state) => state.dropMedia)
+  const ingestFile = useCanvasStore((state) => state.ingestFile)
   const setIndexOpen = useCanvasStore((state) => state.setIndexOpen)
   const requestCamera = useCanvasStore((state) => state.requestCamera)
+  const rerunStale = useCanvasStore((state) => state.rerunStale)
+  const setForkMenu = useCanvasStore((state) => state.setForkMenu)
 
   const [dragging, setDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -44,11 +51,12 @@ export function CanvasApp() {
     if (!benchMode) void boot()
   }, [boot])
 
-  // jobsStore → derived tile statuses (job events are rare; recompute is
-  // one derive pass over the active document).
+  // jobsStore → derived tile statuses + completion landing (job events are
+  // rare; recompute is one derive pass over the active document).
   useEffect(() => useJobsStore.subscribe(() => useCanvasStore.getState().recompute()), [])
 
-  // §7 base keys: Escape deselect / close index, J/K cycle, ⌘K index.
+  // §7 base keys: Escape deselect / close index, J/K cycle, ⌘K index, R
+  // rerun-stale, B fork the selection, digits jump-to-take.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
@@ -59,15 +67,19 @@ export function CanvasApp() {
         return
       }
       if (event.key === 'Escape') {
-        if (useCanvasStore.getState().indexOpen) setIndexOpen(false)
-        else select(null)
+        const state = useCanvasStore.getState()
+        if (state.indexOpen) setIndexOpen(false)
+        else if (state.endpointMenu || state.forkMenu) {
+          state.setEndpointMenu(null)
+          state.setForkMenu(null)
+        } else select(null)
         return
       }
       if (typing) return
       const state = useCanvasStore.getState()
       if (!state.tiles.length) return
       if (event.key === 'j' || event.key === 'k') {
-        const index = state.tiles.findIndex((tile) => tile.id === state.selection?.tileId)
+        const index = state.tiles.findIndex((tile) => tile.id === state.selection.tileIds[0])
         const delta = event.key === 'j' ? 1 : -1
         const next = state.tiles[(index + delta + state.tiles.length) % state.tiles.length]
         if (next) {
@@ -76,22 +88,38 @@ export function CanvasApp() {
         }
       }
       if (event.key === 'f') requestCamera({ kind: 'fit' })
+      // Rerun every stale chain — one gesture (principle 5).
+      if (event.key === 'r') void rerunStale()
+      // B opens the fork menu on the selected output tile (§7 branch/fork).
+      if (event.key === 'b') {
+        const selected = state.selection.tileIds[0]
+        const tile = state.tiles.find((entry) => entry.id === selected)
+        if (tile && tile.canonical) setForkMenu({ chainId: tile.id })
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [requestCamera, select, setIndexOpen])
+  }, [requestCamera, select, setIndexOpen, setForkMenu, rerunStale])
 
   // Drop-anything: the drop routes itself by media kind (§4) and lands as a
-  // media object. Works over any canvas state — empty or populated.
-  const handleFile = useCallback((file: File) => {
+  // REAL stored object (bytes → blob row → media chain → tile). Works over
+  // any canvas state — empty or populated.
+  const handleFile = useCallback(async (file: File) => {
     const type = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : null
     if (!type) {
       useCanvasStore.getState().toast('error', `${file.name} is not a media kind the canvas knows (image / video / audio).`)
       return
     }
+    // Session-local preview paints instantly; the ingested blob is the
+    // durable copy the tile falls back to after a reload.
     const previewUrl = type === 'image' || type === 'video' ? URL.createObjectURL(file) : undefined
-    void dropMedia({ name: file.name, kind: type, previewUrl })
-  }, [dropMedia])
+    try {
+      const bytes = await file.arrayBuffer()
+      await ingestFile({ name: file.name, kind: type, bytes, previewUrl })
+    } catch (error) {
+      useCanvasStore.getState().toast('error', `${file.name} could not be read: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [ingestFile])
 
   if (benchMode) return <CanvasBenchmark />
 
@@ -115,15 +143,19 @@ export function CanvasApp() {
       event.preventDefault()
       setDragging(false)
       const file = event.dataTransfer.files?.[0]
-      if (file) handleFile(file)
+      if (file) void handleFile(file)
     }}
   >
+    <CanvasEngineHost />
     <Radar />
     <div className="canvas-stage">
       <Substrate />
       {phase === 'ready' && emptyCanvas && <Launcher onPickFile={() => fileInputRef.current?.click()} />}
     </div>
-    <Inspector />
+    <PropertiesPanel />
+    <BottomBar />
+    <EndpointMenu />
+    <ForkMenu />
     <IndexOverlay />
     <div className="canvas-toasts" aria-live="polite">
       {toasts.map((toast) => (
@@ -141,7 +173,7 @@ export function CanvasApp() {
       data-canvas-file-input
       onChange={(event) => {
         const file = event.target.files?.[0]
-        if (file) handleFile(file)
+        if (file) void handleFile(file)
         event.target.value = ''
       }}
     />

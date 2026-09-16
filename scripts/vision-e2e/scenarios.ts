@@ -219,7 +219,7 @@ export const SCENARIOS: VisionScenario[] = [
           'Center: a 3D viewport showing a HUMAN STICK FIGURE with arms raised in a V — colored joint spheres (bright saturated dots) connected by darker colored bone sticks, standing on a faint dark floor grid; a "selected:" pill near the top; a keyboard-hints bar along the bottom of the viewport.',
           'Right panel: a square black canvas preview rendering the SAME pose as a DWPose whole-body skeleton on pure black — colored limb sticks (darker, slightly desaturated versions of the joint colors), bright colored joint dots, small blue hand-dot clusters near both wrists with thin rainbow finger lines, a cluster of tiny white dots for the face, colored dots at the feet — this is a colored DWPose figure on black, NOT a photo, wireframe, or 3D mesh.',
           'The 3D figure and the 2D preview must be recognizably the SAME pose (arms up in a V).',
-          'Bottom timeline: "Key (K)" and "Delete" buttons, a "frame N / 55" readout, a row of many small tick marks (grid frames) with one or two bright green keyframe markers, and a right-aligned note line.',
+          'Bottom timeline: "Key (K)" and "Delete" buttons, a "frame N / 55" readout, and a track of a FEW WIDE SEGMENTS (the sparse 17n+5 grid — typically 3-4 stretched cells, NOT dense tick marks) where keyframed cells render as solid accent-green blocks and the current cell carries an accent outline, plus a right-aligned note line reading "…keyframe(s) · grid 17n+5 · … frames @ 24 fps · hold-last beyond keys".',
           'Blessings: the preview canvas may show slight pixelation (intended image-rendering); the figure in the 3D viewport is intentionally flat-shaded without lighting; small muted sub-labels are the app\'s design language.',
           'Defects to flag: 3D viewport empty or all-black, preview canvas blank, limbs missing or single-colored (the limb palette must be multi-colored), overlapping panel content, text clipped by panels, timeline ticks missing.',
         ].join(' '),
@@ -235,11 +235,14 @@ export const SCENARIOS: VisionScenario[] = [
     label: 'Canvas Phase 1 — seed tile on the substrate + titlebar radar',
     run: async (page) => {
       await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
-      await page.goto('/?canvas=1')
+      await page.goto('/?canvas=1&probe=canvas')
       await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
       await page.locator('[data-canvas-prompt]').fill('a lone drummer on a night train, windows streaked with rain')
       await page.locator('[data-canvas-submit]').click()
       await expect(page.locator('[data-canvas-tile]').first()).toBeVisible({ timeout: 10_000 })
+      // Phase 2 submits for real; offline that parks nothing, so the queued
+      // ring comes from the gated mock link (the identical store state).
+      await page.evaluate(() => (window as unknown as { __canvasScenario(name: string): unknown }).__canvasScenario('seed-mock'))
       await page.waitForTimeout(1_100) // fly-to + ring paint settle
     },
     after: async (page) => {
@@ -253,11 +256,69 @@ export const SCENARIOS: VisionScenario[] = [
         label: 'Canvas — seed tile rendered with queued ring + radar visible at 1080p',
         rubric: [
           'Context: a dark-theme desktop studio at 1920x1080 on the ?canvas=1 canvas route — NO left sidebar (this surface replaces the shell chrome; a slim top titlebar + an infinite dotted-grid canvas below is the intended design).',
-          'Top titlebar (slim, dark): left side shows one canvas tab (a name like "Canvas <date>" with an × close affordance); center-left a pill-shaped RADAR button with a pulse/activity icon reading "1 queued" (muted gray-blue styling, a queue count is expected — the seed job is a Phase-2-pending mock, CORRECT not a defect); a dashed-outline "engine · Phase 2" chip (dashed/disabled is intended — the canvas consumes no engine yet); right side an "index ⌘K" button.',
+          'Top titlebar (slim, dark): left side shows one canvas tab (a name like "Canvas <date>" with an × close affordance); center-left a pill-shaped RADAR button with a pulse/activity icon reading "1 queued" (muted gray-blue styling, a queue count is expected in this scenario — CORRECT not a defect); beside it a muted "engine offline" chip (offline is the honest state in tests, CORRECT); right side an "index ⌘K" button.',
           'Canvas surface: a subtle evenly-spaced dot grid on a very dark background; ONE media tile card floating on it — a rounded dark card with a 1px border containing: a 16:9 preview area showing the prompt text on a dashed placeholder (no thumbnail yet — the seed has no take; intended), a visible status ring around the tile (border highlight — queued state, muted), small head/tail dot affordances at the tile\'s left and right edges, and a metadata strip + op-chip row ("no ops") below the preview.',
-          'A floating inspector panel may be visible at the right side of the canvas (drag handle header with the tile title, a small facts table, an X close button) — intended Phase-1 shell.',
+          'A floating PROPERTIES panel may be visible at the right side of the canvas (drag handle header with the tile title and a small mode pill like "text → video", stacked sections for Prompt / Engine / References / Identity / Guides / Takes, an X close button) — intended Phase-2 surface. A slim contextual bottom bar spans the canvas foot (object title, mode pill, status chip, fork button).',
           'The tile may be partially overlapped by nothing; text on the tile must be readable, not clipped mid-glyph.',
           'Defects to flag: no radar/button visible in the titlebar, no tile card on the canvas, the tile border-less or invisible against the grid, overlapping titlebar controls, empty canvas with no objects, any pure-white or pure-black dead region covering the surface.',
+        ].join(' '),
+      },
+    ],
+  },
+
+  {
+    // Canvas Phase 2 (task flyuh6h) — generation on canvas: an ingested media
+    // object (real blob-served poster) + the fork edge + the properties panel
+    // and contextual bar. Deterministic: fresh session, one drop, one fork.
+    id: 'canvas-phase2',
+    label: 'Canvas Phase 2 — ingested media, fork edge, properties + contextual bar',
+    run: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+      await page.goto('/?canvas=1')
+      await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+      // Drop a real, decodable PNG: the ingestion path stores bytes as a
+      // content-addressed blob and serves the poster through the blob route.
+      await page.evaluate(() => {
+        const canvas = document.createElement('canvas')
+        canvas.width = 64
+        canvas.height = 36
+        const context = canvas.getContext('2d')!
+        context.fillStyle = '#2b3a55'
+        context.fillRect(0, 0, 64, 36)
+        context.fillStyle = '#e8b04b'
+        context.fillRect(8, 8, 16, 16)
+        const binary = atob(canvas.toDataURL('image/png').split(',')[1])
+        const bytes = new Uint8Array(binary.length)
+        for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+        const transfer = new DataTransfer()
+        transfer.items.add(new File([bytes], 'vision-drop.png', { type: 'image/png' }))
+        document.querySelector('[data-canvas-root]')!.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true }))
+      })
+      await expect(page.locator('[data-canvas-tile]').first()).toBeVisible({ timeout: 10_000 })
+      // Fork it (decoded substrate) — a second tile + a derived edge.
+      await page.keyboard.press('b')
+      const forkMenu = page.locator('[data-canvas-fork-menu]')
+      await expect(forkMenu).toBeVisible()
+      await forkMenu.locator('[data-canvas-fork-substrate="decoded"]').click()
+      await expect(page.locator('[data-canvas-tile]')).toHaveCount(2, { timeout: 10_000 })
+      await expect(page.locator('[data-canvas-edge]')).toHaveCount(1)
+      await page.waitForTimeout(1_100) // fly-to settle
+    },
+    after: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
+    },
+    checkpoints: [
+      {
+        id: 'canvas-phase2-1080p',
+        label: 'Canvas — ingested media tile with a real poster, forked chain + derived edge, properties panel open',
+        rubric: [
+          'Context: a dark-theme desktop studio at 1920x1080 on the ?canvas=1 canvas route — NO left sidebar; a slim top titlebar (one canvas tab, a radar pill reading "calm" or a low queue count, an "engine offline" chip, an "index ⌘K" button), an infinite dotted-grid canvas, and a slim contextual bottom bar.',
+          'TWO media tile cards on the canvas: the LEFT one shows a REAL image poster (a dark blue rectangle with a gold square inside — an actually rendered <img>, not a placeholder), the RIGHT one (the fork) shows the same image or its prompt placeholder; a curved ACCENT-COLORED ARROW EDGE connects them left→right with a visible arrowhead at the fork — the derived fork edge.',
+          'Each tile has small circular dot affordances at its left and right edges (the typed-hole endpoints), a status ring (idle state — muted), and a metadata strip + op-chip row ("no ops").',
+          'A floating PROPERTIES panel at the right side, roughly 700px tall (or full canvas height on short screens): header with the selected chain title + a small accent mode pill (e.g. "reference → video" or "text → video") + X button; visible sections starting with "PROMPT" (a text editor area) and "ENGINE — MINIMAX H3" with tier chips (Quality / Fast · 4-step / Fast · 8-step) — deeper sections (REFERENCES / IDENTITY PAYLOAD / GUIDES / TAKES) may sit below the panel\'s internal scroll fold, which is INTENDED (the panel scrolls); a sticky ACTION ROW pinned to the panel\'s bottom edge with a small status chip and the generate button (may read disabled/dimmed — engine offline, correct). The action row must be fully visible inside the panel, never clipped.',
+          'Bottom bar (chain context): the selected object title, an accent mode pill, a status chip, "no identity payload" or an identity readout, a drift chip, a takes chip, a fork button, and possibly a "1 source ↑" fork-history note.',
+          'Blessings: muted/dimmed disabled controls are intended offline; dense small sub-labels are the design language; tiles may be at slightly different y positions (adjacency stacking).',
+          'Defects to flag: no visible edge/arrow between the two tiles, poster area empty or a broken-image icon, properties panel overlapping the tiles so content is unreadable, bottom bar empty, any pure-white/black dead region.',
         ].join(' '),
       },
     ],

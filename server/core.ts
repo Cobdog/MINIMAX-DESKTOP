@@ -1093,7 +1093,7 @@ export function createStudioServer(paths: StudioServerPaths) {
           const headerToken = Array.isArray(header) ? header[0] : header
           // The filmstrip GET joins the browser-native group: <img> posters
           // cannot set headers either. Query tokens stay GET-only there.
-          const queryTokenAllowed = url.pathname === '/api/lan/events' || url.pathname === '/api/lan/realtime' || url.pathname === '/api/lan/media' || (url.pathname === '/api/lan/assets/filmstrip' && request.method === 'GET')
+          const queryTokenAllowed = url.pathname === '/api/lan/events' || url.pathname === '/api/lan/realtime' || url.pathname === '/api/lan/media' || (url.pathname === '/api/lan/assets/filmstrip' && request.method === 'GET') || (url.pathname === '/api/lan/documents/blobs/file' && request.method === 'GET')
           const presented = headerToken ?? (queryTokenAllowed ? url.searchParams.get('token') ?? undefined : undefined)
           if (!tokenMatches(presented, lanToken)) return sendJson(response, 401, { error: 'This link is no longer authorized. Request a fresh link with the current access token.' })
         }
@@ -1629,6 +1629,50 @@ export function createStudioServer(paths: StudioServerPaths) {
             const roots = stringArray(body.roots)
             if (!roots || !roots.length) return sendJson(response, 400, { error: 'An array of nominated roots is required.' })
             return sendJson(response, 200, { relink: documents.relinkBlobs(roots) })
+          }
+          // Canvas Phase 2 media ingestion: dropped bytes → an engine-visible
+          // copy inside the output directory (uploads + filmstrips + frame
+          // extraction all operate on output-contained paths) → a
+          // content-addressed blob row (hash on ingest, invariant 9). The
+          // take that lands afterwards re-registers the same file — the blob
+          // tree dedupes by hash.
+          if (url.pathname === '/api/lan/documents/blobs/ingest' && request.method === 'POST') {
+            const body = await readJson(request, 180_000_000)
+            const data = typeof body.data === 'string' ? body.data : ''
+            const rawName = typeof body.name === 'string' ? body.name : ''
+            const kind = body.kind === 'image' || body.kind === 'video' || body.kind === 'audio' ? body.kind : ''
+            if (!kind) return sendJson(response, 400, { error: 'A media kind (image / video / audio) is required.' })
+            if (!rawName) return sendJson(response, 400, { error: 'A file name is required.' })
+            if (!data || data.length < 8) return sendJson(response, 400, { error: 'The dropped file carried no bytes.' })
+            let bytes: Buffer
+            try {
+              bytes = Buffer.from(data, 'base64')
+            } catch {
+              return sendJson(response, 400, { error: 'The dropped bytes are not valid base64.' })
+            }
+            if (!bytes.length) return sendJson(response, 400, { error: 'The dropped file decoded to zero bytes.' })
+            const extension = extname(rawName).toLowerCase().slice(0, 8) || (kind === 'image' ? '.png' : kind === 'audio' ? '.mp3' : '.mp4')
+            const safeStem = basename(rawName, extname(rawName)).replace(/[^a-z0-9._-]+/gi, '_').slice(0, 80) || 'dropped'
+            const folder = join(settings.outputDirectory, 'canvas-media')
+            const outputPath = join(folder, `${safeStem}-${randomUUID().slice(0, 8)}${extension}`)
+            try {
+              await mkdir(folder, { recursive: true })
+              await writeFile(outputPath, bytes)
+              const blob = documents.registerBlobFile(kind, outputPath)
+              logEvent({ kind: 'documents.blob-ingest', bytes: bytes.length, hash: blob.hash ? 'present' : 'missing' })
+              return sendJson(response, 200, { path: outputPath, blob })
+            } catch (error) {
+              return sendJson(response, 500, { error: `The dropped media could not be stored: ${error instanceof Error ? error.message : String(error)}` })
+            }
+          }
+          // Blob media serving for canvas previews: <img>/<video> sources
+          // cannot set headers, so this read-only media route is in the
+          // query-token set exactly like /api/lan/media.
+          if (url.pathname === '/api/lan/documents/blobs/file' && (request.method === 'GET' || request.method === 'HEAD')) {
+            const relPath = url.searchParams.get('path') ?? ''
+            const resolved = documents.resolveBlobFile(relPath)
+            if (!resolved) return sendJson(response, 404, { error: 'The media file is unavailable.' })
+            return serveLocalMediaHttp(request, response, resolved.absPath)
           }
           // Archive (§7): export = zip (manifest + document rows + blob tree);
           // import refuses unknown-newer versions loudly.

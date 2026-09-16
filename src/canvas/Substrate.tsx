@@ -14,7 +14,7 @@
  * `content-visibility: auto` so the browser skips their layout/paint when
  * off-screen inside the margin band.
  */
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { Maximize2, Minus, Plus } from 'lucide-react'
 import {
   bandFor,
@@ -36,7 +36,7 @@ import { CanvasTile } from './Tile'
 const CULL_MARGIN_PX = 600
 const PERSIST_DEBOUNCE_MS = 600
 
-export function Substrate() {
+function SubstrateBase() {
   const tiles = useCanvasStore((state) => state.tiles)
   const edges = useCanvasStore((state) => state.edges)
   const selection = useCanvasStore((state) => state.selection)
@@ -207,10 +207,12 @@ export function Substrate() {
             key={tile.id}
             tile={tile}
             band={band}
-            selected={selection?.tileId === tile.id}
+            selected={selection.tileIds.includes(tile.id)}
             previewUrl={droppedPreviews[tile.id]}
             onSelect={select}
             onDismissFailure={dismissFailure}
+            onEndpoint={(chainId, direction) => useCanvasStore.getState().setEndpointMenu({ chainId, direction })}
+            onFork={(chainId) => useCanvasStore.getState().setForkMenu({ chainId })}
           />
         ))}
       </div>
@@ -226,3 +228,9 @@ export function Substrate() {
     </div>
   </div>
 }
+
+/** Render-isolated on purpose: the substrate re-renders ONLY on its own
+ *  store subscriptions (tiles/edges/selection/camera commands) — parent
+ *  state changes (toasts, menus) must never spend a substrate render (the
+ *  transient discipline the render canary asserts). */
+export const Substrate = memo(SubstrateBase)

@@ -27,15 +27,21 @@ export function Radar() {
   const select = useCanvasStore((state) => state.select)
   const toast = useCanvasStore((state) => state.toast)
   const setIndexOpen = useCanvasStore((state) => state.setIndexOpen)
+  const engine = useCanvasStore((state) => state.engine)
   const jobs = useJobsStore((state) => state.jobs)
 
   const linked = new Set(Object.values(chainJobs))
   const unlinked = jobs.filter((job) => !linked.has(job.id))
   const aggregate = attention(tiles)
+  // One queue, both surfaces (D1/D2): unlinked ACTIVE work (renders submitted
+  // from the old CreateView) still counts toward running/queued. Needs-
+  // attention stays derived from the open canvases' OBJECTS only — an
+  // unlinked failed job has no object here to dismiss; the index + JobsView
+  // carry it (contract a: failure states are durable ON the object).
   const counts = {
     running: aggregate.counts.running + unlinked.filter((job) => job.status === 'running').length,
     queued: aggregate.counts.queued + unlinked.filter((job) => job.status === 'queued').length,
-    needsAttention: aggregate.counts.needsAttention + unlinked.filter((job) => job.status === 'failed').length,
+    needsAttention: aggregate.counts.needsAttention,
   }
 
   const zoomToAttention = () => {
@@ -82,8 +88,8 @@ export function Radar() {
       </span>
     </button>
 
-    <button type="button" className="canvas-engine-chip" data-canvas-engine title="Engine chip + GPU meter live in the radar once generation arrives (Phase 2) — this surface consumes no engine.">
-      <span className="status-dot" /> engine · Phase 2
+    <button type="button" className={`canvas-engine-chip ${engine.connected ? (engine.modelReady ? 'online' : 'degraded') : ''}`} data-canvas-engine data-engine-connected={engine.connected} data-engine-ready={engine.modelReady} title={engine.connected ? (engine.modelReady ? 'Local engine connected — MiniMax H3 ready' : 'Engine connected but H3 model components are missing — install them and refresh') : 'Engine offline — start ComfyUI to generate'}>
+      <span className="status-dot" /> {engine.connected ? (engine.modelReady ? 'H3 engine ready' : 'engine on · models missing') : 'engine offline'}
     </button>
 
     <div className="canvas-titlebar-spacer" />

@@ -1,12 +1,12 @@
 /**
- * Canvas Phase 1 — the launcher (§4: "the empty canvas is the launcher").
+ * Canvas Phase 2 — the launcher (§4: "the empty canvas is the launcher").
  *
  * Prompt bar + drop-anything zone + the L15-confirmed minimal chips (image
  * prompt / video prompt / noDialogue handoff / drop) + resume cards (the
  * multi-canvas session — camera restored on open). Submitting the first
  * prompt spawns the seed tile AT the prompt bar (spatial-queue contract c)
- * and parks a mock queued job in jobsStore — the launcher comes alive, no
- * mode switch. Generation itself fires in Phase 2.
+ * and submits the REAL H3 render through the shared flows core — the
+ * launcher comes alive, no mode switch; a refused engine surfaces honestly.
  */
 import { useEffect, useRef, useState } from 'react'
 import { Clapperboard, FileVideo, ImagePlus, MessageSquareOff, Plus, Upload } from 'lucide-react'
@@ -98,7 +98,7 @@ export function Launcher({ onPickFile }: { onPickFile(): void }) {
           type="button"
           className="canvas-chip"
           data-canvas-chip="noDialogue"
-          title="noDialogue handoffs load into the prompt in Phase 2 — the chip records the intent"
+          title="The chain's no-dialogue policy composes into the render prompt (silent score emission)"
           onClick={() => setPrompt((current) => current ? `${current} · no dialogue` : 'no dialogue')}
         >
           <MessageSquareOff size={13} /> noDialogue handoff

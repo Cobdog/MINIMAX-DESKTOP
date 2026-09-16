@@ -484,6 +484,24 @@ async function main() {
   check(ftsLone.status === 200, 'lone double quote must not error')
 
   // =====================================================================
+  // (h2) Phase 2 ingestion routes: bytes -> blob row -> served media
+  // =====================================================================
+  const pngBytes = Buffer.from('89504e470d0a1a0a0000000d4948445200000040000000400806000000', 'hex')
+  const ingest = await api.post('/api/lan/documents/blobs/ingest', { data: pngBytes.toString('base64'), name: 'dropped-plate.png', kind: 'image' })
+  check(ingest.status === 200 && ingest.body.path.includes('canvas-media') && ingest.body.blob.relPath.startsWith('canvas-blobs/'), 'ingest returns the engine-visible copy + the content-addressed blob path')
+  check(typeof ingest.body.blob.hash === 'string' && ingest.body.blob.hash.length === 64, 'ingest hashes the bytes (invariant 9)')
+  const served = await api.getRaw(`/api/lan/documents/blobs/file?${new URLSearchParams({ path: ingest.body.blob.relPath })}`)
+  check(served.status === 200 && Buffer.compare(served.buffer.subarray(0, pngBytes.length), pngBytes) === 0, 'the blob file route serves the exact ingested bytes')
+  const traversal = await api.get(`/api/lan/documents/blobs/file?${new URLSearchParams({ path: '../../studio.db' })}`)
+  check(traversal.status === 404, 'blob serving is containment-gated (a traversal is an honest 404)')
+  const unregistered = await api.get(`/api/lan/documents/blobs/file?${new URLSearchParams({ path: 'canvas-blobs/ff/not-registered' })}`)
+  check(unregistered.status === 404, 'unregistered blob paths answer 404 (no fabricated content)')
+  const badKind = await api.post('/api/lan/documents/blobs/ingest', { data: 'aGVsbG8=', name: 'x.bin', kind: 'document' })
+  check(badKind.status === 400, 'ingest refuses unknown media kinds')
+  const emptyBytes = await api.post('/api/lan/documents/blobs/ingest', { data: '', name: 'empty.png', kind: 'image' })
+  check(emptyBytes.status === 400, 'ingest refuses empty payloads')
+
+  // =====================================================================
   // (i) unknown-newer refuses loudly; old surface untouched
   // =====================================================================
   const futureDb = new Database(dbFileA)

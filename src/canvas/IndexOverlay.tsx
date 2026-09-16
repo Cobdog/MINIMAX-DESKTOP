@@ -3,10 +3,10 @@
  * document FTS + the session's loaded objects + jobs. Selecting navigates to
  * the region (open the owning canvas if needed, fly the camera to the tile).
  *
- * Honest Phase-1 limits: FTS hits that resolve to chains/takes not in a
- * LOADED document render as "not open in this session" rows (no fabrication);
- * job row actions (retry/cancel/rerun-stale) are Phase 2 and render disabled
- * with the reason. Projects navigate by opening the canvas.
+ * Honest limits: FTS hits that resolve to chains/takes not in a LOADED
+ * document render as "not open in this session" rows (no fabrication); job
+ * rows navigate to their chain and carry a stop action while the job is
+ * live (Phase 2 wiring). Projects navigate by opening the canvas.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Clapperboard, Search } from 'lucide-react'
@@ -22,6 +22,7 @@ type Row = {
   projectId?: string
   chainId?: string
   disabled?: boolean
+  cancellable?: boolean
 }
 
 export function IndexOverlay() {
@@ -101,10 +102,11 @@ export function IndexOverlay() {
         key: `job:${job.id}`,
         kind: 'job',
         label: job.prompt ? `${job.prompt.slice(0, 70)}` : job.id,
-        note: `job · ${job.status}${chainId ? '' : ' — retry/cancel arrive with generation (Phase 2)'}`,
+        note: `job · ${job.status}${chainId ? '' : ' — not on an open canvas'}`,
         projectId: chainId ? activeProjectId ?? undefined : undefined,
         chainId,
         disabled: !chainId,
+        cancellable: chainId ? job.status === 'queued' || job.status === 'running' : false,
       })
     }
     // FTS hits not already covered by a loaded row.
@@ -155,12 +157,11 @@ export function IndexOverlay() {
       </div>
       <ul className="canvas-index-rows" data-canvas-index-rows>
         {rows.map((row, index) => (
-          <li key={row.key}>
+          <li key={row.key} className={`canvas-index-li ${index === cursor ? 'cursor' : ''} ${row.disabled ? 'disabled' : ''}`} onMouseEnter={() => setCursor(index)}>
             <button
               type="button"
-              className={`canvas-index-row ${index === cursor ? 'cursor' : ''} ${row.disabled ? 'disabled' : ''}`}
+              className="canvas-index-row"
               data-canvas-index-row={row.kind}
-              onMouseEnter={() => setCursor(index)}
               onClick={() => void activate(row)}
               disabled={row.disabled}
             >
@@ -168,6 +169,17 @@ export function IndexOverlay() {
               <span className="canvas-index-row-label">{row.label}</span>
               <span className="canvas-index-row-note">{row.note}</span>
             </button>
+            {row.cancellable && (
+              <button
+                type="button"
+                className="canvas-index-row-cancel"
+                aria-label="Cancel this job"
+                data-canvas-index-cancel
+                onClick={() => { const chainId = row.chainId; if (chainId) void useCanvasStore.getState().cancelChainJob(chainId) }}
+              >
+                stop
+              </button>
+            )}
           </li>
         ))}
         {!rows.length && <li className="canvas-index-empty">{query ? 'Nothing matches — yet.' : 'Type to search across the session.'}</li>}

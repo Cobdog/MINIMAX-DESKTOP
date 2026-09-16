@@ -1712,6 +1712,19 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
         return null
       }
     },
+    /** Resolves a registered, PRESENT blob to its absolute path + kind for
+     *  media serving (canvas Phase 2). Containment-gated: a relPath escaping
+     *  the blob tree, an unregistered path, or a missing file all answer
+     *  null — the route turns that into an honest 404, never a traversal. */
+    resolveBlobFile: (relPath: string): { absPath: string; kind: string } | null => {
+      if (!relPath || relPath.length > 512 || relPath.includes('\0')) return null
+      const absPath = blobAbsolutePath(relPath)
+      if (!isInsideBlobRoot(absPath)) return null
+      const row = statements.blob.get(relPath) as Record<string, unknown> | undefined
+      if (!row || Number(row.missing) === 1) return null
+      if (!existsSync(absPath)) return null
+      return { absPath, kind: str(row.kind) }
+    },
 
     search: (query: string, kind?: string, limit = 50) => {
       const match = ftsMatchExpression(query)

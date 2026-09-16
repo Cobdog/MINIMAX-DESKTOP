@@ -6,7 +6,7 @@ export type UpscaleMode = 'off' | 'ltx' | 'rtx' | 'lbh2d' | 'lbh3d'
 export type ReferencePurpose = 'character' | 'character-angle' | 'hair' | 'wardrobe' | 'accessory' | 'location' | 'continuity' | 'product' | 'style' | 'generic'
 export type PromptPresetCategory = 'camera' | 'shot' | 'angle' | 'lens' | 'lighting' | 'audio' | 'style' | 'movement' | 'transition' | 'character' | 'wardrobe' | 'location' | 'embedding' | 'looseness'
 export type PromptPreset = { id: string; category: PromptPresetCategory; label: string; keywords: string[]; description: string; insertion: string }
-export type MovieReferenceBinding = { file: MediaFile; purpose: ReferencePurpose; label: string; characterId?: string; hairStyleId?: string; wardrobeId?: string; accessoryId?: string; locationId?: string; locationEnvironmentMode?: LocationProject['environmentMode']; source: 'character-studio' | 'hair-studio' | 'wardrobe-studio' | 'accessory-studio' | 'location-studio' | 'movie' | 'shot' | 'continuity' }
+export type MovieReferenceBinding = { file: MediaFile; purpose: ReferencePurpose; label: string; characterId?: string; hairStyleId?: string; wardrobeId?: string; accessoryId?: string; locationId?: string; locationEnvironmentMode?: LocationProject['environmentMode']; source: 'character-studio' | 'hair-studio' | 'wardrobe-studio' | 'accessory-studio' | 'location-studio' | 'movie' | 'shot' | 'continuity' | 'canvas' }
 export type ResolvedMovieShot = { preferredMode: GenerationMode; effectiveMode: GenerationMode; references: MovieReferenceBinding[]; compiledPrompt: string; routeReason: string; omittedReferences: MovieReferenceBinding[] }
 
 export type GenerationDefaults = {
@@ -160,7 +160,10 @@ export type NodePackStatus = NodePackDefinition & {
 export type FetchPin = { kind: 'sha'; value: string } | { kind: 'tag'; value: string } | { kind: 'branch'; value: string }
 
 export type FetchSource =
-  | { kind: 'hf'; repo: string; revision: FetchPin }
+  /** `dataset: true` marks an HF DATASET repo (not a model repo): the fetch
+   *  engine builds `/datasets/<repo>/resolve/...` download URLs for it. The
+   *  revision API path is only needed for moving (branch/tag) pins. */
+  | { kind: 'hf'; repo: string; revision: FetchPin; dataset?: boolean }
   | { kind: 'git'; url: string; revision: FetchPin }
 
 /** Model roots beyond the six scanner kinds the fetcher places weights into

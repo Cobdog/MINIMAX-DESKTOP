@@ -49,8 +49,37 @@ export const documentsApi = {
   createChain: async (input: { projectId: string; kind?: string; inputSpec?: Record<string, unknown>; settings?: Record<string, unknown> }) =>
     (await post<{ chain: DocumentChain }>('/api/lan/documents/chains', input)).chain,
 
+  updateChain: (input: { id: string; settings?: Record<string, unknown>; inputSpec?: Record<string, unknown>; stale?: boolean }) =>
+    post<{ chain: DocumentChain }>('/api/lan/documents/chains/update', input),
+
+  createOutput: async (input: { chainId: string; substrates?: string[] }) =>
+    (await post<{ output: { id: string } }>('/api/lan/documents/outputs', input)).output,
+
+  appendTake: async (input: { outputId: string; jobId?: string | null; artifacts?: string[]; latentPath?: string | null; metrics?: Record<string, unknown> | null }) =>
+    (await post<{ take: { id: string } }>('/api/lan/documents/takes', input)).take,
+
+  supersedeTake: (input: { outputId: string; takeId: string }) =>
+    post<{ take: { id: string } }>('/api/lan/documents/takes/supersede', input),
+
+  upsertIdentity: (input: { chainId: string; refAssetIds?: string[]; subjectText?: string; strength?: number; perSlotStrengths?: Record<string, number> | null }) =>
+    post<{ identity: Record<string, unknown> }>('/api/lan/documents/identity', input),
+
   addOp: (chainId: string, kind: string, settings?: Record<string, unknown>) =>
     post<{ op: { id: string } }>('/api/lan/documents/ops', { chainId, kind, settings: settings ?? {} }),
+
+  /** Phase 2 media ingestion: dropped bytes → engine-visible output-dir copy
+   *  + content-addressed blob row. Returns both paths. */
+  ingestBlob: async (input: { dataBase64: string; name: string; kind: 'image' | 'video' | 'audio' }) =>
+    post<{ path: string; blob: { relPath: string; hash: string | null; size: number | null; present: boolean } }>('/api/lan/documents/blobs/ingest', { data: input.dataBase64, name: input.name, kind: input.kind }),
+
+  /** Blob media URL for <img>/<video> sources (token rides the query — the
+   *  route is in the server's query-token set exactly like /api/lan/media). */
+  blobFileUrl: (relPath: string) => {
+    const query = new URLSearchParams({ path: relPath })
+    const token = new URLSearchParams(window.location.search).get('token')
+    if (token) query.set('token', token)
+    return `/api/lan/documents/blobs/file?${query}`
+  },
 
   search: async (query: string, limit = 24): Promise<SearchHit[]> => {
     if (!query.trim()) return []

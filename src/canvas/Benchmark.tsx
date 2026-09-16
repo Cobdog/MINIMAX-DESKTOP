@@ -137,7 +137,7 @@ export function CanvasBenchmark() {
       activeProjectId: BENCH_PROJECT_ID,
       documents: { [BENCH_PROJECT_ID]: { project: { id: BENCH_PROJECT_ID, name: 'bench', camera: {}, createdAt: 0, lastActiveAt: 0 }, chains } },
       layout: undefined,
-      selection: null,
+      selection: { tileIds: [] },
       chainJobs: {},
     })
     useCanvasStore.getState().recompute()

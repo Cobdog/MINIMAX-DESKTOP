@@ -11,7 +11,7 @@
  * The seed tile's queued state is a projection of jobsStore (the launcher
  * drops a mock job there); Phase 2 replaces the mock with the real submit.
  */
-import { type CameraState, type ViewBlob } from './camera'
+import { rectsIntersect, type CameraState, type ViewBlob } from './camera'
 
 // ---- document shapes (mirror server/documents.ts hydration) -----------------
 
@@ -52,6 +52,9 @@ export type DocumentChain = {
   createdAt: number
   outputs: DocumentOutput[]
   ops: DocumentOp[]
+  /** §2 identity payload (present once the panel or a fork writes one). */
+  identity?: { id: string; refAssetIds: string[]; refmodIds: string[]; subjectText: string; strength: number; perSlotStrengths: Record<string, number> | null } | null
+  controlTracks?: Array<{ id: string; kind: string; source: string; inputRef: string; maskRef: string | null; params: Record<string, unknown> | null }>
 }
 
 export type CanvasDocument = {
@@ -108,12 +111,24 @@ export type Tile = {
   refOutputs: string[]
   ops: Array<{ id: string; kind: string }>
   canonical: DocumentTake | null
+  /** Every take of the chain's outputs, newest-first (the take strip + the
+   *  fork-from-early-take gesture read this). */
+  takes: DocumentTake[]
   priors: number
   substrates: string[]
   /** Output-contained absolute artifact path for the filmstrip poster, if any. */
   previewPath: string | null
+  /** Content-addressed blob artifact (relative path) when the canonical take
+   *  registered one — the preview surface serves it via the blob file route. */
+  artifactPath: string | null
+  /** Media kind the canonical take carries (metrics.kind), when recorded. */
+  mediaKind: 'image' | 'video' | 'audio' | null
   duration: number
   lockState: string
+  stale: boolean
+  hopCount: number
+  driftMetrics: Record<string, unknown> | null
+  identity: DocumentChain['identity']
 }
 
 export const TILE_W = 320
@@ -175,10 +190,28 @@ function takeDuration(take: DocumentTake): number {
 
 function previewArtifactOf(take: DocumentTake | null): string | null {
   if (!take) return null
+  // The engine-visible copy every landing path records (filmstrips, media
+  // serving, and frame extraction all operate on output-contained paths);
+  // a bare absolute artifact is the pre-blob fallback.
+  const metrics = take.metrics ?? {}
+  if (typeof metrics.sourcePath === 'string' && metrics.sourcePath.startsWith('/')) return metrics.sourcePath
   for (const artifact of take.artifacts) {
     if (artifact.startsWith('/')) return artifact
   }
   return null
+}
+
+function blobArtifactOf(take: DocumentTake | null): string | null {
+  if (!take) return null
+  for (const artifact of take.artifacts) {
+    if (artifact.startsWith('canvas-blobs/')) return artifact
+  }
+  return null
+}
+
+function takeMediaKind(take: DocumentTake | null): 'image' | 'video' | 'audio' | null {
+  const kind = take?.metrics?.kind
+  return kind === 'image' || kind === 'video' || kind === 'audio' ? kind : null
 }
 
 function titleFor(document: CanvasDocument, chain: DocumentChain, index: number): string {
@@ -256,8 +289,9 @@ export function deriveTiles(
     const refs = refsOf.get(chain.id) ?? []
     const jobId = links[chain.id] ?? null
     const job = jobId ? jobsById.get(jobId) ?? null : null
-    const canonical = chain.outputs.flatMap((output) => output.takes).find((take) => take.supersededBy === null) ?? null
-    const priors = chain.outputs.reduce((sum, output) => sum + output.takes.filter((take) => take.supersededBy !== null).length, 0)
+    const allTakes = chain.outputs.flatMap((output) => output.takes)
+    const canonical = allTakes.find((take) => take.supersededBy === null) ?? null
+    const priors = allTakes.filter((take) => take.supersededBy !== null).length
     const place = placed.get(chain.id) ?? GRID_ORIGIN
     const kind: TileKind = canonical || chain.kind === 'media' ? 'media' : 'seed'
     const width = layout?.[chain.id]?.w ?? TILE_W
@@ -276,11 +310,18 @@ export function deriveTiles(
       refOutputs: refs,
       ops: chain.ops.map((op) => ({ id: op.id, kind: op.kind })),
       canonical,
+      takes: [...allTakes].sort((a, b) => b.createdAt - a.createdAt),
       priors,
       substrates: chain.outputs.flatMap((output) => output.substratesAvailable),
       previewPath: previewArtifactOf(canonical),
+      artifactPath: blobArtifactOf(canonical),
+      mediaKind: takeMediaKind(canonical),
       duration: canonical ? takeDuration(canonical) : 0,
       lockState: chain.lockState,
+      stale: chain.stale,
+      hopCount: chain.hopCount,
+      driftMetrics: chain.driftMetrics,
+      identity: chain.identity ?? null,
     }
   }).filter((tile) => byId.has(tile.id))
 }
@@ -380,6 +421,24 @@ export function tilesBoundingRect(tiles: ReadonlyArray<Tile>): { x: number; y: n
 export function seedSpawnPoint(camera: CameraState, width: number, height: number): { x: number; y: number } {
   const center = { x: width / 2, y: height * 0.42 }
   return { x: (center.x - camera.x) / camera.k - TILE_W / 2, y: (center.y - camera.y) / camera.k }
+}
+
+/**
+ * Spawn anti-overlap: the prompt bar spawn point is a SCREEN anchor, so two
+ * consecutive spawns (drop, then prompt) land on the same world spot when the
+ * camera hasn't moved. Nudge straight down in grid steps until the new tile's
+ * footprint is clear of every existing tile — the spawned object is always
+ * visible and clickable (L25's cluster-on-parent for roots).
+ */
+export function avoidOverlap(spawn: { x: number; y: number }, occupied: ReadonlyArray<{ x: number; y: number; w: number; h: number }>): { x: number; y: number } {
+  let position = { x: spawn.x, y: spawn.y }
+  let guard = 0
+  const collides = () => occupied.some((tile) => rectsIntersect({ x: position.x, y: position.y, w: TILE_W, h: TILE_H_MEDIA }, tile))
+  while (collides() && guard < 32) {
+    position = { x: position.x, y: position.y + TILE_H_MEDIA + 60 }
+    guard += 1
+  }
+  return position
 }
 
 // ---- mock job (Phase 2 replaces this) -------------------------------------------

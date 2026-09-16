@@ -3,9 +3,10 @@
  *  graph submission, and cancellation-aware job bookkeeping. */
 import { useState } from 'react'
 import { createId } from '../lib/createId'
-import { buildMiniMaxWorkflow, frameIndexForSeconds, guideFrameWarning } from '../lib/workflow'
+import { buildMiniMaxWorkflow } from '../lib/workflow'
 import { buildLtx25Workflow } from '../lib/ltx25Workflow'
 import { ACE_STEP_REQUIRED_NODES, buildAceStepWorkflow } from '../lib/aceStepWorkflow'
+import { submitH3Render } from '../lib/h3Submit'
 import { buildLtx23UtilityGraph, findLtx23Utility, resolveLtx23Selection } from '../lib/graph'
 import type { Ltx23UtilityKind } from '../lib/graph'
 import { prepareImage } from '../lib/imageCrop'
@@ -17,7 +18,6 @@ import { resolveMovieShot } from '../lib/promptComposer'
 import { buildMusic3Workflow } from '../lib/music3Workflow'
 import { buildContactSheetWorkflow, inferContactSheetSelection } from '../lib/contactSheet'
 import type { Music3GenerationOptions } from '../lib/music3Workflow'
-import { buildRenderManifest } from '../lib/manifest'
 import { useWorkspaceStore } from '../state/workspaceStore'
 import type { useStudioSession } from './useStudioSession'
 import type { useGenerationQueue, NoticeTone } from './useGenerationQueue'
@@ -242,165 +242,73 @@ export function useGenerationFlows(options: {
     missingNodes: readonly string[]
   }) => {
     if (!settings) return
+    if (upscale.mode === 'rtx' && !window.confirm('RTX/CUDA upscale processes every frame independently and can amplify MiniMax noise or temporal shimmer. Continue with this experimental post-process?')) return
     // Wave 2a: workspace fields are read from the store AT CALL TIME — the
     // App root no longer re-renders on workspace edits (that is the point of
     // the zustand substrate), so the `ws` facade's captured values could be
     // stale by the time the user clicks Generate. Same field names, same
     // validation order; only the read moved.
+    //
+    // Phase 2 (flyuh6h): validation/upload/graph/submit live in the shared
+    // core (lib/h3Submit.ts) so the canvas submits through the SAME flows —
+    // this hook is now the old surface's request builder: snapshot the
+    // workspace, compose the effective prompt + ordered references, delegate.
     const workspace = useWorkspaceStore.getState()
-    const { mode, prompt, firstFrame, lastFrame, referenceImages, referenceVideos, referenceAudios, duration, resolution, turbo, turboLoader, steps, sampler, scheduler, experimentalSampling, loraStrength, seed, sigmaShiftMode, shiftVideo, shiftAudio, refImageSize, liveEnabled, livePreviewMode, clothingPolicy, noDialogue, naturalMovement, movieHandoff, characterHandoff, selectedReferenceCharacterIds, selectedReferenceLocationIds, setActiveJobId } = workspace
-    if (upscale.mode === 'ltx' && (!upscale.model || !upscale.vae)) {
-      notify('error', 'LTX 2.5 spatial upscaler and video VAE must be available in ComfyUI.')
-      return
-    }
-    if (upscale.mode === 'ltx' && upscale.missingNodes.length) {
-      notify('error', `Update ComfyUI before using LTX 2× upscale. Missing nodes: ${upscale.missingNodes.join(', ')}.`)
-      return
-    }
-    if (upscale.mode === 'rtx' && !workspace.rtxModel) {
-      notify('error', 'Choose an AI upscale model installed in ComfyUI first.')
-      return
-    }
-    if ((upscale.mode === 'lbh2d' || upscale.mode === 'lbh3d') && !upscale.lbhModel) {
-      notify('error', 'Install an H3 latent upscaler model into ComfyUI/models/latent_upscale_models (LBH-123-AI release), then refresh the engine.')
-      return
-    }
-    if (upscale.mode === 'rtx' && !window.confirm('RTX/CUDA upscale processes every frame independently and can amplify MiniMax noise or temporal shimmer. Continue with this experimental post-process?')) return
-    if (!prompt.trim()) {
-      notify('error', 'Add a prompt before generating.')
-      return
-    }
-    if (!status.connected) {
-      notify('error', 'Start ComfyUI and verify the server connection in Settings.')
-      return
-    }
-    if (!modelReady) {
-      notify('error', 'One or more required MiniMax H3 model components are missing.')
-      return
-    }
-    if (liveEnabled && livePreviewMode === 'h3-override' && !h3PreviewOverrideNode) {
-      notify('error', 'MiniMax H3 animated preview is selected, but its Preview Override node was not detected. Install or enable the custom node, restart ComfyUI, then click the Local engine status to refresh.')
-      return
-    }
-    if (liveEnabled && livePreviewMode === 'h3-override' && !selection.previewVae) {
-      notify('error', 'MiniMax H3 animated preview requires taeh3_decoder.safetensors in ComfyUI/models/vae_approx. Refresh the Local engine after adding it.')
-      return
-    }
-    if ((mode === 'image' || mode === 'frames') && !firstFrame) {
-      notify('error', 'Choose a first frame for this mode.')
-      return
-    }
-    if (mode === 'frames' && !lastFrame) {
-      notify('error', 'Choose a last frame for first-and-last-frame generation.')
-      return
-    }
-    if (mode === 'reference' && referenceImages.length + referenceVideos.length + referenceAudios.length === 0) {
-      notify('error', 'Add at least one reference image, video, or audio file.')
-      return
-    }
-    if (mode === 'reference' && (referenceImages.length > 9 || referenceVideos.length > 3 || referenceAudios.length > 3)) {
-      notify('error', 'Reference limits are 9 pictures, 3 videos, and 3 audio files. Remove extras before rendering.')
-      return
-    }
-    const invalidGuide = workspace.timelineGuides.find((guide) => guideFrameWarning(guide.seconds, duration))
-    if (mode === 'reference' && invalidGuide) {
-      notify('error', guideFrameWarning(invalidGuide.seconds, duration)!)
-      return
-    }
-
-    setSubmitting(true)
-    notify('neutral', 'Uploading inputs and preparing the ComfyUI graph…')
+    const { mode, prompt, firstFrame, lastFrame, referenceImages, referenceVideos, referenceAudios, duration, resolution, turbo, turboLoader, steps, sampler, scheduler, experimentalSampling, loraStrength, seed, sigmaShiftMode, shiftVideo, shiftAudio, refImageSize, liveEnabled, livePreviewMode, clothingPolicy, noDialogue, naturalMovement, movieHandoff, characterHandoff, selectedReferenceCharacterIds, selectedReferenceLocationIds, setActiveJobId, rtxModel } = workspace
     const workspaceBindings = ws.workspaceBindingsFor(selectedReferenceCharacterIds, selectedReferenceLocationIds)
     const renderReferenceImages = resolveRenderReferenceImages(referenceImages, workspaceBindings, clothingPolicy)
     const effectivePrompt = composeH3Prompt({ prompt, mode, bindings: workspaceBindings, clothingPolicy, noDialogue, naturalMovement })
     const [width, height] = resolution.split('x').map(Number)
-    const localId = createId()
-    const job: GenerationJob = {
-      id: localId,
+    setSubmitting(true)
+    const result = await submitH3Render({
       mode,
       prompt: effectivePrompt,
-      createdAt: Date.now(),
-      status: 'queued',
-      progress: 2,
-      progressLabel: 'Preparing and uploading inputs',
-      width: width * (upscale.mode === 'off' ? 1 : 2),
-      height: height * (upscale.mode === 'off' ? 1 : 2),
+      width,
+      height,
       duration,
+      seed,
+      steps,
+      turbo,
+      turboLoader,
+      experimentalSampling,
+      loraStrength,
+      sampler,
+      scheduler,
+      refImageSize,
+      sigmaShift: sigmaShiftMode === 'custom' ? { video: shiftVideo, audio: shiftAudio } : undefined,
+      upscale,
+      rtxModel,
+      firstFrame,
+      lastFrame,
+      referenceImages: renderReferenceImages,
+      referenceVideos,
+      referenceAudios,
+      timelineGuides: workspace.timelineGuides,
+      livePreview: { enabled: liveEnabled, mode: livePreviewMode },
       movieLink: movieHandoff ?? undefined,
       characterProjectId: characterHandoff ?? undefined,
-    }
-    setJobs((current) => [job, ...current])
-    setActiveJobId(localId)
-    try {
-      const upload = async (file: MediaFile, fitToOutput = false) => file.kind === 'image' && (fitToOutput || Boolean(file.crop))
-        ? window.minimax.uploadImageData(settings.comfyUrl, await prepareImage(file, width, height))
-        : window.minimax.uploadInput(settings.comfyUrl, file.path)
-      const guides = mode === 'reference' ? workspace.timelineGuides : []
-      const [first, last, images, videos, audios, guideUploads] = await Promise.all([
-        firstFrame && (mode === 'image' || mode === 'frames') ? upload(firstFrame, true) : undefined,
-        lastFrame && mode === 'frames' ? upload(lastFrame, true) : undefined,
-        Promise.all(mode === 'reference' ? renderReferenceImages.map((file) => upload(file)) : []),
-        Promise.all(mode === 'reference' ? referenceVideos.map((file) => upload(file)) : []),
-        Promise.all(mode === 'reference' ? referenceAudios.map((file) => upload(file)) : []),
-        Promise.all(guides.map(({ file }) => upload(file))),
-      ])
-      if (cancellationRequests.current.has(localId)) throw new Error('Generation cancelled before submission.')
-      const graph = buildMiniMaxWorkflow({
-        mode,
-        prompt: effectivePrompt,
-        width,
-        height,
-        duration,
-        seed,
-        steps,
-        turbo,
-        experimentalSampling,
-        loraStrength,
-        sampler: experimentalSampling ? sampler : 'res_multistep',
-        scheduler: experimentalSampling ? scheduler : 'simple',
-        upscale: upscale.mode === 'ltx' ? { type: 'ltx', model: upscale.model, vae: upscale.vae } : upscale.mode === 'rtx' ? { type: 'rtx', model: workspace.rtxModel } : upscale.mode === 'lbh2d' || upscale.mode === 'lbh3d' ? { type: upscale.mode, model: upscale.lbhModel } : undefined,
-        refImageSize,
-        sigmaShift: sigmaShiftMode === 'custom' ? { video: shiftVideo, audio: shiftAudio } : undefined,
-        previewOverride: liveEnabled && livePreviewMode === 'h3-override' && h3PreviewOverrideNode ? { frames: 50, fps: 12, nodeType: h3PreviewOverrideNode, vaeName: selection.previewVae, jpegQuality: 85 } : undefined,
-        filenamePrefix: `video/MiniMax_H3_${Date.now()}`,
-        firstFrame: firstFrame?.path,
-        lastFrame: lastFrame?.path,
-        referenceImages: renderReferenceImages.map((item) => item.path),
-        referenceVideos: referenceVideos.map((item) => item.path),
-        referenceAudios: referenceAudios.map((item) => item.path),
-        timelineGuides: guides.length ? guides.map((guide) => ({ frameIndex: frameIndexForSeconds(guide.seconds) })) : undefined,
-        turboLoader,
-      }, selection, { first, last, images, videos, audios, guides: guideUploads }, info)
-      const manifest = buildRenderManifest({
-        mode, prompt: effectivePrompt, width, height, duration, seed, steps, turbo, experimentalSampling, loraStrength,
-        sampler: experimentalSampling ? sampler : 'res_multistep', scheduler: experimentalSampling ? scheduler : 'simple',
-        refImageSize, sigmaShift: sigmaShiftMode === 'custom' ? { video: shiftVideo, audio: shiftAudio } : undefined,
-        upscale: upscale.mode === 'off' ? undefined : upscale.mode === 'ltx' ? { type: 'ltx', model: upscale.model, vae: upscale.vae } : { type: 'rtx', model: workspace.rtxModel },
-        referenceImages: renderReferenceImages.map((item) => item.path), referenceVideos: referenceVideos.map((item) => item.path), referenceAudios: referenceAudios.map((item) => item.path),
-        timelineGuides: guides.length ? guides.map((guide) => ({ frameIndex: frameIndexForSeconds(guide.seconds) })) : undefined,
-        filenamePrefix: `video/MiniMax_H3_${Date.now()}`,
-      }, selection, models, settings.comfyUrl, graph)
-      const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, clientId)
-      if (cancellationRequests.current.has(localId)) {
-        await window.minimax.cancelPrompt(settings.comfyUrl, response.prompt_id)
-        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'cancelled', error: undefined } : item))
-        notify('success', 'Generation cancelled.')
-      } else {
-        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: 'Waiting for ComfyUI to start', manifest, graph } : item))
-        notify('success', 'Generation added to the local ComfyUI queue.')
-        ws.setCharacterHandoff(null)
-      }
+    }, {
+      settings,
+      connected: status.connected,
+      modelReady,
+      selection,
+      models,
+      info,
+      clientId,
+      h3PreviewOverrideNode,
+    }, {
+      notify,
+      setJobs,
+      cancellationRequests,
+      onJobCreated: (jobId) => setActiveJobId(jobId),
+    })
+    if (result.ok) {
+      ws.setCharacterHandoff(null)
       workspace.setSeed(Math.floor(Math.random() * 1_000_000_000))
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      const cancelled = cancellationRequests.current.has(localId)
-      setJobs((current) => current.map((item) => item.id === localId ? cancelled ? { ...item, status: 'cancelled', error: undefined } : { ...item, status: 'failed', error: message } : item))
-      notify(cancelled ? 'success' : 'error', cancelled ? 'Generation cancelled.' : message)
-    } finally {
-      cancellationRequests.current.delete(localId)
-      setCancellingIds((current) => { const next = new Set(current); next.delete(localId); return next })
-      setSubmitting(false)
     }
+    cancellationRequests.current.delete(result.ok ? result.jobId : '')
+    setCancellingIds((current) => { const next = new Set(current); next.delete(result.ok ? result.jobId : ''); return next })
+    setSubmitting(false)
   }
 
   const runH3Diagnostics = async () => {
