@@ -687,7 +687,10 @@ export class FetchManager {
         const allSize = entry.files.every((file) => typeof file.sizeBytes === 'number')
         let done = 0
         for (const file of entry.files) {
-          const url = `https://huggingface.co/${entry.source.repo}/resolve/${revision}/${file.path.split('/').map(encodeURIComponent).join('/')}`
+          // Dataset repos live under /datasets/<repo>; model repos at the
+          // bare path. SHA pins (the catalog's default for weights) resolve
+          // locally, so only the download URL needs the distinction.
+          const url = `https://huggingface.co/${entry.source.dataset ? 'datasets/' : ''}${entry.source.repo}/resolve/${revision}/${file.path.split('/').map(encodeURIComponent).join('/')}`
           const cached = join(this.cacheDir(entry.id), 'files', file.path)
           this.emit({ id: entry.id, phase: 'downloading', file: file.path, bytes: done, totalBytes })
           const result = await this.transport.download({ url, destPath: cached, expectedSizeBytes: file.sizeBytes, expectedSha256: file.sha256, onProgress: (bytes) => this.emit({ id: entry.id, phase: 'downloading', file: file.path, bytes: done + bytes, totalBytes }) })
@@ -921,8 +924,15 @@ export function createFilesystemTransport(root: string): FetchTransport {
       const parsed = new URL(options.url)
       let sourcePath: string
       if (parsed.hostname === 'huggingface.co') {
-        const [, repo, , , , ...rest] = parsed.pathname.split('/')
-        sourcePath = join(absoluteRoot, 'hf', repo ?? 'unknown', rest.join('/'))
+        // Model URLs: /<owner>/<repo>/resolve/<rev>/<path> → hf/<owner>/<path>
+        // (the historical layout). Dataset URLs carry a leading /datasets/
+        // segment and map under hf/datasets/<owner>/ so the two cannot
+        // collide in the mock root.
+        const segments = parsed.pathname.split('/')
+        const isDataset = segments[1] === 'datasets'
+        const owner = isDataset ? segments[2] : segments[1]
+        const rest = segments.slice(isDataset ? 6 : 5)
+        sourcePath = join(absoluteRoot, 'hf', ...(isDataset ? ['datasets'] : []), owner ?? 'unknown', rest.join('/'))
       } else {
         const codeload = parsed.pathname.replace(/^\/|\/$/g, '') // owner/repo/tar.gz/ref
         const [owner, repository, , ref] = codeload.split('/')

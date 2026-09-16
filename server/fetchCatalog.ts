@@ -27,7 +27,11 @@
  *    checkpoints — runtime merge via the HybridLoader is preferred over
  *    pre-merged checkpoints);
  *  - the reference ComfyUI revision for the managed runtime's
- *    clone-on-demand seam (task 3ay7wbz).
+ *    clone-on-demand seam (task 3ay7wbz);
+ *  - the fasth3-live assessment's two artifacts (task gg7mu3s): the W4A8
+ *    video VAE (VAE-side quantization candidate) and the MATLOWAI fused
+ *    turbo (the VALIDATION candidate for the Ref2VA turbo bake-off's fused
+ *    arm, queued on the experiment ladder — task muwufpp).
  *
  * Pin discipline (LICENSES.md §9.1): entries pin `sha | tag | branch`.
  * Branch pins are moving — the fetch engine resolves them to the HEAD SHA
@@ -36,7 +40,12 @@
  *
  * Integrity pins below were verified against the Hugging Face / GitHub
  * APIs on 2026-09-14 (sizes + x-linked-etag sha256 for LFS files;
- * repository HEAD shas at catalog-authoring time).
+ * repository HEAD shas at catalog-authoring time) and on 2026-09-15 (the
+ * fasth3-live rows: sizes from the dataset tree API; the w4a8 VAE's sha256
+ * recovered through HF's own AV-scan VirusTotal reference because the
+ * dataset's license gate masks the LFS oid for anonymous API reads — see
+ * the entry's licenseNote and docs/LICENSES.md §5; the MATLOWAI sha256 is
+ * a plain LFS oid from the ungated repo).
  */
 import { join, resolve } from 'node:path'
 import type { AppSettings, FetchCatalogEntry, FetchDestination, FetchModelRoot, ModelKind } from '../src/types'
@@ -554,6 +563,46 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
     sizeBytes: 1_817_113_766,
     sizeClass: 'large',
     homepage: 'https://huggingface.co/Kijai/LTX2.3_comfy',
+  },
+
+  // ---- fasth3-live assessment (task gg7mu3s) -------------------------------
+  // Two artifacts the 2026-09-15 assessment of jacokon/fasth3-live committed
+  // to cataloging. Pins verified against the HF APIs on 2026-09-15: sizes
+  // from the tree API; the w4a8 sha256 via HF's AV-scan VT reference (the
+  // dataset's license gate masks the LFS oid anonymously); the MATLOWAI
+  // sha256 straight from the ungated repo's LFS metadata.
+  {
+    id: 'fasth3-vae-w4a8',
+    name: 'MiniMax-H3 video VAE W4A8 (fasth3-live)',
+    group: 'weights',
+    description: 'jacokon\'s W4A8 quantization of the MiniMax-H3 video VAE (from fp16, ~1.7 GB) — the VAE-side quantization candidate from the fasth3-live assessment: the same decode path at a fraction of the fp16 video-VAE footprint. What it is NOT: not a new VAE architecture, and its decode-fidelity delta vs fp16 is author-measured only (unverified by us — no run yet). The source dataset is HF license-gated: the file downloads only for a logged-in HF account that has accepted the dataset gate, and this fetch engine sends no credentials — an anonymous fetch fails honestly (401). A manually staged file matching the presence glob satisfies this entry without a fetch.',
+    licenseSpdx: 'minimax-h3-community-license-agreement',
+    licenseNote: 'Model Derivative of MiniMax H3 under the MiniMax H3 Community License Agreement (dataset LICENSE-MiniMax-H3.txt): Applicable Territory worldwide EXCLUDING the EU, UK, Republic of Korea and USA — the fetch consent flow surfaces these terms; the HF-side gate additionally requires per-account acceptance. docs/LICENSES.md §5.',
+    licenseUrl: 'https://huggingface.co/datasets/jacokon/fasth3-live/blob/main/LICENSE-MiniMax-H3.txt',
+    source: { kind: 'hf', repo: 'jacokon/fasth3-live', revision: { kind: 'sha', value: 'b21e88784d0c036ea19508cfff2c2839bddef6eb' }, dataset: true },
+    destination: { kind: 'model-root', root: 'vae' },
+    files: [{ path: 'minimax_h3_video_vae_w4a8_from_fp16.safetensors', sizeBytes: 1_738_850_040, sha256: '67ebba39653f6347533faed3dd9c6cc6cdb8a9a2c0d721d86abc015d449e7475' }],
+    detectGlob: '*video_vae_w4a8*',
+    sizeBytes: 1_738_850_040,
+    sizeClass: 'large',
+    homepage: 'https://huggingface.co/datasets/jacokon/fasth3-live',
+  },
+  {
+    id: 'matlowai-fused-turbo-int8',
+    name: 'MATLOWAI fused turbo (Ref2VA + lightx2v turbo + Mystic, int8 convrot)',
+    group: 'weights',
+    description: 'The VALIDATION candidate for the Ref2VA turbo bake-off\'s fused arm (queued on the experiment ladder, task muwufpp — NOT yet run by us): one 21 GB ComfyUI diffusion file — the pruned fl2va transformer with a rank-1024 SVD of the (ref2va − fl2va) weight delta fused in (first/last-frame AND reference conditioning from one partition), lightx2v\'s 8-step turbo LoRA @1.0 and the Mystic v2.0 style LoRA @0.7 folded into the weights, INT8 ConvRot quantization of the 200 core Linear layers — loaded by the stock UNETLoader. Author claims (unverified): 4-step reference/i2v/t2v at ~76 s per 10 s clip on a 96 GB card, cleaner output and ~21 GB less peak VRAM than the equivalent live-LoRA stack (which the repo also documents piece-by-piece). Unverified by us: every quality/timing claim, and behavior on our pruned-int8 testbed path.',
+    licenseSpdx: 'minimax-h3-community-license-agreement',
+    licenseNote: 'Model Derivative of MiniMax H3 under the MiniMax H3 Community License Agreement (repo LICENSE, license_name minimax-h3-community-license-agreement): territory and commercial-use terms ride with the outputs. The folded lightx2v turbo is Apache-2.0 and the base fused checkpoint is an xmarre Apache-side conversion, but the merged WEIGHTS stay MiniMax-H3 derivatives. docs/LICENSES.md §5.',
+    licenseUrl: 'https://huggingface.co/MATLOWAI/minimax-h3-fused-turbo-int8-convrot/blob/main/LICENSE',
+    source: { kind: 'hf', repo: 'MATLOWAI/minimax-h3-fused-turbo-int8-convrot', revision: { kind: 'sha', value: '8a8dffaa0cd99c6184833ae0a3b4e9b0089c17b3' } },
+    destination: { kind: 'model-root', root: 'diffusion_models' },
+    files: [{ path: 'diffusion_models/minimax_h3_fused_refdelta_r1024_turbo8_mystic07_int8_convrot.safetensors', sizeBytes: 20_980_178_976, sha256: '4262e4e9963c553fa00016bbe83961407a4fc0a888be95fd836c8d4f2304e48b' }],
+    detectGlob: '*fused_refdelta_r1024*',
+    sizeBytes: 20_980_178_976,
+    sizeClass: 'huge',
+    experimentPrerequisite: true,
+    homepage: 'https://huggingface.co/MATLOWAI/minimax-h3-fused-turbo-int8-convrot',
   },
 
   // ---- Clone-on-demand seam (task 3ay7wbz) --------------------------------

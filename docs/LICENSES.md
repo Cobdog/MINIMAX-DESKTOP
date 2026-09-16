@@ -170,6 +170,8 @@ model roots (symlink → junction → hardlink → refuse; never a byte-copy —
 | yzd-v/DWPose (ONNX pair) + hr16/DWPose-TorchScript-BatchSize5 | Apache-2.0 `[API-2026-09-14]` | weights (fetch-catalog preprocessors) | notice | clean |
 | Comfy-Org/Depth-Anything-3 (Base) | Apache-2.0 `[API-2026-09-14]` | weights (fetch-catalog preprocessor, `geometry_estimation`) | notice | clean |
 | smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models (b25-49 int8) | inherits the MiniMax fl2va/ref2va terms (repo README) `[API-2026-09-14]` | weights (fetch-catalog OPTIONAL — runtime merge via the HybridLoader is preferred) | same class as the MiniMax base weights (§5 row 1); no additional grant | surfaced |
+| jacokon/fasth3-live (W4A8 video VAE) | **minimax-h3-community-license-agreement** `[API-2026-09-15]` (dataset card gate text + LICENSE-MiniMax-H3.txt; the repo's CODE/prompts/characters are Apache-2.0 under its LICENSE — maintainer-verified at the 2026-09-15 assessment) | weights (fetch catalog, task gg7mu3s — VAE-side quantization candidate) | MiniMax H3 Community License: Applicable Territory worldwide EXCLUDING EU/UK/KR/US + commercial-use terms; the HF dataset carries a per-account license gate on top — surfaced at fetch consent, and anonymous fetches fail honestly (401). sha256 pin recovered via HF's own AV-scan VirusTotal reference (the gate masks the LFS oid for anonymous API reads); size pinned from the tree API | surfaced; prompt-pack import from this dataset is BLOCKED-EXTERNAL (gated content — needs maintainer-supplied files or a gate-accepted token) |
+| MATLOWAI/minimax-h3-fused-turbo-int8-convrot | **minimax-h3-community-license-agreement** `[API-2026-09-15]` (repo LICENSE, license_name in card; folded lightx2v turbo + base conversion are Apache-2.0 sides, the merged weights stay MiniMax-H3 derivatives) | weights (fetch catalog, task gg7mu3s — the queued Ref2VA turbo bake-off fused arm, experiment-ladder task muwufpp) | same MiniMax H3 Community class (territory + commercial terms); author quality/timing claims unverified by us — surfaced at consent | surfaced |
 | ComfyUI reference checkout | GPL-3.0 (tag `v0.34.0`) | engine checkout (fetch catalog, §3 row) | the checkout is the user's own GPL working copy; we convey nothing | fetchable-but-flagged |
 
 Node code that pairs with the Krea 2 LoRAs is permissive and already §4-clean:
@@ -299,8 +301,13 @@ PROVENANCE IANAL stance continues):
    version-gate maintenance burden.
 
 The fetch catalog (`server/fetchCatalog.ts`, task hgjbea2) pins sizes and
-sha256 digests for its weight entries, all verified against the HF API on
-2026-09-14 (`[API-2026-09-14]`, `x-linked-etag` for LFS files). Its license
+sha256 digests for its weight entries, verified against the HF API on
+2026-09-14 (`[API-2026-09-14]`, `x-linked-etag` for LFS files) and on
+2026-09-15 for the fasth3-live rows (task gg7mu3s): the gated dataset's
+sizes come from the tree API, and the w4a8 VAE's sha256 was recovered
+through HF's own AV-scan VirusTotal reference (the license gate masks the
+LFS oid for anonymous reads — the hash is HF-computed from the actual file
+bytes; method recorded in the catalog header and §5). Its license
 verdicts are transcribed from this inventory (and single-sourced from
 `ENGINE_NODE_PACKS` for the pack rows — the fetcher suite's integrity
 section fails the build if a catalog row ships without a license verdict or

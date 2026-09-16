@@ -16,6 +16,9 @@
 //       semantics (links removed, foreign files kept, cache retained)
 //   (f) placement policy: weights LINK into model roots (never copied),
 //       a foreign file at the destination fails the fetch
+//   (f2) dataset-repo sources: HF DATASET repos download through the
+//       /datasets/<repo>/resolve/... URL form (task gg7mu3s — the gated
+//       fasth3-live VAE row)
 //   (g) engine-checkout: codeload tarball fetch → extract → main.py gate;
 //       a non-empty destination is refused
 //   (h) production HTTP transport against a local origin: redirect
@@ -227,7 +230,7 @@ async function main() {
       }
     }
     // The seed commitments (mission + licensing pass) are all present.
-    for (const expected of ['pack:minimax-h3-turbo', 'pack:krea2-controlnet', 'pack:h3-audio-t8', 'fun-control-union', 'vdn-stage-dmd-250', 'vdn-stage-b-2000', 'smhfacct-hybrid-b25-49', 'dwpose-onnx', 'dwpose-torchscript', 'da3-base', 'hed-annotator', 'mlsd-annotator', 'engine-comfyui']) {
+    for (const expected of ['pack:minimax-h3-turbo', 'pack:krea2-controlnet', 'pack:h3-audio-t8', 'fun-control-union', 'vdn-stage-dmd-250', 'vdn-stage-b-2000', 'smhfacct-hybrid-b25-49', 'dwpose-onnx', 'dwpose-torchscript', 'da3-base', 'hed-annotator', 'mlsd-annotator', 'engine-comfyui', 'fasth3-vae-w4a8', 'matlowai-fused-turbo-int8']) {
       ok(ids.has(expected), `seed entry present: ${expected}`)
     }
     const facok = findFetchEntry('pack:krea2-controlnet')
@@ -239,6 +242,17 @@ async function main() {
     ok(findFetchEntry('smhfacct-hybrid-b25-49').optional === true, 'the smhfacct hybrid is marked OPTIONAL (runtime merge preferred)')
     ok(FETCH_CATALOG.filter((entry) => entry.experimentPrerequisite).length >= 7, 'experiment prerequisites are clearly marked')
     ok(findFetchEntry('engine-comfyui').licenseSpdx === 'GPL-3.0' && findFetchEntry('engine-comfyui').source.revision.kind === 'tag', 'the engine checkout is GPL-3.0 at a pinned tag')
+    // fasth3-live assessment rows (task gg7mu3s): both carry full integrity
+    // pins + honest descriptions of what is verified vs author-claimed.
+    const fasth3Vae = findFetchEntry('fasth3-vae-w4a8')
+    ok(fasth3Vae.source.kind === 'hf' && fasth3Vae.source.dataset === true && fasth3Vae.source.revision.kind === 'sha', 'the w4a8 VAE is a sha-pinned HF DATASET source (the /datasets/ download path)')
+    ok(fasth3Vae.files.every((file) => /^[0-9a-f]{64}$/.test(file.sha256 ?? '') && typeof file.sizeBytes === 'number'), 'the w4a8 VAE carries full sha256 + size pins despite the dataset gate masking the LFS oid')
+    ok(/license-gated/i.test(fasth3Vae.description) && /401/.test(fasth3Vae.description) && /unverified/i.test(fasth3Vae.description), 'the w4a8 VAE description discloses the HF gate (anonymous fetch 401s) and the unverified fidelity claim')
+    ok(fasth3Vae.destination.kind === 'model-root' && fasth3Vae.destination.root === 'vae' && matchesGlob('minimax_h3_video_vae_w4a8_from_fp16.safetensors', fasth3Vae.detectGlob), 'the w4a8 VAE lands in the vae root with a matching presence glob')
+    const matlowai = findFetchEntry('matlowai-fused-turbo-int8')
+    ok(matlowai.destination.kind === 'model-root' && matlowai.destination.root === 'diffusion_models', 'the MATLOWAI fused turbo lands in diffusion_models')
+    ok(matlowai.source.kind === 'hf' && matlowai.source.revision.kind === 'sha' && matlowai.files[0].sha256 === '4262e4e9963c553fa00016bbe83961407a4fc0a888be95fd836c8d4f2304e48b' && matlowai.files[0].sizeBytes === 20_980_178_976, 'the MATLOWAI entry pins the verified LFS sha256 + size at a pinned revision')
+    ok(matlowai.experimentPrerequisite === true && /unverified/i.test(matlowai.description), 'the MATLOWAI entry is an experiment prerequisite with its author claims flagged unverified')
     ok(fetchExtraModelRoots().includes('model_patches') && fetchExtraModelRoots().includes('vdn') && fetchExtraModelRoots().includes('geometry_estimation'), 'extra model roots enumerate for config mirroring')
     ok(matchesGlob('minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors', '*fun_controlnet_union*'), 'the presence glob catches the staged quantized variant')
     // License discipline: no non-permissive pack is vendor mode (the audit's
@@ -412,6 +426,38 @@ async function main() {
     const { manager: presentManager } = makeManager(home3, settings3, makeClaimingTransport())
     const present = (await presentManager.catalogStatus()).find((candidate) => candidate.id === 'fun-control-union')
     ok(present.state === 'present' && /detected/.test(present.note ?? ''), 'a staged quantized variant satisfies presence via the detect glob')
+  }
+
+  // ---- (f2) dataset-repo sources (task gg7mu3s) --------------------------------------
+  console.log('fetcher: dataset-repo download URLs')
+  {
+    // The fasth3-live VAE lives in an HF DATASET repo (license-gated). The
+    // engine must build /datasets/<repo>/resolve/... download URLs for it,
+    // use its sha pin verbatim (no revision API call), and link the file
+    // into the vae root like any weights row.
+    const home = makeHome()
+    const settings = makeSettings(home)
+    const urls = []
+    const transport = makeClaimingTransport({
+      download: async (options) => {
+        urls.push(options.url)
+        const size = options.expectedSizeBytes ?? 16
+        fs.mkdirSync(path.dirname(options.destPath), { recursive: true })
+        fs.writeFileSync(options.destPath, Buffer.alloc(size, 7))
+        return { sizeBytes: size, sha256: await sha256File(options.destPath), resumedBytes: 0 }
+      },
+    })
+    const { manager, events } = makeManager(home, settings, transport)
+    settings.fetch.consents['fasth3-vae-w4a8'] = { consented: true, licenseSpdx: 'minimax-h3-community-license-agreement' }
+    const result = await fetchAndAwait(manager, events, 'fasth3-vae-w4a8')
+    ok(!result.failure, `the dataset-repo VAE row fetches through the engine (${result.failure?.message ?? 'ok'})`)
+    ok(urls.length === 1 && urls[0] === 'https://huggingface.co/datasets/jacokon/fasth3-live/resolve/b21e88784d0c036ea19508cfff2c2839bddef6eb/minimax_h3_video_vae_w4a8_from_fp16.safetensors', 'dataset sources download from /datasets/<repo>/resolve/<sha>/<path>')
+    ok(transport.state.resolves === 0, 'the sha pin resolved locally — no revision API call')
+    const entry = findFetchEntry('fasth3-vae-w4a8')
+    const target = modelRootTargetPath(entry.destination, settings, entry.files[0].path)
+    ok(fs.existsSync(target) && path.basename(target) === 'minimax_h3_video_vae_w4a8_from_fp16.safetensors', 'the VAE links into the vae model root')
+    const state = JSON.parse(fs.readFileSync(path.join(home, 'fetcher', 'fetch-state.json'), 'utf8'))
+    ok(state.installs['fasth3-vae-w4a8'].verified === 'sha256', 'the gated-repo row still verifies at the sha256 level (the pin does not depend on the gate)')
   }
 
   // ---- (g) engine checkout ----------------------------------------------------------
