@@ -20,6 +20,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import Database from 'better-sqlite3'
+import { upCanvasDocuments } from './documents'
 
 export type Migration = {
   id: number
@@ -134,6 +135,17 @@ export const migrations: Migration[] = [
         );
       `)
     },
+  },
+  {
+    // Canvas Phase 0 (docs/specs/canvas-document-model.md §1/§2): the
+    // document tables, take append-only + bake-immutability triggers, the
+    // canvas FTS surface (+ live job indexing triggers), the legacy-import
+    // marker, and the additive jobs extension (gpu_queue_state / plan_ref /
+    // failure_json — nullable, never referenced by the old surface). The old
+    // stores keep their tables and their behavior untouched.
+    id: 2,
+    name: '002-canvas-documents',
+    up: upCanvasDocuments,
   },
 ]
 

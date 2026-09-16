@@ -16,6 +16,7 @@
     "test": "node scripts/test-workflows.cjs",
     "test:registry": "node scripts/test-registry.cjs",
     "test:storage": "node scripts/test-storage.cjs",
+    "test:documents": "node scripts/test-documents.cjs",
     "test:filmstrip": "node scripts/test-filmstrip.cjs",
     "test:realtime": "node scripts/test-realtime.cjs",
     "test:llm": "node scripts/test-llm.cjs",
@@ -31,7 +32,7 @@
     "vision:report": "node scripts/vision-e2e/report.cjs",
     "gate": "node scripts/run-gate.cjs",
     "license:audit": "node scripts/audit-licenses.cjs",
-    "test:all": "pnpm test && pnpm test:registry && pnpm test:e2e && pnpm test:storage && pnpm test:filmstrip && pnpm test:realtime && pnpm test:llm && pnpm test:engine && pnpm test:runtime && pnpm test:fetcher && pnpm test:lora-form && pnpm test:poserig && pnpm test:camera && pnpm smoke:server && pnpm test:vision"
+    "test:all": "pnpm test && pnpm test:registry && pnpm test:e2e && pnpm test:storage && pnpm test:documents && pnpm test:filmstrip && pnpm test:realtime && pnpm test:llm && pnpm test:engine && pnpm test:runtime && pnpm test:fetcher && pnpm test:lora-form && pnpm test:poserig && pnpm test:camera && pnpm smoke:server && pnpm test:vision"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

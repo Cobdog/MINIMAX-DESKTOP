@@ -6,7 +6,9 @@
  * terminal-transition events, explicit FTS insert/delete management, and
  * whole-document workspace last-write-wins.
  */
+import { dirname, join } from 'node:path'
 import { openStudioDatabase } from './db'
+import { createDocumentStore, type DocumentStore } from './documents'
 import { TECHNIQUE_CORPUS, type SavedPromptEntry } from '../src/lib/promptCorpus'
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled'])
@@ -42,6 +44,13 @@ export function ftsMatchExpression(raw: string): string {
  *  crashed server. */
 export function createStudioRepository(dbFile: string) {
   const db = openStudioDatabase(dbFile)
+  // Canvas document store (Phase 0) on the SAME handle/migrations: new
+  // canvas_* tables beside the old ones — the old surface above is untouched.
+  // Blobs are content-addressed under <studio home>/canvas-blobs next to the
+  // db file. An open failure fails the whole repository (503), matching the
+  // append-only-migration discipline: a document store that cannot migrate
+  // must never answer stale.
+  const documents: DocumentStore = createDocumentStore(db, { blobRoot: join(dirname(dbFile), 'canvas-blobs') })
   const statements = {
     selectJobStatus: db.prepare('SELECT status FROM jobs WHERE id = ?'),
     upsertJob: db.prepare(`
@@ -216,6 +225,10 @@ export function createStudioRepository(dbFile: string) {
 
   return {
     close: () => db.close(),
+
+    /** The canvas document store (Phase 0) — runs beside the old surface on
+     *  the same database handle; see server/documents.ts. */
+    documents,
 
     /** Per-job upsert keyed by id — NEVER a whole-list replace. Two clients
      *  (or tabs) writing overlapping sets each win per job: the newest write

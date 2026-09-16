@@ -48,6 +48,11 @@ const SUITES = [
   { name: 'test', command: 'pnpm run test', timeoutMs: 20 * MINUTE },
   { name: 'test:registry', command: 'pnpm run test:registry', timeoutMs: 20 * MINUTE },
   { name: 'test:storage', command: 'pnpm run test:storage', timeoutMs: 20 * MINUTE },
+  // Canvas document store (Phase 0, task oiavqh8): migration 002 golden
+  // fixture, §6 legacy import, tombstone/GC adversarials, §7 archive
+  // round-trip + cross-version refusal, §4 FTS. Boots the built server on a
+  // scratch home (like test:storage — needs dist-server from a prior build).
+  { name: 'test:documents', command: 'pnpm run test:documents', timeoutMs: 20 * MINUTE },
   { name: 'test:realtime', command: 'pnpm run test:realtime', timeoutMs: 20 * MINUTE },
   { name: 'test:filmstrip', command: 'pnpm run test:filmstrip', timeoutMs: 20 * MINUTE },
   { name: 'test:llm', command: 'pnpm run test:llm', timeoutMs: 20 * MINUTE },

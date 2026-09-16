@@ -33,6 +33,11 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: pnpm smoke:server
+      # Canvas document store (Phase 0, task oiavqh8): runs AFTER build — the
+      # suite boots the built server on a scratch home (same pattern as the
+      # gate-local test:storage). Migration 002 golden fixture, §6 legacy
+      # import, GC fork-edge adversarials, §7 archive round-trip, §4 FTS.
+      - run: pnpm test:documents
       # Managed ComfyUI runtime (increment 1): stub-checkout suite — needs
       # neither python nor a real checkout; the python section self-skips.
       - run: pnpm test:runtime

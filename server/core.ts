@@ -24,6 +24,8 @@ import type { AppSettings, GpuTelemetry, LanStatus, ModelKind } from '../src/typ
 import { failureRef, logEvent, logFailure } from './logger'
 import { sanitizeErrorMessage } from './logSanitize'
 import { createStudioRepository, type StudioRepository } from './repo'
+import { CANVAS_SCHEMA_VERSION, CanvasSchemaVersionError } from './documents'
+import { exportProjectArchive, importProjectArchive } from './documentArchive'
 import { createRealtimeHub, type RealtimeHub } from './realtime'
 import { EngineProcess } from './engineProcess'
 import { RuntimeManager, RuntimeConfigError } from './runtime'
@@ -407,6 +409,24 @@ export function createStudioServer(paths: StudioServerPaths) {
     logEvent({ kind: 'db.ready', file: 'studio.db' })
   } catch (error) {
     logFailure('db/open', error, undefined, 'error')
+  }
+
+  // Canvas Phase 0 (docs/specs/canvas-document-model.md): the document store
+  // runs beside the old surface. The §6 legacy import runs ONCE on first
+  // canvas boot — i.e. the first /api/lan/documents route hit — so a studio
+  // that never opens the canvas never pays for it. A failed import leaves no
+  // marker and retries on the next attempt (deterministic ids keep it clean).
+  let documentsImportEnsured = false
+  const ensureDocumentsImported = () => {
+    if (!studioRepo || documentsImportEnsured) return
+    documentsImportEnsured = true
+    try {
+      const report = studioRepo.documents.importLegacy({ characters: mobileCharacterLibrary })
+      if (!report.alreadyImported) logEvent({ kind: 'documents.legacy-import', ...report.counts })
+    } catch (error) {
+      documentsImportEnsured = false
+      logFailure('documents/legacy-import', error)
+    }
   }
 
   // Realtime event fabric (wave 1): ONE WebSocket per client (plus an SSE v2
@@ -1183,6 +1203,518 @@ export function createStudioServer(paths: StudioServerPaths) {
           const id = typeof body.id === 'string' ? body.id : ''
           if (!id || id.length > 200) return sendJson(response, 400, { error: 'A prompt id is required.' })
           return sendJson(response, 200, { deleted: studioRepo.deletePrompt(id) })
+        }
+        // ---- Canvas document store (Phase 0) ---------------------------------
+        // /api/lan/documents/* — minimal CRUD for projects/chains/outputs/
+        // takes/assets/ops/identity/control tracks/plans/session + retention
+        // (prune/gc/trash) + §6 legacy import + §7 archive + §4 FTS search.
+        // The canvas UI (next phase) consumes these; no UI ships here. All
+        // bodies validated shape-first; unknown-newer documents refuse with a
+        // loud 400 naming the writing app version (§2/F9); the old storage
+        // routes above are untouched.
+        if (url.pathname.startsWith('/api/lan/documents')) {
+          if (!studioRepo) return sendJson(response, 503, { error: 'The studio database is unavailable; canvas documents cannot be accessed.' })
+          const documents = studioRepo.documents
+          ensureDocumentsImported()
+          // Unknown-newer versions are a LOUD refusal (400), never a silent
+          // downgrade; everything else propagates to the structural 500.
+          const documentsFailure = (error: unknown): ReturnType<typeof sendJson> | null => {
+            if (error instanceof CanvasSchemaVersionError) {
+              return sendJson(response, 400, {
+                error: error.message,
+                schemaVersion: { found: error.found, supported: error.supported, writerAppVersion: error.writerAppVersion },
+              })
+            }
+            return null
+          }
+          const idFrom = (body: Record<string, unknown>) => (typeof body.id === 'string' && body.id && body.id.length <= 400 ? body.id : null)
+          const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+          const stringArray = (value: unknown): string[] | null => (Array.isArray(value) && value.every((item) => typeof item === 'string' && item.length <= 4096) ? value : null)
+
+          if (url.pathname === '/api/lan/documents/bootstrap' && request.method === 'GET') {
+            return sendJson(response, 200, { schemaVersion: CANVAS_SCHEMA_VERSION, appVersion: documents.appVersion, legacyImport: documents.legacyImportStatus() })
+          }
+          if (url.pathname === '/api/lan/documents/projects' && request.method === 'GET') {
+            const trash = url.searchParams.get('trash') === '1'
+            return sendJson(response, 200, { projects: trash ? documents.listTrashedProjects() : documents.listProjects() })
+          }
+          if (url.pathname === '/api/lan/documents/projects' && request.method === 'POST') {
+            const body = await readJson(request, 100_000)
+            const name = typeof body.name === 'string' ? body.name.trim().slice(0, 200) : ''
+            if (!name) return sendJson(response, 400, { error: 'A project name is required.' })
+            try {
+              return sendJson(response, 200, { project: documents.createProject({ name, camera: isRecord(body.camera) ? body.camera : {}, settingsDefaults: isRecord(body.settingsDefaults) ? body.settingsDefaults : {} }) })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/project' && request.method === 'GET') {
+            const id = url.searchParams.get('id') ?? ''
+            if (!id || id.length > 400) return sendJson(response, 400, { error: 'A project id is required.' })
+            try {
+              const document = documents.getProjectDocument(id)
+              if (!document) return sendJson(response, 404, { error: `No project with id ${id}.` })
+              return sendJson(response, 200, document)
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/projects/update' && request.method === 'POST') {
+            const body = await readJson(request, 2_000_000)
+            const id = idFrom(body)
+            if (!id) return sendJson(response, 400, { error: 'A project id is required.' })
+            try {
+              if (typeof body.name === 'string' && body.name.trim()) documents.renameProject(id, body.name.trim().slice(0, 200))
+              if (isRecord(body.camera)) documents.setProjectCamera(id, body.camera)
+              if (isRecord(body.settingsDefaults)) documents.setProjectSettingsDefaults(id, body.settingsDefaults)
+              return sendJson(response, 200, { project: documents.getProject(id) })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/projects/delete' && request.method === 'POST') {
+            const body = await readJson(request, 10_000)
+            const id = idFrom(body)
+            if (!id) return sendJson(response, 400, { error: 'A project id is required.' })
+            return sendJson(response, 200, { deleted: documents.tombstoneProject(id) })
+          }
+          if (url.pathname === '/api/lan/documents/projects/restore' && request.method === 'POST') {
+            const body = await readJson(request, 10_000)
+            const id = idFrom(body)
+            if (!id) return sendJson(response, 400, { error: 'A project id is required.' })
+            return sendJson(response, 200, { restored: documents.restoreProject(id) })
+          }
+          if (url.pathname === '/api/lan/documents/chains' && request.method === 'GET') {
+            if (url.searchParams.get('trash') !== '1') return sendJson(response, 400, { error: 'Chain listing is by project document; only ?trash=1 is standalone.' })
+            return sendJson(response, 200, { chains: documents.listTrashedChains(url.searchParams.get('projectId') ?? undefined) })
+          }
+          if (url.pathname === '/api/lan/documents/chains' && request.method === 'POST') {
+            const body = await readJson(request, 2_000_000)
+            const projectId = typeof body.projectId === 'string' ? body.projectId : ''
+            if (!projectId || projectId.length > 400) return sendJson(response, 400, { error: 'A projectId is required.' })
+            try {
+              return sendJson(response, 200, {
+                chain: documents.createChain({
+                  projectId,
+                  kind: typeof body.kind === 'string' && body.kind ? body.kind.slice(0, 60) : undefined,
+                  inputSpec: isRecord(body.inputSpec) ? body.inputSpec : {},
+                  settings: isRecord(body.settings) ? body.settings : {},
+                  lockState: body.lockState === 'locked' ? 'locked' : undefined,
+                }),
+              })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/chains/update' && request.method === 'POST') {
+            const body = await readJson(request, 2_000_000)
+            const id = idFrom(body)
+            if (!id) return sendJson(response, 400, { error: 'A chain id is required.' })
+            const update: Record<string, unknown> = { id }
+            if (isRecord(body.settings)) update.settings = body.settings
+            if (body.lockState === 'locked' || body.lockState === 'unlocked') update.lockState = body.lockState
+            if (typeof body.hopCount === 'number' && Number.isFinite(body.hopCount)) update.hopCount = body.hopCount
+            if (isRecord(body.driftMetrics) || body.driftMetrics === null) update.driftMetrics = body.driftMetrics
+            if (isRecord(body.inputSpec)) update.inputSpec = body.inputSpec
+            try {
+              const chain = documents.updateChain(update as Parameters<typeof documents.updateChain>[0])
+              if (body.stale === true || body.stale === false) documents.setChainStale(id, body.stale)
+              return sendJson(response, 200, { chain: body.stale === undefined ? chain : documents.getChain(id) })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/chains/delete' && request.method === 'POST') {
+            const body = await readJson(request, 10_000)
+            const id = idFrom(body)
+            if (!id) return sendJson(response, 400, { error: 'A chain id is required.' })
+            return sendJson(response, 200, { deleted: documents.tombstoneChain(id) })
+          }
+          if (url.pathname === '/api/lan/documents/chains/restore' && request.method === 'POST') {
+            const body = await readJson(request, 10_000)
+            const id = idFrom(body)
+            if (!id) return sendJson(response, 400, { error: 'A chain id is required.' })
+            return sendJson(response, 200, { restored: documents.restoreChain(id) })
+          }
+          if (url.pathname === '/api/lan/documents/outputs' && request.method === 'GET') {
+            const chainId = url.searchParams.get('chainId') ?? ''
+            if (!chainId || chainId.length > 400) return sendJson(response, 400, { error: 'A chainId is required.' })
+            return sendJson(response, 200, { outputs: documents.listOutputs(chainId) })
+          }
+          if (url.pathname === '/api/lan/documents/outputs' && request.method === 'POST') {
+            const body = await readJson(request, 100_000)
+            const chainId = typeof body.chainId === 'string' ? body.chainId : ''
+            if (!chainId || chainId.length > 400) return sendJson(response, 400, { error: 'A chainId is required.' })
+            const substrates = stringArray(body.substrates)
+            try {
+              return sendJson(response, 200, { output: documents.createOutput({ chainId, substrates: substrates ?? [] }) })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/takes' && request.method === 'GET') {
+            const outputId = url.searchParams.get('outputId') ?? ''
+            if (!outputId || outputId.length > 400) return sendJson(response, 400, { error: 'An outputId is required.' })
+            return sendJson(response, 200, { takes: documents.listTakes(outputId), canonicalTakeId: documents.canonicalTake(outputId)?.id ?? null })
+          }
+          if (url.pathname === '/api/lan/documents/takes' && request.method === 'POST') {
+            const body = await readJson(request, 2_000_000)
+            const outputId = typeof body.outputId === 'string' ? body.outputId : ''
+            if (!outputId || outputId.length > 400) return sendJson(response, 400, { error: 'An outputId is required.' })
+            const artifacts = stringArray(body.artifacts)
+            if (body.artifacts !== undefined && !artifacts) return sendJson(response, 400, { error: 'artifacts must be an array of paths.' })
+            try {
+              return sendJson(response, 200, {
+                take: documents.appendTake({
+                  outputId,
+                  jobId: typeof body.jobId === 'string' && body.jobId ? body.jobId : null,
+                  artifacts: artifacts ?? [],
+                  latentPath: typeof body.latentPath === 'string' && body.latentPath ? body.latentPath : null,
+                  metrics: isRecord(body.metrics) ? body.metrics : null,
+                  contentHash: typeof body.contentHash === 'string' && body.contentHash ? body.contentHash : null,
+                }),
+              })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/takes/supersede' && request.method === 'POST') {
+            const body = await readJson(request, 10_000)
+            const outputId = typeof body.outputId === 'string' ? body.outputId : ''
+            const takeId = typeof body.takeId === 'string' && body.takeId && body.takeId.length <= 400 ? body.takeId : null
+            if (!outputId || !takeId) return sendJson(response, 400, { error: 'An outputId and takeId are required.' })
+            try {
+              return sendJson(response, 200, { take: documents.supersedeTake({ outputId, takeId }) })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/ops' && request.method === 'GET') {
+            const chainId = url.searchParams.get('chainId') ?? ''
+            if (!chainId || chainId.length > 400) return sendJson(response, 400, { error: 'A chainId is required.' })
+            return sendJson(response, 200, { ops: documents.ops(chainId) })
+          }
+          if (url.pathname === '/api/lan/documents/ops' && request.method === 'POST') {
+            const body = await readJson(request, 500_000)
+            const chainId = typeof body.chainId === 'string' ? body.chainId : ''
+            const kind = typeof body.kind === 'string' ? body.kind.trim().slice(0, 60) : ''
+            if (!chainId || chainId.length > 400 || !kind) return sendJson(response, 400, { error: 'A chainId and an op kind are required.' })
+            try {
+              return sendJson(response, 200, { op: documents.addOp({ chainId, kind, settings: isRecord(body.settings) ? body.settings : {} }) })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/ops/update' && request.method === 'POST') {
+            const body = await readJson(request, 500_000)
+            const id = idFrom(body)
+            if (!id || !isRecord(body.settings)) return sendJson(response, 400, { error: 'An op id and a settings object are required.' })
+            try {
+              documents.updateOpSettings(id, body.settings)
+              return sendJson(response, 200, { updated: true })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/ops/reorder' && request.method === 'POST') {
+            const body = await readJson(request, 100_000)
+            const chainId = typeof body.chainId === 'string' ? body.chainId : ''
+            const orderedIds = stringArray(body.orderedIds)
+            if (!chainId || chainId.length > 400 || !orderedIds) return sendJson(response, 400, { error: 'A chainId and an orderedIds array are required.' })
+            try {
+              documents.reorderOps(chainId, orderedIds)
+              return sendJson(response, 200, { ops: documents.ops(chainId) })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/ops/bake' && request.method === 'POST') {
+            const body = await readJson(request, 10_000)
+            const id = idFrom(body)
+            if (!id) return sendJson(response, 400, { error: 'An op id is required.' })
+            try {
+              documents.bakeOp(id)
+              return sendJson(response, 200, { baked: true })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/ops/delete' && request.method === 'POST') {
+            const body = await readJson(request, 10_000)
+            const id = idFrom(body)
+            if (!id) return sendJson(response, 400, { error: 'An op id is required.' })
+            try {
+              return sendJson(response, 200, { deleted: documents.deleteOp(id) })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/identity' && request.method === 'POST') {
+            const body = await readJson(request, 500_000)
+            const chainId = typeof body.chainId === 'string' ? body.chainId : ''
+            if (!chainId || chainId.length > 400) return sendJson(response, 400, { error: 'A chainId is required.' })
+            const refAssetIds = body.refAssetIds === undefined ? undefined : stringArray(body.refAssetIds) ?? undefined
+            if (body.refAssetIds !== undefined && !refAssetIds) return sendJson(response, 400, { error: 'refAssetIds must be an array of asset ids.' })
+            try {
+              return sendJson(response, 200, {
+                identity: documents.upsertIdentity({
+                  chainId,
+                  refAssetIds,
+                  refmodIds: body.refmodIds === undefined ? undefined : stringArray(body.refmodIds) ?? undefined,
+                  subjectText: typeof body.subjectText === 'string' ? body.subjectText.slice(0, 20_000) : undefined,
+                  strength: typeof body.strength === 'number' && Number.isFinite(body.strength) ? body.strength : undefined,
+                  perSlotStrengths: isRecord(body.perSlotStrengths) ? (body.perSlotStrengths as Record<string, number>) : undefined,
+                }),
+              })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/control-tracks' && request.method === 'POST') {
+            const body = await readJson(request, 500_000)
+            const chainId = typeof body.chainId === 'string' ? body.chainId : ''
+            const kind = typeof body.kind === 'string' ? body.kind.trim().slice(0, 40) : ''
+            const source = typeof body.source === 'string' ? body.source.trim().slice(0, 40) : ''
+            const inputRef = typeof body.inputRef === 'string' ? body.inputRef.slice(0, 4096) : ''
+            if (!chainId || !kind || !source || !inputRef) return sendJson(response, 400, { error: 'A chainId, kind, source, and inputRef are required.' })
+            try {
+              return sendJson(response, 200, {
+                controlTrack: documents.addControlTrack({
+                  chainId, kind, source, inputRef,
+                  maskRef: typeof body.maskRef === 'string' && body.maskRef ? body.maskRef.slice(0, 4096) : null,
+                  params: isRecord(body.params) ? body.params : null,
+                }),
+              })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/control-tracks/delete' && request.method === 'POST') {
+            const body = await readJson(request, 10_000)
+            const id = idFrom(body)
+            if (!id) return sendJson(response, 400, { error: 'A control track id is required.' })
+            return sendJson(response, 200, { deleted: documents.deleteControlTrack(id) })
+          }
+          if (url.pathname === '/api/lan/documents/assets' && request.method === 'GET') {
+            const kind = url.searchParams.get('kind') ?? undefined
+            const scopedKind = kind && kind.length <= 40 ? kind : undefined
+            if (url.searchParams.get('trash') === '1') return sendJson(response, 200, { assets: documents.listTrashedAssets(scopedKind) })
+            return sendJson(response, 200, { assets: documents.listAssets(scopedKind) })
+          }
+          if (url.pathname === '/api/lan/documents/assets' && request.method === 'POST') {
+            const body = await readJson(request, 8_000_000)
+            const kind = typeof body.kind === 'string' ? body.kind : ''
+            if (!kind || !isRecord(body.fields)) return sendJson(response, 400, { error: 'An asset kind and a fields object are required.' })
+            const referenceSet = body.canonicalReferenceSet === undefined || body.canonicalReferenceSet === null ? null : stringArray(body.canonicalReferenceSet)
+            if (referenceSet === null && body.canonicalReferenceSet !== undefined && body.canonicalReferenceSet !== null) return sendJson(response, 400, { error: 'canonicalReferenceSet must be an array of paths.' })
+            try {
+              return sendJson(response, 200, {
+                asset: documents.upsertAsset({
+                  id: typeof body.id === 'string' && body.id ? body.id : undefined,
+                  kind,
+                  fields: body.fields,
+                  canonicalReferenceSet: referenceSet,
+                }),
+              })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/assets/delete' && request.method === 'POST') {
+            const body = await readJson(request, 10_000)
+            const id = idFrom(body)
+            if (!id) return sendJson(response, 400, { error: 'An asset id is required.' })
+            return sendJson(response, 200, { deleted: documents.tombstoneAsset(id) })
+          }
+          if (url.pathname === '/api/lan/documents/assets/restore' && request.method === 'POST') {
+            const body = await readJson(request, 10_000)
+            const id = idFrom(body)
+            if (!id) return sendJson(response, 400, { error: 'An asset id is required.' })
+            return sendJson(response, 200, { restored: documents.restoreAsset(id) })
+          }
+          if (url.pathname === '/api/lan/documents/assets/fork' && request.method === 'POST') {
+            const body = await readJson(request, 500_000)
+            const projectId = typeof body.projectId === 'string' ? body.projectId : ''
+            const assetId = typeof body.assetId === 'string' ? body.assetId : ''
+            if (!projectId || !assetId) return sendJson(response, 400, { error: 'A projectId and an assetId are required.' })
+            if (body.consent !== true) return sendJson(response, 400, { error: 'Forking a global asset into a project requires explicit consent.' })
+            try {
+              return sendJson(response, 200, {
+                fork: documents.forkAssetIntoProject({
+                  projectId,
+                  assetId,
+                  forkedSettings: isRecord(body.forkedSettings) ? body.forkedSettings : {},
+                  consent: true,
+                }),
+              })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/plans' && request.method === 'POST') {
+            const body = await readJson(request, 8_000_000)
+            const projectId = typeof body.projectId === 'string' ? body.projectId : ''
+            if (!projectId || projectId.length > 400 || !isRecord(body.document)) return sendJson(response, 400, { error: 'A projectId and a plan document are required.' })
+            try {
+              return sendJson(response, 200, { plan: documents.upsertPlan({ projectId, id: typeof body.id === 'string' && body.id ? body.id : undefined, document: body.document }) })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/session' && request.method === 'GET') {
+            return sendJson(response, 200, { session: documents.getSession() })
+          }
+          if (url.pathname === '/api/lan/documents/session' && request.method === 'POST') {
+            const body = await readJson(request, 100_000)
+            const openProjects = stringArray(body.openProjects)
+            if (!openProjects) return sendJson(response, 400, { error: 'openProjects must be an array of project ids.' })
+            const activeProject = typeof body.activeProject === 'string' && body.activeProject ? body.activeProject : null
+            return sendJson(response, 200, { session: documents.saveSession({ openProjects, activeProject }) })
+          }
+          // Retention (§3): session-scoped prune (defaults to the session's
+          // open projects), mark-and-sweep GC, and the explicit trash empty.
+          if (url.pathname === '/api/lan/documents/prune' && request.method === 'POST') {
+            const body = await readJson(request, 100_000)
+            const requested = stringArray(body.projectIds)
+            const projectIds = requested ?? documents.getSession().openProjects
+            if (!projectIds.length) return sendJson(response, 400, { error: 'No open projects in the session; pass projectIds explicitly.' })
+            return sendJson(response, 200, { pruned: documents.pruneProjects(projectIds) })
+          }
+          if (url.pathname === '/api/lan/documents/gc' && request.method === 'POST') {
+            return sendJson(response, 200, { gc: documents.sweep() })
+          }
+          if (url.pathname === '/api/lan/documents/trash/empty' && request.method === 'POST') {
+            const body = await readJson(request, 10_000)
+            if (body.confirm !== 'empty-trash') return sendJson(response, 400, { error: 'Emptying the trash is destructive; send confirm:"empty-trash".' })
+            return sendJson(response, 200, { emptied: documents.emptyTrash() })
+          }
+          if (url.pathname === '/api/lan/documents/blobs/relink' && request.method === 'POST') {
+            const body = await readJson(request, 100_000)
+            const roots = stringArray(body.roots)
+            if (!roots || !roots.length) return sendJson(response, 400, { error: 'An array of nominated roots is required.' })
+            return sendJson(response, 200, { relink: documents.relinkBlobs(roots) })
+          }
+          // Archive (§7): export = zip (manifest + document rows + blob tree);
+          // import refuses unknown-newer versions loudly.
+          if (url.pathname === '/api/lan/documents/export' && request.method === 'GET') {
+            const id = url.searchParams.get('id') ?? ''
+            if (!id || id.length > 400) return sendJson(response, 400, { error: 'A project id is required.' })
+            try {
+              const { archive, manifest } = exportProjectArchive(documents, id)
+              const safeName = manifest.projectName.replace(/[^a-z0-9._-]+/gi, '_').slice(0, 80) || 'project'
+              response.writeHead(200, {
+                'content-type': 'application/zip',
+                'content-disposition': `attachment; filename="${safeName}.canvas.zip"`,
+                'content-length': String(archive.length),
+                'x-canvas-schema-version': String(manifest.schemaVersion),
+              })
+              return void response.end(archive)
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/import' && request.method === 'POST') {
+            const body = await readJson(request, 200_000_000)
+            const archiveBase64 = typeof body.archiveBase64 === 'string' ? body.archiveBase64 : ''
+            if (!archiveBase64 || archiveBase64.length < 100) return sendJson(response, 400, { error: 'An archiveBase64 zip payload is required.' })
+            let archive: Buffer
+            try {
+              archive = Buffer.from(archiveBase64, 'base64')
+            } catch {
+              return sendJson(response, 400, { error: 'The archive payload is not valid base64.' })
+            }
+            try {
+              return sendJson(response, 200, { import: importProjectArchive(documents, archive) })
+            } catch (error) {
+              // Archive problems are user-actionable (corrupt zip, unknown
+              // version, taken project id): loud 400s with the reason, never
+              // the generic structural 500.
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              return sendJson(response, 400, { error: error instanceof Error ? error.message : 'The archive could not be imported.' })
+            }
+          }
+          // §6 legacy import: auto-ran on first documents access; this route
+          // re-runs it for library entries that sync after boot (idempotent:
+          // jobs/workspace/prompts are marker-gated, characters upsert by id).
+          if (url.pathname === '/api/lan/documents/import/legacy' && request.method === 'POST') {
+            const body = await readJson(request, 36_000_000)
+            const characters = Array.isArray(body.characters) ? body.characters : mobileCharacterLibrary
+            try {
+              return sendJson(response, 200, { import: documents.importLegacy({ characters, force: true }) })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          if (url.pathname === '/api/lan/documents/search' && request.method === 'GET') {
+            const query = (url.searchParams.get('q') ?? '').slice(0, 400)
+            const kind = url.searchParams.get('kind') ?? undefined
+            const limit = Number(url.searchParams.get('limit'))
+            return sendJson(response, 200, {
+              results: documents.search(query, kind && kind.length <= 20 ? kind : undefined, Number.isInteger(limit) && limit >= 1 && limit <= 200 ? limit : 50),
+            })
+          }
+          if (url.pathname === '/api/lan/documents/jobs/state' && request.method === 'POST') {
+            const body = await readJson(request, 100_000)
+            const id = idFrom(body)
+            if (!id) return sendJson(response, 400, { error: 'A job id is required.' })
+            const queue = body.gpuQueueState === 'active' || body.gpuQueueState === 'queued_for_gpu' || body.gpuQueueState === null ? body.gpuQueueState : undefined
+            if (body.gpuQueueState !== undefined && queue === undefined) return sendJson(response, 400, { error: 'gpuQueueState must be active, queued_for_gpu, or null.' })
+            const failure = body.failure === null || body.failure === undefined
+              ? undefined
+              : isRecord(body.failure) && typeof body.failure.stage === 'string' && typeof body.failure.reason === 'string'
+                ? { stage: body.failure.stage.slice(0, 100), reason: body.failure.reason.slice(0, 2000), ref: typeof body.failure.ref === 'string' ? body.failure.ref.slice(0, 200) : undefined }
+                : 'invalid'
+            if (failure === 'invalid') return sendJson(response, 400, { error: 'failure must be {stage, reason, ref?} or null.' })
+            try {
+              return sendJson(response, 200, { job: documents.setJobState({ id, gpuQueueState: queue, planRef: typeof body.planRef === 'string' ? body.planRef.slice(0, 400) : body.planRef === null ? null : undefined, failure: failure === undefined ? undefined : (failure as { stage: string; reason: string; ref?: string } | null) }) })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
+          }
+          return sendJson(response, 404, { error: 'Unknown canvas documents route.' })
         }
         if (url.pathname === '/api/lan/upload-output' && request.method === 'POST') {
           const body = await readJson(request, 10_000)
