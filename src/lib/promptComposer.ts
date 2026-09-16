@@ -149,6 +149,22 @@ export function compileMovieShotPrompt(project: MovieProject, scene: MovieScene,
   return parts.filter(Boolean).filter((part) => { const key = sentenceKey(part); if (!key || seen.has(key)) return false; seen.add(key); return true }).join(' ')
 }
 
+/** Segmented-inference prompt discipline — temporal exclusivity + per-segment
+ *  reference declaration, translated from supElement's AutoContext README
+ *  ("提示词注意事项" / prompt caveats, upstream @ f1062d34e3c25ef421b2aadeb69f2d21831d1625;
+ *  full translation + code cross-check: docs/research/autocontext-deepread.md §5).
+ *  Advised ONLY on multi-segment paths (the timeline tool composes one prompt
+ *  per shot of a chain): a single continuous shot with one whole-clip prompt
+ *  is the always-valid case the upstream rules explicitly exclude — the
+ *  single-shot tools (enhance/audio) never see this guidance. */
+export const TEMPORAL_EXCLUSIVITY_GUIDANCE = [
+  'Multi-segment discipline — temporal exclusivity: each segment\'s prompt may only describe what is "happening now" in that segment, as new changes relative to the END of the previous segment.',
+  'Segmentation is a relay: the anchor frames from the end of segment N-1 already supply segment N\'s entire starting visual state (positions, pose, camera) implicitly — do NOT repeat that starting state in the prompt.',
+  'No retelling, no overlap: a segment must never re-describe an action or camera move already completed in the previous segment — the instruction then conflicts with what the anchor frames show, causing stuttering, broken motion logic, or repeated actions. Zero out the previous segment\'s ongoing action and write the new segment like a new instruction after pressing the shutter: only the displacement, actions, or new elements inside the new time window.',
+  'Close the action loop, then open the next segment on the result only. Wrong: segment 1 "object A moves toward position B", segment 2 "after moving to B, object A turns around at B" — segment 2 re-tells the move the anchor frames already show, so the model tries to re-move it (ghosting, frame skipping). Right: segment 1 "object A moves toward position B and finally stops at B", segment 2 "having settled, object A slowly turns" — "stopped at B" is an established fact; only the turning is described.',
+  'Per-segment reference declaration: every segment must independently and completely declare ALL reference material it needs (image1, <Picture N>, <Video N>, <Audio N>). References are NOT remembered or inherited into the next segment — a segment that fails to re-declare image1 receives no reference image at all, and character/object identity drifts. Not written means not passed.',
+].join(' ')
+
 /** Runtime per-request instructions for the prompt assistant — the composer's
  *  [context] layer. The role/output-format/contract layers now resolve
  *  server-side from the fragment registry (server/llm/composer.ts); this
@@ -167,6 +183,10 @@ export function buildPromptAssistantContext(tool: PromptAssistantTool, context: 
     : `Effective generation route: ${context.mode}`
   return [
     officialStructure,
+    // Multi-segment paths only (timeline): the temporal-exclusivity +
+    // per-segment reference declaration rules refine the timed structure
+    // above. Single-shot tools never see it — guidance is scoped, not global.
+    tool === 'timeline' ? TEMPORAL_EXCLUSIVITY_GUIDANCE : '',
     preservation,
     context.noDialogue ? 'Audio constraint: no spoken dialogue, narration, voice-over, singing, lip-sync, subtitles, captions, or text overlays. Preserve ambient sound effects only.' : '',
     `Effective duration: ${context.duration} seconds`,

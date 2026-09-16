@@ -498,6 +498,27 @@ assert.ok(referenceOrderWarnings('No tags here.', { images: 3, videos: 0, audios
 assert.ok(referenceOrderWarnings('Uses <Audio 2> first, then <Audio 1>.', { images: 0, videos: 0, audios: 2 }).some((warning) => warning.includes('<Audio 2> is mentioned before')), 'audio order mismatch expected')
 
 
+// ---- Segmented-inference prompt discipline (temporal exclusivity) -----------
+// supElement's AutoContext README rules, translated (docs/research/
+// autocontext-deepread.md §5, upstream @ f1062d34e3c25ef421b2aadeb69f2d21831d1625):
+// advised ONLY on the multi-segment path (the timeline tool composes one prompt
+// per shot); the single-shot tools must stay untouched — the upstream scope
+// note excludes one-prompt whole-clip videos from the discipline.
+const { TEMPORAL_EXCLUSIVITY_GUIDANCE, buildPromptAssistantContext } = load('src/lib/promptComposer.ts')
+assert.equal(typeof TEMPORAL_EXCLUSIVITY_GUIDANCE, 'string', 'the temporal-exclusivity guidance constant exists')
+assert.ok(TEMPORAL_EXCLUSIVITY_GUIDANCE.length > 400, 'the guidance is substantive (both principles + worked examples)')
+assert.ok(TEMPORAL_EXCLUSIVITY_GUIDANCE.includes('temporal exclusivity'), 'guidance names core principle 1')
+assert.ok(TEMPORAL_EXCLUSIVITY_GUIDANCE.includes('anchor frames'), 'guidance states the relay/anchor mechanism')
+assert.ok(TEMPORAL_EXCLUSIVITY_GUIDANCE.includes('finally stops at B') && TEMPORAL_EXCLUSIVITY_GUIDANCE.includes('having settled'), 'guidance carries the worked wrong/right pair (closed action loop, new action after the result)')
+assert.ok(TEMPORAL_EXCLUSIVITY_GUIDANCE.includes('Per-segment reference declaration') && TEMPORAL_EXCLUSIVITY_GUIDANCE.includes('Not written means not passed'), 'guidance carries core principle 2 (no reference inheritance)')
+assert.ok(buildPromptAssistantContext('timeline', { duration: 10, mode: 'text' }).includes(TEMPORAL_EXCLUSIVITY_GUIDANCE), 'the timeline (multi-segment) context advises the discipline')
+for (const tool of ['enhance', 'audio']) {
+  const singleShot = buildPromptAssistantContext(tool, { duration: 6, mode: 'reference', referenceMap: ['<Picture 1> = Ada'], noDialogue: true })
+  assert.equal(singleShot.includes(TEMPORAL_EXCLUSIVITY_GUIDANCE), false, `the single-shot ${tool} context never carries the multi-segment discipline`)
+  assert.equal(singleShot.includes('Multi-segment discipline'), false, `the single-shot ${tool} context stays free of any exclusivity wording`)
+}
+
+
 // ---- H3 no-dialogue emission: ambience bed + silent score --------------------
 // H3 fills unspecified silence with gibberish speech, so the toggle ON must
 // spend the audio budget (ambience bed), silence the score via the official
@@ -1079,7 +1100,7 @@ function runComposerTests() {
 
 runComposerTests()
 runKernelTests().then(() => {
-  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction (incl. structural execution-error capture: node id/class + sanitized reason + taxonomy label), quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the H3 no-dialogue emission (ambience bed, silent score field, retained negation, OFF-state inertness), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference), ContactSheet character sheets (topology, LoRA inference, size clamps, views-first attribution), graph-family versioning + looseness presets, the Z-Image ControlNet Union graph (pin names, native canny, aux preprocessors, mask, image-sized latent), the pure error sanitizer (prompt-text redaction bar, comma-clause redaction, technical-message preservation, stack-path extraction, length cap, fallback constant), the failure taxonomy (ordered human-cause buckets over sanitized reasons), and the diagnostic report (canary-proof blob by construction, version shape allow-list, model-scan counts only, failure histogram by bucket, deterministic output, sanitizer self-test verdict)')
+  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction (incl. structural execution-error capture: node id/class + sanitized reason + taxonomy label), quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the segmented-inference prompt discipline (temporal-exclusivity guidance constant, timeline-only scoping, single-shot contexts untouched), the H3 no-dialogue emission (ambience bed, silent score field, retained negation, OFF-state inertness), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference), ContactSheet character sheets (topology, LoRA inference, size clamps, views-first attribution), graph-family versioning + looseness presets, the Z-Image ControlNet Union graph (pin names, native canny, aux preprocessors, mask, image-sized latent), the pure error sanitizer (prompt-text redaction bar, comma-clause redaction, technical-message preservation, stack-path extraction, length cap, fallback constant), the failure taxonomy (ordered human-cause buckets over sanitized reasons), and the diagnostic report (canary-proof blob by construction, version shape allow-list, model-scan counts only, failure histogram by bucket, deterministic output, sanitizer self-test verdict)')
 }, (error) => {
   console.error(error)
   process.exitCode = 1

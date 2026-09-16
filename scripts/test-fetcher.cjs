@@ -230,7 +230,7 @@ async function main() {
       }
     }
     // The seed commitments (mission + licensing pass) are all present.
-    for (const expected of ['pack:minimax-h3-turbo', 'pack:krea2-controlnet', 'pack:h3-audio-t8', 'fun-control-union', 'vdn-stage-dmd-250', 'vdn-stage-b-2000', 'smhfacct-hybrid-b25-49', 'dwpose-onnx', 'dwpose-torchscript', 'da3-base', 'hed-annotator', 'mlsd-annotator', 'engine-comfyui', 'fasth3-vae-w4a8', 'matlowai-fused-turbo-int8']) {
+    for (const expected of ['pack:minimax-h3-turbo', 'pack:krea2-controlnet', 'pack:h3-audio-t8', 'fun-control-union', 'vdn-stage-dmd-250', 'vdn-stage-b-2000', 'smhfacct-hybrid-b25-49', 'dwpose-onnx', 'dwpose-torchscript', 'da3-base', 'hed-annotator', 'mlsd-annotator', 'engine-comfyui', 'fasth3-vae-w4a8', 'matlowai-fused-turbo-int8', 'pack:autocontext']) {
       ok(ids.has(expected), `seed entry present: ${expected}`)
     }
     const facok = findFetchEntry('pack:krea2-controlnet')
@@ -239,6 +239,15 @@ async function main() {
     ok(t8.licenseSpdx === 'GPL-3.0-or-later' && t8.source.revision.kind === 'branch', 'T8mars is GPL-3.0-or-later user-fetch (fetchable-but-flagged, never vendored)')
     const larryvrh = findFetchEntry('pack:minimax-h3-turbo')
     ok(larryvrh.licenseSpdx === 'Apache-2.0' && larryvrh.source.revision.kind === 'sha', 'Larryvrh turbo pins a SHA (immutable)')
+    // AutoContext row (task p8oyfy1, docs/research/autocontext-deepread.md §7):
+    // supElement's segmented-inference pack — permissive Apache-2.0 at an
+    // immutable sha pin, single-sourced from ENGINE_NODE_PACKS (checked
+    // per-entry above); the "Add files via upload" history makes a sha pin,
+    // not a branch, the right posture.
+    const autocontext = findFetchEntry('pack:autocontext')
+    ok(autocontext.licenseSpdx === 'Apache-2.0' && autocontext.source.revision.kind === 'sha' && autocontext.source.revision.value === 'f1062d34e3c25ef421b2aadeb69f2d21831d1625', 'AutoContext is Apache-2.0 at the deep-read sha pin (immutable)')
+    const autocontextPack = findNodePack('autocontext')
+    ok(autocontext.name === autocontextPack.name && autocontext.source.url === autocontextPack.repoUrl && autocontextPack.installMode === 'user-fetch', 'the AutoContext row is single-sourced from ENGINE_NODE_PACKS (user-fetch pack, license verdict lives there)')
     ok(findFetchEntry('smhfacct-hybrid-b25-49').optional === true, 'the smhfacct hybrid is marked OPTIONAL (runtime merge preferred)')
     ok(FETCH_CATALOG.filter((entry) => entry.experimentPrerequisite).length >= 7, 'experiment prerequisites are clearly marked')
     ok(findFetchEntry('engine-comfyui').licenseSpdx === 'GPL-3.0' && findFetchEntry('engine-comfyui').source.revision.kind === 'tag', 'the engine checkout is GPL-3.0 at a pinned tag')

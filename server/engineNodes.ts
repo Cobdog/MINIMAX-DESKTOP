@@ -72,7 +72,13 @@ import type { AppSettings, ModelKind, NodePackDefinition, NodePackStatus } from 
  *    Fetchable-but-flagged like T8mars.
  *  - radiance (FXTD Studios, task 068xwy3): GPL-3.0 — one node
  *    (Float32ColorCorrect, load-bearing in the outpaint template).
- *    Fetchable-but-flagged. */
+ *    Fetchable-but-flagged.
+ *  - ComfyUI_MinimaxH3_AutoContext (supElement, task lxmtgss): Apache-2.0
+ *    (LICENSE file read from a fresh fetch, 2026-09-16; template copyright
+ *    line only) — the segmented-inference pack (prompt-timeline slicing,
+ *    per-segment reference filtering, 3-channel anchoring; deep-read:
+ *    docs/research/autocontext-deepread.md). Permissive: vendor-eligible,
+ *    user-fetch until a vendoring increment is wanted. */
 export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
   {
     id: 'vdn-h3',
@@ -184,6 +190,26 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     licenseNote: 'GPL-3.0 (GitHub API license record, verified 2026-09-15). Fetchable-but-flagged like every GPL pack: user-fetch only, never vendored; one node used.',
     installMode: 'user-fetch',
     homepage: 'https://github.com/fxtdstudios/radiance',
+  },
+  // -- segmented inference for H3 (task lxmtgss deep-read → task p8oyfy1) --
+  {
+    id: 'autocontext',
+    name: 'ComfyUI_MinimaxH3_AutoContext',
+    description: 'supElement’s one-click segmented-inference pack for MiniMax H3: '
+      + 'prompt-timeline slicing (Clip_Tag/timeline/sequential/global), per-segment reference '
+      + 'filtering (only prompt-declared refs are passed), 3-channel inter-segment anchoring '
+      + '(initial-latent splice + video_context_denoise dial, cond-row motion keyframes, '
+      + 'untagged context-audio ref), hash-keyed per-segment latent cache with resume, '
+      + 'video_guide bridging, audio_drive, and a pixel-domain seam-correction node. '
+      + 'Deep-read: docs/research/autocontext-deepread.md.',
+    repoUrl: 'https://github.com/supElement/ComfyUI_MinimaxH3_AutoContext',
+    pinnedRevision: 'f1062d34e3c25ef421b2aadeb69f2d21831d1625',
+    licenseSpdx: 'Apache-2.0',
+    licenseNote: 'Apache-2.0 (LICENSE file read from a fresh fetch, 2026-09-16; template '
+      + 'copyright line only). Permissive: vendor-eligible, user-fetch until a vendoring '
+      + 'increment is wanted.',
+    installMode: 'user-fetch',
+    homepage: 'https://github.com/supElement/ComfyUI_MinimaxH3_AutoContext',
   },
 ]
 

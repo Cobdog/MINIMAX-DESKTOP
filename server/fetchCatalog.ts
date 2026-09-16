@@ -14,8 +14,9 @@
  * Seed policy — every entry is something our own research committed to:
  *  - the ENGINE_NODE_PACKS user-fetch list (facok NO-LICENSE, T8mars
  *    GPL-3.0, Larryvrh turbo Apache-2.0, krea2edit Apache-2.0, anypaint
- *    MIT), single-sourced from that registry (license verdicts live
- *    THERE, not duplicated here);
+ *    MIT, AutoContext Apache-2.0 — the supElement segmented-inference
+ *    pack, deep-read docs/research/autocontext-deepread.md), single-sourced
+ *    from that registry (license verdicts live THERE, not duplicated here);
  *  - the Krea 2 edit-mode weights (task t8u00uu): the Identity Edit v1.2
  *    LoRA line + the AnyPaint rank-32 adapter that docs/research/
  *    krea2-edit-mode.md committed the edit families to;
@@ -104,6 +105,10 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   nodePackEntry('ltxvideo'),
   nodePackEntry('kjnodes'),
   nodePackEntry('radiance'),
+  // supElement's segmented-inference pack (task p8oyfy1, deep-read
+  // docs/research/autocontext-deepread.md §7): sha-pinned Apache-2.0 row,
+  // single-sourced from ENGINE_NODE_PACKS like every pack entry.
+  nodePackEntry('autocontext'),
   // First-party pack (task k271ykk): installs from the studio's own
   // custom-nodes/ payload — the fetch engine short-circuits to a local
   // install and never touches the transport. License + repo stay
