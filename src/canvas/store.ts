@@ -1,5 +1,5 @@
 /**
- * Canvas Phase 2 — the canvas session store.
+ * Canvas Phase 3 — the canvas session store.
  *
  * Everything the route renders except the camera: the open-project session,
  * loaded documents, derived tiles/edges, selection (single + batch), the
@@ -7,7 +7,11 @@
  * Phase 2, GENERATION: chains submit REAL H3 renders through the shared
  * flows core (lib/h3Submit.ts) with per-chain settings unwound from the old
  * workspace singleton, completed jobs land as takes on their chains, and
- * dropped bytes ingest into content-addressed blobs.
+ * dropped bytes ingest into content-addressed blobs. Phase 3 adds the OP
+ * STACK surface (§5.1: the modal editor's store actions — add/edit/reorder/
+ * bake/undo, canonical-pointer switching, locks), the LTX-2.3 utility
+ * invocation through the shared core (lib/ltx23UtilitySubmit.ts), Z-Image
+ * stills as an op (lib/zImageSubmit.ts), and the pose-rig dock state.
  *
  * The camera is deliberately NOT here (camera.ts owns it, outside React) —
  * the store only emits rare `cameraCommands` that the substrate executes.
@@ -28,9 +32,11 @@ import {
   avoidOverlap,
   CANVAS_MOCK_JOB_PREFIX,
   type CanvasDocument,
+  collectOutputRefs,
   deriveEdges,
   deriveTiles,
   seedSpawnPoint,
+  TILE_H_MEDIA,
   TILE_W,
   type Tile,
   type Edge,
@@ -51,11 +57,14 @@ import {
   type CanvasLibraries,
   type ForkSubstrate,
 } from './generation'
+import { DEFAULT_SETTINGS, type OpKind } from './ops'
 import type { EndpointDirection, EndpointOption, OptionAvailability } from './options'
 import { findH3PreviewOverrideNode } from '../lib/h3Stack'
 import { inferSelections } from '../lib/modelSelection'
 import { submitH3Render, validateH3Render } from '../lib/h3Submit'
-import { findLtx23Utility } from '../lib/graph'
+import { submitLtx23Utility, validateLtx23Utility } from '../lib/ltx23UtilitySubmit'
+import { submitZImage, validateZImage, planZImageGraph } from '../lib/zImageSubmit'
+import { buildLtx23UtilityGraph, findLtx23Utility } from '../lib/graph'
 import { loadCharacterProjects } from '../lib/characterLibrary'
 import { loadLocationProjects } from '../lib/locationLibrary'
 import { loadWardrobeProjects } from '../lib/wardrobeLibrary'
@@ -137,6 +146,11 @@ type CanvasState = {
   indexOpen: boolean
   endpointMenu: { chainId: string; direction: EndpointDirection } | null
   forkMenu: { chainId: string } | null
+  /** Phase 3 (§5.1): the op modal's target chain — L8 DECIDED: modal-only
+   *  v1 (no inline chip controls). */
+  opEditor: { chainId: string } | null
+  /** Phase 3 (§5.2): the pose-rig dock's target chain (control-track export). */
+  poseRig: { chainId: string } | null
   cameraCommands: CameraCommand[]
   cameraCommandSeq: number
   viewDirty: boolean
@@ -151,7 +165,8 @@ type CanvasActions = {
   createCanvas(name?: string): Promise<string | null>
   /** The launcher's prompt submit: spawn the seed chain, then REAL submit. */
   submitPrompt(text: string, mediaType: 'video' | 'image'): Promise<void>
-  /** Real H3 submission for one chain (per-chain settings → shared core). */
+  /** Real submission for one chain (per-chain settings → shared cores; image
+   *  intent routes to Z-Image per §5.4 engines-as-ops). */
   submitChain(chainId: string): Promise<{ ok: boolean; message?: string }>
   /** Validation-only preview of a chain's submit (the bar + menus read it). */
   validateChain(chainId: string): string | null
@@ -165,14 +180,32 @@ type CanvasActions = {
   /** One typed-hole menu choice (§3 option menus). */
   runEndpointAction(chainId: string, direction: EndpointDirection, option: EndpointOption, sourceChainId?: string): Promise<void>
   /** Fork a chain's output on a substrate (§2 outputRef). */
-  fork(source: { chainId: string; outputId: string; takeId?: string | null; substrate: ForkSubstrate }): Promise<void>
+  fork(source: { chainId: string; outputId: string; takeId?: string | null; substrate: ForkSubstrate; withUpscale?: boolean }): Promise<void>
   setEndpointMenu(menu: { chainId: string; direction: EndpointDirection } | null): void
   setForkMenu(menu: { chainId: string } | null): void
   rerunStale(): Promise<void>
+  /** One chain's consented re-execution: submit + clear the stale flag. */
+  rerunChain(chainId: string): Promise<void>
   cancelChainJob(chainId: string): Promise<void>
   dismissFailure(tileId: string): void
   setInspectorOpen(open: boolean): void
   setIndexOpen(open: boolean): void
+  setOpEditor(editor: { chainId: string } | null): void
+  setPoseRig(panel: { chainId: string } | null): void
+  /** §5.1 op-stack edits — each lands in the document store then recomputes
+   *  (the tile's preview LIVE-UPDATES: L3 decided live-update). */
+  addStackOp(chainId: string, kind: OpKind, settings?: Record<string, unknown>): Promise<string | null>
+  updateStackOp(chainId: string, opId: string, settings: Record<string, unknown>): Promise<void>
+  removeStackOp(chainId: string, opId: string): Promise<void>
+  reorderStackOps(chainId: string, orderedIds: string[]): Promise<void>
+  bakeStackOp(chainId: string, opId: string): Promise<void>
+  /** Canonical-pointer switch on the take strip (F5/takes): the chosen take
+   *  becomes canonical; the displaced one becomes a prior; downstream forks
+   *  of this chain go stale (locks gate — locked chains stay pristine). */
+  switchCanonical(chainId: string, takeId: string): Promise<void>
+  /** §7 P — pin (lock/unlock) a chain: locked chains gate propagation and
+   *  keep ALL takes resident (tier 1). */
+  setChainLock(chainId: string, locked: boolean): Promise<void>
   setEngineFacts(facts: { connected: boolean; modelReady: boolean }): void
   toast(tone: CanvasToast['tone'], text: string): void
   dismissToast(id: number): void
@@ -216,8 +249,10 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     // Identity-stability guard: background reloads and jobsStore ticks must
     // not swap the tiles/edges array references when the derivation is
     // unchanged — the substrate subscribes to these, and a new reference is
-    // a React render on the pan/zoom path (the transient discipline).
-    const tileSig = tiles.map((tile) => `${tile.id}:${tile.status}:${tile.kind}:${Math.round(tile.x)},${Math.round(tile.y)}:${tile.priors}:${tile.canonical?.id ?? ''}:${tile.previewPath ?? ''}:${tile.prompt.length}`).join('|')
+    // a React render on the pan/zoom path (the transient discipline). Op
+    // edits join the signature (Phase 3): a settings/bake change IS a
+    // live-update signal for the tile preview.
+    const tileSig = tiles.map((tile) => `${tile.id}:${tile.status}:${tile.kind}:${Math.round(tile.x)},${Math.round(tile.y)}:${tile.priors}:${tile.canonical?.id ?? ''}:${tile.previewPath ?? ''}:${tile.prompt.length}:${tile.lockState}:${tile.stale}:${tile.ops.map((op) => `${op.id}${op.bakedAt ?? ''}${JSON.stringify(op.settings)}`).join(',')}`).join('|')
     const edgeSig = edges.map((edge) => edge.id).join('|')
     const linksSig = Object.entries(links).map(([chainId, jobId]) => `${chainId}=${jobId}`).join('|')
     if (tileSig === viewSigs.tiles && edgeSig === viewSigs.edges && linksSig === viewSigs.links) return
@@ -363,6 +398,8 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     indexOpen: false,
     endpointMenu: null,
     forkMenu: null,
+    opEditor: null,
+    poseRig: null,
     cameraCommands: [],
     cameraCommandSeq: 0,
     viewDirty: false,
@@ -506,6 +543,40 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       const projectId = get().activeProjectId
       if (!context || !projectId) return { ok: false, message: 'The chain is not on an open canvas.' }
       const { settings, bindings, firstFrame, lastFrame, referenceMedia, referenceVideos, referenceAudios } = context
+      // §5.4 engines-as-ops (Phase 3): image INTENT routes the still surface —
+      // nothing-selected = a Z-Image Turbo still; a selected image = the Fun
+      // ControlNet Union graph over that image (the zImageControlnet
+      // machinery). Selection still decides the surface (L4), extended to the
+      // image engine; frames/reference modes remain H3 video concepts.
+      const stillIntent = settings.mediaType === 'image' && (effectiveMode(settings) === 'text' || effectiveMode(settings) === 'image')
+      if (stillIntent) {
+        const mode = effectiveMode(settings)
+        const facts = engineFacts()
+        if (!facts.settings) return { ok: false, message: 'Studio settings are still loading.' }
+        const result = await submitZImage(
+          {
+            prompt: settings.prompt,
+            seed: settings.seed,
+            width: Number(settings.resolution.split('x')[0]) || 1344,
+            height: Number(settings.resolution.split('x')[1]) || 768,
+            surface: mode === 'image' ? 'control' : 'plain',
+            controlImage: mode === 'image' ? firstFrame : null,
+            controlMode: 'canny',
+            filenamePrefix: `MiniMax_first_frames/Canvas_ZImage_${Date.now()}`,
+            manifestExtra: { canvas: { chainId, projectId } },
+          },
+          { settings: facts.settings, connected: facts.connected, info: facts.info },
+          {
+            notify: (tone, text) => get().toast(tone === 'neutral' ? 'neutral' : tone, text),
+            setJobs: (update) => useJobsStore.getState().setJobs(update),
+            onJobCreated: (jobId) => {
+              set((current) => ({ chainJobs: { ...current.chainJobs, [chainId]: jobId } }))
+              recomputeTiles()
+            },
+          },
+        )
+        return result.ok ? { ok: true } : { ok: false, message: result.message }
+      }
       const selection = selectionFor(settings.turbo, settings.turboFamily)
       const facts = engineFacts()
       if (!facts.settings) return { ok: false, message: 'Studio settings are still loading.' }
@@ -545,6 +616,19 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       const context = chainRenderContext(chainId)
       if (!context) return 'The chain is not on an open canvas.'
       const { settings, bindings, firstFrame, lastFrame, referenceMedia, referenceVideos, referenceAudios } = context
+      // The still surface (§5.4) validates through its own ladder.
+      if (settings.mediaType === 'image' && (effectiveMode(settings) === 'text' || effectiveMode(settings) === 'image')) {
+        const facts = engineFacts()
+        return validateZImage(
+          {
+            prompt: settings.prompt, seed: settings.seed, width: 1344, height: 768,
+            surface: effectiveMode(settings) === 'image' ? 'control' : 'plain',
+            controlImage: effectiveMode(settings) === 'image' ? firstFrame : null,
+            controlMode: 'canny',
+          },
+          { connected: facts.connected, info: facts.info },
+        )
+      }
       const selection = selectionFor(settings.turbo, settings.turboFamily)
       const facts = engineFacts()
       const request = buildCanvasRenderRequest(settings, { firstFrame, lastFrame, referenceImages: referenceMedia, referenceVideos, referenceAudios }, bindings)
@@ -744,7 +828,74 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         return
       }
       if (action.kind === 'utility') {
-        get().toast('neutral', `The LTX-2.3 ${action.tool} utility lands on canvas with the Phase-3 op stacks — today it runs from Settings → Utilities.`)
+        // §5.4 engines-as-ops (Phase 3): a REAL utility run — a new chain
+        // consuming this tile's output (the edge is what it consumes), the
+        // official-template graph through the SHARED core (the Settings
+        // utilities and this surface submit through one code path), the job
+        // linked to the chain so the result lands as its take.
+        const sourceChain = doc.chains.find((entry) => entry.id === chainId)
+        const outputId = sourceChain?.outputs[0]?.id ?? null
+        if (!outputId) {
+          get().toast('error', 'That object has no output yet — generate or drop media first.')
+          return
+        }
+        const media = mediaForOutput(buildOutputIndex(doc).get(outputId))
+        if (!media) {
+          get().toast('error', 'That object’s output has no renderable media to run the utility over.')
+          return
+        }
+        const settings = readChainSettings(sourceChain?.settings ?? {})
+        try {
+          const utility = findLtx23Utility(`ltx23.${action.tool}`)
+          const utilityChain = await documentsApi.createChain({
+            projectId: doc.project.id,
+            kind: 'generation',
+            inputSpec: forkInputSpec({ outputId, takeId: null, substrate: 'decoded' }),
+            settings: {
+              ...chainSettingsDefaults(useSessionStore.getState().settings),
+              prompt: utility?.promptDefault ?? '',
+              mediaType: 'video',
+            } as unknown as Record<string, unknown>,
+          })
+          set({ viewDirty: true })
+          const sourceTile = get().tiles.find((tile) => tile.id === chainId)
+          // Cluster-on-parent (L25), stacked BELOW the fork row so a fork and
+          // a utility from the same source never overlap.
+          const place = sourceTile ? { x: sourceTile.x + TILE_W + 140, y: sourceTile.y + TILE_H_MEDIA + 60, w: TILE_W } : { x: 120, y: 96, w: TILE_W }
+          set((current) => ({ layout: { ...(current.layout ?? {}), [utilityChain.id]: place } }))
+          const refreshed = await loadDocument(doc.project.id)
+          if (refreshed) recomputeTiles()
+          set({ selection: { tileIds: [utilityChain.id] }, inspectorOpen: true })
+          get().requestCamera({ kind: 'fly', tileId: utilityChain.id })
+          get().persistView()
+          const facts = engineFacts()
+          if (!facts.settings) {
+            get().toast('error', 'Studio settings are still loading.')
+            return
+          }
+          const result = await submitLtx23Utility(
+            { tool: action.tool as never, video: media.media, prompt: settings.prompt || undefined, manifestExtra: { canvas: { chainId: utilityChain.id, projectId: doc.project.id }, utility: action.tool } },
+            { settings: facts.settings, connected: facts.connected, info: facts.info, models: facts.models, clientId: engineBridge.clientId },
+            {
+              notify: (tone, text) => get().toast(tone === 'neutral' ? 'neutral' : tone, text),
+              setJobs: (update) => useJobsStore.getState().setJobs(update),
+              onJobCreated: (jobId) => {
+                set((current) => ({ chainJobs: { ...current.chainJobs, [utilityChain.id]: jobId } }))
+                recomputeTiles()
+              },
+            },
+          )
+          if (result.ok) get().toast('success', `The ${utility?.label ?? action.tool} chain is running — the result lands here as its take.`)
+        } catch (error) {
+          get().toast('error', `The utility chain could not start: ${error instanceof Error ? error.message : String(error)}`)
+        }
+        return
+      }
+      if (action.kind === 'pose-rig') {
+        // §5.2 (Phase 3): the pose rig docks as a floating canvas panel; its
+        // export lands as this chain's control track.
+        set({ endpointMenu: null, poseRig: { chainId } })
+        return
       }
     },
 
@@ -790,7 +941,8 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
           else referenceOutputIds = [source.outputId]
         }
         // latents forks record the substrate honestly; latent continuation
-        // renders arrive with the Motion-Context chains (Phase 3).
+        // renders arrive with the Motion-Context chains (the Phase-4 engine
+        // seam — the substrate records on the fork today).
         const inputSpec = forkInputSpec({
           outputId: source.outputId,
           takeId: source.takeId ?? null,
@@ -807,6 +959,9 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
             prompt: settings.prompt,
             firstFrameOutputId,
             referenceOutputIds,
+            // Upscale dual-mode (§5.1): the FORK side records the engine
+            // upscale on the new chain (the stack side is the upscale op).
+            ...(source.withUpscale ? { upscaleMode: 'ltx' as const } : {}),
           } as unknown as Record<string, unknown>,
         })
         set((current) => ({ layout: { ...(current.layout ?? {}), [fork.id]: { x: 0, y: 0, w: TILE_W } }, viewDirty: true }))
@@ -836,6 +991,161 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       for (const tile of stale) await get().submitChain(tile.id)
     },
 
+    rerunChain: async (chainId) => {
+      // One chain's consented re-execution: the submit runs, then the stale
+      // flag clears (a rerun IS the consent invariant 3 names). Submitting
+      // first keeps the honest state if the submit refuses offline — the
+      // chain stays visibly stale until a submit actually goes out.
+      const result = await get().submitChain(chainId)
+      if (result.ok) {
+        try {
+          await documentsApi.updateChain({ id: chainId, stale: false })
+          const doc = activeDocument()
+          if (doc) {
+            const refreshed = await loadDocument(doc.project.id)
+            if (refreshed) recomputeTiles()
+          }
+        } catch {
+          // The rerun went out; the stale flag clearing is retried on the
+          // next document write. Ambient — not worth an error toast.
+        }
+      }
+    },
+
+    // ---- §5.1 op-stack edits (the modal editor's store actions) ---------------
+
+    addStackOp: async (chainId, kind, settings) => {
+      try {
+        // The upscale op rides the EXISTING render path (chain settings carry
+        // the mode the H3 request builder reads) — the op is its visible
+        // stack entry; both stay in sync through this action + the editor.
+        if (kind === 'upscale') {
+          const mode = (settings && typeof settings.mode === 'string' ? settings.mode : 'ltx') as CanvasChainSettings['upscaleMode']
+          await get().setChainSettings(chainId, { upscaleMode: mode })
+        }
+        const op = await documentsApi.addOp(chainId, kind, settings ?? DEFAULT_SETTINGS[kind]() as unknown as Record<string, unknown>)
+        const doc = activeDocument()
+        if (doc) {
+          const refreshed = await loadDocument(doc.project.id)
+          if (refreshed) recomputeTiles()
+        }
+        return op.id
+      } catch (error) {
+        get().toast('error', `The op could not be added: ${error instanceof Error ? error.message : String(error)}`)
+        return null
+      }
+    },
+
+    updateStackOp: async (chainId, opId, settings) => {
+      try {
+        await documentsApi.updateOpSettings(opId, settings)
+        if (typeof settings.mode === 'string' && ['ltx', 'rtx', 'lbh2d', 'lbh3d'].includes(settings.mode)) {
+          await get().setChainSettings(chainId, { upscaleMode: settings.mode as CanvasChainSettings['upscaleMode'] })
+        }
+        const doc = activeDocument()
+        if (doc) {
+          const refreshed = await loadDocument(doc.project.id)
+          if (refreshed) recomputeTiles()
+        }
+      } catch (error) {
+        get().toast('error', `The op edit could not be saved: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    },
+
+    removeStackOp: async (chainId, opId) => {
+      try {
+        await documentsApi.deleteOp(opId)
+        const doc = activeDocument()
+        if (doc) {
+          const refreshed = await loadDocument(doc.project.id)
+          if (refreshed) recomputeTiles()
+        }
+        get().toast('neutral', 'Op undone — the stack re-rendered without it; the source is untouched.')
+      } catch (error) {
+        get().toast('error', `The op could not be undone: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    },
+
+    reorderStackOps: async (chainId, orderedIds) => {
+      try {
+        await documentsApi.reorderOps(chainId, orderedIds)
+        const doc = activeDocument()
+        if (doc) {
+          const refreshed = await loadDocument(doc.project.id)
+          if (refreshed) recomputeTiles()
+        }
+      } catch (error) {
+        get().toast('error', `The stack could not be reordered: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    },
+
+    bakeStackOp: async (chainId, opId) => {
+      try {
+        await documentsApi.bakeOp(opId)
+        const doc = activeDocument()
+        if (doc) {
+          const refreshed = await loadDocument(doc.project.id)
+          if (refreshed) recomputeTiles()
+        }
+        get().toast('neutral', 'Op baked — irreversible by design; the frozen settings are now part of the source’s history.')
+      } catch (error) {
+        get().toast('error', `The op could not be baked: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    },
+
+    // ---- takes / locks (F5 + L21) ---------------------------------------------
+
+    switchCanonical: async (chainId, takeId) => {
+      const doc = activeDocument()
+      const chain = doc?.chains.find((entry) => entry.id === chainId)
+      const output = chain?.outputs[0]
+      if (!doc || !output) return
+      if (output.takes.find((take) => take.id === takeId)?.supersededBy == null) return // already canonical: never a write
+      let propagationError: string | null = null
+      try {
+        await documentsApi.supersedeTake({ outputId: output.id, takeId })
+        // Stale propagation (invariant 3): downstream forks of this chain
+        // consume the output's CANONICAL take — a pointer switch is an
+        // upstream change. Locks gate: locked chains stay pristine. A failed
+        // per-consumer mark never rolls the pointer back — it surfaces and
+        // the next document write retries it.
+        const owned = new Set(chain.outputs.map((entry) => entry.id))
+        for (const other of doc.chains) {
+          if (other.id === chainId || other.lockState === 'locked') continue
+          const refs = new Set<string>()
+          collectOutputRefs(other.inputSpec, refs)
+          if (![...refs].some((outputId) => owned.has(outputId))) continue
+          try {
+            await documentsApi.updateChain({ id: other.id, stale: true })
+          } catch (error) {
+            propagationError = error instanceof Error ? error.message : String(error)
+          }
+        }
+        get().toast('success', propagationError
+          ? `Canonical take switched — but marking a downstream fork stale failed (${propagationError}). It will mark on the next upstream change.`
+          : 'Canonical take switched — the displaced take stays as a prior; nothing was deleted.')
+      } catch (error) {
+        get().toast('error', `The canonical pointer could not switch: ${error instanceof Error ? error.message : String(error)}`)
+        return
+      }
+      // Always re-derive after the pointer moved, whatever propagation did.
+      const refreshed = await loadDocument(doc.project.id)
+      if (refreshed) recomputeTiles()
+    },
+
+    setChainLock: async (chainId, locked) => {
+      const doc = activeDocument()
+      if (!doc) return
+      try {
+        await documentsApi.updateChain({ id: chainId, lockState: locked ? 'locked' : 'unlocked' })
+        const refreshed = await loadDocument(doc.project.id)
+        if (refreshed) recomputeTiles()
+        get().toast(locked ? 'success' : 'neutral', locked ? 'Chain locked — propagation is gated; every take stays resident.' : 'Chain unlocked — upstream changes mark it stale again.')
+      } catch (error) {
+        get().toast('error', `The lock could not change: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    },
+
     cancelChainJob: async (chainId) => {
       const jobId = get().chainJobs[chainId]
       const job = useJobsStore.getState().jobs.find((entry) => entry.id === jobId)
@@ -850,6 +1160,8 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
 
     setInspectorOpen: (open) => set({ inspectorOpen: open }),
     setIndexOpen: (open) => set({ indexOpen: open }),
+    setOpEditor: (editor) => set({ opEditor: editor, endpointMenu: null, forkMenu: null }),
+    setPoseRig: (panel) => set({ poseRig: panel, endpointMenu: null }),
     setEngineFacts: (facts) => set({ engine: facts }),
 
     toast: (tone, text) => {
@@ -971,11 +1283,14 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
   /** Engine-free submit-plan probe: maps a selection spec through the REAL
    *  builder + graph construction and returns the built graph's facts plus
    *  the honest validation against the live session (offline → the real
-   *  refusal string). This is what the e2e suite asserts per mode. */
+   *  refusal string). This is what the e2e suite asserts per mode. Phase 3:
+   *  a `mediaType: 'image'` spec routes through the Z-Image plan (§5.4
+   *  stills) exactly like submitChain does. */
   Object.defineProperty(window, '__canvasSubmitPlan', {
     configurable: true,
     value: (spec: {
       prompt?: string
+      mediaType?: 'video' | 'image'
       firstFrameOutputId?: string | null
       lastFrameOutputId?: string | null
       referenceOutputIds?: string[]
@@ -987,6 +1302,7 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
       const settings = {
         ...chainSettingsDefaults(useSessionStore.getState().settings),
         prompt: spec.prompt ?? 'a lone drummer on a night train',
+        mediaType: spec.mediaType ?? 'video',
         firstFrameOutputId: spec.firstFrameOutputId ?? null,
         lastFrameOutputId: spec.lastFrameOutputId ?? null,
         referenceOutputIds: spec.referenceOutputIds ?? [],
@@ -994,6 +1310,34 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
         turbo: spec.turbo ?? 'off',
         duration: spec.duration ?? 6,
         resolution: spec.resolution ?? '1344x768',
+      }
+      // The still surface (§5.4): construction through the Z-Image machinery.
+      if (settings.mediaType === 'image' && (effectiveMode(settings) === 'text' || effectiveMode(settings) === 'image')) {
+        const facts = engineFacts()
+        const snapshot = useCanvasStore.getState()
+        const doc = snapshot.activeProjectId ? snapshot.documents[snapshot.activeProjectId] : null
+        const outputs = doc ? buildOutputIndex(doc) : new Map()
+        const controlImage = settings.firstFrameOutputId ? mediaForOutput(outputs.get(settings.firstFrameOutputId))?.media ?? null : null
+        const surface = effectiveMode(settings) === 'image' ? 'control' as const : 'plain' as const
+        const validation = validateZImage(
+          { prompt: settings.prompt, seed: settings.seed, width: 1344, height: 768, surface, controlImage, controlMode: 'canny' },
+          { connected: facts.connected, info: facts.info },
+        )
+        const fakeZSelection = { model: 'TEST-z_image_turbo.safetensors', encoder: 'TEST-qwen_3_4b.safetensors', vae: 'TEST-ae.safetensors', controlnet: 'TEST-zimage-fun-controlnet-union.safetensors' }
+        const graph = planZImageGraph({ prompt: settings.prompt, seed: 1, width: 1344, height: 768, surface, controlImage, controlMode: 'canny' }, fakeZSelection, surface === 'control' ? { controlImage: 'plan-control.png' } : {})
+        const nodes = Object.values(graph)
+        return {
+          mode: surface === 'control' ? 'z-image-control' : 'z-image',
+          validation,
+          graph: {
+            nodeClasses: nodes.map((node) => node.class_type),
+            unetModel: nodes.find((node) => node.class_type === 'UNETLoader')?.inputs.unet_name ?? null,
+            loadImageCount: nodes.filter((node) => node.class_type === 'LoadImage').length,
+            saveNode: nodes.some((node) => node.class_type === 'SaveImage'),
+            controlnet: nodes.some((node) => node.class_type === 'QwenImageDiffsynthControlnet'),
+            total: nodes.length,
+          },
+        }
       }
       const snapshot = useCanvasStore.getState()
       const doc = snapshot.activeProjectId ? snapshot.documents[snapshot.activeProjectId] : null
@@ -1041,6 +1385,64 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
           loraLoaderCount: nodes.filter((node) => node.class_type.includes('LoraLoader') || node.class_type.includes('TurboLoRA')).length,
           total: nodes.length,
         },
+      }
+    },
+  })
+
+  /** Engine-free UTILITY-plan probe (Phase 3, §5.4): the typed-hole → graph
+   *  construction seam. Returns the honest availability refusal against the
+   *  live engine (offline → detection refuses) AND the official-template
+   *  graph facts built through the REAL factory with a fully-resolved TEST
+   *  selection — construction never needs an engine. */
+  Object.defineProperty(window, '__canvasUtilityPlan', {
+    configurable: true,
+    value: (tool: string) => {
+      const facts = engineFacts()
+      const isIa2v = tool === 'ia2v'
+      const request = {
+        tool: tool as never,
+        seed: 1,
+        video: isIa2v ? null : { path: '/plan/source.mp4', name: 'source.mp4', kind: 'video' as const },
+        image: isIa2v ? { path: '/plan/portrait.png', name: 'portrait.png', kind: 'image' as const } : null,
+        audio: isIa2v ? { path: '/plan/voice.wav', name: 'voice.wav', kind: 'audio' as const } : null,
+      }
+      const validation = validateLtx23Utility(request, { connected: facts.connected, info: facts.info, models: facts.models })
+      const utility = findLtx23Utility(`ltx23.${tool}`)
+      if (!utility) return { tool, validation, graph: null, refusal: `unknown utility ${tool}` }
+      // Every slot the registry requires, resolved to TEST names — the exact
+      // contract requireSlots enforces, so the factory builds for real.
+      const fakeSelection = Object.fromEntries(utility.modelSlots.map((slot) => [slot, `TEST-${String(slot)}.safetensors`])) as never
+      try {
+        const graph = buildLtx23UtilityGraph({
+          tool: request.tool,
+          seed: 1,
+          filenamePrefix: 'video/LTX23_plan',
+          video: request.video ? { name: 'plan-source.mp4' } : undefined,
+          image: request.image ? { name: 'plan-portrait.png' } : undefined,
+          audio: request.audio ? { name: 'plan-voice.wav' } : undefined,
+        }, fakeSelection)
+        const nodes = Object.values(graph)
+        const audioSourceClass = Object.values(graph)
+          .filter((node) => node.class_type === 'CreateVideo')
+          .map((node) => {
+            if (!Array.isArray(node.inputs.audio)) return null
+            const sourceId = String((node.inputs.audio as [string, number])[0])
+            return graph[sourceId]?.class_type ?? null
+          })
+        return {
+          tool,
+          validation,
+          graph: {
+            nodeClasses: nodes.map((node) => node.class_type),
+            loadVideoCount: nodes.filter((node) => node.class_type === 'LoadVideo').length,
+            manualSigmasCount: nodes.filter((node) => node.class_type === 'ManualSigmas').length,
+            saveVideo: nodes.some((node) => node.class_type === 'SaveVideo'),
+            audioSourceClass,
+            total: nodes.length,
+          },
+        }
+      } catch (error) {
+        return { tool, validation, graph: null, refusal: error instanceof Error ? error.message : String(error) }
       }
     },
   })

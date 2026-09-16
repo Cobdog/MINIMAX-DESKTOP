@@ -158,7 +158,12 @@
 .zimage-preview-actions { display: flex; align-items: center; justify-content: space-between; gap:var(--space-3); padding: 13px; border-top: 1px solid var(--line); }
 .zimage-preview-actions > span { min-width: 0; overflow: hidden; color: var(--muted-2); font-size:var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
 
-.ai-chat-head { position: fixed; right: 18px; bottom: 74px; z-index:var(--z-overlay); display: grid; justify-items: end; gap: 10px; pointer-events: none; }
+/* Vision-loop fix (Phase 3 bundle 20260916-222220): at 1080p the FAB's old
+   bottom:74px put its circle over the Create panel's Resolution dropdown
+   chevron (the panel's bottom controls run to the viewport's right edge).
+   150px lifts it clear of the output-size row + generate bar while keeping
+   the corner-anchor FAB pattern. */
+.ai-chat-head { position: fixed; right: 18px; bottom: 150px; z-index:var(--z-overlay); display: grid; justify-items: end; gap: 10px; pointer-events: none; }
 .ai-chat-head > * { pointer-events: auto; }
 .ai-chat-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 5px; width: 52px; height: 52px; border: 1px solid rgba(201,255,66,.5); border-radius: 50%; background: #c9ff42; color:var(--accent-ink); box-shadow: 0 10px 34px rgba(0,0,0,.45); font-weight: 800; cursor: pointer; }
 .ai-chat-toggle:hover { transform: translateY(-1px); box-shadow: 0 12px 38px rgba(0,0,0,.55); }
@@ -2497,3 +2502,14 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .caption-reference:hover:not(:disabled) { filter: brightness(1.08); }
 .caption-reference:disabled { opacity: .5; cursor: wait; }
 .reference-caption-notice { grid-column: 1 / -1; color: var(--muted-2); font-size: var(--text-sm); }
+
+/* ---- Canvas Phase 3: first view retirement (canvas-ui-v1 §8) -----------------
+   ClipEditor / VideoReferenceClipper / FrameBookmarkStudio are
+   capability-redundant now that the canvas ships op stacks + forks. The old
+   shell still LOADS every one of them when directly navigated (their
+   D-dependencies hold until Phase 5) — the entries grey out and point at the
+   canvas surface that absorbed them. */
+.nav-button.retired-view { opacity: .55; }
+.nav-button.retired-view .retired-badge { margin-left: auto; padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted-2); font-size: var(--text-2xs); font-style: normal; letter-spacing: .04em; text-transform: uppercase; }
+.retired-affordance { opacity: .55; }
+.retired-affordance:hover { opacity: .8; }

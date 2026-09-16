@@ -13,8 +13,11 @@ export function GpuMeter({ value, engineOnline = true }: { value: GpuTelemetry |
   return <div className={`gpu-meter ${available ? 'available' : ''} ${engineOnline ? '' : 'suppressed'}`} title={title} aria-label={title}><Gauge size={14} /><span><small>GPU</small><strong>{available ? `${usage}%` : '—'}</strong></span><i aria-hidden="true"><b style={{ width: `${available ? usage : 0}%` }} /></i><span><small>VRAM</small><strong>{available ? `${vram}%` : '—'}</strong></span></div>
 }
 
-export function NavButton({ active, icon: Icon, label, count, itemType, onClick }: { active: boolean; icon: typeof Film; label: string; count?: number; itemType?: 'character' | 'wardrobe' | 'location'; onClick(): void }) {
-  return <button className={`nav-button ${active ? 'active' : ''}`} data-item-type={itemType} aria-label={label} onClick={onClick}><Icon size={19} /><span>{label}</span>{count ? <em>{count}</em> : null}</button>
+export function NavButton({ active, icon: Icon, label, count, itemType, retired, onClick }: { active: boolean; icon: typeof Film; label: string; count?: number; itemType?: 'character' | 'wardrobe' | 'location'; retired?: boolean; onClick(): void }) {
+  // Phase-3 view retirement (canvas-ui-v1 §8): a retired view stays directly
+  // navigable (its D-dependencies hold until Phase 5) but greys out with a
+  // pointer to the canvas surface that absorbed its capability.
+  return <button className={`nav-button ${active ? 'active' : ''} ${retired ? 'retired-view' : ''}`} data-item-type={itemType} data-retired={retired ? '1' : undefined} aria-label={label} title={retired ? 'Retired — this capability now lives on the canvas (?canvas=1). The view still opens.' : undefined} onClick={onClick}><Icon size={19} /><span>{label}</span>{retired ? <em className="retired-badge">retired</em> : null}{count ? <em>{count}</em> : null}</button>
 }
 
 export function Notice({ tone, text, onClose }: { tone: 'error' | 'success' | 'neutral'; text: string; onClose(): void }) {

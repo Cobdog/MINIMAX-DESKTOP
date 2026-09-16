@@ -677,7 +677,7 @@ export type GenerationJob = {
   width: number
   height: number
   duration: number
-  provider?: 'minimax' | 'ltx25' | 'ltx23' | 'acestep' | 'music3'
+  provider?: 'minimax' | 'ltx25' | 'ltx23' | 'acestep' | 'music3' | 'zimage'
   /** Reproducibility record attached at submit time (persisted). */
   manifest?: Record<string, unknown>
   /** Submit-side graph for in-memory auto-retry only — stripped before

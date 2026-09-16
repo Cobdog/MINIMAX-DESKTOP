@@ -68,11 +68,11 @@ export function EndpointMenu() {
         <span>{menu.direction === 'consume' ? 'consume from — inputs' : 'produce into — extensions'}</span>
       </header>
       <div className="canvas-menu-groups">
-        {['generate', 'input', 'utility', 'fork'].map((group) => {
+        {['generate', 'input', 'control', 'utility', 'fork'].map((group) => {
           const rows = options.filter((option) => option.group === group)
           if (!rows.length) return null
           return <div key={group} className="canvas-menu-group" data-canvas-menu-group={group}>
-            <span className="canvas-menu-group-label">{group === 'generate' ? 'generate' : group === 'input' ? 'inputs' : group === 'utility' ? 'utilities' : 'fork'}</span>
+            <span className="canvas-menu-group-label">{group === 'generate' ? 'generate' : group === 'input' ? 'inputs' : group === 'control' ? 'control inputs' : group === 'utility' ? 'utilities' : 'fork'}</span>
             {rows.map((option) => (
               <button
                 type="button"

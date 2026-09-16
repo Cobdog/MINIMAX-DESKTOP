@@ -77,7 +77,7 @@ async function activeDocument(page: Page) {
   return page.evaluate(async (id) => {
     const response = await fetch(`/api/lan/documents/project?id=${encodeURIComponent(id)}`)
     return (await response.json()) as {
-      chains: Array<{ id: string; kind: string; settings: Record<string, unknown>; inputSpec: Record<string, unknown>; outputs: Array<{ id: string; takes: Array<{ id: string; jobId: string | null; artifacts: string[]; supersededBy: string | null }> }>; identity?: { subjectText: string; strength: number } | null }>
+      chains: Array<{ id: string; kind: string; lockState: string; stale: boolean; settings: Record<string, unknown>; inputSpec: Record<string, unknown>; ops: Array<{ id: string; kind: string; ordinal: number; settings: Record<string, unknown>; bakedAt: number | null }>; controlTracks?: Array<{ id: string; kind: string; source: string; inputRef: string }>; outputs: Array<{ id: string; takes: Array<{ id: string; jobId: string | null; artifacts: string[]; supersededBy: string | null }> }>; identity?: { subjectText: string; strength: number } | null }>
     }
   }, session.activeProject!)
 }
@@ -404,7 +404,7 @@ test('a completed job lands a take on its chain (canonical pointed, blob registe
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
-test('multi-select shows the batch context (§4 contexts, not modes)', async ({ page }) => {
+test('multi-select batch gestures: lock all + honest generate-all refusal (§4)', async ({ page }) => {
   const problems = await trackErrors(page)
   await resetSession(page)
   await page.goto('/?canvas=1')
@@ -419,10 +419,28 @@ test('multi-select shows the batch context (§4 contexts, not modes)', async ({ 
   await page.waitForTimeout(900) // fly-to settle (d3 transition) before clicking
 
   // Shift-click adds to the selection: the bar flips to the multi context
-  // with the honest Phase-3 batch stub.
+  // with the REAL batch gestures (Phase 3).
   await tiles.first().click({ modifiers: ['Shift'] })
   await expect(page.locator('[data-canvas-bottombar]')).toHaveAttribute('data-canvas-bar-context', 'multi')
-  await expect(page.locator('[data-canvas-bar-batch]')).toBeVisible()
+  await expect(page.locator('[data-canvas-bar-generate-all]')).toBeVisible()
+  await expect(page.locator('[data-canvas-bar-lock-all]')).toBeVisible()
+
+  // Multi-lock: both chains record lockState 'locked' in the document (the
+  // consent gate — propagation-stable, takes always resident).
+  await page.locator('[data-canvas-bar-lock-all]').click()
+  await expect(page.locator('[data-canvas-bar-lock-all]')).toContainText('unlock all', { timeout: 10_000 })
+  const locked = await activeDocument(page)
+  expect(locked.chains.every((chain) => chain.lockState === 'locked')).toBe(true)
+  // And back (the gesture toggles).
+  await page.locator('[data-canvas-bar-lock-all]').click()
+  const unlocked = await activeDocument(page)
+  expect(unlocked.chains.every((chain) => chain.lockState === 'unlocked')).toBe(true)
+
+  // Multi-generate offline: the engine refuses both honestly — nothing parks
+  // in the queue, the bar says so, the objects stay idle.
+  await page.locator('[data-canvas-bar-generate-all]').click()
+  await expect(page.locator('[data-canvas-toast="error"]').first()).toContainText('ComfyUI')
+  await expect(page.locator('[data-canvas-radar]')).toHaveAttribute('data-queued', '0')
   await page.screenshot({ path: 'test-results/shots/19-canvas-multi-batch.png' })
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
@@ -628,5 +646,324 @@ test('session + camera autosave restore through the documents API', async ({ pag
   await expect(card).toBeVisible()
   await card.click()
   await expect(page.locator('[data-canvas-tile]').first()).toBeVisible({ timeout: 10_000 })
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+// ---- Canvas Phase 3 (task j5sj28v) ----------------------------------------------
+
+test('op modal: add/edit/reorder/undo/bake with a LIVE tile preview (§5.1, L3+L8)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await dropPng(page, 'op-stack-plate.png')
+  const tile = page.locator('[data-canvas-tile]').first()
+  await expect(tile).toBeVisible({ timeout: 10_000 })
+  await page.waitForTimeout(600)
+
+  // §7: Enter on a media selection opens the op modal (the ONLY editor — L8).
+  await tile.click()
+  await page.keyboard.press('Enter')
+  const modal = page.locator('.canvas-opmodal')
+  await expect(modal).toBeVisible()
+  await expect(modal.locator('[data-canvas-op-stage]')).toBeVisible()
+  await expect(modal.locator('[data-canvas-op-stack]')).toContainText('An empty stack')
+
+  // Add a crop (ImageCrop data — the first op, per §5.1)…
+  await modal.locator('[data-canvas-op-add]').click()
+  await modal.locator('[data-canvas-op-add="crop"]').click()
+  await expect(modal.locator('[data-canvas-op-stack] .canvas-op-row')).toHaveCount(1, { timeout: 10_000 })
+  let document = await activeDocument(page)
+  expect(document.chains[0]!.ops.map((op) => op.kind)).toEqual(['crop'])
+  expect(document.chains[0]!.ops[0]!.settings).toMatchObject({ x: 0.5, y: 0.5, zoom: 1, fit: 'crop' })
+
+  // …an adjust (ctx.filter proxy) — the slider edit lands (debounced) and the
+  // TILE preview live-updates (L3 decided: live-update).
+  await modal.locator('[data-canvas-op-add]').click()
+  await modal.locator('[data-canvas-op-add="adjust"]').click()
+  await expect(modal.locator('[data-canvas-op-stack] .canvas-op-row')).toHaveCount(2, { timeout: 10_000 })
+  await modal.locator('[data-canvas-op-field="brightness"]').evaluate((element) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    setter.call(element, '0.6') // the offset slider: 0 = neutral, +0.6 → brightness 1.6
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await page.waitForTimeout(1_100) // edit debounce + document reload
+  document = await activeDocument(page)
+  const adjust = document.chains[0]!.ops.find((op) => op.kind === 'adjust')!
+  expect(adjust.settings.brightness).toBeGreaterThan(1.4)
+  const tileFilter = await tile.locator('img.canvas-tile-poster').first().evaluate((element) => element.style.filter)
+  expect(tileFilter).toContain('brightness')
+
+  // Reorder: rotate joins third, moves up past the adjust (drag-to-reorder's
+  // atomic step — the buttons are the accessible form).
+  await modal.locator('[data-canvas-op-add]').click()
+  await modal.locator('[data-canvas-op-add="rotate"]').click()
+  await expect(modal.locator('[data-canvas-op-stack] .canvas-op-row')).toHaveCount(3, { timeout: 10_000 })
+  await modal.locator('.canvas-op-row[data-op-kind="rotate"] [data-canvas-op-up]').click()
+  await page.waitForTimeout(600)
+  document = await activeDocument(page)
+  expect(document.chains[0]!.ops.map((op) => op.kind)).toEqual(['crop', 'rotate', 'adjust'])
+
+  // Per-op undo (⌘Z undoes the LAST unbaked op in stack order — here the
+  // adjust, which the reorder moved last).
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(modal.locator('[data-canvas-op-stack] .canvas-op-row')).toHaveCount(2, { timeout: 10_000 })
+  document = await activeDocument(page)
+  expect(document.chains[0]!.ops.map((op) => op.kind)).toEqual(['crop', 'rotate'])
+
+  // Bake: explicit, two-step, irreversible — the op row freezes afterwards.
+  await modal.locator('.canvas-op-row[data-op-kind="crop"] [data-canvas-op-bake]').click()
+  await expect(modal.locator('.canvas-op-row[data-op-kind="crop"] [data-canvas-op-bake]')).toContainText('irreversible?')
+  await modal.locator('.canvas-op-row[data-op-kind="crop"] [data-canvas-op-bake]').click()
+  await expect(modal.locator('.canvas-op-row[data-op-kind="crop"] .canvas-op-baked')).toBeVisible({ timeout: 10_000 })
+  await expect(modal.locator('.canvas-op-row[data-op-kind="crop"] [data-canvas-op-undo]')).toHaveCount(0)
+  document = await activeDocument(page)
+  expect(document.chains[0]!.ops.find((op) => op.kind === 'crop')!.bakedAt).not.toBeNull()
+
+  await page.keyboard.press('Escape')
+  await expect(modal).toHaveCount(0)
+  await page.screenshot({ path: 'test-results/shots/20-canvas-op-modal.png' })
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('fork semantics complete: early take → canonical switch → stale propagation → rerun gesture', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await dropPng(page, 'fork-semantics.png')
+  const source = page.locator('[data-canvas-tile]').first()
+  await expect(source).toBeVisible({ timeout: 10_000 })
+  await page.waitForTimeout(600)
+
+  // Fork decoded (B gesture) — the fork chain consumes the source output.
+  await source.click()
+  await page.keyboard.press('b')
+  await page.locator('[data-canvas-fork-substrate="decoded"]').click()
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(2, { timeout: 10_000 })
+  await expect(page.locator('[data-canvas-edge]')).toHaveCount(1)
+
+  // A second take lands on the SOURCE through the real append path (the
+  // append-only take model): the new one is canonical, the first is a prior.
+  let document = await activeDocument(page)
+  const sourceChain = document.chains.find((chain) => chain.kind === 'media')!
+  const sourceOutput = sourceChain.outputs[0]!
+  const blobArtifact = sourceOutput.takes[0]!.artifacts[0]!
+  await page.request.post('/api/lan/documents/takes', { data: { outputId: sourceOutput.id, artifacts: [blobArtifact], metrics: { kind: 'image', sourcePath: '', name: 'second-take.png' } } })
+  await page.reload()
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  const tiles = page.locator('[data-canvas-tile]')
+  await expect(tiles).toHaveCount(2, { timeout: 10_000 })
+  document = await activeDocument(page)
+  const takes = document.chains.find((chain) => chain.kind === 'media')!.outputs[0]!.takes
+  expect(takes.length).toBe(2)
+  expect(takes.filter((take) => take.supersededBy === null).length).toBe(1)
+  // takes list newest-first: [0] = the appended second take (canonical),
+  // [1] = the original take (the prior the strip will offer).
+  const firstTakeId = takes[1]!.id
+
+  // Zoom into the near band so the take strip renders, then switch the
+  // canonical pointer BACK to the first take (click the prior chip).
+  await source.click()
+  const viewport = page.locator('[data-canvas-viewport]')
+  const box = await viewport.boundingBox()
+  await page.mouse.move(box!.x + 700, box!.y + 400)
+  for (let index = 0; index < 4; index += 1) await page.mouse.wheel(0, -140)
+  await page.waitForTimeout(400)
+  const prior = page.locator('[data-canvas-take-switch]').first()
+  await expect(prior).toBeVisible({ timeout: 10_000 })
+  await prior.click()
+  await page.waitForTimeout(800)
+
+  // The pointer switched to the ORIGINAL take (F5/takes: nothing deleted) AND
+  // the fork chain went stale — an upstream change marks downstream
+  // (invariant 3, visible ring).
+  document = await activeDocument(page)
+  const mediaChain = document.chains.find((chain) => chain.kind === 'media')!
+  const canonical = mediaChain.outputs[0]!.takes.find((take) => take.supersededBy === null)!
+  expect(canonical.id).toBe(firstTakeId)
+  expect(mediaChain.outputs[0]!.takes.filter((take) => take.supersededBy !== null).length).toBe(1)
+  const forkChain = document.chains.find((chain) => chain.kind === 'generation')!
+  expect(forkChain.stale).toBe(true)
+
+  // The rerun gesture is one chip on the fork's context; offline the submit
+  // refuses — the chain stays HONESTLY stale until a submit goes out. (Close
+  // the floating panel first — it can overlap the fork tile's position.)
+  const forkTile = page.locator(`[data-canvas-tile="${forkChain.id}"]`)
+  await page.locator('[data-canvas-properties] button[aria-label="Close properties"]').click()
+  await forkTile.click()
+  await expect(page.locator('[data-canvas-bottombar]')).toHaveAttribute('data-canvas-bar-context', 'chain')
+  const rerun = page.locator('[data-canvas-bar-rerun]')
+  await expect(rerun).toBeVisible()
+  await expect(forkTile).toHaveAttribute('data-tile-status', 'stale')
+  await rerun.click()
+  await expect(page.locator('[data-canvas-toast="error"]').first()).toContainText('ComfyUI')
+  const afterRefusal = await activeDocument(page)
+  expect(afterRefusal.chains.find((chain) => chain.id === forkChain.id)!.stale).toBe(true)
+
+  // Locks gate propagation (L21): clear the stale flag through the same API
+  // a successful rerun would, lock the fork, switch the canonical pointer
+  // again — the locked chain stays PRISTINE.
+  await page.request.post('/api/lan/documents/chains/update', { data: { id: forkChain.id, stale: false } })
+  await page.locator('[data-canvas-bar-lock]').click()
+  await page.waitForTimeout(700)
+  await source.click()
+  await page.waitForTimeout(300)
+  await page.locator('[data-canvas-take-switch]').first().click()
+  await page.waitForTimeout(800)
+  const afterLock = await activeDocument(page)
+  expect(afterLock.chains.find((chain) => chain.id === forkChain.id)!.stale).toBe(false)
+  expect(afterLock.chains.find((chain) => chain.id === forkChain.id)!.lockState).toBe('locked')
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('engines-as-ops: the utility typed-hole seam builds the official template (probe), menu gates honestly', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1&probe=canvas')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await dropPng(page, 'utility-source.png')
+  await expect(page.locator('[data-canvas-tile]').first()).toBeVisible({ timeout: 10_000 })
+
+  // The probe is the typed-hole → graph-construction seam: validation refuses
+  // offline with the honest message, yet the REAL factory builds the official
+  // template against a resolved TEST selection (construction is pure).
+  const plan = page.evaluate.bind(page)
+  const removeSubtitles = await plan((tool: string) => (window as unknown as { __canvasUtilityPlan(tool: string): { validation: string | null; graph: { nodeClasses: string[]; loadVideoCount: number; manualSigmasCount: number; saveVideo: boolean; audioSourceClass: Array<string | null>; total: number } } }).__canvasUtilityPlan(tool), 'remove-subtitles')
+  expect(removeSubtitles.validation).toContain('Start ComfyUI')
+  expect(removeSubtitles.graph.loadVideoCount).toBe(1)
+  expect(removeSubtitles.graph.manualSigmasCount).toBe(2) // the two-stage ManualSigmas shape
+  expect(removeSubtitles.graph.saveVideo).toBe(true)
+  expect(removeSubtitles.graph.audioSourceClass[0]).toBe('GetVideoComponents') // original audio passes through
+  expect(removeSubtitles.graph.nodeClasses).toContain('LTXAddVideoICLoRAGuide')
+
+  const ia2v = await plan((tool: string) => (window as unknown as { __canvasUtilityPlan(tool: string): { graph: { audioSourceClass: Array<string | null>; loadVideoCount: number } | null } }).__canvasUtilityPlan(tool), 'ia2v')
+  expect(ia2v.graph!.audioSourceClass[0]).toBe('LTXVAudioVAEDecode') // ia2v muxes GENERATED audio
+  expect(ia2v.graph!.loadVideoCount).toBe(0)
+
+  // The menu rows stay availability-gated: offline every utility is offered
+  // but disabled with the honest reason — ia2v (no node packs) leads with the
+  // missing-weights install guidance; a pack-gated tool leads with the engine.
+  const tile = page.locator('[data-canvas-tile]').first()
+  await page.waitForTimeout(600)
+  await tile.locator('[data-canvas-endpoint="tail"]').click()
+  const menu = page.locator('[data-canvas-endpoint-menu="produce"]')
+  await expect(menu).toBeVisible()
+  const ia2vRow = menu.locator('[data-canvas-menu-row="produce:utility:ia2v"]')
+  await expect(ia2vRow).toBeVisible()
+  await expect(ia2vRow).toBeDisabled()
+  await expect(ia2vRow).toContainText('Not ready — missing')
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('Z-Image as an op: image intent spawns a still chain; control via a selected image (probe)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1&probe=canvas')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+
+  // Nothing-selected + image intent (§5.4): the launcher's image chip + Enter.
+  await page.locator('[data-canvas-chip="image"]').click()
+  await page.locator('[data-canvas-prompt]').fill('a lighthouse over a black sea, still')
+  await page.locator('[data-canvas-submit]').click()
+  const tile = page.locator('[data-canvas-tile]').first()
+  await expect(tile).toBeVisible({ timeout: 10_000 })
+  // Offline the Z-Image surface refuses honestly — the object still lands.
+  await expect(page.locator('[data-canvas-toast="error"]').first()).toContainText('ComfyUI')
+  await expect(page.locator('[data-canvas-radar]')).toHaveAttribute('data-queued', '0')
+  let document = await activeDocument(page)
+  expect(document.chains[0]!.settings.mediaType).toBe('image')
+
+  // A real ingested image to select against (the control surface).
+  await page.keyboard.press('Escape')
+  await dropPng(page, 'zimage-control.png')
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(2, { timeout: 10_000 })
+  document = await activeDocument(page)
+  const controlOutput = document.chains.find((chain) => chain.kind === 'media')!.outputs[0]!.id
+
+  const plan = page.evaluate.bind(page)
+  const plain = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; validation: string | null; graph: { saveNode: boolean; loadImageCount: number; controlnet: boolean; unetModel: string | null } } }).__canvasSubmitPlan(spec), { mediaType: 'image' })
+  expect(plain.mode).toBe('z-image')
+  expect(plain.validation).toContain('Start ComfyUI')
+  expect(plain.graph.saveNode).toBe(true) // SaveImage — the still surface
+  expect(plain.graph.loadImageCount).toBe(0)
+  expect(plain.graph.controlnet).toBe(false)
+
+  const control = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; graph: { loadImageCount: number; controlnet: boolean; unetModel: string | null } } }).__canvasSubmitPlan(spec), { mediaType: 'image', firstFrameOutputId: controlOutput })
+  expect(control.mode).toBe('z-image-control')
+  expect(control.graph.loadImageCount).toBe(1) // the control image loader
+  expect(control.graph.controlnet).toBe(true) // the Fun ControlNet Union node
+  expect(control.graph.unetModel).toBe('TEST-z_image_turbo.safetensors')
+
+  // Video intent is untouched: the same probe without mediaType stays H3.
+  const video = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; graph: { saveNode?: boolean } } }).__canvasSubmitPlan(spec), {})
+  expect(video.mode).toBe('text')
+  expect((video.graph as { saveNode?: boolean }).saveNode).toBeUndefined()
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('the pose rig docks as a canvas panel and exports a control track (§5.2)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await dropPng(page, 'pose-target.png')
+  const tile = page.locator('[data-canvas-tile]').first()
+  await expect(tile).toBeVisible({ timeout: 10_000 })
+  await page.waitForTimeout(600)
+
+  // The typed-hole consume menu carries the control-inputs group.
+  await tile.locator('[data-canvas-endpoint="head"]').click()
+  const menu = page.locator('[data-canvas-endpoint-menu="consume"]')
+  await expect(menu).toBeVisible()
+  await expect(menu.locator('[data-canvas-menu-group="control"]')).toBeVisible()
+  await menu.locator('[data-canvas-menu-row="consume:pose-rig"]').click()
+
+  // The dock: a floating react-rnd panel mounting the SAME rig chunk.
+  const dock = page.locator('[data-canvas-poserig]')
+  await expect(dock).toBeVisible({ timeout: 15_000 })
+  await expect(dock.locator('[data-poserig="app"]')).toBeVisible({ timeout: 15_000 })
+  await expect(dock.locator('[data-poserig-preview]')).toBeVisible()
+
+  // Export-to-control-track: the rendered frames land as a blob + a
+  // canvas_control_track row on the target chain (§2.1).
+  await dock.locator('[data-poserig-export-track]').click()
+  await expect(page.locator('[data-canvas-toast="success"]').first()).toBeVisible({ timeout: 20_000 })
+  const document = await activeDocument(page)
+  const target = document.chains.find((chain) => chain.kind === 'media')!
+  expect(target.controlTracks?.length).toBe(1)
+  expect(target.controlTracks![0]!.kind).toBe('pose')
+  expect(target.controlTracks![0]!.source).toBe('poserig')
+
+  await dock.locator('[data-canvas-poserig-close]').click()
+  await expect(dock).toHaveCount(0)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('first view retirement smoke: greyed entries, views still directly reachable (§8 Phase 3)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await page.goto('/')
+  await expect(page.getByRole('button', { name: /generate video/i })).toBeVisible()
+
+  // The sidebar shows the Clip editor GREYED with the retirement marker…
+  const clipNav = page.locator('.nav-button[data-retired="1"]')
+  await expect(clipNav).toBeVisible()
+  await expect(clipNav).toContainText('Clip editor')
+  await expect(clipNav).toContainText('retired')
+  await expect(clipNav).toHaveClass(/retired-view/)
+
+  // …and it still LOADS when directly navigated (the D-dependencies hold
+  // until Phase 5 — the old shell never breaks).
+  await clipNav.click()
+  await expect(page.getByRole('heading', { name: 'Movie editor' })).toBeVisible()
+
+  // Library carries the same retirement markers for the clip editor entry
+  // and the frame-bookmark studio trigger.
+  await page.getByRole('button', { name: /library/i }).first().click()
+  await expect(page.getByRole('heading', { name: /video library/i })).toBeVisible()
+  await expect(page.locator('[data-retired="clip-editor"]')).toBeVisible()
+  await expect(page.locator('[data-retired="clip-editor"]')).toHaveClass(/retired-affordance/)
+  await expect(page.locator('[data-retired="clip-editor"]')).toContainText('Open clip editor')
+  await page.screenshot({ path: 'test-results/shots/21-view-retirement.png' })
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })

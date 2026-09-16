@@ -229,7 +229,8 @@
 .canvas-properties-dial input[type="range"] { flex: 1; accent-color: var(--accent); }
 .canvas-properties-dial-label { color: var(--muted-2); font-size: var(--text-2xs); font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
 .canvas-properties-dial-value { min-width: 34px; color: var(--muted); font-family: ui-monospace, Consolas, monospace; font-size: var(--text-sm); text-align: right; }
-.canvas-properties-note { color: var(--muted-2); font-size: var(--text-2xs); line-height: 1.4; }
+.canvas-properties-note { margin: 0; color: var(--muted-2); font-size: var(--text-2xs); line-height: 1.4; }
+.canvas-properties-anchor { margin: 0; padding: 3px 8px; border: 1px dashed var(--line-strong); border-radius: 7px; color: var(--muted); font-size: var(--text-2xs); }
 .canvas-properties-warning { color: var(--warning); font-size: var(--text-2xs); }
 .canvas-properties-takes { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
 .canvas-properties-takes li { display: flex; align-items: center; gap: 6px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 7px; font-size: var(--text-sm); }
@@ -256,3 +257,82 @@
 .canvas-index-li.cursor .canvas-index-row { background: var(--surface-3); }
 .canvas-properties { grid-template-rows: auto minmax(0, 1fr) auto; }
 .canvas-properties-submit { position: sticky; bottom: 0; padding: 8px 10px; border-top: 1px solid var(--line); background: var(--surface); }
+
+/* The op modal's backdrop: the old shell's 76% black crushes the ALREADY
+   near-black canvas to indistinguishable — the canvas's own menu-overlay
+   recipe (abyss at 55%) keeps the substrate + bottom bar recognizable
+   beneath the modal. */
+.modal-backdrop.canvas-opmodal-backdrop { background: color-mix(in srgb, var(--color-surface-abyss) 55%, transparent); }
+
+/* ---- Phase 3: op chips + canonical-switch takes -------------------------------- */
+.canvas-op-chip { cursor: pointer; }
+.canvas-op-chip.baked { border-style: solid; border-color: color-mix(in srgb, var(--warning) 45%, transparent); color: var(--warning); }
+.canvas-op-chip-empty { cursor: pointer; }
+.canvas-take-chip.prior { cursor: pointer; }
+.canvas-take-chip.prior:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); }
+
+/* ---- Phase 3: the op modal editor (§5.1, L8 modal-only v1) --------------------- */
+.canvas-opmodal { display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(1080px, 94vw); max-height: min(760px, 92vh); border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); box-shadow: 0 18px 48px rgba(0,0,0,.5); overflow: hidden; }
+.canvas-opmodal-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+.canvas-opmodal-header strong { font-size: var(--text-md); }
+.canvas-opmodal-header span { display: block; color: var(--muted-2); font-size: var(--text-2xs); }
+.canvas-opmodal-header button { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: var(--text-lg); cursor: pointer; }
+.canvas-opmodal-header button:hover { background: var(--surface-3); color: var(--text); }
+.canvas-opmodal-body { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(300px, 1fr); min-height: 0; }
+.canvas-opmodal-stagewrap { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 8px; padding: 12px; border-right: 1px solid var(--line); }
+.canvas-opmodal-stage { position: relative; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--color-surface-abyss); aspect-ratio: 16 / 9; max-height: 58vh; }
+.canvas-opmodal-stage.painting { cursor: crosshair; }
+.canvas-opmodal-media { width: 100%; height: 100%; max-width: 100%; max-height: 100%; object-fit: cover; transition: filter 90ms ease; }
+.canvas-opmodal-empty { padding: 20px; color: var(--muted-2); font-size: var(--text-sm); text-align: center; }
+.canvas-opmodal-mask { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.canvas-opmodal-brushhint { position: absolute; left: 8px; bottom: 8px; display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--line-strong); border-radius: 999px; background: color-mix(in srgb, var(--color-surface-abyss) 82%, transparent); color: var(--color-text-soft); font-size: var(--text-2xs); }
+.canvas-opmodal-scrub { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.canvas-opmodal-scrub input { flex: 1; accent-color: var(--accent); }
+.canvas-opmodal-stack { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 8px; min-height: 0; padding: 12px; }
+.canvas-opmodal-addrow { position: relative; display: flex; align-items: center; gap: 8px; }
+.canvas-opmodal-count { color: var(--muted-2); font-size: var(--text-sm); }
+.canvas-opmodal-addmenu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 5; display: grid; gap: 2px; min-width: 190px; padding: 5px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); box-shadow: 0 18px 48px rgba(0,0,0,.5); }
+.canvas-opmodal-addmenu button { padding: 6px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font-size: var(--text-md); text-align: left; cursor: pointer; }
+.canvas-opmodal-addmenu button:hover { background: var(--surface-3); }
+.canvas-opmodal-addnote { padding: 5px 7px; color: var(--muted-2); font-size: var(--text-2xs); }
+.canvas-opmodal-ops { display: grid; gap: 4px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.canvas-op-row { display: flex; align-items: center; gap: 7px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); cursor: pointer; }
+.canvas-op-row.selected { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 8%, var(--surface-2)); }
+.canvas-op-row.baked { border-style: double; }
+.canvas-op-row:not(.baked) { cursor: grab; }
+.canvas-op-ordinal { display: grid; place-items: center; min-width: 18px; height: 18px; border: 1px solid var(--line-strong); border-radius: 5px; color: var(--muted-2); font-family: ui-monospace, Consolas, monospace; font-size: var(--text-2xs); }
+.canvas-op-label { font-size: var(--text-md); font-weight: 650; white-space: nowrap; }
+.canvas-op-summary { flex: 1; overflow: hidden; color: var(--muted); font-family: ui-monospace, Consolas, monospace; font-size: var(--text-2xs); text-overflow: ellipsis; white-space: nowrap; }
+.canvas-op-baked { display: inline-flex; align-items: center; gap: 3px; color: var(--warning); font-size: var(--text-2xs); white-space: nowrap; }
+.canvas-op-actions { display: inline-flex; align-items: center; gap: 3px; }
+.canvas-op-actions button { display: grid; place-items: center; width: 22px; height: 22px; padding: 0 3px; border: 1px solid var(--line-strong); border-radius: 6px; background: transparent; color: var(--muted); font-size: var(--text-2xs); cursor: pointer; }
+.canvas-op-actions button:hover:not(:disabled) { color: var(--text); border-color: var(--line-strong); background: var(--surface-3); }
+.canvas-op-actions button:disabled { opacity: .35; cursor: default; }
+.canvas-op-actions .canvas-op-bake { width: auto; padding: 0 7px; white-space: nowrap; }
+.canvas-op-actions .canvas-op-bake.confirm { border-color: color-mix(in srgb, var(--warning) 55%, transparent); color: var(--warning); }
+.canvas-op-empty { padding: 10px; border: 1px dashed var(--line); border-radius: 9px; color: var(--muted-2); font-size: var(--text-sm); list-style: none; }
+.canvas-op-edit { display: grid; gap: 6px; padding: 9px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.canvas-op-edit label { display: grid; gap: 3px; color: var(--muted); font-size: var(--text-sm); }
+.canvas-op-edit input[type="range"] { accent-color: var(--accent); }
+.canvas-op-edit input[type="number"], .canvas-op-edit select { padding: 4px 7px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); color: var(--text); font-size: var(--text-sm); }
+.canvas-op-note { margin: 0; color: var(--muted-2); font-size: var(--text-2xs); }
+.canvas-op-quick { display: flex; gap: 5px; }
+.canvas-op-quick button { padding: 3px 9px; border: 1px solid var(--line-strong); border-radius: 7px; background: transparent; color: var(--muted); font-size: var(--text-sm); cursor: pointer; }
+.canvas-op-quick button:hover { color: var(--text); border-color: var(--line-strong); background: var(--surface-3); }
+.canvas-op-brushrow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.canvas-op-brushrow label { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 140px; }
+.canvas-opmodal-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted-2); font-size: var(--text-2xs); }
+.canvas-opmodal-footer kbd { padding: 1px 5px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface-2); font-family: ui-monospace, Consolas, monospace; }
+
+/* ---- Phase 3: the pose rig dock (§5.2) ------------------------------------------ */
+.canvas-poserig-dock { z-index: 55; display: grid; grid-template-rows: auto minmax(0, 1fr); border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); box-shadow: 0 18px 48px rgba(0,0,0,.5); overflow: hidden; }
+.canvas-poserig-header { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--line); background: var(--surface-2); cursor: grab; }
+.canvas-poserig-header strong { overflow: hidden; font-size: var(--text-md); text-overflow: ellipsis; white-space: nowrap; }
+.canvas-poserig-header span { flex: 1; overflow: hidden; color: var(--muted-2); font-size: var(--text-2xs); text-overflow: ellipsis; white-space: nowrap; }
+.canvas-poserig-header button { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: var(--text-lg); cursor: pointer; }
+.canvas-poserig-body { display: grid; min-height: 0; overflow: hidden; }
+.canvas-poserig-body .poserig-root { height: 100%; }
+.canvas-poserig-fallback { display: grid; place-content: center; gap: 8px; color: var(--muted); font-size: var(--text-sm); }
+
+/* ---- Phase 3: multi batch chips -------------------------------------------------- */
+.canvas-bar-drift { font-variant-numeric: tabular-nums; }

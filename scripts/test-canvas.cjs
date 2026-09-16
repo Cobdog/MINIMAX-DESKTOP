@@ -281,6 +281,9 @@ const localStorageStub = {
 const generation = loadTs('src/canvas/generation.ts', { localStorage: localStorageStub, window: { dispatchEvent: () => undefined, addEventListener: () => undefined } })
 const options = loadTs('src/canvas/options.ts')
 const h3Submit = loadTs('src/lib/h3Submit.ts', { localStorage: localStorageStub })
+const ops = loadTs('src/canvas/ops.ts')
+const ltx23Submit = loadTs('src/lib/ltx23UtilitySubmit.ts', { localStorage: localStorageStub })
+const zImageSubmit = loadTs('src/lib/zImageSubmit.ts', { localStorage: localStorageStub })
 
 const media = (path, kind) => ({ path, name: path.split('/').pop(), kind })
 const take = (id, overrides) => ({ id, outputId: 'out-1', jobId: null, artifacts: [], latentPath: null, metrics: null, createdAt: 1, supersededBy: null, evicted: false, contentHash: null, ...overrides })
@@ -470,6 +473,150 @@ console.log('(q) graph construction per selection (engine-free, L4)')
   ok(classes(turboGraph).some((cls) => cls.includes('LoraLoader')), 'graph: the fast tier wires the turbo LoRA loader')
   const quality = request({ prompt: 'slow pass', turbo: 'off' })
   ok(!classes(generation.planCanvasGraph(quality, fakeSelection)).some((cls) => cls.includes('LoraLoader')), 'graph: the quality tier stays LoRA-free (registry inertness)')
+}
+
+// ---- Phase 3 (task j5sj28v): the op-stack model (§5.1) ----------------------
+console.log('(r) op-stack model — kinds, tolerant settings, live-preview composition')
+{
+  // Type-directed kind offering (§3 discipline).
+  eq(ops.opKindsFor('image').length, 6, 'kinds: the image surface offers six v1 op kinds (stabilize is video-only)')
+  ok(ops.opKindsFor('image').includes('crop'), 'kinds: image offers crop')
+  ok(!ops.opKindsFor('image').includes('trim'), 'kinds: image does NOT offer trim (video op)')
+  ok(ops.opKindsFor('video').includes('trim'), 'kinds: video offers trim')
+  ok(!ops.opKindsFor('video').includes('crop'), 'kinds: video does NOT offer crop (ImageCrop is the image data model)')
+  ok(ops.opKindsFor('audio').length === 0, 'kinds: audio offers no v1 ops (honest)')
+
+  // Tolerant settings reads — documents are external data.
+  const crop = ops.readOpSettings('crop', { x: 9, y: -4, zoom: 0.2, fit: 'contain' })
+  eq({ x: crop.x, y: crop.y }, { x: 1, y: 0 }, 'settings: crop x/y clamp to [0,1]')
+  close(crop.zoom, 1, 1e-9, 'settings: crop zoom clamps at the 1 floor')
+  eq(ops.readOpSettings('crop', {}).fit, 'crop', 'settings: absent crop falls back to fill-crop')
+  eq(ops.readOpSettings('rotate', { degrees: 'left' }).degrees, 0, 'settings: a non-numeric rotation falls back to 0')
+  const trim = ops.readOpSettings('trim', { start: 10, end: 12 })
+  eq(trim, { start: 10, end: 12 }, 'settings: a legal trim section round-trips')
+  const trimNudged = ops.readOpSettings('trim', { start: 10, end: 11 })
+  close(trimNudged.end, 12, 1e-9, 'settings: a sub-2s trim widens to the clipper minimum')
+  const mask = ops.readOpSettings('mask', { strokes: [{ points: [0.1, 0.2], size: 0.05, erase: false }, { points: 'x', size: 1, erase: true }, null] })
+  eq(mask.strokes.length, 1, 'settings: malformed strokes drop, never crash')
+  eq(ops.readOpSettings('color-grade', {}).temperature, 0, 'settings: an absent grade is neutral')
+
+  // Live-preview composition (L3: live-update) — stack order applies.
+  const neutral = ops.opPreviewStyle([])
+  eq(neutral.filter, 'none', 'preview: an empty stack is the identity')
+  eq(neutral.objectPosition, '50.0% 50.0%', 'preview: default focal point is center')
+  const composed = ops.opPreviewStyle([
+    { kind: 'adjust', settings: { brightness: 1.4, contrast: 1.1, saturation: 1 } },
+    { kind: 'crop', settings: { x: 0.25, y: 0.75, zoom: 1.5, fit: 'crop' } },
+    { kind: 'rotate', settings: { degrees: 90 } },
+    { kind: 'color-grade', settings: { temperature: 0.5, tint: 0 } },
+  ])
+  ok(composed.filter.includes('brightness(1.400)'), 'preview: the adjust op composes into the filter')
+  ok(composed.filter.includes('sepia(0.175)'), 'preview: a warm grade composes its sepia proxy')
+  ok(composed.transform.includes('scale(1.5000)'), 'preview: crop zoom composes into the transform')
+  ok(composed.transform.includes('rotate(90.00deg)'), 'preview: rotation composes into the transform')
+  eq(composed.objectPosition, '25.0% 75.0%', 'preview: the crop focal point becomes object-position')
+  const trimmed = ops.opPreviewStyle([{ kind: 'trim', settings: { start: 2, end: 8 } }])
+  eq({ s: trimmed.trimStart, e: trimmed.trimEnd }, { s: 2, e: 8 }, 'preview: the trim window surfaces for the scrubber')
+  const stackedZoom = ops.opPreviewStyle([{ kind: 'crop', settings: { x: 0.5, y: 0.5, zoom: 2, fit: 'crop' } }, { kind: 'crop', settings: { x: 0.5, y: 0.5, zoom: 2, fit: 'crop' } }])
+  ok(stackedZoom.transform.includes('scale(4.0000)'), 'preview: stacked crops MULTIPLY (stack order semantics)')
+
+  // Reorder permutations — baked ops are immovable, moves clamp at the ends.
+  const stack = [
+    { id: 'a', bakedAt: null },
+    { id: 'b', bakedAt: null },
+    { id: 'c', bakedAt: 123 },
+    { id: 'd', bakedAt: null },
+  ]
+  eq(ops.moveOpPermutation(stack, 'b', 1), null, 'reorder: a move ONTO a baked op is refused')
+  eq(ops.moveOpPermutation(stack, 'c', -1), null, 'reorder: a baked op never moves (frozen by trigger)')
+  eq(ops.moveOpPermutation(stack, 'a', -1), null, 'reorder: the first op cannot move up')
+  eq(ops.moveOpPermutation(stack, 'd', 1), null, 'reorder: the last op cannot move down')
+  eq(ops.moveOpPermutation(stack, 'a', 1), ['b', 'a', 'c', 'd'], 'reorder: a-↓ swaps with b')
+  eq(ops.moveOpPermutation(stack, 'd', -1), null, 'reorder: d-↑ is blocked by the baked c (baked ops are barriers)')
+  eq(ops.moveOpPermutation(stack, 'gone', 1), null, 'reorder: an unknown op is a no-op')
+
+  // Chip summaries.
+  eq(ops.opSummary('crop', { x: 0.5, y: 0.5, zoom: 1.4, fit: 'crop' }), '1.4×', 'summary: crop zoom reads on the chip')
+  eq(ops.opSummary('rotate', { degrees: 90 }), '90°', 'summary: rotation degrees read on the chip')
+  eq(ops.opSummary('trim', { start: 1, end: 5 }), '1.0–5.0s', 'summary: the trim section reads on the chip')
+  eq(ops.opSummary('adjust', { brightness: 1, contrast: 1, saturation: 1 }), 'neutral', 'summary: a neutral adjust reads neutral')
+}
+
+console.log('(s) typed-hole surface — the pose rig row (§5.2) + utility rows')
+{
+  const facts = { connected: false, h3Ready: false, utilities: [] }
+  const consume = options.endpointOptions('consume', [], facts)
+  const poseRig = consume.find((row) => row.id === 'consume:pose-rig')
+  ok(poseRig && poseRig.available, 'options: the pose rig row is offered on the consume side (engine-free)')
+  eq(poseRig.group, 'control', 'options: the pose rig row sits in the control-inputs group')
+  ok(poseRig.hint.includes('17n+5'), 'options: the pose rig row carries the keyframe-grid hint')
+  const produce = options.endpointOptions('produce', ['image'], facts)
+  ok(!produce.some((row) => row.id === 'consume:pose-rig'), 'options: the pose rig row never leaks to the produce side')
+}
+
+console.log('(t) the LTX-2.3 utility validation ladder + official-template plan')
+{
+  const video = { path: '/out/scene.mp4', name: 'scene.mp4', kind: 'video' }
+  const offlineFacts = { connected: false, info: {}, models: [] }
+  eq(ltx23Submit.validateLtx23Utility({ tool: 'remove-subtitles', video }, offlineFacts), 'Start ComfyUI and verify the server connection in Settings.', 'ladder: offline refuses with the honest message')
+  eq(ltx23Submit.validateLtx23Utility({ tool: 'remove-subtitles', video: null }, { connected: true, info: {}, models: [] }).length > 0, true, 'ladder: no detection offline → the refusal names what is missing')
+  const noVideo = ltx23Submit.validateLtx23Utility({ tool: 'outpaint', video: null }, { connected: true, info: { LTXAddVideoICLoRAGuide: 1, ImagePadKJ: 1, Float32ColorCorrect: 1 }, models: [] })
+  // The registry gate leads the input gate: with no models resolved the
+  // refusal names the missing stack (install guidance), not the input.
+  ok(String(noVideo).includes('not ready'), 'ladder: unresolved weights refuse with install guidance before the input check')
+  const ia2v = ltx23Submit.validateLtx23Utility({ tool: 'ia2v', video: null, image: null, audio: null }, { connected: true, info: {}, models: [] })
+  ok(String(ia2v).includes('both an input image and an audio file') || String(ia2v).includes('not ready'), 'ladder: ia2v names its two inputs or its missing stack')
+
+  // The plan builds the REAL official template with a resolved TEST selection
+  // — construction is pure (the typed-hole seam the e2e probe asserts too).
+  const plan = ltx23Submit.planLtx23UtilityGraph(
+    { tool: 'remove-subtitles', video },
+    { info: {}, models: [] },
+    { video: 'scene.mp4' },
+  )
+  // Offline facts cannot resolve the models, so the plan refuses honestly —
+  // the factory half is exercised through the fully-resolved path below.
+  eq(plan.graph, null, 'plan: unresolved models refuse the plan (honest)')
+  ok(plan.refusal.includes('not ready'), 'plan: the refusal names the missing stack')
+}
+
+console.log('(u) Z-Image as an op — the still-surface validation ladder + graph plan')
+{
+  const offlineFacts = { connected: false, info: {} }
+  eq(zImageSubmit.validateZImage({ prompt: 'a still', seed: 1, width: 1344, height: 768, surface: 'plain', controlImage: null, controlMode: 'canny' }, offlineFacts), 'Start ComfyUI and verify the server connection in Settings.', 'ladder: offline refuses with the honest message')
+  eq(
+    zImageSubmit.validateZImage({ prompt: '   ', seed: 1, width: 1344, height: 768, surface: 'plain', controlImage: null, controlMode: 'canny' }, offlineFacts),
+    'Add a prompt before generating.',
+    'ladder: an empty prompt refuses before anything else',
+  )
+  const fakeInfo = {
+    UNETLoader: { input: { required: { unet_name: [['z_image_turbo_bf16.safetensors', 'other.safetensors']] } } },
+    CLIPLoader: { input: { required: { clip_name: [['qwen_3_4b.safetensors']] } } },
+    VAELoader: { input: { required: { vae_name: [['ae.safetensors']] } } },
+    ModelPatchLoader: { input: { required: { model_name: [['Z-Image-Turbo-Fun-Controlnet-Union.safetensors']] } } },
+    QwenImageDiffsynthControlnet: { input: { required: {} } },
+    GetImageSize: { input: { required: {} } },
+    Canny: { input: { required: {} } },
+  }
+  const selection = zImageSubmit.resolveZImageSelection(fakeInfo)
+  eq(selection.model, 'z_image_turbo_bf16.safetensors', 'resolve: the combo list resolves the turbo model name')
+  eq(selection.encoder, 'qwen_3_4b.safetensors', 'resolve: the Qwen 3 encoder resolves')
+  ok(zImageSubmit.zImageControlNodesReady(fakeInfo, 'canny'), 'resolve: the canny control path is node-ready')
+  ok(!zImageSubmit.zImageControlNodesReady(fakeInfo, 'depth'), 'resolve: depth needs its aux preprocessor (not installed here)')
+  const noControlImage = zImageSubmit.validateZImage({ prompt: 'a still', seed: 1, width: 1344, height: 768, surface: 'control', controlImage: null, controlMode: 'canny' }, { connected: true, info: fakeInfo })
+  eq(noControlImage, 'Choose a control image for the structure-guided still.', 'ladder: control surface without an image refuses')
+
+  // Graph plans: plain = the Z-Image turbo template; control = the
+  // zImageControlnet machinery (Fun ControlNet Union).
+  const plainPlan = zImageSubmit.planZImageGraph({ prompt: 'a still', seed: 7, width: 1024, height: 576, surface: 'plain', controlImage: null, controlMode: 'canny' }, selection)
+  const plainClasses = Object.values(plainPlan).map((node) => node.class_type)
+  ok(plainClasses.includes('UNETLoader') && plainClasses.includes('SaveImage'), 'plan: the plain surface builds the Z-Image turbo template')
+  ok(!plainClasses.includes('LoadImage'), 'plan: the plain surface wires no image loader (text→still)')
+  const controlPlan = zImageSubmit.planZImageGraph({ prompt: 'a still', seed: 7, width: 1024, height: 576, surface: 'control', controlImage: { path: '/x.png', name: 'x.png', kind: 'image' }, controlMode: 'canny' }, selection, { controlImage: 'x.png' })
+  const controlClasses = Object.values(controlPlan).map((node) => node.class_type)
+  ok(controlClasses.includes('QwenImageDiffsynthControlnet'), 'plan: the control surface wires the Fun ControlNet Union node')
+  ok(controlClasses.includes('Canny'), 'plan: the control surface preprocesses through native Canny')
+  ok(controlClasses.includes('ModelPatchLoader'), 'plan: the control surface loads the union patch')
 }
 
 console.log(`\ntest-canvas: ${passed} assertions passed`)

@@ -35,7 +35,14 @@ const CANVAS_PRESETS = [
 
 const DURATIONS = [1, 2, 3, 5, 8, 15] as const
 
-export default function PoseRigApp() {
+/** The ONLY canvas integration (Phase 3, §5.2): when docked, the rendered
+ *  frames can be handed to the canvas as a control track. Absent = the plain
+ *  dev surface. */
+export type PoseRigDock = {
+  onExportTrack(payload: { dataBase64: string; frames: number; width: number; height: number }): void
+}
+
+export default function PoseRigApp({ dock }: { dock?: PoseRigDock } = {}) {
   // E-FC1: human-134 stays the DEFAULT; AP-10K is a first-class selectable
   // alternative (never the initial rig), labeled with its measured adherence.
   const [templateId, setTemplateId] = useState(DEFAULT_TEMPLATE_ID)
@@ -423,6 +430,26 @@ export default function PoseRigApp() {
               <button type="button" data-poserig-export-server disabled title={`version-pinned OFF (E-FC0.5): __value__ is undocumented engine API — verified against ${SERVER_RENDER_BRIDGE.verifiedAgainst}; client render is the default`}>
                 <Camera size={14} /><span>Server render</span>
               </button>
+              {dock && (
+                <button
+                  type="button"
+                  data-poserig-export-track
+                  title="Render every frame into a contact sheet and hand it to the canvas as this chain's control track (stored + hashed)"
+                  onClick={() => {
+                    const dataUrl = renderSheetDataUrl()
+                    if (!dataUrl) return
+                    setStatus('exporting the pose control track to the canvas…')
+                    dock.onExportTrack({
+                      dataBase64: dataUrl.split(',')[1] ?? '',
+                      frames: timeline.totalFrames,
+                      width: timeline.canvas.width,
+                      height: timeline.canvas.height,
+                    })
+                  }}
+                >
+                  <Plus size={14} /><span>→ control track</span>
+                </button>
+              )}
             </div>
             <p className="poserig-note">
               non-human default path = sprite/region compositing — E-FC1 measured it BEST in class (1.4–2× tighter than AP-10K skeletons); reference: the tranche scripts in test-results/experiments/efc1/scripts. Skeleton templates are the explicit-pose alternative.

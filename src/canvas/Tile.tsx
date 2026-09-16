@@ -1,35 +1,50 @@
 /**
- * Canvas Phase 2 — the media tile (§3 tile anatomy).
+ * Canvas Phase 3 — the media tile (§3 tile anatomy).
  *
  * Preview surface (filmstrip poster through the shared media seams, blob
- * artifact via the documents blob route), status ring (idle / queued-for-GPU
- * / running / stale / failed-durable — §4 on-object state), op chips from the
- * chain's op stack, take strip (canonical starred, priors visible, fork
- * action — the Auditions pattern), head/tail endpoint affordances (Phase 2:
- * clickable typed holes). Semantic zoom is content swap BY BAND — the band
- * arrives as a prop, so a band crossing is the only reason this component
- * re-renders.
+ * artifact via the documents blob route) with the op stack composed LIVE
+ * onto it (L3 decided: live-update — opPreviewStyle applies the same
+ * filter/transform/focal composition the modal shows), status ring (idle /
+ * queued-for-GPU / running / stale / failed-durable — §4 on-object state),
+ * op chips from the chain's op stack (Phase 3: a chip click opens the modal
+ * editor — L8 decided: modal-only v1, no inline chip controls), take strip
+ * (canonical starred; Phase 3: clicking a prior take switches the canonical
+ * pointer — F5/takes; fork action — the Auditions pattern), head/tail
+ * endpoint affordances (clickable typed holes). Semantic zoom is content
+ * swap BY BAND — the band arrives as a prop, so a band crossing is the only
+ * reason this component re-renders (op edits re-derive the tile too, which
+ * is the live-update contract).
  */
 import { memo } from 'react'
 import { Film, GitFork, Lock, Star } from 'lucide-react'
 import { FilmstripPoster } from '../components/PooledVideoCard'
 import { useFilmstrip } from '../media/useFilmstrip'
 import { documentsApi } from './api'
+import { opPreviewStyle } from './ops'
 import type { ZoomBand } from './camera'
 import { STATUS_LABEL, type Tile } from './derive'
 
 function TilePreview({ tile, previewUrl }: { tile: Tile; previewUrl?: string }) {
   const filmstrip = useFilmstrip(tile.previewPath, tile.duration)
+  // L3 (decided): the tile preview LIVE-UPDATES as ops change — the stack's
+  // visual proxy composes right here (the modal shows the same composition).
+  const opStyle = opPreviewStyle(tile.ops)
+  const liveStyle = {
+    filter: opStyle.filter !== 'none' ? opStyle.filter : undefined,
+    transform: opStyle.transform !== 'none' ? opStyle.transform : undefined,
+    objectPosition: opStyle.objectPosition !== '50% 50%' ? opStyle.objectPosition : undefined,
+    objectFit: opStyle.objectFit !== 'cover' ? opStyle.objectFit : undefined,
+  } as const
   if (previewUrl) {
-    return <img className="canvas-tile-poster" src={previewUrl} alt={tile.title} />
+    return <img className="canvas-tile-poster" src={previewUrl} alt={tile.title} style={liveStyle} />
   }
   // The durable blob artifact (content-addressed) renders directly — images
   // as <img>, video takes as a paused <video> (frame 0 poster).
   if (tile.artifactPath && tile.mediaKind === 'image') {
-    return <img className="canvas-tile-poster" data-canvas-poster="blob" src={documentsApi.blobFileUrl(tile.artifactPath)} alt={tile.title} />
+    return <img className="canvas-tile-poster" data-canvas-poster="blob" src={documentsApi.blobFileUrl(tile.artifactPath)} alt={tile.title} style={liveStyle} />
   }
   if (tile.artifactPath && tile.mediaKind === 'video') {
-    return <video className="canvas-tile-poster" data-canvas-poster="blob" src={documentsApi.blobFileUrl(tile.artifactPath)} muted preload="metadata" aria-label={tile.title} />
+    return <video className="canvas-tile-poster" data-canvas-poster="blob" src={documentsApi.blobFileUrl(tile.artifactPath)} muted preload="metadata" aria-label={tile.title} style={liveStyle} />
   }
   if (tile.kind === 'seed' && !tile.previewPath) {
     return <div className="canvas-tile-poster canvas-tile-poster-seed" aria-label="seed">
@@ -42,7 +57,7 @@ function TilePreview({ tile, previewUrl }: { tile: Tile; previewUrl?: string }) 
   </FilmstripPoster>
 }
 
-function TileBase({ tile, band, selected, previewUrl, onSelect, onDismissFailure, onEndpoint, onFork }: {
+function TileBase({ tile, band, selected, previewUrl, onSelect, onDismissFailure, onEndpoint, onFork, onOpenOps, onSwitchTake }: {
   tile: Tile
   band: ZoomBand
   selected: boolean
@@ -51,7 +66,10 @@ function TileBase({ tile, band, selected, previewUrl, onSelect, onDismissFailure
   onDismissFailure(tileId: string): void
   onEndpoint(chainId: string, direction: 'consume' | 'produce'): void
   onFork(chainId: string): void
+  onOpenOps(chainId: string): void
+  onSwitchTake(chainId: string, takeId: string): void
 }) {
+  const priorTakes = tile.takes.filter((take) => take.supersededBy !== null)
   return <div
     className={`canvas-tile ${selected ? 'selected' : ''}`}
     data-canvas-tile={tile.id}
@@ -112,9 +130,24 @@ function TileBase({ tile, band, selected, previewUrl, onSelect, onDismissFailure
     )}
 
     {band !== 'far' && (
-      <div className="canvas-tile-ops" aria-label="Op stack">
-        {tile.ops.map((op) => <span key={op.id} className="canvas-op-chip" data-op-kind={op.kind}>{op.kind}</span>)}
-        {!tile.ops.length && <span className="canvas-op-chip canvas-op-chip-empty">no ops</span>}
+      <div className="canvas-tile-ops" aria-label="Op stack" title="Open the op stack editor (Enter)">
+        {tile.ops.map((op) => (
+          <span
+            key={op.id}
+            className={`canvas-op-chip ${op.bakedAt !== null ? 'baked' : ''}`}
+            data-op-kind={op.kind}
+            data-canvas-op-chip={op.id}
+            role="button"
+            tabIndex={0}
+            onClick={(event) => { event.stopPropagation(); onOpenOps(tile.id) }}
+            onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpenOps(tile.id) } }}
+          >
+            {op.kind}{op.bakedAt !== null ? ' ·baked' : ''}
+          </span>
+        ))}
+        {!tile.ops.length && (
+          <button type="button" className="canvas-op-chip canvas-op-chip-empty" data-canvas-op-chip-empty onClick={(event) => { event.stopPropagation(); onOpenOps(tile.id) }}>no ops</button>
+        )}
       </div>
     )}
 
@@ -126,9 +159,21 @@ function TileBase({ tile, band, selected, previewUrl, onSelect, onDismissFailure
         </div>
         <div className="canvas-tile-takes" aria-label="Takes">
           {tile.canonical
-            ? <span className="canvas-take-chip canonical" title="Canonical take"><Star size={10} fill="currentColor" /> {tile.canonical.id.slice(0, 8)}</span>
+            ? <span className="canvas-take-chip canonical" title="Canonical take — click a prior to switch the pointer"><Star size={10} fill="currentColor" /> {tile.canonical.id.slice(0, 8)}</span>
             : <span className="canvas-take-chip canvas-take-chip-empty">no take yet</span>}
-          {tile.priors > 0 && <span className="canvas-take-chip prior" title="Earlier takes — fork from an early take to keep drift low">+{tile.priors} prior{tile.priors > 1 ? 's' : ''}</span>}
+          {priorTakes.slice(0, 3).map((take) => (
+            <button
+              key={take.id}
+              type="button"
+              className="canvas-take-chip prior"
+              data-canvas-take-switch={take.id}
+              title="Make this take canonical — nothing is deleted; downstream forks go stale"
+              onClick={(event) => { event.stopPropagation(); onSwitchTake(tile.id, take.id) }}
+            >
+              {take.id.slice(0, 8)}
+            </button>
+          ))}
+          {tile.priors > 3 && <span className="canvas-take-chip prior" title={`${tile.priors - 3} more earlier takes — the properties panel lists them`}>+{tile.priors - 3}</span>}
           {tile.canonical && (
             <button type="button" className="canvas-take-fork" data-canvas-fork={tile.id} aria-label={`Fork ${tile.title}`} title="Fork from this object (B)" onClick={(event) => { event.stopPropagation(); onFork(tile.id) }}>
               <GitFork size={10} /> fork

@@ -7,7 +7,7 @@ import { buildMiniMaxWorkflow } from '../lib/workflow'
 import { buildLtx25Workflow } from '../lib/ltx25Workflow'
 import { ACE_STEP_REQUIRED_NODES, buildAceStepWorkflow } from '../lib/aceStepWorkflow'
 import { submitH3Render } from '../lib/h3Submit'
-import { buildLtx23UtilityGraph, findLtx23Utility, resolveLtx23Selection } from '../lib/graph'
+import { submitLtx23Utility } from '../lib/ltx23UtilitySubmit'
 import type { Ltx23UtilityKind } from '../lib/graph'
 import { prepareImage } from '../lib/imageCrop'
 import { inferSelections } from '../lib/modelSelection'
@@ -119,73 +119,18 @@ export function useGenerationFlows(options: {
 
   /** LTX-2.3 one-graph utility (task 068xwy3): template-faithful video
    *  tools (remove-subtitles / watermark / archival / object, outpaint,
-   *  img+audio→video) over the 2.3-dev checkpoint — the headless-builder
-   *  pattern (CharacterStudio precedent): validate availability, upload the
-   *  input media, submit the official-template graph. The pick-and-run UI
-   *  belongs to the canvas redesign epic (vbrstja); today the Settings
-   *  utilities section calls this. */
+   *  img+audio→video) over the 2.3-dev checkpoint. Phase 3 (j5sj28v): the
+   *  submission core lives in lib/ltx23UtilitySubmit.ts — this hook and the
+   *  canvas typed-hole menus submit through ONE code path (the h3Submit
+   *  discipline). The pick-and-run UI is the canvas's typed-hole menus. */
   const generateLtxUtility = async (options: { tool: Ltx23UtilityKind; input: MediaFile | null; audio?: MediaFile | null; prompt?: string; seed?: number }): Promise<string | null> => {
     if (!settings) return 'Studio settings are still loading.'
-    if (!status.connected) {
-      const message = 'Start ComfyUI and verify the server connection in Settings.'
-      notify('error', message)
-      return message
-    }
-    const utility = findLtx23Utility(`ltx23.${options.tool}`)
-    if (!utility) return `Unknown LTX-2.3 utility '${options.tool}'.`
-    const detection = utility.detect(info, models)
-    if (!detection.available) {
-      const missing = [...detection.missingNodes.map((nodeClass) => `node ${nodeClass}`), ...detection.missingModels]
-      const message = `${utility.label} is not ready — missing: ${missing.join('; ')}. ${utility.ui.installHint ?? ''}`
-      notify('error', message)
-      return message
-    }
-    const needsVideo = options.tool !== 'ia2v'
-    if (needsVideo && !options.input) return `Choose an input video for ${utility.label} first.`
-    if (options.tool === 'ia2v' && (!options.input || !options.audio)) return 'Image + audio → video needs both an input image and an audio file.'
-    const localId = createId()
-    const job: GenerationJob = {
-      id: localId, provider: 'ltx23', mode: 'text', prompt: options.prompt ?? utility.promptDefault,
-      createdAt: Date.now(), status: 'queued', progress: 2, progressLabel: `Preparing ${utility.label}`,
-      width: 0, height: 0, duration: 0,
-    }
-    setJobs((current) => [job, ...current])
-    notify('neutral', `Preparing the official LTX-2.3 ${utility.label} template graph…`)
-    try {
-      const seed = options.seed ?? Math.floor(Math.random() * 1_000_000_000)
-      // Raw uploads: the templates resize/preprocess inside the graph, so the
-      // source files go up untouched (no H3 crop pipeline).
-      const uploadedVideo = needsVideo && options.input ? await window.minimax.uploadInput(settings.comfyUrl, options.input.path) : undefined
-      const uploadedImage = options.tool === 'ia2v' && options.input ? await window.minimax.uploadInput(settings.comfyUrl, options.input.path) : undefined
-      const uploadedAudio = options.tool === 'ia2v' && options.audio ? await window.minimax.uploadInput(settings.comfyUrl, options.audio.path) : undefined
-      if (cancellationRequests.current.has(localId)) throw new Error('Generation cancelled before submission.')
-      const graph = buildLtx23UtilityGraph({
-        tool: options.tool,
-        prompt: options.prompt,
-        seed,
-        filenamePrefix: `video/LTX23_${options.tool}_${Date.now()}`,
-        video: uploadedVideo,
-        image: uploadedImage,
-        audio: uploadedAudio,
-      }, resolveLtx23Selection(info, models))
-      const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, clientId)
-      if (cancellationRequests.current.has(localId)) {
-        await window.minimax.cancelPrompt(settings.comfyUrl, response.prompt_id)
-        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'cancelled' } : item))
-        return 'The LTX-2.3 utility run was cancelled before it started.'
-      }
-      setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: 'Waiting for ComfyUI to start' } : item))
-      notify('success', `${utility.label} added to the ComfyUI queue.`)
-      return null
-    } catch (error) {
-      const cancelled = cancellationRequests.current.has(localId)
-      const message = cancelled ? 'LTX-2.3 utility cancelled.' : error instanceof Error ? error.message : String(error)
-      setJobs((current) => current.map((item) => item.id === localId ? { ...item, status: cancelled ? 'cancelled' : 'failed', error: cancelled ? undefined : message } : item))
-      notify(cancelled ? 'success' : 'error', message)
-      return message
-    } finally {
-      cancellationRequests.current.delete(localId)
-    }
+    const result = await submitLtx23Utility(
+      { tool: options.tool, prompt: options.prompt, seed: options.seed, video: options.tool === 'ia2v' ? null : options.input, image: options.tool === 'ia2v' ? options.input : null, audio: options.audio ?? null },
+      { settings, connected: status.connected, info, models, clientId },
+      { notify, setJobs, cancellationRequests },
+    )
+    return result.ok ? null : result.message
   }
 
   const generateAceStep = async (aceOptions: AceStepGenerationOptions) => {

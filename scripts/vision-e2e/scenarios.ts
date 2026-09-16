@@ -111,7 +111,7 @@ export const SCENARIOS: VisionScenario[] = [
         label: 'Settings — "LLM · llama.cpp router" card in its provider-empty fallback state',
         rubric: [
           SHELL_CONTEXT,
-          'The Settings view: single-column stack of section cards beside the sidebar, "Settings" heading with subtitle and a "Save settings" button.',
+          'The Settings view: a single-column stack of section cards beside the sidebar. The page scrolls INSIDE its own container and this capture is taken with the LLM card scrolled into view — the "Settings" heading and its "Save settings" button MAY sit above the visible fold (that is intended scrolling, not clipping; judge only what is in frame).',
           'The "LLM · llama.cpp router" card is in frame with: title "LLM · llama.cpp router" and its explanatory sub-line; a health pill reading "Ollama fallback" (NOT "online"/"connected"/"Router · N models" — no router is configured in tests, so an online-looking pill is a bug); a labeled "Router address (router mode)" input that is EMPTY (its placeholder mentions 127.0.0.1:8080 and the Ollama fallback); a "Test connection" button.',
           'Below those: the card\'s grid of controls — checkbox rows "Unload models before generating" (checked) and "Thinking by default (freeform)" (unchecked), a "Prompt writing style" dropdown, a "Sticky models (never unload)" input, and a closing note line mentioning that nothing leaves the workstation.',
           'NO model rows: zero model ids/names listed as selectable rows in this card (phantom models with no provider behind them are a bug). A "no models / not reachable" status line is acceptable.',
@@ -261,6 +261,76 @@ export const SCENARIOS: VisionScenario[] = [
           'A floating PROPERTIES panel may be visible at the right side of the canvas (drag handle header with the tile title and a small mode pill like "text → video", stacked sections for Prompt / Engine / References / Identity / Guides / Takes, an X close button) — intended Phase-2 surface. A slim contextual bottom bar spans the canvas foot (object title, mode pill, status chip, fork button).',
           'The tile may be partially overlapped by nothing; text on the tile must be readable, not clipped mid-glyph.',
           'Defects to flag: no radar/button visible in the titlebar, no tile card on the canvas, the tile border-less or invisible against the grid, overlapping titlebar controls, empty canvas with no objects, any pure-white or pure-black dead region covering the surface.',
+        ].join(' '),
+      },
+    ],
+  },
+
+  {
+    // Canvas Phase 3 (task j5sj28v) — the op modal editor (§5.1) over the
+    // canvas with a LIVE tile preview, then the completed fork semantics:
+    // derived edge + near-band take strip. Deterministic: fresh session, one
+    // drop, modal ops applied via the real store paths.
+    id: 'canvas-phase3',
+    label: 'Canvas Phase 3 — op modal editor + fork gesture',
+    run: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+      await page.goto('/?canvas=1')
+      await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+      // A real, decodable PNG so the live preview composes over a real image.
+      await page.evaluate(() => {
+        const canvas = document.createElement('canvas')
+        canvas.width = 64
+        canvas.height = 36
+        const context = canvas.getContext('2d')!
+        context.fillStyle = '#2b3a55'
+        context.fillRect(0, 0, 64, 36)
+        context.fillStyle = '#e8b04b'
+        context.fillRect(8, 8, 16, 16)
+        const binary = atob(canvas.toDataURL('image/png').split(',')[1])
+        const bytes = new Uint8Array(binary.length)
+        for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+        const transfer = new DataTransfer()
+        transfer.items.add(new File([bytes], 'vision-op-stack.png', { type: 'image/png' }))
+        document.querySelector('[data-canvas-root]')!.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true }))
+      })
+      const tile = page.locator('[data-canvas-tile]').first()
+      await expect(tile).toBeVisible({ timeout: 10_000 })
+      await page.waitForTimeout(600)
+      // §7 Enter opens the op modal; a crop + a warm adjust land through the
+      // real store (the tile preview re-derives live — L3).
+      await tile.click()
+      await page.keyboard.press('Enter')
+      const modal = page.locator('.canvas-opmodal')
+      await expect(modal).toBeVisible()
+      await modal.locator('[data-canvas-op-add]').click()
+      await modal.locator('[data-canvas-op-add="crop"]').click()
+      await expect(modal.locator('[data-canvas-op-stack] .canvas-op-row')).toHaveCount(1, { timeout: 10_000 })
+      await modal.locator('[data-canvas-op-add]').click()
+      await modal.locator('[data-canvas-op-add="adjust"]').click()
+      await expect(modal.locator('[data-canvas-op-stack] .canvas-op-row')).toHaveCount(2, { timeout: 10_000 })
+      await modal.locator('[data-canvas-op-field="brightness"]').evaluate((element) => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+        setter.call(element, '0.45') // offset slider: 0 = neutral, +0.45 → brightness 1.45
+        element.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+      await page.waitForTimeout(1_200) // debounced commit + live re-derive
+    },
+    after: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
+    },
+    checkpoints: [
+      {
+        id: 'canvas-phase3-opmodal-1080p',
+        label: 'Canvas — the op modal editor open over the substrate with a live preview + stack rows',
+        rubric: [
+          'Context: a dark-theme desktop studio at 1920x1080 on the ?canvas=1 canvas route behind a DIMMED MODAL BACKDROP. The canvas surface is near-black BY DESIGN (a dark abyss background with a very subtle dot grid) — under the dim the grid dots may fall below visibility; the contract is SILHOUETTES, not a void: at least one dimmed structure behind the modal (a floating panel, a tile edge, or the bottom bar strip) plus the FULLY BRIGHT top titlebar (canvas tab, radar chip, "engine offline" chip, index button) which renders above the backdrop.',
+          'A large modal panel (~1000px wide, centered): header row with a title beginning "Op stack —" and a sub-line about edits being ops and bake being irreversible; an × close button at its top right.',
+          'The modal body has TWO columns. LEFT: a preview stage — a rounded dark frame showing the SOURCE IMAGE visibly brightened/warmed compared to neutral (a dark blue rectangle with a gold square, clearly lighter than a dark navy) — plus a scrubber row is ABSENT (this is an image, no trim scrubber).',
+          'RIGHT: an "add op" pill button with a "+", an op count line, then a STACK LIST of exactly TWO op rows — "1 crop" (a summary like "1.0×") and "2 adjust" — each row carrying small icon buttons (undo, up/down arrows) and a "bake" text button at the right; one row is highlighted as the selected editor below shows sliders labeled brightness / contrast / saturation. The sliders are SYMMETRIC: center is neutral, so the brightness thumb (set above neutral) sits RIGHT of its track\'s geometric center while contrast/saturation sit at center.',
+          'Beneath the list: the selected op\'s edit panel with the three labeled range sliders, and a small muted footer line mentioning ⌘Z undo / drag to reorder / Esc.',
+          'Blessings: the canvas behind is dimmed (silhouette-level); the modal may overlap the tile; dense small sub-labels are the design language; dimmed controls are intended; the op-row bake button may sit close to the modal\'s inner right padding (flush-but-present is fine, clipped-half is not).',
+          'Defects to flag: modal clipped by the viewport, stack rows overlapping, sliders without labels, the brightness thumb left of center, the preview stage empty or pure black, text cut mid-glyph, NO bright structure anywhere (full void).',
         ].join(' '),
       },
     ],

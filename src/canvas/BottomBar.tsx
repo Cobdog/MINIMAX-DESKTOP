@@ -1,21 +1,22 @@
 /**
- * Canvas Phase 2 — the contextual bottom bar (§4: 100% contextual —
+ * Canvas Phase 3 — the contextual bottom bar (§4: 100% contextual —
  * contexts, not modes).
  *
  *   nothing selected → the generation surface (mode readout from the
  *     selection roles + prompt entry + honest engine state);
- *   media selected   → transport + op entry + properties;
+ *   media selected   → transport + op entry (the modal, L8: modal-only v1)
+ *     + properties;
  *   chain selected   → identity payload + drift readout + takes + fork
- *     history;
- *   multi-select     → batch gestures (honest stubs — Phase 3 lands the ops).
+ *     history + lock (P) + per-chain rerun;
+ *   multi-select     → batch gestures (multi-generate to queue selections,
+ *     multi-lock; Phase 3 lands the ops the Phase-2 stub promised).
  */
 import { useState } from 'react'
-import { ChevronUp, CircleDot, GitFork, Layers, Pause, Play, Plus } from 'lucide-react'
+import { ChevronUp, CircleDot, GitFork, Layers, Lock, LockOpen, Pause, Play, Plus } from 'lucide-react'
 import { collectOutputRefs, STATUS_LABEL } from './derive'
 import { effectiveMode, MODE_LABEL, readChainSettings } from './generation'
+import { opKindsFor } from './ops'
 import { useCanvasStore } from './store'
-
-const OP_KINDS = ['crop', 'mask', 'trim', 'adjust', 'stabilize'] as const
 
 export function BottomBar() {
   const selection = useCanvasStore((state) => state.selection)
@@ -56,17 +57,34 @@ export function BottomBar() {
     else element.pause()
   }
 
+  // Op entry (media context): the modal is the ONLY editor (L8) — the menu
+  // adds the first op and opens the editor on it.
   const addOp = async (kind: string) => {
     setOpMenuOpen(false)
     if (!primary) return
-    try {
-      const { documentsApi } = await import('./api')
-      await documentsApi.addOp(primary.id, kind, {})
-      useCanvasStore.getState().recompute()
-      toast('success', `${kind} op added to the stack — editing lands with Phase 3.`)
-    } catch (error) {
-      toast('error', `The op could not be added: ${error instanceof Error ? error.message : String(error)}`)
+    const store = useCanvasStore.getState()
+    const id = await store.addStackOp(primary.id, kind as never)
+    if (id) store.setOpEditor({ chainId: primary.id })
+  }
+
+  // Batch gestures (multi context): queue every selected chain, or lock them
+  // all (P for one, the gesture for many).
+  const multiGenerate = async () => {
+    const store = useCanvasStore.getState()
+    let queued = 0
+    for (const tile of selectedTiles) {
+      const result = await store.submitChain(tile!.id)
+      if (result.ok) queued += 1
     }
+    toast(queued ? 'success' : 'error', queued
+      ? `${queued} of ${selectedTiles.length} selection${selectedTiles.length === 1 ? '' : 's'} queued — L26: generations serialize by default.`
+      : 'Nothing queued — the engine refused every selection (the reasons are on the objects).')
+  }
+
+  const multiLock = async () => {
+    const store = useCanvasStore.getState()
+    const lock = !selectedTiles.every((tile) => tile!.lockState === 'locked')
+    for (const tile of selectedTiles) await store.setChainLock(tile!.id, lock)
   }
 
   // Fork history: parents = chains whose outputs this chain consumes; forks =
@@ -84,6 +102,10 @@ export function BottomBar() {
     }
     return { parents, forks }
   })()
+
+  // Type-directed op offering (§3): the same kind list the modal's add menu
+  // derives for the tile's media kind.
+  const offeredOpKinds = primary ? opKindsFor(primary.mediaKind) : []
 
   return <footer className="canvas-bottombar" data-canvas-bottombar data-canvas-bar-context={context}>
     {context === 'empty' && (
@@ -123,8 +145,17 @@ export function BottomBar() {
           {forkHistory.forks.length ? `${forkHistory.forks.length} fork${forkHistory.forks.length === 1 ? '' : 's'} ↓` : ''}
           {!forkHistory.parents.length && !forkHistory.forks.length ? 'no forks yet' : ''}
         </span>
+        <button
+          type="button"
+          className="canvas-chip"
+          data-canvas-bar-lock={primary.lockState}
+          title={primary.lockState === 'locked' ? 'Unlock — upstream changes mark this chain stale again' : 'Lock — propagation is gated; every take stays resident'}
+          onClick={() => void useCanvasStore.getState().setChainLock(primary.id, primary.lockState !== 'locked')}
+        >
+          {primary.lockState === 'locked' ? <Lock size={11} /> : <LockOpen size={11} />} {primary.lockState === 'locked' ? 'locked' : 'unlocked'} <kbd>P</kbd>
+        </button>
         <button type="button" className="canvas-chip" data-canvas-bar-fork disabled={!primary.canonical} onClick={() => setForkMenu({ chainId: primary.id })}><GitFork size={11} /> fork <kbd>B</kbd></button>
-        {primary.stale && <button type="button" className="canvas-chip" data-canvas-bar-rerun onClick={() => void useCanvasStore.getState().rerunStale()}>rerun <kbd>R</kbd></button>}
+        {primary.stale && <button type="button" className="canvas-chip" data-canvas-bar-rerun title="Rerun this chain — one gesture (principle 5)" onClick={() => void useCanvasStore.getState().rerunChain(primary.id)}>rerun <kbd>R</kbd></button>}
       </>
     )}
 
@@ -136,14 +167,15 @@ export function BottomBar() {
           <button type="button" className="canvas-chip" data-canvas-bar-ops onClick={() => setOpMenuOpen((value) => !value)}><Plus size={11} /> op <ChevronUp size={10} /></button>
           {opMenuOpen && (
             <div className="canvas-bar-opmenu-pop" data-canvas-bar-opmenu role="menu">
-              {OP_KINDS.map((kind) => (
+              {offeredOpKinds.map((kind) => (
                 <button type="button" key={kind} role="menuitem" data-canvas-bar-op={kind} onClick={() => void addOp(kind)}>{kind}</button>
               ))}
-              <span className="canvas-bar-opmenu-note">Non-destructive stack; per-op undo + bake land in Phase 3.</span>
+              <span className="canvas-bar-opmenu-note">Non-destructive stack · per-op undo + reorder + bake in the editor.</span>
             </div>
           )}
         </div>
-        <button type="button" className="canvas-chip" data-canvas-bar-properties onClick={() => useCanvasStore.getState().setInspectorOpen(true)}>properties <kbd>↵</kbd></button>
+        <button type="button" className="canvas-chip" data-canvas-bar-opedit onClick={() => useCanvasStore.getState().setOpEditor({ chainId: primary.id })}>ops <kbd>↵</kbd></button>
+        <button type="button" className="canvas-chip" data-canvas-bar-properties onClick={() => useCanvasStore.getState().setInspectorOpen(true)}>properties</button>
         <button type="button" className="canvas-chip" data-canvas-bar-fork onClick={() => setForkMenu({ chainId: primary.id })}><GitFork size={11} /> fork</button>
       </>
     )}
@@ -154,9 +186,13 @@ export function BottomBar() {
         {selectedTiles.slice(0, 4).map((tile) => (
           <button type="button" key={tile!.id} className="canvas-bar-chip-tile" data-canvas-bar-multitile={tile!.id} onClick={() => { select(tile!.id); requestCamera({ kind: 'fly', tileId: tile!.id }) }}>{tile!.title}</button>
         ))}
-        <span className="canvas-bar-stub" data-canvas-bar-batch title="Batch gestures (rerun all, fork all, group) land with Phase 3 ops">
-          batch gestures — Phase 3
-        </span>
+        <button type="button" className="canvas-chip" data-canvas-bar-generate-all onClick={() => void multiGenerate()}>
+          <Play size={11} /> generate all
+        </button>
+        <button type="button" className="canvas-chip" data-canvas-bar-lock-all onClick={() => void multiLock()}>
+          {selectedTiles.every((tile) => tile!.lockState === 'locked') ? <LockOpen size={11} /> : <Lock size={11} />}
+          {selectedTiles.every((tile) => tile!.lockState === 'locked') ? 'unlock all' : 'lock all'}
+        </button>
         <button type="button" className="canvas-chip" onClick={() => select(null)}>clear</button>
       </>
     )}

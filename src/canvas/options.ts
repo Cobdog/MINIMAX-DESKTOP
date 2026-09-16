@@ -32,7 +32,7 @@ export type OptionAvailability = {
 export type EndpointOption = {
   id: string
   /** L19: category visible — the menu groups by this. */
-  group: 'generate' | 'input' | 'utility' | 'fork'
+  group: 'generate' | 'input' | 'utility' | 'fork' | 'control'
   label: string
   description: string
   /** The store action this row performs when picked. */
@@ -43,6 +43,8 @@ export type EndpointOption = {
     | { kind: 'add-reference' }
     | { kind: 'utility'; tool: string }
     | { kind: 'fork'; substrate: 'decoded' | 'extracted-frame' | 'latents' }
+    /** Phase 3: the pose rig dock (§5.2 control-input family, epic 66xhflw). */
+    | { kind: 'pose-rig' }
   available: boolean
   /** Why not (install guidance rides here). */
   reason?: string
@@ -91,6 +93,14 @@ export function endpointOptions(direction: EndpointDirection, sourceKinds: Reado
       action: { kind: 'add-reference' }, available: true,
       hint: '≤9 pictures · 3 videos · 3 audio',
     })
+    // §5.2 control-input family (Phase 3, epic 66xhflw): the pose rig docks
+    // as a floating canvas tool panel — a from-scratch control input, so it
+    // is offered for ANY chain kind and never needs the engine.
+    rows.push({
+      id: 'consume:pose-rig', group: 'control', label: 'Pose rig', description: 'Author a pose control track for this chain — the IK rig docks as a panel; export lands as a control input.',
+      action: { kind: 'pose-rig' }, available: true,
+      hint: 'palette-exact DWPose · 17n+5 keyframe grid',
+    })
     return rows
   }
 
@@ -130,7 +140,7 @@ export function endpointOptions(direction: EndpointDirection, sourceKinds: Reado
   rows.push({
     id: 'produce:fork-latents', group: 'fork', label: 'Fork — latents on disk', description: 'Continue from the saved sampler latent (never-denoised conditioning).',
     action: { kind: 'fork', substrate: 'latents' }, available: false,
-    reason: 'Latent forks render through the Motion-Context chains — Phase 3 wiring; the substrate records on the fork today.',
+    reason: 'Latent forks render through the Motion-Context chains — the substrate records on the fork today (engine wiring is the Phase-4 seam).',
   })
   for (const utility of availability.utilities) {
     const wantsVideo = utility.tool !== 'ia2v'

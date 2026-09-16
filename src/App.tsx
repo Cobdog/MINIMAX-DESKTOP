@@ -462,7 +462,10 @@ function App() {
           <div className="nav-group"><span className="nav-section-label">Review</span>
             <NavButton active={view === 'queue'} icon={ListVideo} label="Queue" count={pendingJobs.length} onClick={() => setView('queue')} />
             <NavButton active={view === 'library'} icon={Library} label="Library" onClick={() => setView('library')} />
-            <NavButton active={view === 'editor'} icon={Scissors} label="Clip editor" onClick={() => setView('editor')} />
+            {/* Phase-3 retirement (canvas §8): the op modal + forks absorbed
+                this capability. Still directly navigable (D-dependencies hold
+                until Phase 5) — greyed with the canvas pointer. */}
+            <NavButton active={view === 'editor'} icon={Scissors} label="Clip editor" retired onClick={() => setView('editor')} />
           </div>
         </nav>
         <div className="sidebar-spacer" />
@@ -627,7 +630,11 @@ function App() {
         setPrompt(videoPrompt); setMode('text'); ws.setNoDialogue(true); setActiveJobId(null); setView('create')
         notify('success', 'Video prompt loaded into Create with No dialogue enabled.')
       }} />
-      {videoClipDraft && <VideoReferenceClipper source={videoClipDraft.source} onClose={() => setVideoClipDraft(null)} onCreate={createVideoReferenceClip} />}
+      {/* Phase-3 retirement (canvas §8): the trim op absorbed the clipper's
+        capability; the Create reference-video edit still opens it (CreateView
+        is the D1 dependency that stays until Phase 4) — the trigger is greyed
+        with the canvas pointer. */}
+    {videoClipDraft && <VideoReferenceClipper source={videoClipDraft.source} onClose={() => setVideoClipDraft(null)} onCreate={createVideoReferenceClip} />}
     </div>
   )
 }

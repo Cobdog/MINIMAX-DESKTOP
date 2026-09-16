@@ -342,6 +342,21 @@ cardinal one: radar + on-object state + summonable index ship as a unit
 before JobsView retires. e2e/vision coverage rewrites per phase before each
 retirement (D6).
 
+**Phase 3 landed (task j5sj28v, 2026-09-16):** the op modal editor ships
+(§5.1 — crop/rotate/brush-mask/adjust/trim/upscale/stabilize/color-grade,
+per-op undo + reorder + bake, live-update tile preview per L3, modal-only
+per L8); fork semantics complete (canonical-pointer switching on the take
+strip, stale propagation respecting locks, per-chain rerun gesture); the
+LTX-2.3 utility family + Z-Image stills arrive as canvas surface (§5.4 —
+the utilities submit through the shared core extracted from the old hook;
+image intent routes to Z-Image, control via a selected image); the pose rig
+docks as the control-input panel (§5.2, export → control track); and the
+FIRST VIEW RETIREMENT lands: ClipEditor + VideoReferenceClipper +
+FrameBookmarkStudio grey out in the old shell with the canvas pointer —
+still directly navigable (their D-dependencies hold until Phase 5);
+CreateView stays (the D1 dependency, Phase 4). CreateView/JobsView/Library
+full retirement follows their Phase-4 capability absorbments.
+
 ## 9. Parked-questions ledger — RECONCILED UNION (per audit L1)
 
 **[BLESSED 2026-09-15 — maintainer accepted both bundles wholesale via

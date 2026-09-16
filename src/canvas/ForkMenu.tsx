@@ -61,6 +61,17 @@ export function ForkMenu() {
             </span>
           </button>
         ))}
+        {/* Upscale dual-mode (§5.1): the FORK side. The stack side is the
+            upscale op in the op modal — one capability, two placements. */}
+        <button
+          type="button"
+          className="canvas-menu-row"
+          data-canvas-fork-upscale
+          onClick={() => chainOutputId && void fork({ chainId: tile.id, outputId: chainOutputId, substrate: 'decoded', withUpscale: true })}
+        >
+          <span className="canvas-menu-row-label">Fork — upscaled</span>
+          <span className="canvas-menu-row-note">A new chain with the LTX 2× engine upscale preset (switchable in its properties).</span>
+        </button>
       </div>
       {earlier.length > 0 && (
         <div className="canvas-menu-group" data-canvas-menu-group="early-take">

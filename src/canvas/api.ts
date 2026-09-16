@@ -49,7 +49,7 @@ export const documentsApi = {
   createChain: async (input: { projectId: string; kind?: string; inputSpec?: Record<string, unknown>; settings?: Record<string, unknown> }) =>
     (await post<{ chain: DocumentChain }>('/api/lan/documents/chains', input)).chain,
 
-  updateChain: (input: { id: string; settings?: Record<string, unknown>; inputSpec?: Record<string, unknown>; stale?: boolean }) =>
+  updateChain: (input: { id: string; settings?: Record<string, unknown>; inputSpec?: Record<string, unknown>; lockState?: 'locked' | 'unlocked'; hopCount?: number; driftMetrics?: Record<string, unknown> | null; stale?: boolean }) =>
     post<{ chain: DocumentChain }>('/api/lan/documents/chains/update', input),
 
   createOutput: async (input: { chainId: string; substrates?: string[] }) =>
@@ -64,8 +64,26 @@ export const documentsApi = {
   upsertIdentity: (input: { chainId: string; refAssetIds?: string[]; subjectText?: string; strength?: number; perSlotStrengths?: Record<string, number> | null }) =>
     post<{ identity: Record<string, unknown> }>('/api/lan/documents/identity', input),
 
-  addOp: (chainId: string, kind: string, settings?: Record<string, unknown>) =>
-    post<{ op: { id: string } }>('/api/lan/documents/ops', { chainId, kind, settings: settings ?? {} }),
+  addOp: async (chainId: string, kind: string, settings?: Record<string, unknown>) =>
+    (await post<{ op: { id: string } }>('/api/lan/documents/ops', { chainId, kind, settings: settings ?? {} })).op,
+
+  /** Phase 3 op-stack edits (§5.1): settings updates, ordinal permutation
+   *  reorder, bake (the explicit irreversible marker), per-op undo (delete —
+   *  the server refuses baked ops). */
+  updateOpSettings: (id: string, settings: Record<string, unknown>) =>
+    post<{ updated: boolean }>('/api/lan/documents/ops/update', { id, settings }),
+
+  reorderOps: (chainId: string, orderedIds: string[]) =>
+    post<{ ops: Array<{ id: string }> }>('/api/lan/documents/ops/reorder', { chainId, orderedIds }),
+
+  bakeOp: (id: string) => post<{ baked: boolean }>('/api/lan/documents/ops/bake', { id }),
+
+  deleteOp: (id: string) => post<{ deleted: number }>('/api/lan/documents/ops/delete', { id }),
+
+  /** §2.1 control track (one per shot + optional mask) — the pose rig dock
+   *  writes pose tracks; preprocessors write extracted ones. */
+  addControlTrack: (input: { chainId: string; kind: string; source: string; inputRef: string; maskRef?: string | null; params?: Record<string, unknown> | null }) =>
+    post<{ controlTrack: { id: string } }>('/api/lan/documents/control-tracks', input),
 
   /** Phase 2 media ingestion: dropped bytes → engine-visible output-dir copy
    *  + content-addressed blob row. Returns both paths. */

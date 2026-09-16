@@ -1,5 +1,5 @@
 /**
- * Canvas Phase 2 — the route root behind ?canvas=1 (§3/§4/§5.4).
+ * Canvas Phase 3 — the route root behind ?canvas=1 (§3/§4/§5.4).
  *
  * Mounts ONLY under the canvas route (main.tsx lazily loads this module like
  * the prototypes; every normal app route never imports it). Own titlebar
@@ -8,7 +8,8 @@
  * canvases, the properties panel, the contextual bottom bar, the summonable
  * index, ambient toasts, session wiring (open/close/order + camera autosave
  * through the documents API), and the drop-anything ingestion (bytes →
- * content-addressed blobs).
+ * content-addressed blobs). Phase 3 adds the OP MODAL (§5.1) and the pose
+ * rig dock (§5.2).
  *
  * ?canvas=1&bench=1 mounts the L33 rendering-budget harness instead
  * (Benchmark.tsx) — same substrate, synthetic document, measurement protocol.
@@ -19,6 +20,8 @@ import { CanvasEngineHost } from './EngineHost'
 import { EndpointMenu } from './EndpointMenu'
 import { ForkMenu } from './ForkMenu'
 import { IndexOverlay } from './IndexOverlay'
+import { OpEditor } from './OpEditor'
+import { PoseRigDock } from './PoseRigDock'
 import { PropertiesPanel } from './PropertiesPanel'
 import { Launcher } from './Launcher'
 import { Radar } from './Radar'
@@ -56,7 +59,11 @@ export function CanvasApp() {
   useEffect(() => useJobsStore.subscribe(() => useCanvasStore.getState().recompute()), [])
 
   // §7 base keys: Escape deselect / close index, J/K cycle, ⌘K index, R
-  // rerun-stale, B fork the selection, digits jump-to-take.
+  // rerun-stale, B fork the selection, Enter opens the op modal on a media
+  // selection (properties otherwise), P pin/lock, digits 1–9 jump-to-take
+  // (canonical pointer switch). The op modal and the pose-rig dock own the
+  // keyboard while open (the rig binds its own window keys; ⌘Z inside the
+  // modal is the modal's per-op undo) — canvas-wide single-letter keys gate.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
@@ -77,6 +84,8 @@ export function CanvasApp() {
       }
       if (typing) return
       const state = useCanvasStore.getState()
+      // The modal surfaces own Escape/keys while open.
+      if (state.opEditor || state.poseRig) return
       if (!state.tiles.length) return
       if (event.key === 'j' || event.key === 'k') {
         const index = state.tiles.findIndex((tile) => tile.id === state.selection.tileIds[0])
@@ -95,6 +104,31 @@ export function CanvasApp() {
         const selected = state.selection.tileIds[0]
         const tile = state.tiles.find((entry) => entry.id === selected)
         if (tile && tile.canonical) setForkMenu({ chainId: tile.id })
+      }
+      // §7: modal open on selection (Enter) — the op modal for a media tile,
+      // the properties panel otherwise.
+      if (event.key === 'Enter') {
+        const selected = state.selection.tileIds[0]
+        const tile = state.tiles.find((entry) => entry.id === selected)
+        if (!tile) return
+        if (tile.kind === 'media' && tile.canonical) useCanvasStore.getState().setOpEditor({ chainId: tile.id })
+        else useCanvasStore.getState().setInspectorOpen(true)
+      }
+      // §7: P pin (lock/unlock) the selection.
+      if (event.key === 'p') {
+        const selected = state.selection.tileIds[0]
+        const tile = state.tiles.find((entry) => entry.id === selected)
+        if (tile) void useCanvasStore.getState().setChainLock(tile.id, tile.lockState !== 'locked')
+      }
+      // §7: digits 1–9 jump-to-take — take N of the selected chain becomes
+      // canonical (oldest-first; nothing is ever deleted — F5/takes).
+      if (/^[1-9]$/.test(event.key)) {
+        const selected = state.selection.tileIds[0]
+        const tile = state.tiles.find((entry) => entry.id === selected)
+        if (!tile || tile.takes.length < 2) return
+        const oldestFirst = [...tile.takes].sort((a, b) => a.createdAt - b.createdAt)
+        const take = oldestFirst[Number(event.key) - 1]
+        if (take && take.supersededBy !== null) void useCanvasStore.getState().switchCanonical(tile.id, take.id)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -156,6 +190,8 @@ export function CanvasApp() {
     <BottomBar />
     <EndpointMenu />
     <ForkMenu />
+    <OpEditor />
+    <PoseRigDock />
     <IndexOverlay />
     <div className="canvas-toasts" aria-live="polite">
       {toasts.map((toast) => (

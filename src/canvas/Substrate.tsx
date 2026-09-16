@@ -213,6 +213,8 @@ function SubstrateBase() {
             onDismissFailure={dismissFailure}
             onEndpoint={(chainId, direction) => useCanvasStore.getState().setEndpointMenu({ chainId, direction })}
             onFork={(chainId) => useCanvasStore.getState().setForkMenu({ chainId })}
+            onOpenOps={(chainId) => useCanvasStore.getState().setOpEditor({ chainId })}
+            onSwitchTake={(chainId, takeId) => void useCanvasStore.getState().switchCanonical(chainId, takeId)}
           />
         ))}
       </div>

@@ -18,7 +18,6 @@ import { SmartPromptEditor } from '../components/SmartPromptEditor'
 import { detectOptimizations } from '../lib/graph'
 import { guideFrameWarning } from '../lib/workflow'
 import { useSessionStore } from '../state/sessionStore'
-import { documentsApi } from './api'
 import { STATUS_LABEL } from './derive'
 import { effectiveMode, MODE_LABEL, readChainSettings, type CanvasChainSettings } from './generation'
 import { useCanvasStore } from './store'
@@ -293,6 +292,11 @@ export function PropertiesPanel() {
 
       <section className="canvas-properties-section" data-canvas-section="identity">
         <label>Identity payload <span className="canvas-properties-hint">re-injected every window</span></label>
+        <p className="canvas-properties-anchor" data-canvas-identity-anchor>
+          anchor · {referenceSlots ? `${referenceSlots} bound picture${referenceSlots === 1 ? '' : 's'}` : 'no reference set'}
+          {chain?.identity?.refAssetIds?.length ? ` · ${chain.identity.refAssetIds.length} asset ref${chain.identity.refAssetIds.length === 1 ? '' : 's'}` : ''}
+          {chain?.identity?.refmodIds?.length ? ` · ${chain.identity.refmodIds.length} RefMod${chain.identity.refmodIds.length === 1 ? '' : 's'}` : ''}
+        </p>
         <textarea
           data-canvas-identity-subject
           rows={2}
@@ -362,7 +366,7 @@ export function PropertiesPanel() {
             <li key={take.id} data-canvas-take={take.id} className={take.supersededBy ? 'prior' : 'canonical'}>
               <span>{take.id.slice(0, 8)}</span>
               {take.supersededBy
-                ? <button type="button" data-canvas-take-restore={take.id} title="Make this take canonical — nothing is deleted" onClick={() => { const output = chain.outputs[0]; if (output) void documentsApi.supersedeTake({ outputId: output.id, takeId: take.id }).then(() => useCanvasStore.getState().recompute()) }}>restore</button>
+                ? <button type="button" data-canvas-take-restore={take.id} title="Make this take canonical — nothing is deleted; unlocked downstream forks go stale" onClick={() => { void useCanvasStore.getState().switchCanonical(chain.id, take.id) }}>restore</button>
                 : <span className="canvas-properties-canonical"><Star size={10} fill="currentColor" /> canonical</span>}
             </li>
           ))}

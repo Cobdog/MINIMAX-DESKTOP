@@ -109,7 +109,9 @@ export type Tile = {
   statusNote: string | null
   jobId: string | null
   refOutputs: string[]
-  ops: Array<{ id: string; kind: string }>
+  /** The chain's op stack (§5.1) — settings + bake marker ride along so the
+   *  tile's preview can compose the ops live (L3 decided: live-update). */
+  ops: Array<{ id: string; kind: string; settings: Record<string, unknown> | null; bakedAt: number | null }>
   canonical: DocumentTake | null
   /** Every take of the chain's outputs, newest-first (the take strip + the
    *  fork-from-early-take gesture read this). */
@@ -308,7 +310,7 @@ export function deriveTiles(
       statusNote: job && job.status === 'failed' ? job.error ?? 'generation failed' : null,
       jobId,
       refOutputs: refs,
-      ops: chain.ops.map((op) => ({ id: op.id, kind: op.kind })),
+      ops: chain.ops.map((op) => ({ id: op.id, kind: op.kind, settings: op.settings ?? null, bakedAt: op.bakedAt ?? null })),
       canonical,
       takes: [...allTakes].sort((a, b) => b.createdAt - a.createdAt),
       priors,
