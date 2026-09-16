@@ -249,3 +249,22 @@ Order: E4 (decode-only, ~free) → E1 → E2 → E3 → E6 → E5 → E7 → E8.
 - **E4 pacing (follow-up)**: honest negative — crossover moved LATER
   (f24→f34); arrival is governed by B-side pin strength; the tranche-1 ramp
   stands as the recommendation.
+
+## ADDENDUM — wan2gp-h3-latent-continue (g3n3rativ3, Apache-2.0, assessed 2026-09-16)
+
+Wan2GP plugin implementing OUR latent-truth doctrine (save inference latents
+beside output; never VAE re-encode across chains). Design-reference, not
+adoptable (different host). Four adoptions for our stack: (1) **hash-bound
+latent↔output binding** — checkpoint stores the final MP4's SHA-256 and
+continuation rejects remuxed/trimmed sources; our take records gain this +
+predecessor fingerprints (same problem class as AutoContext's cache-gap:
+chain-identity verification, found independently twice). (2) **Frozen-audio-
+prefix** join (past audio in fixed-conditioning rows, past+future decoded
+together, pre-roll trimmed) — a third audio-join strategy; queued as a
+drift-envelope audio arm. (3) Context presets: ≥18 retained frames (6 video
+blocks / 31 audio tokens), extended 18/35/52f + 0.5/1/2s audio (near our
+22/39/56 grid points) — parameterization for extend settings. (4) Third
+independent confirmation of the pinned-row hazard (rejects Spectrum/skip-step
+for chains: "they alter conditioned rows"). Evidence quality: thin (3★, 4
+commits, one confounded user test) — mechanisms well-engineered, claims to be
+harness-verified not trusted.
