@@ -221,23 +221,38 @@ Reference downloads and node documentation are maintained by [Comfy-Org's ACE-St
 
 ## Documentation
 
+**Orientation:** [docs/ROADMAP.md](docs/ROADMAP.md) is the state of play (shipped / building / queued / awaiting-maintainer, sourced from the task board); [docs/LEARNINGS.md](docs/LEARNINGS.md) holds the operational and engineering lessons; [docs/agent/README.md](docs/agent/README.md) indexes the agent runbook tree (read on intent, not at boot).
+
 | Doc | Contents |
 | --- | --- |
-| [docs/architecture.md](docs/architecture.md) | Server + SPA process model, API surface, generation pipeline |
-| [docs/LICENSES.md](docs/LICENSES.md) | Third-party license inventory (deps, vendored, user-fetch, weights), AGPL mechanics, headers policy, VDN-patch analysis |
-| [docs/inventory.md](docs/inventory.md) | Exhaustive file/feature/dependency census (pre-migration) |
-| [docs/audit/code-quality-audit.md](docs/audit/code-quality-audit.md) | Adversarial review: P0–P3 findings, top-10 fixes |
-| [docs/audit/security-audit.md](docs/audit/security-audit.md) | Threat model, findings, hardening priorities |
-| [docs/migration.md](docs/migration.md) | The Electron → web migration record |
+| [docs/architecture.md](docs/architecture.md) | Server + SPA process model, API surface, generation pipeline, registry/fetcher/runtime internals |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | State of play: shipped / building / queued / awaiting-maintainer |
+| [docs/LEARNINGS.md](docs/LEARNINGS.md) | Operational + engineering lessons (testbed ops, measurement doctrine, harness gotchas) |
+| [docs/agent/README.md](docs/agent/README.md) | Agent runbook tree index — runbook / testing / conventions, read on intent |
+| [docs/library/README.md](docs/library/README.md) | Research library — full-copy captures of load-bearing external docs (H3 prompt guides, ComfyUI H3 pages, Motion-Context README) with the source-of-truth check protocol |
+| [docs/specs/canvas-ui-v1.md](docs/specs/canvas-ui-v1.md) | **BLESSED** Canvas UI v1 spec — the authoritative UI direction |
+| [docs/specs/canvas-document-model.md](docs/specs/canvas-document-model.md) | Canvas document model: chains/forks/takes schema spec |
+| [docs/PROVENANCE.md](docs/PROVENANCE.md) | Fork lineage, AGPLv3 rationale, vendored-ports provenance |
+| [docs/LICENSES.md](docs/LICENSES.md) | Third-party license inventory (deps, vendored, user-fetch, weights), AGPL mechanics, headers policy |
+| [docs/migration.md](docs/migration.md) | The Electron → web migration record (complete) |
+| [docs/audit/code-quality-audit.md](docs/audit/code-quality-audit.md) | Adversarial review: P0–P3 findings + resolution status |
+| [docs/audit/security-audit.md](docs/audit/security-audit.md) | Threat model, findings + resolution status |
+| [docs/research/ui-pre-brainstorm.md](docs/research/ui-pre-brainstorm.md) | Canvas UI decision register — locks and spec pointers (bulk archived) |
+| [docs/research/ui-inventory-and-migration-map.md](docs/research/ui-inventory-and-migration-map.md) | Every legacy view/component classified: remove / refactor-absorb / keep / seed |
 | [docs/research/ecosystem-2026-09.md](docs/research/ecosystem-2026-09.md) | H3/LTX/ACE/Z-Image ecosystem research driving the roadmap |
 | [docs/research/h3-transitions-and-latent-continuity.md](docs/research/h3-transitions-and-latent-continuity.md) | Transitions & latent continuity: verdict table, three strategies, E1–E8 experiment ladder |
 | [docs/research/h3-node-ecosystem-sweep.md](docs/research/h3-node-ecosystem-sweep.md) | Custom-node field sweep: code-read verdicts, new methods, adopt shortlist |
 | [docs/research/h3-sampler-shaping-and-motion-control.md](docs/research/h3-sampler-shaping-and-motion-control.md) | Sampler/sigma/guidance recipe, adherence levers, movement-director lineage, E-MD1 |
 | [docs/research/speed-quality-and-imagegen-paths.md](docs/research/speed-quality-and-imagegen-paths.md) | Speed/quality levers (VDN vs turbo, TE caching), memory choreography, Krea 2 / Klein image paths |
 | [docs/research/h3-instruction-based-editing.md](docs/research/h3-instruction-based-editing.md) | H3 as instruction-based editor: arena rank, adaln-hybrid gap, T=1/frame-packet, model division of labor |
-| [docs/research/fun-control-input-surface.md](docs/research/fun-control-input-surface.md) | Fun Control wire format, DWPose render spec, extraction matrix, IK-rig architecture |
-| [docs/research/ui-pre-brainstorm.md](docs/research/ui-pre-brainstorm.md) | Canvas UI working doc — locks, tensions, open questions (living document) |
-| [docs/history/plan-v0.md](docs/history/plan-v0.md) | Upstream's original planning document (historical) |
+| [docs/research/h3-lora-form-compatibility.md](docs/research/h3-lora-form-compatibility.md) | Full-width↔pruned LoRA form compatibility: mechanism, math, load-time patch architecture |
+| [docs/research/fun-control-input-surface.md](docs/research/fun-control-input-surface.md) | Fun Control wire format, DWPose render spec, extraction matrix, IK-rig architecture, E-FC1 verdict |
+| [docs/research/krea2-edit-mode.md](docs/research/krea2-edit-mode.md) | Krea 2 edit mode: instruction editing, masked refine, preservation ladder (E-K1) |
+| [docs/research/ap10k-control-lora-training.md](docs/research/ap10k-control-lora-training.md) | AP-10K control-branch LoRA feasibility: GO-WITH-ADAPTATION |
+| [docs/research/ap10k-trainer-survey.md](docs/research/ap10k-trainer-survey.md) | Trainer comparison for the control-branch finetune (DiffSynX, musubi, ai-toolkit, …) |
+| [docs/research/autocontext-deepread.md](docs/research/autocontext-deepread.md) | AutoContext mechanism deep-read: anchoring math, ref filtering, temporal-exclusivity rules |
+| [docs/research/ltx-vs-h3-verdict.md](docs/research/ltx-vs-h3-verdict.md) | LTX 2.5 verdict: keep-utilities-only |
+| [docs/archive/README.md](docs/archive/README.md) | Archive index — superseded/historical documents and their successors |
 
 ## License
 

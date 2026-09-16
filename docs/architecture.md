@@ -1,6 +1,6 @@
 # Architecture
 
-> Contributor-oriented overview of MiniMax Studio as a web application. For the migration history, see [migration.md](migration.md). Last verified 2026-09-14 (managed runtime + launch profiles/vendoring/patch tier, the local-first fetcher, optimization registry, LLM layer, QA gate).
+> Contributor-oriented overview of MiniMax Studio as a web application. For the migration history, see [migration.md](migration.md). Last verified 2026-09-14 (managed runtime + launch profiles/vendoring/patch tier, the local-first fetcher, optimization registry, LLM layer, QA gate); canvas note added 2026-09-16.
 
 ## What this is
 
@@ -141,6 +141,18 @@ license gate is unchanged and still machine-checked).
 ## Renderer structure
 
 `src/App.tsx` (~630 lines) is the composition shell — hook wiring, view routing, and handoffs between workspaces. The domain logic is layered so each feature lands in exactly one place:
+
+**The canvas surface (2026-09-16):** `?canvas=1` mounts an alternate primary
+surface under construction — `src/canvas/` (`CanvasApp.tsx` + the spatial
+queue/launcher substrate, DOM+CSS-transform tiles with a d3-zoom camera per
+the BLESSED spec [specs/canvas-ui-v1.md](specs/canvas-ui-v1.md)). Phase 1
+(substrate + launcher + spatial queue skeleton, commit 0ee1bcb) and Phase 2
+(generation arrives on canvas as ops + properties-panel bindings, commit
+2ae8ce1) have landed vision-verified; the legacy view tree above remains the
+default surface while the canvas build-out continues (migration map:
+[research/ui-inventory-and-migration-map.md](research/ui-inventory-and-migration-map.md)).
+The prototyped direction lives at `/?proto=bench|stage|score`
+(`src/prototypes/`), kept runnable as design references.
 
 | Layer | Modules | What lives there |
 | --- | --- | --- |

@@ -1,6 +1,8 @@
 # Code-Quality Audit — MINIMAX-DESKTOP (Cobdog fork)
 
 > Automated adversarial review, 2026-09-09, at `18fe989`. Full read of all 43 TS/TSX files (~7,490 lines), electron main/preload, scripts, configs. Read-only. Verification gap: `node_modules` not installed in the audit environment, so `pnpm typecheck`/`pnpm lint` were not executed; type-safety claims are from reading tsconfigs and source, not a compiler run.
+>
+> **Resolution status (noted 2026-09-16, hygiene pass 2):** this audit drove the Stabilization epic (Flux m2yc3vd, closed 2026-09-14) — the P0 output-attribution-by-mtime and localStorage-quota fixes, poll-loop hardening (terminal-state guard, deadlines, shared poll kernel), and the silent-failure batch (scan guard, atomic settings, startup catch) all landed with a test baseline wired into the gate. The God-component finding (1,961-line App.tsx) was resolved by the decomposition epic (yl4tzwb) and the Electron-era code it cites was decommissioned 2026-09-10. Remaining low-priority observations are tracked as normal work, not audit debt.
 
 ---
 

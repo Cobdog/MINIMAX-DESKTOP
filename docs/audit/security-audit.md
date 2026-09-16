@@ -1,6 +1,8 @@
 # Security Audit — MINIMAX-DESKTOP (Cobdog fork)
 
 > Automated adversarial security review, 2026-09-09, at `18fe989`. Read-only pass over `electron/main.ts`, `electron/preload.ts`, `src/`, `public/sw.js`, `package.json`. Findings verified against code; line references from the surveyed commit.
+>
+> **Resolution status (noted 2026-09-16, hygiene pass 2):** this audit drove the Security-hardening epic (Flux 1qv5cg3, closed 2026-09-14) — LAN transport hardening (on-demand start, timing-safe compare, header-only token), main-side input validation on every route, CSP/navigation guards, proxy subfolder validation + bootstrap trim all landed. The two Electron-scoped findings (EOL runtime, IPC surface) were **mooted by design** when the Electron shell was decommissioned (2026-09-10, `docs/migration.md`) — the IPC surface no longer exists; the server's `/api` routes carried the validation fixes over. The HTTPS-with-fingerprint recommendation remains open as the long pole (task eqbx1dq, P2). Line references below refer to the pre-migration tree and are historical.
 
 ### Threat model summary
 
@@ -31,7 +33,7 @@ No Critical findings. The two High findings are the LAN transport and the EOL El
 - **Recommendation:** Defer `startLanServer()` until the user opens the LAN dialog (the `lan:status` handler can lazily start it), and stop it on dialog close or app idle. Consider binding to the single `lanAddress()`-selected interface instead of `0.0.0.0`.
 
 ### [MEDIUM] IPC surface gives the renderer unvalidated filesystem, URL, and process primitives
-- **Location:** `electron/main.ts` — all 30 channels enumerated in `docs/inventory.md` §1.2. Specific unchecked ones:
+- **Location:** `electron/main.ts` — all 30 channels enumerated in `docs/archive/inventory.md` §1.2. Specific unchecked ones:
   - `file:data-url` (`main.ts:729-733`): reads **any path** the renderer names and base64s it — the mime fallback maps *unknown extensions to `image/jpeg`*, so there is no extension restriction at all.
   - `comfy:upload` (`main.ts:681-689`): reads **any renderer-named path** and POSTs the bytes to a **renderer-supplied URL** — a one-call arbitrary-file exfiltration primitive.
   - `comfy:*` handlers (`main.ts:602-676`): fetch renderer-supplied URLs from main with no origin check (contrast the `minimax-media://comfy` handler, which does pin origin+pathname at `main.ts:543-546`).
