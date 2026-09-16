@@ -10,19 +10,21 @@
   all agents** — never submit prompts, experiments, jobs, or tests to it,
   never "just probe" it with a generation. The self-managed runtime's own
   instances allocate from 8191 up and must avoid BOTH ports.
-- Engine-dependent work uses the **Kreatine testbed** at `127.0.0.1:8189`
-  (testbed lives at `"/home/agent/work/VS Proj/Kreatine/testbed/ComfyUI"` —
-  gitignored, own uv venv, weights symlinked, ComfyUI 0.34.x). Probe first:
+- Engine-dependent work uses the **canonical shared install** at
+  `127.0.0.1:8189` (relocated 2026-09-16 from the Kreatine testbed to
+  `/home/agent/comfyui` — one uv venv, unified custom nodes, models
+  symlinked from `/home/agent/models/`; its root CLAUDE.md is the
+  shared-instance coordination protocol). Probe first:
   it may be down; if down and you need it, ask — never fall back to 8188.
 - GPU windows for experiment batches are **maintainer-authorized** ("gpu
   free"); work within the stated budget and say what you used.
 
 ## Bring-up
 
-From the testbed dir:
+From the canonical install dir:
 
 ```bash
-./.venv/bin/python main.py --port 8189 --listen 127.0.0.1
+cd /home/agent/comfyui && ./.venv/bin/python main.py --port 8189 --listen 127.0.0.1
 ```
 
 - Launch in the background WITH A LOG FILE and **record the PID**.
