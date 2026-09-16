@@ -285,11 +285,21 @@ main().catch((e) => {
   process.exit(1)
 })
 
-// Windows-leg guard: no tracked file may be CRLF-exposed (a CRLF checkout
-// breaks byte-identity assertions — the 2026-09-16 failure class).
+// Windows-leg guard (platform-stable form): (a) no tracked file may be CRLF
+// in the INDEX (i/crlf — would round-trip badly everywhere); (b) the working
+// tree may not contain CRLF on THIS checkout (catches i/lf+w/crlf mixes);
+// (c) artifacts byte-compared by this suite must carry explicit eol pins so
+// a Windows autocrlf checkout cannot flip them (the 2026-09-16 class — the
+// w/ column is checkout-dependent, so the pin, not the local tree, is the
+// invariant).
 {
   const { execFileSync } = require('node:child_process')
   const eol = execFileSync('git', ['ls-files', '--eol'], { encoding: 'utf8' })
-  const exposed = eol.split('\n').filter((line) => /w\/ *crlf/.test(line))
-  ok(exposed.length === 0, `CRLF-exposed tracked files would break Windows byte-identity: ${exposed.slice(0, 5).join('; ')}`)
+  const lines = eol.split('\n').filter(Boolean)
+  const indexCrlf = lines.filter((line) => /i\/crlf/.test(line))
+  ok(indexCrlf.length === 0, `tracked files stored with CRLF in the index: ${indexCrlf.slice(0, 5).join('; ')}`)
+  const treeCrlf = lines.filter((line) => /w\/ *crlf/.test(line))
+  ok(treeCrlf.length === 0, `CRLF in this working tree (would break byte-identity here): ${treeCrlf.slice(0, 5).join('; ')}`)
+  const attrs = execFileSync('git', ['check-attr', 'eol', '--', 'benchmarks/results/LEADERBOARD.md'], { encoding: 'utf8' })
+  ok(/eol:\s*lf/.test(attrs), 'benchmarks/results/LEADERBOARD.md must carry an explicit eol=lf pin (Windows autocrlf guard)')
 }
