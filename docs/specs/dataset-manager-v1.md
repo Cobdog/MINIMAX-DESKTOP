@@ -140,10 +140,14 @@ rewritten, always to a new file:
 3. **CFR 24.000 fps**, speed-preserving by default: **retime only for near-24 corrections**
    (e.g. 23.976 → 24.000 — the research's condition; unconditional retiming would warp
    30fps content 1.25×); **drop/dup for integer-ratio downsampling** (30→24, 60→24 —
-   speed preserved); **interpolation LAST and only for upsampling gaps**
-   (rife-ncnn-vulkan / ffmpeg minterpolate; interpolated items are tagged). NVIDIA OFSDK
-   is license-barred for AGPL (A1 — pending the maintainer's explicit word; the license
-   conflict itself is not optional) →
+   speed preserved); **interpolation LAST and only for upsampling gaps** — built-in and
+   shipped: **rife-ncnn-vulkan / ffmpeg minterpolate** (license-clean). OPTIONAL
+   accelerator: **NVIDIA OFSDK via the user-fetch wrapper pattern** (A1 resolved,
+   maintainer 2026-09-17): the app never ships NVIDIA code or headers — a consent-gated
+   fetcher downloads the SDK from NVIDIA's official source on explicit user action, the
+   user accepts NVIDIA's license themselves, and a locally-compiled adapter (our own API
+   declarations) bridges it at runtime; availability-gated, RIFE stays the default and the
+   fallback. All interpolated items are tagged regardless of engine →
 4. **17n+5 grid conform: bake to grid target +2 frames.** The trainer's own loader floors
    the container duration and clamps DOWN the 17n+5 grid; the +2 headroom is what makes
    the clamp land exactly on target instead of walking down 17 (the f56 mechanism,
@@ -271,8 +275,11 @@ Audio rows always train (measured: no droppable budget; real vs silence cost-ide
 
 ## 13. Open items (the blessing list)
 
-- **A1** NVIDIA OFSDK → rife/minterpolate (license-barred for AGPL) — needs the
-  maintainer's explicit yes.
+- **A1 RESOLVED** (maintainer 2026-09-17): RIFE/minterpolate ship as the built-in
+  interpolation defaults; NVIDIA OFSDK is supported as a user-fetched optional
+  accelerator under the wrapper pattern (zero NVIDIA bytes distributed; user-side fetch,
+  license acceptance, and locally-compiled adapter; RIFE remains default and fallback).
+  Posture documented for the licensing pass — strongest available, not legal certainty.
 - **N9** CLIP reference-triage — in or out of v1.
 - **Blessing flags (r2 changes beyond the signed locks, each needs a nod):**
   (a) trim-stale extends the signed crop-stale decision (same mechanism, flagged);
