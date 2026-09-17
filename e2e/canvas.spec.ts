@@ -940,30 +940,38 @@ test('the pose rig docks as a canvas panel and exports a control track (§5.2)',
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
-test('first view retirement smoke: greyed entries, views still directly reachable (§8 Phase 3)', async ({ page }) => {
+// Phase 5 (task 7mcp11b): the deletion wave — the Phase-3 retirement flips to
+// DELETION. The trio (Clip editor, Video reference clipper, Frame bookmarks)
+// greys out in Phase 3 with "still directly navigable until Phase 5"; Phase 5
+// deletes them: no nav (the shell itself is gone), no markers, no surfaces.
+// The capabilities live on canvas: the op modal's trim + the fork/substrate
+// machinery (asserted by their own specs above).
+test('Phase-5 deletion smoke: the Phase-3 retired trio is gone; op/fork surfaces carry it (§8)', async ({ page }) => {
   const problems = await trackErrors(page)
+  await resetSession(page)
   await page.goto('/')
-  await expect(page.getByRole('button', { name: /generate video/i })).toBeVisible()
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
 
-  // The sidebar shows the Clip editor GREYED with the retirement marker…
-  const clipNav = page.locator('.nav-button[data-retired="1"]', { hasText: 'Clip editor' })
-  await expect(clipNav).toBeVisible()
-  await expect(clipNav).toContainText('retired')
-  await expect(clipNav).toHaveClass(/retired-view/)
+  // The old shell is dead — nothing greyed because nothing remains.
+  await expect(page.locator('.nav-button')).toHaveCount(0)
+  await expect(page.locator('[data-retired]')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Movie editor' })).toHaveCount(0)
+  await expect(page.locator('[data-retired="clip-editor"]')).toHaveCount(0)
 
-  // …and it still LOADS when directly navigated (the D-dependencies hold
-  // until Phase 5 — the old shell never breaks).
-  await clipNav.click()
-  await expect(page.getByRole('heading', { name: 'Movie editor' })).toBeVisible()
-
-  // Library carries the same retirement markers for the clip editor entry
-  // and the frame-bookmark studio trigger.
-  await page.getByRole('button', { name: /library/i }).first().click()
-  await expect(page.getByRole('heading', { name: /video library/i })).toBeVisible()
-  await expect(page.locator('[data-retired="clip-editor"]')).toBeVisible()
-  await expect(page.locator('[data-retired="clip-editor"]')).toHaveClass(/retired-affordance/)
-  await expect(page.locator('[data-retired="clip-editor"]')).toContainText('Open clip editor')
-  await page.screenshot({ path: 'test-results/shots/21-view-retirement.png' })
+  // The absorbed capability: a media object opens the OP MODAL (trim/crop/
+  // mask live there — the clipper's trim + the bookmark studio's frames are
+  // op-kind + substrate choices on the object).
+  await dropPng(page, 'phase5-trio.png')
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+  await page.locator('[data-canvas-tile]').first().click()
+  await page.keyboard.press('Enter')
+  await expect(page.locator('.canvas-opmodal')).toBeVisible()
+  await page.locator('[data-canvas-op-add]').click()
+  await expect(page.locator('[data-canvas-op-add="crop"]')).toBeVisible() // image media — the per-kind gating holds
+  await expect(page.locator('[data-canvas-op-add="trim"]')).toHaveCount(0) // trim is video-only (honest)
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Escape')
+  await page.screenshot({ path: 'test-results/shots/21-phase5-trio-deleted.png' })
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
@@ -1165,37 +1173,70 @@ test('the global asset store binds through the properties panel (consent-gated)'
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
-test('Phase-4 retirement smoke: Create / Queue / Library / LTX 2.5 greyed, still directly reachable (§8)', async ({ page }) => {
+// Phase 5 (task 7mcp11b): the Phase-4 retirement flips to DELETION — the four
+// views (Create, Queue, Library, LTX 2.5) died with the shell. Their canvas
+// replacements are already proven above; this smoke proves the ABSENCE plus
+// each replacement being one gesture away (D-deps resolve to the canvas).
+test('Phase-5 deletion smoke: Create / Queue / Library / LTX 2.5 are gone; the canvas replacements stand (§8)', async ({ page }) => {
   const problems = await trackErrors(page)
+  await resetSession(page)
   await page.goto('/')
-  await expect(page.getByRole('button', { name: /generate video/i })).toBeVisible()
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
 
-  // All four newly-retired nav entries carry the greyed marker + pointer.
-  for (const label of ['Create', 'LTX 2.5', 'Queue', 'Library']) {
-    const nav = page.locator('.nav-button[data-retired="1"]', { hasText: label })
-    await expect(nav).toBeVisible()
-    await expect(nav).toContainText('retired')
-    await expect(nav).toHaveClass(/retired-view/)
-  }
+  // Absence: no shell, no greyed nav, no retired markers, no old headings.
+  await expect(page.locator('.nav-button')).toHaveCount(0)
+  await expect(page.locator('[data-retired]')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: /create with minimax h3/i })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Queue' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: /video library/i })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: /create with ltx/i })).toHaveCount(0)
 
-  // Each view still LOADS when directly navigated (D-dependencies hold until
-  // Phase 5) and carries its canvas pointer.
-  await page.locator('.nav-button[data-retired="1"]', { hasText: 'Create' }).click()
-  await expect(page.getByRole('heading', { name: /create with minimax h3/i })).toBeVisible()
-  await expect(page.locator('[data-retired="create"]')).toBeVisible()
+  // Create → the launcher prompt bar IS the generation surface (empty canvas
+  // = launcher; a prompt spawns the seed object).
+  await expect(page.locator('[data-canvas-promptbar]')).toBeVisible()
 
-  await page.locator('.nav-button[data-retired="1"]', { hasText: 'Queue' }).click()
-  await expect(page.getByRole('heading', { name: 'Queue' })).toBeVisible()
-  await expect(page.locator('[data-retired="jobs"]')).toBeVisible()
+  // Queue → ⌘K summons the index (the flat queue across all jobs).
+  await page.keyboard.press('Control+k')
+  await expect(page.locator('[data-canvas-index]')).toBeVisible()
+  await page.keyboard.press('Escape')
 
-  await page.locator('.nav-button[data-retired="1"]', { hasText: 'Library' }).click()
-  await expect(page.getByRole('heading', { name: /video library/i })).toBeVisible()
-  await expect(page.locator('[data-retired="library"]')).toBeVisible()
+  // Library → V summons the library projection.
+  await page.keyboard.press('v')
+  await expect(page.locator('[data-canvas-library]')).toBeVisible()
+  await page.keyboard.press('Escape')
 
-  await page.locator('.nav-button[data-retired="1"]', { hasText: 'LTX 2.5' }).click()
-  await expect(page.getByRole('heading', { name: /create with ltx/i })).toBeVisible()
-  await expect(page.locator('[data-retired="ltx25"]')).toBeVisible()
-  await page.screenshot({ path: 'test-results/shots/23-phase4-retirement.png' })
+  // LTX 2.5 → the engine lives as the typed-hole produce row on an image
+  // object (probe-asserted by the engines-as-ops spec above); the old
+  // workspace surface is gone.
+  await expect(page.locator('[data-retired="ltx25"]')).toHaveCount(0)
+  await page.screenshot({ path: 'test-results/shots/23-phase5-four-deleted.png' })
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+// Phase 5 (task 7mcp11b): the MoviePlanner shot handoff seeds a REAL canvas
+// chain through the store's seedChain — compiled prompt + shot settings,
+// CONSENT-GATED (created + selected + inspected, NEVER submitted: zero jobs
+// appear; the user generates from the panel — principle 5).
+test('the Studios dock shot handoff seeds a chain, consent-gated (nothing auto-executes)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1&probe=canvas')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  const result = await page.evaluate(() => (window as unknown as { __canvasScenario(name: string): { ok: boolean; chainId?: string; selected?: boolean; inspector?: boolean; jobsCreated?: number; reason?: string } }).__canvasScenario('seed-chain'))
+  expect(result.ok, result.reason).toBe(true)
+  expect(result.selected).toBe(true)
+  expect(result.inspector).toBe(true)
+  expect(result.jobsCreated).toBe(0)
+  await expect(page.locator(`[data-canvas-tile="${result.chainId}"]`)).toBeVisible({ timeout: 10_000 })
+  // The shot's compiled settings persisted on the chain (the document write
+  // settles; the API read is the durable truth).
+  await page.waitForTimeout(400)
+  const document = await activeDocument(page)
+  const chain = document.chains.find((entry) => entry.id === result.chainId)
+  expect(chain, 'the seeded chain exists in the document').toBeTruthy()
+  expect(chain!.settings.prompt).toContain('drummer steps off the night train')
+  expect(chain!.settings.duration).toBe(9)
+  expect(chain!.settings.resolution).toBe('768x1344')
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 

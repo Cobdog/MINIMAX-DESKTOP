@@ -721,4 +721,35 @@ console.log('(w) the extracted engine cores — ladders stay verbatim (one code 
   eq(ace.validateAceStep(aceOption, { connected: true, info: {}, selection: { base: '', sft: '', vae: '', textEncoderSmall: '', textEncoderLarge: '' } }), 'The ACE-Step BASE model, audio VAE, and both Qwen ACE text encoders are required.', 'acestep ladder: missing models refuse naming the variant')
 }
 
-console.log(`\ntest-canvas: ${passed} assertions passed`)
+// ---------------------------------------------------------------------------
+// Phase 5 (task 7mcp11b) — the deletion wave's extracted cores: the character
+// contact-sheet submission (ContactSheet-REQUIRED — the LTX survey fallback
+// died with the shell) and the MoviePlanner latent scene-chain (its new home
+// is the canvas Studios dock). Async (the submissions are async functions);
+// the suite's tail summary moves inside the runner.
+// ---------------------------------------------------------------------------
+async function phase5Cores() {
+  console.log('(x) Phase-5 extracted cores — contact sheet (ContactSheet-only) + scene chains')
+  const contact = loadTs('src/lib/contactSheetSubmit.ts')
+  const contactFacts = (overrides = {}) => ({ settings: { comfyUrl: 'http://x' }, connected: true, models: [], selection: { ref2va: 'r', textEncoder: 't', videoVae: 'v' }, clientId: 'c', ...overrides })
+  const project = { id: 'char-1', name: 'Mira', baseImage: media('/refs/mira.png', 'image') }
+  const noop = () => {}
+  const io = { notify: noop, setJobs: () => { throw new Error('no job should be created by a refused submission') } }
+  eq(await contact.submitCharacterContactSheet(project, contactFacts({ connected: false }), io), 'Start ComfyUI and verify the server connection in Settings.', 'contact sheet: offline refuses first (the shared ladder)')
+  eq(await contact.submitCharacterContactSheet({ id: 'char-2', name: 'Mira' }, contactFacts(), io), 'Approve a character identity image first.', 'contact sheet: no approved identity image refuses')
+  eq(await contact.submitCharacterContactSheet(project, contactFacts(), io), 'Install the ComfyUI-H3-ContactSheet nodes and the five-view turnaround LoRA (minimax_h3_five_view_*), then refresh the engine.', 'contact sheet: the ContactSheet nodes + turnaround LoRA are REQUIRED (Phase-4 cleanup applied — the LTX survey fallback is gone)')
+
+  const scenes = loadTs('src/lib/sceneChainSubmit.ts')
+  const chainFacts = (overrides = {}) => ({ settings: { comfyUrl: 'http://x', generationDefaults: { steps: 30, turbo: 'off', experimentalSampling: false, loraStrength: 1, sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', duration: 6, resolution: '1344x768' } }, connected: true, modelReady: true, selection: {}, clientId: 'c', ...overrides })
+  const sceneProject = { id: 'mv-1', title: 'Nightfall', aspectRatio: '16:9', scenes: [] }
+  const singleShotScene = { id: 'sc-1', title: 'Alley', transition: 'cut', locationId: '', shots: [{ id: 'sh-1', title: 'Open', duration: 6, prompt: 'a lone figure', dialogue: '', mode: 'text', characterIds: [], stage: 'planned' }] }
+  eq(await scenes.submitSceneChain(sceneProject, singleShotScene, [], true, chainFacts({ connected: false }), io), 'Start ComfyUI and verify the server connection in Settings.', 'scene chain: offline refuses first')
+  eq(await scenes.submitSceneChain(sceneProject, singleShotScene, [], true, chainFacts({ modelReady: false }), io), 'One or more required MiniMax H3 model components are missing.', 'scene chain: incomplete model stack refuses')
+  eq(await scenes.submitSceneChain(sceneProject, singleShotScene, [], false, chainFacts(), io), 'Install the ComfyUI-H3-Motion-Context custom nodes first, then refresh the engine.', 'scene chain: absent Motion-Context nodes refuse (latent continuity is the whole point)')
+  eq(await scenes.submitSceneChain(sceneProject, singleShotScene, [], true, chainFacts(), io), 'A chain needs at least two shots with prompts.', 'scene chain: fewer than two prompted shots refuses honestly')
+  eq(await scenes.submitSceneChain(sceneProject, { ...singleShotScene, shots: [{ ...singleShotScene.shots[0], prompt: '' }] }, [], true, chainFacts(), io), 'A chain needs at least two shots with prompts.', 'scene chain: un-prompted shots are filtered before the count (settings-stable, never a doomed graph)')
+}
+
+phase5Cores()
+  .then(() => { console.log(`\ntest-canvas: ${passed} assertions passed`) })
+  .catch((error) => { console.error(error); process.exit(1) })

@@ -13,6 +13,7 @@ import { useContext, useState } from 'react'
 import { Rnd } from 'react-rnd'
 import { Settings, X } from 'lucide-react'
 import { h3StackReport } from '../lib/h3Stack'
+import { ErrorBoundary } from '../components/ErrorBoundary'
 import { SettingsView } from '../views/SettingsView'
 import type { AppSettings } from '../types'
 import { CanvasSessionContext } from './sessionContext'
@@ -32,6 +33,10 @@ export function SettingsDock() {
 
   const save = async () => {
     try {
+      // The old shell's exact save sequence: persist FIRST, then rescan +
+      // recheck + refresh the LLM providers (saveSettings returns the
+      // server-normalized settings).
+      await window.minimax.saveSettings(settings)
       await Promise.all([scanModels(settings), checkConnection(settings.comfyUrl)])
       await refreshOllama(settings)
       toast('success', 'Settings saved and model folders rescanned.')
@@ -88,24 +93,28 @@ export function SettingsDock() {
       <button type="button" aria-label="Close settings" data-canvas-settings-close onClick={() => setSettingsDock(false)}><X size={13} /></button>
     </header>
     <div className="canvas-settings-body" data-canvas-settings-body>
-      <SettingsView
-        settings={settings}
-        setSettings={(value) => void setSettings(value)}
-        info={session.info}
-        models={models}
-        h3Report={h3StackReport(models)}
-        scanning={scanning}
-        status={status}
-        checking={checking}
-        diagnosticRunning={diagnosticRunning}
-        ollamaModels={ollamaModels}
-        onRefreshOllama={() => void refreshOllama(settings)}
-        onScan={() => void scanModels(settings)}
-        onCheck={() => void checkConnection(settings.comfyUrl)}
-        onSave={() => void save()}
-        onApplyDefaults={applyDefaults}
-        onRunDiagnostics={() => void runDiagnosticsNow()}
-      />
+      {/* Per-surface boundary — the discipline the old shell's per-view
+          wrappers carried (a crashing surface must not take the app down). */}
+      <ErrorBoundary label="settings">
+        <SettingsView
+          settings={settings}
+          setSettings={(value) => void setSettings(value)}
+          info={session.info}
+          models={models}
+          h3Report={h3StackReport(models)}
+          scanning={scanning}
+          status={status}
+          checking={checking}
+          diagnosticRunning={diagnosticRunning}
+          ollamaModels={ollamaModels}
+          onRefreshOllama={() => void refreshOllama(settings)}
+          onScan={() => void scanModels(settings)}
+          onCheck={() => void checkConnection(settings.comfyUrl)}
+          onSave={() => void save()}
+          onApplyDefaults={applyDefaults}
+          onRunDiagnostics={() => void runDiagnosticsNow()}
+        />
+      </ErrorBoundary>
     </div>
   </Rnd>
 }

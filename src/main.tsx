@@ -1,7 +1,6 @@
 import { StrictMode, Suspense, lazy } from 'react'
 import { createRoot } from 'react-dom/client'
 import { LoaderCircle } from 'lucide-react'
-import App from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { installWebApiClient } from './lib/apiClient'
 import { sanitizeError } from './lib/logSanitize'
@@ -26,10 +25,11 @@ const PrototypeShell = lazy(() => import('./prototypes/PrototypeShell'))
 // Wired into the canvas at §5.2 integration time.
 const PoseRigApp = lazy(() => import('./poserig/PoseRigApp'))
 
-// Canvas Phase 1 (task jl4ye8x, docs/specs/canvas-ui-v1.md §3/§4) — the
-// video-canvas substrate behind ?canvas=1: own lazy chunk (canvas + css +
-// d3-zoom + react-rnd), never imported by normal routes. The old shell stays
-// the default and untouched until Phase 5.
+// Canvas Phase 5 (task 7mcp11b, docs/specs/canvas-ui-v1.md §8) — the canvas
+// IS the app: the default route. The old shell (App.tsx + the View union +
+// its nav model) is deleted; ?canvas=1 remains as a HARMLESS ALIAS (existing
+// bookmarks, e2e, and the bench harness keep working — it selects the same
+// default surface and is never required again).
 const CanvasApp = lazy(() => import('./canvas/CanvasApp').then((m) => ({ default: m.CanvasApp })))
 
 // The renderer always runs in a browser against the app's own web server
@@ -41,7 +41,8 @@ const mobile = params.get('mobile') === '1'
 const proto = params.get('proto')
 const protoRoute = proto === 'bench' || proto === 'stage' || proto === 'score'
 const poserigRoute = params.get('poserig') === '1'
-const canvasRoute = params.get('canvas') === '1'
+// NOTE: ?canvas=1 is intentionally NOT read — the canvas being the default
+// route makes the param a no-op alias (bookmarks/e2e/bench keep working).
 document.documentElement.classList.toggle('mobile-route', mobile)
 
 const viewFallback = <div className="boot"><LoaderCircle className="spin" /><span>Loading…</span></div>
@@ -59,15 +60,13 @@ const onCaughtError = (error: unknown) => {
 createRoot(document.getElementById('root')!, { onCaughtError }).render(
   <StrictMode>
     <ErrorBoundary label="root">
-      {canvasRoute
-        ? <Suspense fallback={viewFallback}><CanvasApp /></Suspense>
-        : poserigRoute
-          ? <Suspense fallback={viewFallback}><PoseRigApp /></Suspense>
-          : protoRoute
-            ? <Suspense fallback={viewFallback}><PrototypeShell /></Suspense>
-            : mobile
-              ? <Suspense fallback={viewFallback}><MobileApp /></Suspense>
-              : <App />}
+      {poserigRoute
+        ? <Suspense fallback={viewFallback}><PoseRigApp /></Suspense>
+        : protoRoute
+          ? <Suspense fallback={viewFallback}><PrototypeShell /></Suspense>
+          : mobile
+            ? <Suspense fallback={viewFallback}><MobileApp /></Suspense>
+            : <Suspense fallback={viewFallback}><CanvasApp /></Suspense>}
     </ErrorBoundary>
   </StrictMode>,
 )

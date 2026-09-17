@@ -1,11 +1,15 @@
-import { spawn } from 'node:child_process'
-import fs from 'node:fs'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 
-// Every test attaches the console/page-error guard — the decomposition
-// refactor must not introduce wiring regressions, and uncaught renderer
-// errors are exactly that class of bug.
+// Canvas Phase 5 (task 7mcp11b): the old shell is DELETED — the canvas is the
+// app. This suite now proves the post-deletion app end to end: default boot
+// (no ?canvas param), the kept surfaces through their canvas docks, the
+// absence of every deleted view (nav, markers, headings), the mobile
+// companion, the realtime fabric, the per-surface error-boundary discipline,
+// the keyboard baseline, and the durable media-tile poster treatment.
+//
+// Every test attaches the console/page-error guard — uncaught renderer errors
+// are exactly the class of wiring bug a deletion wave can introduce.
 async function trackErrors(page: Page) {
   const problems: string[] = []
   page.on('pageerror', (error) => problems.push(`pageerror: ${error.message}`))
@@ -16,12 +20,13 @@ async function trackErrors(page: Page) {
 }
 
 // Environmental noise, not renderer defects: fetch failures against the
-// (absent) configured engine, and the browser's own log line when the app's
-// live-preview WebSocket cannot reach ComfyUI. The app surfaces both as
-// designed "Engine offline" UI.
+// (absent) configured engine, the browser's own log line when the app's
+// live-preview WebSocket cannot reach ComfyUI, and the trace-recorder CSP
+// note (see canvas.spec.ts for the verified rationale).
 const environmental = (entry: string) =>
   entry.includes('Failed to load resource')
   || /WebSocket connection to .* failed/.test(entry)
+  || /Connecting to 'blob:.*' violates the following Content Security Policy directive: "connect-src/.test(entry)
 
 test.beforeEach(async ({ page }) => {
   page.on('pageerror', (error) => {
@@ -29,85 +34,159 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-const VIEW_HEADINGS: Array<[label: string, heading: RegExp]> = [
-  ['Create', /MiniMax H3|Create/i],
-  ['LTX 2.5', /LTX/i],
-  ['Music', /ACE|Music/i],
-  ['Music 3', /Music 3/i],
-  ['Create Image', /Z-Image|Image/i],
-  ['Characters', /Character/i],
-  ['Hair', /Hair/i],
-  ['Wardrobe', /Wardrobe/i],
-  ['Accessories', /Accessor/i],
-  ['Locations', /Location/i],
-  ['Movie', /Movie/i],
-  ['Queue', /Queue|render/i],
-  ['Library', /Library/i],
-  ['Clip editor', /Clip|Editor/i],
-  ['Settings', /Settings/i],
-  ['Diagnostics', /Diagnostics/i],
-]
+/** Deterministic boot: close the canvas session (the empty-canvas launcher
+ *  only shows with no open canvases). */
+async function resetSession(page: Page) {
+  await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+}
 
-test('boots to the Create view with the studio shell', async ({ page }) => {
+// The deleted old shell: every retired view's markers must be GONE — the
+// Phase-5 successor of the Phase-3/4 retirement smoke (greyed + still
+// navigable). Now: not greyed — ABSENT.
+test('boots to the canvas app by default — no param, no old shell (§8 Phase 5)', async ({ page }) => {
   const problems = await trackErrors(page)
+  await resetSession(page)
   await page.goto('/')
-  await expect(page.locator('#root')).toBeAttached()
-  await expect(page.getByRole('button', { name: /create/i }).first()).toBeVisible()
-  await expect(page.locator('.app-shell, .studio, main, [class*="sidebar"]').first()).toBeVisible()
-  await expect(problems.filter((entry) => !environmental(entry))).toEqual([])
-})
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await expect(page.locator('[data-canvas-launcher]')).toBeVisible()
+  await expect(page.locator('[data-canvas-radar]')).toBeVisible()
 
-test('every view renders without renderer errors', async ({ page }) => {
-  const problems = await trackErrors(page)
-  await page.goto('/')
-  for (const [label] of VIEW_HEADINGS) {
-    const button = page.getByRole('button', { name: new RegExp(label, 'i') }).first()
-    await expect(button).toBeVisible({ timeout: 10_000 })
-    await button.click()
-    await page.waitForTimeout(400)
-    const main = page.locator('main, [class*="view"], [class*="page"]').first()
-    await expect(main).toBeVisible()
+  // The old shell is DEAD: no app shell, no sidebar nav, no retired markers.
+  await expect(page.locator('.app-shell')).toHaveCount(0)
+  await expect(page.locator('.sidebar')).toHaveCount(0)
+  await expect(page.locator('.nav-button')).toHaveCount(0)
+  await expect(page.locator('[data-retired]')).toHaveCount(0)
+  await expect(page.locator('.retired-affordance')).toHaveCount(0)
+
+  // The deleted views' surfaces are absent (headings the old shell rendered).
+  for (const gone of [/create with minimax h3/i, /video library/i, /movie editor/i, /create with ltx/i]) {
+    await expect(page.getByRole('heading', { name: gone })).toHaveCount(0)
   }
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
-test('captures a 1920x1080 screenshot of every view for vision inspection', async ({ page }) => {
-  await page.goto('/')
-  let index = 0
-  for (const [label] of VIEW_HEADINGS) {
-    index += 1
-    const button = page.getByRole('button', { name: new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') }).first()
-    await expect(button).toBeVisible({ timeout: 10_000 })
-    await button.click()
-    await page.waitForTimeout(500)
-    await page.screenshot({ path: `test-results/shots/${String(index).padStart(2, '0')}-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.png` })
-  }
+test('?canvas=1 stays a harmless alias of the default route', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await expect(page.locator('[data-canvas-launcher]')).toBeVisible()
+  await expect(page.locator('.app-shell')).toHaveCount(0)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
-// The primary action and the render controls must be reachable without
-// scrolling at the pinned viewport — the panel scrolls internally instead.
-test('Create view keeps Generate and render controls visible at 1080p', async ({ page }) => {
+// The Phase-3/4 retirement smoke tests, flipped to DELETION assertions: the
+// seven greyed views (Clip editor, Video reference clipper, Frame bookmarks,
+// Create, Queue, Library, LTX 2.5) died with the shell.
+test('the 7 greyed views are deleted: no nav, no markers, no surfaces (§8 Phase 5)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  // Nav model gone entirely → nothing to click, nothing greyed.
+  await expect(page.locator('.nav-button[data-retired]')).toHaveCount(0)
+  await expect(page.locator('[data-retired="clip-editor"]')).toHaveCount(0)
+  await expect(page.locator('[data-retired="create"]')).toHaveCount(0)
+  await expect(page.locator('[data-retired="jobs"]')).toHaveCount(0)
+  await expect(page.locator('[data-retired="library"]')).toHaveCount(0)
+  await expect(page.locator('[data-retired="ltx25"]')).toHaveCount(0)
+  // The capabilities live on canvas: the launcher chips + radar buttons.
+  for (const selector of ['[data-canvas-settings-button]', '[data-canvas-studios-button]', '[data-canvas-diagnostics-button]', '[data-canvas-library-button]', '[data-canvas-index-button]']) {
+    await expect(page.locator(selector)).toBeVisible()
+  }
+  await page.screenshot({ path: 'test-results/shots/25-phase5-default-canvas.png' })
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+// The still-live surfaces' accounting (h14qd9t): every kept surface opens
+// through its canvas dock and renders without renderer errors — the successor
+// of "every view renders".
+test('every kept surface renders without renderer errors through its canvas dock', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+
+  // The Studios dock: all six kept authoring surfaces (Characters, Hair,
+  // Wardrobe, Accessories, Locations, Movie) — lazy chunks load + render.
+  await page.locator('[data-canvas-studios-button]').click()
+  await expect(page.locator('[data-canvas-studios-dock]')).toBeVisible()
+  const studioHeadings: Array<[string, RegExp]> = [
+    ['characters', /character studio/i],
+    ['hair', /hair studio/i],
+    ['wardrobes', /wardrobe studio/i],
+    ['accessories', /accessory studio/i],
+    ['locations', /location studio/i],
+    ['movie', /movie planner/i],
+  ]
+  for (const [tab, heading] of studioHeadings) {
+    await page.locator(`[data-canvas-studios-tab="${tab}"]`).click()
+    await expect(page.getByRole('heading', { name: heading }).first()).toBeVisible({ timeout: 15_000 })
+    await page.waitForTimeout(150)
+  }
+  await page.locator('[data-canvas-studios-close]').click()
+  await expect(page.locator('[data-canvas-studios-dock]')).toHaveCount(0)
+
+  // The Diagnostics dock (inventory row 10).
+  await page.locator('[data-canvas-diagnostics-button]').click()
+  await expect(page.getByRole('heading', { name: /diagnostics/i }).first()).toBeVisible({ timeout: 10_000 })
+  await page.locator('[data-canvas-diagnostics-close]').click()
+
+  // The Settings dock (Phase 4).
+  await page.locator('[data-canvas-settings-button]').click()
+  await expect(page.getByRole('heading', { name: /settings/i }).first()).toBeVisible({ timeout: 10_000 })
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('captures 1920x1080 screenshots of the post-deletion surfaces for vision inspection', async ({ page }) => {
+  await resetSession(page)
+  await page.goto('/')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: 'test-results/shots/01-default-canvas.png' })
+  await page.locator('[data-canvas-studios-button]').click()
+  await expect(page.getByRole('heading', { name: /character studio/i }).first()).toBeVisible({ timeout: 15_000 })
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: 'test-results/shots/02-studios-characters.png' })
+  await page.locator('[data-canvas-studios-tab="movie"]').click()
+  await expect(page.getByRole('heading', { name: /movie planner/i }).first()).toBeVisible({ timeout: 15_000 })
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: 'test-results/shots/03-studios-movie.png' })
+  await page.locator('[data-canvas-studios-close]').click()
+  await page.locator('[data-canvas-diagnostics-button]').click()
+  await expect(page.getByRole('heading', { name: /diagnostics/i }).first()).toBeVisible({ timeout: 10_000 })
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: 'test-results/shots/04-diagnostics.png' })
+})
+
+// Successor of the Create-view controls test: the launcher (the empty-canvas
+// generation surface) keeps its primary controls visible at the pinned 1080p
+// viewport.
+test('launcher keeps the prompt bar and chips visible at 1080p', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
   await page.goto('/')
   const inViewport = async (locator: ReturnType<Page['locator']>) => {
     const box = await locator.boundingBox()
     expect(box).not.toBeNull()
     return box!.y >= 0 && box!.y + box!.height <= 1080
   }
-  await expect(page.getByRole('button', { name: /generate video/i })).toBeVisible()
-  expect(await inViewport(page.getByRole('button', { name: /generate video/i }))).toBe(true)
-  await expect(page.locator('#duration')).toBeVisible()
-  expect(await inViewport(page.locator('#duration'))).toBe(true)
-  // The right panel owns an internal scroll region for its settings.
-  await expect(page.locator('.preview-scroll')).toBeAttached()
+  await expect(page.locator('[data-canvas-promptbar]')).toBeVisible()
+  expect(await inViewport(page.locator('[data-canvas-prompt]'))).toBe(true)
+  expect(await inViewport(page.locator('[data-canvas-submit]'))).toBe(true)
+  for (const chip of ['image', 'video', 'music3', 'acestep', 'studios', 'movie', 'prompt-library']) {
+    await expect(page.locator(`[data-canvas-chip="${chip}"]`)).toBeVisible()
+    expect(await inViewport(page.locator(`[data-canvas-chip="${chip}"]`))).toBe(true)
+  }
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
-test('settings round-trips a change through the server API', async ({ page }) => {
+test('settings round-trips a change through the server API (docked)', async ({ page }) => {
   const problems = await trackErrors(page)
+  await resetSession(page)
   await page.goto('/')
-  await page.getByRole('button', { name: /settings/i }).first().click()
-  const ollamaModel = page.locator('#ollama-model, input[aria-label*="Ollama model" i]').first()
-  const target = ollamaModel.isVisible().then(() => ollamaModel).catch(() => null)
-  // The settings view renders service inputs as text fields in the web app.
+  await page.locator('[data-canvas-settings-button]').click()
+  await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible()
   const outputInput = page.locator('#output-path')
   await expect(outputInput).toBeVisible()
   const original = await outputInput.inputValue()
@@ -121,20 +200,20 @@ test('settings round-trips a change through the server API', async ({ page }) =>
   await page.getByRole('button', { name: /save/i }).first().click()
   await page.waitForTimeout(400)
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
-  void target
 })
 
 // 15th test (LLM layer): the Settings LLM section renders in its
-// provider-empty fallback state. The e2e server has no llama.cpp router
-// configured (llamaCppUrl defaults to ''), so the section must show the
-// Ollama-fallback indicator, the router address input, and the
-// unload-on-generate toggle — deeper provider behavior lives in test:llm
-// against a mock router.
+// provider-empty fallback state — now inside the canvas Settings dock. The
+// e2e server has no llama.cpp router configured (llamaCppUrl defaults to ''),
+// so the section must show the Ollama-fallback indicator, the router address
+// input, and the unload-on-generate toggle — deeper provider behavior lives
+// in test:llm against a mock router.
 test('Settings renders the LLM router section with the Ollama fallback state', async ({ page }) => {
   const problems = await trackErrors(page)
+  await resetSession(page)
   await page.goto('/')
-  await page.getByRole('button', { name: /settings/i }).first().click()
-  await expect(page.getByRole('heading', { name: /settings/i })).toBeVisible()
+  await page.locator('[data-canvas-settings-button]').click()
+  await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible()
 
   const llmSection = page.locator('.llm-section')
   await expect(llmSection).toBeVisible()
@@ -154,16 +233,18 @@ test('Settings renders the LLM router section with the Ollama fallback state', a
 })
 
 // Diagnostics suite (task xyo4is4): the PII-scrubbed surface renders
-// engine-independently, builds its report from structured fields only,
-// copies it through the (permission-granted) clipboard, and saves it as a
-// local download — no network beyond this app's own server, nothing leaves
-// the machine.
-test('diagnostics view renders, builds a scrubbed report, and copies it', async ({ page }) => {
+// engine-independently inside its dock, builds its report from structured
+// fields only, copies it through the (permission-granted) clipboard, and
+// saves it as a local download — no network beyond this app's own server,
+// nothing leaves the machine.
+test('diagnostics dock renders, builds a scrubbed report, and copies it', async ({ page }) => {
   const problems = await trackErrors(page)
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await resetSession(page)
   await page.goto('/')
-  await page.getByRole('button', { name: /diagnostics/i }).first().click()
-  await expect(page.getByRole('heading', { name: /diagnostics/i })).toBeVisible()
+  await page.locator('[data-canvas-diagnostics-button]').click()
+  await expect(page.locator('[data-canvas-diagnostics-dock]')).toBeVisible()
+  await expect(page.getByRole('heading', { name: /diagnostics/i }).first()).toBeVisible()
 
   // Sections render (engine state is environment-dependent: the e2e server
   // has no engine on CI, but a dev box may expose one on the default port).
@@ -206,9 +287,8 @@ test('mobile companion view boots alongside the studio', async ({ page }) => {  
 
 // Wave 1 — the realtime event fabric: on boot the client establishes its ONE
 // fabric connection to the app's own server (WebSocket primary, SSE v2
-// fallback) and telemetry samples start flowing. Engine-independent and
-// deterministic — a sample arrives even on boxes with no GPU (flagged
-// available:false), because the server-side sampler runs without an engine.
+// fallback) and telemetry samples start flowing. The canvas EngineHost mounts
+// the same session/queue hooks the old shell did — the fabric is unchanged.
 test('the realtime fabric connects on boot and telemetry samples flow', async ({ page }) => {
   const problems = await trackErrors(page)
   await page.goto('/')
@@ -219,17 +299,14 @@ test('the realtime fabric connects on boot and telemetry samples flow', async ({
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
-// Wave 0b — the per-view error boundary: a render crash in one view must not
-// take the shell down, and the boundary's console output + fallback UI must
-// be sanitized (the injected crash message carries sentinel "prompt" words
-// that may never survive anywhere). The crash is forced by wrapping the
+// Wave 0b — the per-surface error boundary: a render crash inside a dock must
+// not take the canvas down, and the boundary's console output + fallback UI
+// must be sanitized (the injected crash message carries sentinel "prompt"
+// words that may never survive anywhere). The crash is forced by wrapping the
 // window.minimax bridge at install time: getSettings hands the app a settings
 // object whose `gpuTier` getter throws — only SettingsView reads that field
-// during render, so the shell and every other view stay healthy.
-// `testedComfyVersion` is pinned so the App-level version-recording effect
-// never spreads the object (a spread would not observe the poison either way,
-// but pinning keeps the poisoned instance in state deterministically).
-test('a crashing view is contained by its error boundary without leaking prompt text', async ({ page }) => {
+// during render, so the canvas root and every other dock stay healthy.
+test('a crashing docked surface is contained by its error boundary without leaking prompt text', async ({ page }) => {
   const consoleErrors: string[] = []
   page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()) })
   await page.addInitScript(() => {
@@ -256,21 +333,26 @@ test('a crashing view is contained by its error boundary without leaking prompt 
       },
     })
   })
+  await resetSession(page)
   await page.goto('/')
-  await expect(page.locator('.sidebar')).toBeVisible()
-  await page.getByRole('button', { name: /settings/i }).first().click()
-  // The per-view boundary shows the sanitized fallback — the shell survives.
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await page.locator('[data-canvas-settings-button]').click()
+  // The per-surface boundary shows the sanitized fallback — the canvas
+  // survives (radar + root stay alive).
   await expect(page.getByText('This view hit an error')).toBeVisible()
-  await expect(page.locator('.sidebar')).toBeVisible()
+  await expect(page.locator('[data-canvas-radar]')).toBeVisible()
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
   // The rendered summary is sanitized: sentinel words never reach the DOM.
   const summary = page.locator('.error-boundary-summary')
   await expect(summary).toBeVisible()
   await expect(summary).toContainText('[redacted]')
   expect((await summary.innerText()).toLowerCase()).not.toContain('umbrella')
-  // Navigation still works: switching views remounts a healthy view.
-  await page.getByRole('button', { name: /library/i }).first().click()
+  // The rest of the app still works: the diagnostics dock opens a healthy
+  // surface while the crashed settings dock shows its fallback.
+  await page.locator('[data-canvas-settings-close]').click()
+  await page.locator('[data-canvas-diagnostics-button]').click()
   await expect(page.getByText('This view hit an error')).toHaveCount(0)
-  await expect(page.getByRole('heading', { name: /video library/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /diagnostics/i }).first()).toBeVisible()
   // The boundary logged (with its ref + [redacted]) and NOTHING logged or
   // rendered carries the raw injected message.
   expect(consoleErrors.length).toBeGreaterThan(0)
@@ -324,21 +406,19 @@ test('transient updates paint through store.subscribe with zero React re-renders
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
-// Wave 2b — the keyboard-first a11y baseline: the Create view's core flow
-// must be fully operable without a mouse. Exercises the two Base UI
-// migrations directly: arrow-key tab navigation (roving tabindex) and the
-// dialogs' focus trap / Escape / focus-restore behavior. Focus visibility is
-// asserted at each step — the token-driven :focus-visible ring must actually
-// render, not merely exist in the stylesheet.
-test('Create view core flow is fully keyboard-operable', async ({ page }) => {
+// Wave 2b successor — the keyboard-first baseline on the post-deletion app:
+// the launcher's prompt bar owns the global `/` focus, the focus-visible
+// ring actually renders, and the Base UI prompt-library dialog keeps its
+// focus-trap / Escape / focus-restore discipline (the dialog machinery the
+// old Create view carried, now on canvas).
+test('launcher core flow is keyboard-operable (focus rings + dialog discipline)', async ({ page }) => {
   const problems = await trackErrors(page)
-  // The workspace is SERVER-persisted (SQLite under the shared test home), so
-  // earlier runs can boot this test with a stale mode/prompt. Wait for the
-  // authoritative boot load before driving, then normalize by keyboard.
-  const workspaceLoaded = page.waitForResponse((response) => response.url().includes('/api/lan/workspace'), { timeout: 8_000 }).catch(() => null)
+  await resetSession(page)
   await page.goto('/')
-  await workspaceLoaded
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
 
+  // `/` focuses the prompt bar from anywhere (§7).
+  await page.keyboard.press('/')
   const focusReport = () => page.evaluate(() => {
     const element = document.activeElement
     if (!element) return { tag: 'none', focusVisible: false, outline: 'none', boxShadow: 'none' }
@@ -350,243 +430,69 @@ test('Create view core flow is fully keyboard-operable', async ({ page }) => {
       boxShadow: style.boxShadow,
     }
   })
-  // Walks Tab (or Shift+Tab) until the active element satisfies the
-  // predicate; fails the test if the limit is exhausted first.
-  const tabUntil = async (predicate: () => Promise<boolean>, backward = false, limit = 60) => {
-    for (let index = 0; index < limit; index += 1) {
-      if (await predicate()) return
-      await page.keyboard.press(backward ? 'Shift+Tab' : 'Tab')
-    }
-    expect(await predicate(), 'Tab walk never reached the target').toBe(true)
-  }
-  const activeIs = (selector: string) => page.evaluate((target) => Boolean(document.activeElement?.closest(target)), selector)
-
-  // 1. Focus the prompt editor by keyboard only and type (clearing whatever
-  //    a previous run persisted).
-  const prompt = page.locator('#prompt')
-  await prompt.focus()
-  await page.keyboard.press('Control+A')
-  await page.keyboard.press('Delete')
+  await expect(page.locator('[data-canvas-prompt]')).toBeFocused()
+  const promptFocus = await focusReport()
+  expect(promptFocus.focusVisible).toBe(true)
+  expect(promptFocus.outline.includes('solid') || promptFocus.boxShadow !== 'none').toBe(true)
   await page.keyboard.type('a lone drummer on a night train, windows streaked with rain')
-  await expect(prompt).toHaveValue(/lone drummer/)
-  const editorFocus = await focusReport()
-  expect(editorFocus.focusVisible).toBe(true)
-  // The composer's textarea:focus treatment is the border+glow ring (the
-  // global outline rule is overridden there) — either affordance proves the
-  // focused control renders a visible indicator.
-  expect(editorFocus.outline.includes('solid') || editorFocus.boxShadow !== 'none').toBe(true)
+  await expect(page.locator('[data-canvas-prompt]')).toHaveValue(/lone drummer/)
 
-  // 2. Backward Tab reaches the mode tabs (the strip sits directly above the
-  //    composer); arrow keys move AND activate (Base UI roving tabindex).
-  await tabUntil(() => activeIs('.mode-tabs'), true)
-  expect(await activeIs('.mode-tabs [role="tab"][aria-selected="true"]')).toBe(true)
-  const tabFocus = await focusReport()
-  expect(tabFocus.focusVisible).toBe(true)
-  expect(tabFocus.outline).toContain('rgb(198, 255, 99)')
-  // The workspace persists server-side, so a previous run may have left the
-  // mode anywhere — arrow (with wrap) to the deterministic Text start first.
-  const selectedTabName = async () => page.locator('.mode-tabs [role="tab"][aria-selected="true"]').innerText()
-  for (let index = 0; index < 5 && !/Text/i.test(await selectedTabName()); index += 1) {
-    await page.keyboard.press('ArrowRight')
-  }
-  await expect(page.locator('.mode-tabs [role="tab"][aria-selected="true"]')).toHaveAccessibleName(/Text/i)
-  await page.keyboard.press('ArrowRight')
-  await expect(page.locator('.mode-tabs [role="tab"][aria-selected="true"]')).toHaveAccessibleName(/Image/i)
-  await page.keyboard.press('ArrowRight')
-  await expect(page.locator('.mode-tabs [role="tab"][aria-selected="true"]')).toHaveAccessibleName(/First \+ last/i)
-  await page.keyboard.press('ArrowRight')
-  await expect(page.locator('.mode-tabs [role="tab"][aria-selected="true"]')).toHaveAccessibleName(/Reference/i)
-  // The prompt survived the mode switches.
-  await expect(prompt).toHaveValue(/lone drummer/)
-
-  // 3. Reference mode surfaces the source-media dialog trigger. Reach it by
-  //    Tab, open with Enter — Base UI Dialog traps focus and focuses the
-  //    close button (our initialFocus).
-  const manageButton = page.getByRole('button', { name: /manage source media/i })
-  await manageButton.waitFor({ state: 'visible' })
-  await tabUntil(() => page.evaluate(() => document.activeElement?.getAttribute('class')?.includes('source-media-manage') ?? false))
-  const manageFocus = await focusReport()
-  expect(manageFocus.focusVisible).toBe(true)
-  await page.keyboard.press('Enter')
-  const dialog = page.locator('.source-media-modal')
-  await expect(dialog).toBeVisible()
-  await expect(page.locator('.source-media-modal [aria-label="Close source media"]')).toBeFocused()
-  // Focus trap: Tab cycles inside the popup and never escapes it. The wrap
-  // past the last control redirects on the next animation frame (the focus
-  // guard's rAF), so each press settles briefly — hammering Tab faster than
-  // a frame would transit the invisible guard span mid-redirect.
-  for (let index = 0; index < 16; index += 1) {
+  // The prompt-library dialog opens by keyboard (Tab forward to the chip —
+  // the chip row sits BELOW the prompt bar in the launcher's DOM order —
+  // then Enter) and keeps the Base UI discipline: focus inside, Escape
+  // restores the trigger.
+  for (let index = 0; index < 14; index += 1) {
+    if (await page.evaluate(() => document.activeElement?.getAttribute('data-canvas-chip') === 'prompt-library')) break
     await page.keyboard.press('Tab')
-    await page.waitForTimeout(60)
   }
-  expect(await page.evaluate(() => Boolean(document.activeElement?.closest('.source-media-modal')))).toBe(true)
-  // Escape closes the dialog and restores focus to the trigger.
+  expect(await page.evaluate(() => document.activeElement?.getAttribute('data-canvas-chip'))).toBe('prompt-library')
+  const chipFocus = await focusReport()
+  expect(chipFocus.focusVisible).toBe(true)
+  await page.keyboard.press('Enter')
+  const dialog = page.locator('.prompt-library-modal')
+  await expect(dialog).toBeVisible({ timeout: 10_000 })
+  expect(await page.evaluate(() => Boolean(document.activeElement?.closest('.prompt-library-modal')))).toBe(true)
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
-  await expect(manageButton).toBeFocused()
+  await expect(page.locator('[data-canvas-chip="prompt-library"]')).toBeFocused()
 
-  // 4. The Community library dialog (second Base UI migration) opens and
-  //    closes by keyboard with focus restore. Its trigger sits above the
-  //    source-media section, so walk backward.
-  await tabUntil(() => page.evaluate(() => document.activeElement?.classList.contains('prompt-library-open') ?? false), true)
-  await page.keyboard.press('Enter')
-  const libraryDialog = page.locator('.prompt-library-modal')
-  await expect(libraryDialog).toBeVisible()
-  expect(await page.evaluate(() => Boolean(document.activeElement?.closest('.prompt-library-modal')))).toBe(true)
-  // Its tab strip is keyboard-navigable too (Base UI Tabs, automatic activation).
-  await tabUntil(() => activeIs('.prompt-library-tabs'))
-  await page.keyboard.press('ArrowRight')
-  await expect(page.locator('.prompt-library-tabs [role="tab"][aria-selected="true"]')).toHaveAccessibleName(/Saved/i)
-  await page.keyboard.press('Escape')
-  await expect(libraryDialog).toHaveCount(0)
-  await expect(page.getByRole('button', { name: /community library/i })).toBeFocused()
-
-  // 5. The primary action: with the engine offline the Generate button is
-  //    correctly DISABLED — and a disabled control is skipped by Tab order,
-  //    which is correct HTML behavior, not an a11y gap. The walk instead
-  //    proves the tab order reaches the generate bar's neighborhood: the
-  //    last operable control on the panel, with a visible focus ring.
-  const advanced = page.getByRole('button', { name: /advanced controls/i })
-  await tabUntil(() => page.evaluate(() => document.activeElement?.textContent?.includes('Advanced controls') ?? false), false, 120)
-  await expect(advanced).toBeFocused()
-  const advancedFocus = await focusReport()
-  expect(advancedFocus.focusVisible).toBe(true)
-  expect(advancedFocus.outline).toContain('solid')
-  const generate = page.getByRole('button', { name: /generate video/i })
-  await expect(generate).toBeVisible()
-  await expect(generate).toBeDisabled()
-  // Cleanup: return the (server-persisted) workspace to its default state so
-  // the next run — including the screenshot loop — boots deterministic.
-  // Still keyboard-only: clear the prompt, then arrow back to Text mode.
-  await prompt.focus()
-  await page.keyboard.press('Control+A')
-  await page.keyboard.press('Delete')
-  await tabUntil(() => activeIs('.mode-tabs'), true, 120)
-  for (let index = 0; index < 5 && !/Text/i.test(await selectedTabName()); index += 1) {
-    await page.keyboard.press('ArrowRight')
-  }
-  await expect(page.locator('.mode-tabs [role="tab"][aria-selected="true"]')).toHaveAccessibleName(/Text/i)
-  // Let the debounced server save land before the context closes.
-  await page.waitForTimeout(1_200)
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
-// Wave 2d — filmstrip posters + the video element pool, proven at the view
-// level. The OLD Library mounted one <video controls preload="metadata"> per
-// card; 12 completed jobs meant 12 range-request-holding elements against
-// the browser's 6-connections-per-origin ceiling. Now cards are static
-// sprite-sheet posters and a pooled element exists only while playing.
-// Engine-independent: jobs are seeded straight through the storage API and
-// the filmstrip route needs only ffmpeg (installed on CI via apt; runners
-// without it skip this test with a logged reason).
-test('library cards render filmstrip posters and pool their video playback', async ({ page }) => {
-  const ffmpegAvailable = await new Promise<boolean>((resolve) => {
-    const probe = spawn('ffmpeg', ['-version'])
-    probe.on('error', () => resolve(false))
-    probe.on('close', (code) => resolve(code === 0))
-  })
-  test.skip(!ffmpegAvailable, 'ffmpeg is not installed on this runner — the filmstrip capability needs it (CI installs it; see .github/workflows/ci.yml)')
-
-  // Codec guard, same honesty pattern: the playback proofs below need a
-  // browser that can actually decode the H.264 fixture. Distro Chromium
-  // builds (Debian/Ubuntu) ship without proprietary codecs; Google Chrome
-  // and codec-complete builds (Arch) run the test in full.
+// Wave 2d successor — the filmstrip/pool capability on the post-deletion app.
+// The old Library's video cards are gone; the canvas media tile is the video
+// surface now. A real mp4 ingested through the canvas file input lands as a
+// stored blob + take; after reload (session previews are transient BY
+// DESIGN) the tile renders its DURABLE poster: a paused blob-served <video>
+// at preload=metadata — frame 0 as the poster, zero autoplay, one element
+// per video object. (The sprite-sheet generation + pool machinery stay
+// unit/e2e-proven server-side in test:filmstrip against the same fixture.)
+test('canvas media tiles render durable video posters from stored blobs', async ({ page }) => {
+  // Codec honesty guard (the same pattern the pooled-playback proof used):
+  // distro Chromium builds ship without proprietary codecs.
+  await page.goto('/')
   const h264Capable = await page.evaluate(() => document.createElement('video').canPlayType('video/mp4; codecs="avc1.42E01E"') !== '')
-  test.skip(!h264Capable, 'this system browser cannot decode H.264 (typical for distro Chromium builds without proprietary codecs) — the pooled-playback proof needs a codec-complete browser such as Google Chrome')
+  test.skip(!h264Capable, 'this system browser cannot decode H.264 (typical for distro Chromium builds without proprietary codecs) — the video-poster proof needs a codec-complete browser such as Google Chrome')
 
-  const base = 'http://127.0.0.1:4199'
-  const outputDirectory = path.resolve('test-home/e2e-filmstrip-output')
-  const settingsResponse = await fetch(`${base}/api/lan/settings`)
-  const originalSettings = ((await settingsResponse.json()) as { settings: Record<string, unknown> }).settings
-  const postSettings = (settings: Record<string, unknown>) => fetch(`${base}/api/lan/settings`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ settings }),
-  })
-
-  // Stage the shared fixture 12 times under a deterministic output directory
-  // (the settings are restored afterwards so later runs stay clean), then
-  // seed 12 completed jobs pointing at those copies through the storage API.
-  fs.mkdirSync(outputDirectory, { recursive: true })
-  const fixture = path.resolve(__dirname, 'fixtures/sample-clip.mp4')
-  const seedCount = 12
-  const jobs = Array.from({ length: seedCount }, (_, index) => {
-    const name = `e2e-filmstrip-${String(index + 1).padStart(2, '0')}.mp4`
-    const filePath = path.join(outputDirectory, name)
-    fs.copyFileSync(fixture, filePath)
-    return {
-      id: `e2e-filmstrip-${String(index + 1).padStart(2, '0')}`,
-      mode: 'text',
-      status: 'completed',
-      prompt: `wave 2d pooled clip number ${index + 1}`,
-      createdAt: Date.now() - (index + 1) * 60_000,
-      progress: 100,
-      width: 320,
-      height: 180,
-      duration: 3,
-      provider: 'minimax',
-      mediaType: 'video',
-      outputUrl: `/api/lan/media?source=output&path=${encodeURIComponent(filePath)}`,
-      localOutputPath: filePath,
-    }
-  })
-  await postSettings({ ...originalSettings, outputDirectory })
-  const seeded = await fetch(`${base}/api/lan/jobs`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jobs }),
-  })
-  expect(seeded.ok, 'seeding jobs through the storage API must succeed').toBe(true)
-
-  try {
-    const problems = await trackErrors(page)
-    await page.goto('/')
-    await page.getByRole('button', { name: /library/i }).first().click()
-    await expect(page.getByRole('heading', { name: /video library/i })).toBeVisible()
-
-    // Exact card lookup: card text runs together ("number 1" + "320 × 180"),
-    // and "number 1" is a substring of "number 10" — so match the prompt's
-    // own <strong> element by its exact text.
-    const cardFor = (index: number) => page.locator('.library-card').filter({ has: page.getByText(`wave 2d pooled clip number ${index}`, { exact: true }) })
-    await expect(cardFor(1)).toBeVisible({ timeout: 15_000 })
-    expect(await page.locator('.library-card').count()).toBeGreaterThanOrEqual(seedCount)
-
-    // Filmstrip posters: every card ends up with a loaded sprite-sheet <img>
-    // (each first load triggers one server-side ffmpeg generation — poll,
-    // twelve sheets take a moment to generate on first view).
-    await expect(page.locator('.library-card img.filmstrip-poster').first()).toBeVisible({ timeout: 30_000 })
-    await expect.poll(() => page.evaluate(() => Array.from(document.querySelectorAll<HTMLImageElement>('.library-card img.filmstrip-poster')).filter((image) => image.complete && image.naturalWidth > 0).length), { timeout: 30_000 }).toBeGreaterThanOrEqual(seedCount)
-
-    // The pool bound: no <video> is mounted for posters — the whole document
-    // holds at most 4 (the pool size) at any moment, versus one per card
-    // before the rewire. Pooled elements live detached until leased, so a
-    // static grid contributes ZERO.
-    expect(await page.evaluate(() => document.querySelectorAll('video').length)).toBeLessThanOrEqual(4)
-
-    // Click a card → its pooled video plays (controls, exclusive).
-    await cardFor(1).locator('.play-overlay').click()
-    await page.waitForFunction(() => {
-      const video = document.querySelector('video')
-      return Boolean(video && !video.paused && video.readyState >= 2)
-    }, undefined, { timeout: 15_000 })
-    expect(await page.evaluate(() => document.querySelectorAll('video').length)).toBe(1)
-
-    // Click another card → the first lease is released (poster back, its
-    // connection dropped) and exactly one video — the NEW card's — plays.
-    await cardFor(2).locator('.play-overlay').click()
-    await page.waitForFunction(() => {
-      const videos = document.querySelectorAll('video')
-      if (videos.length !== 1) return false
-      const video = videos[0]
-      return Boolean(!video.paused && video.readyState >= 2)
-    }, undefined, { timeout: 15_000 })
-    const playingSource = await page.evaluate(() => document.querySelector('video')?.getAttribute('src') ?? '')
-    expect(playingSource).toContain('e2e-filmstrip-02')
-    await expect(cardFor(1).locator('.play-overlay')).toBeVisible()
-
-    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
-  } finally {
-    // Restore the pre-test settings so the shared e2e home stays clean.
-    await postSettings(originalSettings)
-  }
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await page.setInputFiles('[data-canvas-file-input]', path.resolve(__dirname, 'fixtures/sample-clip.mp4'))
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 15_000 })
+  // The durable copy: reload drops the session-local preview (an object URL,
+  // transient by design) and the tile falls back to its STORED artifact —
+  // the blob-served paused <video> (frame 0 poster, no autoplay).
+  await page.reload()
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 15_000 })
+  const poster = page.locator('video[data-canvas-poster="blob"]').first()
+  await expect(poster).toBeVisible()
+  await expect(poster).toHaveAttribute('preload', 'metadata')
+  await page.waitForFunction(() => {
+    const video = document.querySelector<HTMLVideoElement>('video[data-canvas-poster="blob"]')
+    return Boolean(video && video.paused)
+  }, undefined, { timeout: 10_000 })
+  expect(await page.evaluate(() => document.querySelectorAll('video').length)).toBe(1)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })

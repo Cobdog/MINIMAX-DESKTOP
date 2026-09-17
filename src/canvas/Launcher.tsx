@@ -9,7 +9,7 @@
  * launcher comes alive, no mode switch; a refused engine surfaces honestly.
  */
 import { useEffect, useRef, useState } from 'react'
-import { AudioLines, Clapperboard, FileVideo, ImagePlus, MessageSquareOff, Music2, Plus, Sparkles, Upload } from 'lucide-react'
+import { AudioLines, Clapperboard, FileVideo, ImagePlus, MessageSquareOff, Music2, Plus, Sparkles, Upload, Users } from 'lucide-react'
 import { PromptLibraryBrowser } from '../components/PromptLibraryBrowser'
 import { useCanvasStore } from './store'
 
@@ -120,6 +120,15 @@ export function Launcher({ onPickFile }: { onPickFile(): void }) {
             beside the bar; a pick fills it. */}
         <button type="button" className="canvas-chip" data-canvas-chip="prompt-library" title="Search public Civitai generation metadata for reusable prompts" onClick={() => setLibraryOpen(true)}>
           <Sparkles size={13} /> prompt library
+        </button>
+        {/* Phase 5: the kept authoring surfaces dock from the launcher too —
+            the asset studios + the movie planner (dated decisions in
+            StudiosDock.tsx). */}
+        <button type="button" className="canvas-chip" data-canvas-chip="studios" title="Asset authoring studios — characters, hair, wardrobe, accessories, locations" onClick={() => useCanvasStore.getState().setStudiosDock({ tab: 'characters' })}>
+          <Users size={13} /> studios
+        </button>
+        <button type="button" className="canvas-chip" data-canvas-chip="movie" title="The movie planner — brief, scenes, shots, chains (the Director Suite ancestor)" onClick={() => useCanvasStore.getState().setStudiosDock({ tab: 'movie' })}>
+          <Clapperboard size={13} /> movie plan
         </button>
       </div>
 

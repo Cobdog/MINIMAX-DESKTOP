@@ -25,6 +25,10 @@
  * generation settings live per chain in the document store.
  */
 import { create } from 'zustand'
+
+/** Phase 5: which kept surface the Studios dock shows (the asset-authoring
+ *  studios + MoviePlanner — dated decisions live in StudiosDock.tsx). */
+export type StudiosDockTab = 'characters' | 'hair' | 'wardrobes' | 'accessories' | 'locations' | 'movie'
 import { documentsApi, type ProjectMeta } from './api'
 import { type CameraState, createCamera, parseViewBlob, type ViewBlob } from './camera'
 import {
@@ -193,6 +197,13 @@ type CanvasState = {
   libraryOpen: boolean
   /** Phase 4 (§8): Settings docked as a floating panel (the thin surface). */
   settingsDock: boolean
+  /** Phase 5: the asset-authoring studios + MoviePlanner docked (the kept
+   *  surfaces' canvas home until their full absorption — dated decisions in
+   *  StudiosDock.tsx). */
+  studiosDock: { tab: StudiosDockTab } | null
+  /** Phase 5: the PII-scrubbed diagnostics surface docked (inventory row 10:
+   *  "diagnostics ride the radar/engine chip"). */
+  diagnosticsDock: boolean
   /** Phase 4 (§5.4): the audio engine dock (Music 3 / ACE-Step as ops). */
   audioDock: { engine: 'music3' | 'acestep'; chainId?: string } | null
   cameraCommands: CameraCommand[]
@@ -214,6 +225,8 @@ type CanvasActions = {
   /** Phase 4 overlays: the library projection (V) + the Settings dock. */
   setLibraryOpen(open: boolean): void
   setSettingsDock(open: boolean): void
+  setStudiosDock(dock: { tab: StudiosDockTab } | null): void
+  setDiagnosticsDock(open: boolean): void
   setAudioDock(dock: { engine: 'music3' | 'acestep'; chainId?: string } | null): void
   /** One audio chain submit (Music 3 / ACE-Step as ops): the dock creates
    *  the chain + settings, submitChain carries it (rerun-stable). */
@@ -226,6 +239,13 @@ type CanvasActions = {
   createCanvas(name?: string): Promise<string | null>
   /** The launcher's prompt submit: spawn the seed chain, then REAL submit. */
   submitPrompt(text: string, mediaType: 'video' | 'image'): Promise<void>
+  /** Phase 5 (Studios dock): seed a chain from a kept surface — the
+   *  MoviePlanner shot handoff. Richer than the launcher's submitPrompt
+   *  (compiled prompt + library reference ids + duration/resolution from the
+   *  shot) and CONSENT-GATED: it creates + selects the object; nothing
+   *  auto-executes (principle 5 — review in the properties panel, generate
+   *  from there). Returns the new chain id, or null on failure. */
+  seedChain(input: { prompt: string } & Partial<CanvasChainSettings>): Promise<string | null>
   /** Real submission for one chain (per-chain settings → shared cores; image
    *  intent routes to Z-Image per §5.4 engines-as-ops). */
   submitChain(chainId: string): Promise<{ ok: boolean; message?: string }>
@@ -492,6 +512,8 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     poseRig: null,
     libraryOpen: false,
     settingsDock: false,
+    studiosDock: null,
+    diagnosticsDock: false,
     audioDock: null,
     cameraCommands: [],
     cameraCommandSeq: 0,
@@ -627,6 +649,8 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
 
     setLibraryOpen: (open) => set({ libraryOpen: open }),
     setSettingsDock: (open) => set({ settingsDock: open }),
+    setStudiosDock: (dock) => set({ studiosDock: dock }),
+    setDiagnosticsDock: (open) => set({ diagnosticsDock: open }),
     setAudioDock: (dock) => set({ audioDock: dock }),
 
     validateAudioDraft: (engine, caption) => {
@@ -724,6 +748,44 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         return project.id
       } catch (error) {
         get().toast('error', `Could not create a canvas: ${error instanceof Error ? error.message : String(error)}`)
+        return null
+      }
+    },
+
+    seedChain: async (input) => {
+      let projectId = get().activeProjectId
+      if (!projectId) {
+        const created = await get().createCanvas()
+        if (!created) return null
+        projectId = created
+      }
+      try {
+        const viewport = globalThis.document.querySelector<HTMLElement>('.canvas-viewport')
+        const anchor = viewport
+          ? seedSpawnPoint(camera.get(), viewport.clientWidth, viewport.clientHeight)
+          : { x: 120, y: 96 }
+        const spawn = avoidOverlap(anchor, get().tiles.map((tile) => ({ x: tile.x, y: tile.y, w: tile.w, h: tile.h })))
+        const defaults = chainSettingsDefaults(useSessionStore.getState().settings)
+        const chain = await documentsApi.createChain({
+          projectId,
+          kind: 'generation',
+          inputSpec: { fresh: { prompt: input.prompt, mediaKind: input.mediaType ?? defaults.mediaType } },
+          settings: { ...defaults, ...input },
+        })
+        if (!chain) return null
+        const chainId = chain.id
+        set((current) => ({
+          layout: { ...(current.layout ?? {}), [chainId]: { x: spawn.x, y: spawn.y, w: TILE_W } },
+          viewDirty: true,
+        }))
+        const refreshed = await loadDocument(projectId)
+        if (refreshed) recomputeTiles()
+        set({ selection: { tileIds: [chainId] }, inspectorOpen: true, endpointMenu: null, forkMenu: null })
+        get().requestCamera({ kind: 'fly', tileId: chainId })
+        get().persistView()
+        return chainId
+      } catch (error) {
+        get().toast('error', `Could not create the object: ${error instanceof Error ? error.message : String(error)}`)
         return null
       }
     },
@@ -1622,7 +1684,7 @@ export const selectAttention = (state: CanvasState) => attention(state.tiles)
 if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('probe') === 'canvas') {
   Object.defineProperty(window, '__canvasScenario', {
     configurable: true,
-    value: (name: string) => {
+    value: async (name: string) => {
       const state = useCanvasStore.getState()
       if (name === 'fail-worst') {
         // Flip the first linked canvas job to failed — the exact store
@@ -1690,6 +1752,30 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
         const tile = state.tiles.find((entry) => entry.status === 'stale') ?? state.tiles[0]
         if (!tile) return { ok: false, reason: 'no tile' }
         return { ok: true, tileId: tile.id }
+      }
+      if (name === 'seed-chain') {
+        // Phase 5 (Studios dock): drive the REAL MoviePlanner shot-handoff
+        // path — a chain seeded from compiled shot settings, CONSENT-GATED
+        // (created + selected, never submitted; no job may exist for it).
+        const jobsBefore = useJobsStore.getState().jobs.length
+        const chainId = await useCanvasStore.getState().seedChain({
+          prompt: 'the drummer steps off the night train into the rain',
+          mediaType: 'video',
+          duration: 9,
+          resolution: '768x1344',
+          referenceCharacterIds: [],
+          referenceLocationIds: [],
+        })
+        if (!chainId) return { ok: false, reason: 'seedChain returned no id' }
+        const after = useCanvasStore.getState()
+        return {
+          ok: true,
+          chainId,
+          selected: after.selection.tileIds[0] === chainId,
+          inspector: after.inspectorOpen,
+          jobsCreated: useJobsStore.getState().jobs.length - jobsBefore,
+          // async document writes settle before the e2e reads activeDocument
+        }
       }
       return { ok: false, reason: `unknown scenario ${name}` }
     },

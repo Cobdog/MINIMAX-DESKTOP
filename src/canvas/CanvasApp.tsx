@@ -1,23 +1,25 @@
 /**
- * Canvas Phase 3 — the route root behind ?canvas=1 (§3/§4/§5.4).
+ * Canvas Phase 5 — THE app root (§8: the old shell is deleted; the canvas is
+ * the default route, ?canvas=1 a harmless alias).
  *
- * Mounts ONLY under the canvas route (main.tsx lazily loads this module like
- * the prototypes; every normal app route never imports it). Own titlebar
- * (radar + canvas tabs), the engine host (Phase 2: the shared session/queue
- * hooks — real generation), the substrate, the launcher overlay for empty
- * canvases, the properties panel, the contextual bottom bar, the summonable
- * index, ambient toasts, session wiring (open/close/order + camera autosave
- * through the documents API), and the drop-anything ingestion (bytes →
- * content-addressed blobs). Phase 3 adds the OP MODAL (§5.1) and the pose
- * rig dock (§5.2).
+ * Own titlebar (radar + canvas tabs), the engine host (Phase 2: the shared
+ * session/queue hooks — real generation), the substrate, the launcher overlay
+ * for empty canvases, the properties panel, the contextual bottom bar, the
+ * summonable index, ambient toasts, session wiring (open/close/order + camera
+ * autosave through the documents API), and the drop-anything ingestion
+ * (bytes → content-addressed blobs). Phase 3 added the OP MODAL (§5.1) and
+ * the pose-rig dock (§5.2); Phase 4 the audio + settings docks; Phase 5 the
+ * STUDIOS + DIAGNOSTICS docks (the kept surfaces' canvas home).
  *
  * ?canvas=1&bench=1 mounts the L33 rendering-budget harness instead
  * (Benchmark.tsx) — same substrate, synthetic document, measurement protocol.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { TransientProbe } from '../state/TransientProbe'
 import { AudioDock } from './AudioDock'
 import { BottomBar } from './BottomBar'
 import { CanvasEngineHost } from './EngineHost'
+import { DiagnosticsDock } from './DiagnosticsDock'
 import { EndpointMenu } from './EndpointMenu'
 import { ForkMenu } from './ForkMenu'
 import { IndexOverlay } from './IndexOverlay'
@@ -28,6 +30,7 @@ import { PropertiesPanel } from './PropertiesPanel'
 import { Launcher } from './Launcher'
 import { Radar } from './Radar'
 import { SettingsDock } from './SettingsDock'
+import { StudiosDock } from './StudiosDock'
 import { Substrate } from './Substrate'
 import { useCanvasStore } from './store'
 import { useJobsStore } from '../state/jobsStore'
@@ -83,7 +86,9 @@ export function CanvasApp() {
         else if (state.endpointMenu || state.forkMenu) {
           state.setEndpointMenu(null)
           state.setForkMenu(null)
-        } else select(null)
+        } else if (state.studiosDock) state.setStudiosDock(null)
+        else if (state.diagnosticsDock) state.setDiagnosticsDock(false)
+        else select(null)
         return
       }
       if (typing) return
@@ -203,6 +208,8 @@ export function CanvasApp() {
       <PoseRigDock />
       <AudioDock />
       <SettingsDock />
+      <StudiosDock />
+      <DiagnosticsDock />
       <IndexOverlay />
       <LibraryOverlay />
     </CanvasEngineHost>
@@ -227,5 +234,10 @@ export function CanvasApp() {
       }}
     />
     <span className="canvas-tile-count" data-canvas-tile-count aria-hidden>{tiles.length} {tiles.length === 1 ? 'object' : 'objects'}</span>
+    {/* The wave-2a transient probe pair (?probe=transient): hidden, inert in
+        every normal session, and NOT memoized on purpose — its render count
+        is the zero-React-render canary the e2e drives. Carried by the old
+        Create view until Phase 5; the app root is its home now. */}
+    {new URLSearchParams(window.location.search).get('probe') === 'transient' && <TransientProbe />}
   </div>
 }

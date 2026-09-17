@@ -349,6 +349,12 @@
 .canvas-settings-body { min-height: 0; overflow: auto; }
 .canvas-settings-body .standard-page { min-height: auto; padding: 14px 16px 22px; }
 
+/* ---- Phase 5: the studios + diagnostics docks (§8 kept surfaces) ------------------ */
+.canvas-studios-tabs { display: flex; gap: 4px; margin-left: 10px; flex-wrap: wrap; }
+.canvas-studios-tabs .canvas-chip { padding: 2px 8px; font-size: var(--text-2-xs); }
+.canvas-studios-body .studio-shell, .canvas-studios-body .movie-shell { min-height: auto; padding: 12px 14px 20px; }
+.canvas-studios-fallback { padding: 24px; color: var(--muted-2); font-size: var(--text-xs); }
+
 /* ---- Phase 4: the library projection (§7 V) -------------------------------------- */
 .canvas-library-panel { width: min(720px, 90vw); }
 .canvas-library-filters { display: flex; gap: 4px; }

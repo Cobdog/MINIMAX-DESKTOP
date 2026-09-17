@@ -47,88 +47,94 @@ export type VisionScenario = {
   checkpoints: VisionCheckpoint[]
 }
 
-// The composer scenario types a known prompt so the screenshot is comparable
-// across runs; it is cleared again in `after` (the workspace persists
-// server-side in the shared test-home).
-const KNOWN_PROMPT = 'a lone drummer on a night train, windows streaked with rain'
-
-/** Chrome shared by every rubric: the intended look of the app. */
+/** Chrome shared by every rubric: the intended look of the app — the CANVAS
+ *  world since Phase 5 (the old shell is deleted: no left sidebar, no nav
+ *  groups, no retirement badges — their absence is the design, not a
+ *  regression). */
 const SHELL_CONTEXT = [
-  'Context for every clause: a dark-theme desktop studio app at 1920x1080.',
-  'Top bar: app name/logo left, GPU/VRAM meters and a red-ish "Engine offline" badge right — the engine being offline in tests is CORRECT, not a defect.',
-  'Below it a dismissible amber "Model license" banner that may wrap to two lines (intended).',
-  'Left sidebar (~218px) with grouped navigation — GENERATE (Create, LTX 2.5, Music, Music 3), PLAN (Create Image, Characters, Hair, Wardrobe, Accessories, Locations), REVIEW (Queue, Library, Clip editor), ADVANCED TOOLS (Movie, Settings) — plus a "Models incomplete" warning box near its bottom.',
-  'Canvas-migration retirement badges: Create, LTX 2.5, Queue, Library and Clip editor carry small muted "retired" pills (greyed styling) — INTENDED Phase-3/4 markers, not defects; the views still open.',
+  'Context for every clause: a dark-theme desktop studio app at 1920x1080 whose ONLY surface is a video canvas — a slim top titlebar over a near-black dotted-grid infinite canvas. There is NO left sidebar and NO grouped navigation: the old shell was deleted (Phase 5); do not flag its absence.',
+  'Top titlebar (slim): canvas tabs (a named tab like "Canvas <date>" with an × affordance), a pill-shaped radar button (reading "calm" or a queue count), a muted "engine offline" chip — the engine being offline in tests is CORRECT, not a defect — then small "library V", "studios", "diagnostics", "settings", "index ⌘K" buttons at the right.',
+  'A slim contextual bottom bar spans the canvas foot; a small object counter may sit bottom-right.',
   'Dimmed/disabled controls and small muted sub-labels are the app\'s intentional dense design language, NOT contrast defects — only flag text that is genuinely unreadable against its immediate background.',
 ].join(' ')
 
 export const SCENARIOS: VisionScenario[] = [
   {
-    id: 'create-composer',
-    label: 'Create view composer at 1080p',
+    // Canvas Phase 5 (task 7mcp11b) — the required NEW scenario: the app's
+    // DEFAULT boot (no ?canvas param) is the canvas. The empty canvas IS the
+    // launcher (§4): prompt bar + drop zone + chips + resume cards.
+    id: 'canvas-default-boot',
+    label: 'Canvas Phase 5 — default boot (no param): the launcher at 1080p',
     run: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
       await page.goto('/')
-      await expect(page.getByRole('button', { name: /generate video/i })).toBeVisible()
-      await page.locator('#prompt').fill(KNOWN_PROMPT)
-      await page.waitForTimeout(300)
+      await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+      await page.waitForTimeout(500)
     },
     after: async (page) => {
-      await page.locator('#prompt').fill('')
-      await page.waitForTimeout(1_200)
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
     },
     checkpoints: [
       {
-        id: 'create-composer-1080p',
-        label: 'Create view — composer, right panel and generate bar fully visible at 1920x1080',
+        id: 'canvas-default-boot-1080p',
+        label: 'Canvas — default-boot launcher fully visible at 1920x1080 (no old shell anywhere)',
         rubric: [
           SHELL_CONTEXT,
-          'Central column: eyebrow "LOCAL VIDEO WORKSPACE", heading "Create with MiniMax H3", a one-line subtitle, and a "Check model paths" button; below them the generation input card.',
-          'Input card, top to bottom: four mode tabs — "Text" (selected/highlighted), "Image", "First + last", "Reference" — each with a small sub-label; a "Shot direction" label row with a green "Ready" badge; a large multi-line textarea containing exactly "a lone drummer on a night train, windows streaked with rain", fully readable with a character counter at its top right (e.g. "59 / 7,000 characters").',
-          'Bottom row of the input card: the buttons "Enhance", "Shot timeline", "Audio pass" (rendered dimmed/disabled — the local LLM is offline in tests, which is correct) and a "Local LLM offline" indicator.',
-          'Right panel ("OUTPUT" / workspace): a "Set up the studio" checklist card with numbered steps and a green "Open Settings" button; three model-status tiles that legitimately show warning states ("Not detected" / "Missing component…" — offline by design, ellipsized status text in these fixed tiles is acceptable); an "Output and quality" section with quality options and an "Output size" block (Orientation "Landscape", a resolution like "1344 × 768").',
-          'Bottom of the right panel: the generate bar — a gauge icon, a resolution/duration summary (e.g. "1344 × 768" and "8s · 24 fps · 30 steps") and the "Generate video" button, which renders DISABLED (engine offline — correct, not a bug). The whole bar must be on-screen.',
-          'Defects to flag: elements overlapping each other, text cut off by a container or the viewport (other than the blessed ellipsized status tiles), buttons/inputs misaligned with their labels, truly unreadable text.',
+          'Center of the canvas: a centered launcher block with a large heading "A blank canvas", a one-line subtitle mentioning describing a shot or dropping anything, and below it the PROMPT BAR — a wide dark rounded textarea (placeholder mentioning "/" to focus and Enter to spawn) with a submit button at its right reading "Spawn video seed" with a small video icon.',
+          'Below the prompt bar, a CHIP ROW of small rounded pill buttons, at minimum: "image prompt", "video prompt" (one of these highlighted as the active media type), "noDialogue handoff", "drop / pick media", "Music 3", "ACE-Step", "prompt library", "studios", and "movie plan" — each with a small icon. All chips must sit fully inside the viewport with readable labels.',
+          'A "Resume" section below the chips: a header row with the word "Resume" and a "new canvas" button, then either recent-canvas cards (name + date, any count) or the muted line "No other canvases yet — the first prompt creates one." — either state is correct.',
+          'NO left sidebar, NO grouped navigation (Create / Queue / Library / Clip editor), NO "retired" pills anywhere — the old shell is deleted by design; any of those appearing is a REGRESSION, flag it.',
+          'Defects to flag: overlapping titlebar controls, the prompt bar or chips clipped by the viewport, unreadable text mid-glyph, a pure-white or pure-black dead region covering the surface.',
         ].join(' '),
       },
     ],
   },
   {
     id: 'settings-llm-fallback',
-    label: 'Settings — LLM router fallback state',
+    label: 'Settings dock — LLM router fallback state',
     run: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
       await page.goto('/')
-      await page.getByRole('button', { name: /settings/i }).first().click()
-      await expect(page.getByRole('heading', { name: /settings/i })).toBeVisible()
+      await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+      // Phase 5: Settings is a docked floating panel opened from the
+      // titlebar (the old route died with the shell).
+      await page.locator('[data-canvas-settings-button]').click()
+      await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible()
       const llmSection = page.locator('.llm-section')
       await expect(llmSection).toBeVisible()
-      // The Settings page scrolls INSIDE its content container, so a fullPage
-      // capture cannot reach below the fold — bring the section into view.
+      // The dock body scrolls INSIDE the panel — bring the card into view.
       await llmSection.scrollIntoViewIfNeeded()
       await page.waitForTimeout(400)
+    },
+    after: async (page) => {
+      const close = page.locator('[data-canvas-settings-close]')
+      if (await close.count()) await close.click().catch(() => undefined)
     },
     checkpoints: [
       {
         id: 'settings-llm-fallback-1080p',
-        label: 'Settings — "LLM · llama.cpp router" card in its provider-empty fallback state',
+        label: 'Settings dock — "LLM · llama.cpp router" card in its provider-empty fallback state',
         rubric: [
           SHELL_CONTEXT,
-          'The Settings view: a single-column stack of section cards beside the sidebar. The page scrolls INSIDE its own container and this capture is taken with the LLM card scrolled into view — the "Settings" heading and its "Save settings" button MAY sit above the visible fold (that is intended scrolling, not clipping; judge only what is in frame).',
+          'A floating Settings DOCK panel over the dimmed canvas: a header strip reading "Settings — docked" with a gear icon and an × close button, and a scrollable body of section cards. The body scrolls INSIDE the panel and this capture is taken with the LLM card scrolled into view — sections above it MAY sit above the visible fold (intended scrolling, not clipping; judge only what is in frame).',
           'The "LLM · llama.cpp router" card is in frame with: title "LLM · llama.cpp router" and its explanatory sub-line; a health pill reading "Ollama fallback" (NOT "online"/"connected"/"Router · N models" — no router is configured in tests, so an online-looking pill is a bug); a labeled "Router address (router mode)" input that is EMPTY (its placeholder mentions 127.0.0.1:8080 and the Ollama fallback); a "Test connection" button.',
           'Below those: the card\'s grid of controls — checkbox rows "Unload models before generating" (checked) and "Thinking by default (freeform)" (unchecked), a "Prompt writing style" dropdown, a "Sticky models (never unload)" input, and a closing note line mentioning that nothing leaves the workstation.',
           'NO model rows: zero model ids/names listed as selectable rows in this card (phantom models with no provider behind them are a bug). A "no models / not reachable" status line is acceptable.',
-          'Defects to flag: pill showing a connected state, a filled router address, model rows present, overlapping or clipped controls, truncated section headers.',
+          'Defects to flag: pill showing a connected state, a filled router address, model rows present, the dock clipped by the viewport edges, overlapping controls, truncated section headers.',
         ].join(' '),
       },
     ],
   },
   {
     id: 'library-empty',
-    label: 'Library — empty state',
+    label: 'Library projection — empty state (V)',
     run: async (page) => {
-      // The shared test-home database persists across runs (the filmstrip e2e
-      // seeds 12 completed jobs through the storage API, which has no delete
-      // route). For a deterministic EMPTY-state capture, clear the jobs table
-      // directly in SQLite (WAL mode — safe alongside the running server).
+      // The shared test-home database persists across runs (earlier e2e
+      // seeds completed jobs and canvas documents through the storage API,
+      // which has no delete route). For a deterministic EMPTY-state capture,
+      // clear the jobs table directly in SQLite (WAL mode — safe alongside
+      // the running server) and close the canvas session so no documents are
+      // loaded — the projection lists takes across LOADED canvases only.
       const databaseFile = resolve('test-home/studio.db')
       if (existsSync(databaseFile)) {
         const db = new Database(databaseFile)
@@ -138,39 +144,48 @@ export const SCENARIOS: VisionScenario[] = [
           db.close()
         }
       }
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
       await page.goto('/')
-      await page.getByRole('button', { name: /library/i }).first().click()
-      await expect(page.getByRole('heading', { name: /video library/i })).toBeVisible()
+      await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+      // V summons the library projection (§7).
+      await page.keyboard.press('v')
+      await expect(page.locator('[data-canvas-library]')).toBeVisible()
       await page.waitForTimeout(400)
+    },
+    after: async (page) => {
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(200)
     },
     checkpoints: [
       {
         id: 'library-empty-1080p',
-        label: 'Library — centered empty state, no cards',
+        label: 'Library projection — summoned overlay in its empty state',
         rubric: [
           SHELL_CONTEXT,
-          'The Library view: eyebrow "LOCAL LIBRARY", heading "Video library", a one-line subtitle, and a thin gradient divider.',
-          'Controls row: a search input (placeholder "Search prompts..."), "Provider" dropdown ("All providers"), "Sort" dropdown ("Newest first"), a video counter showing "0" of "0 videos", an "Export manifests" button, and an "Open clip editor" button at the heading\'s top right.',
-          'The body is the EMPTY state: a centered block inside a large dashed-border container, holding a history/clock-style icon, the bold line "Completed generations will appear here." and a smaller secondary line "New work is saved automatically on this device.".',
-          'NO video cards, thumbnails, grid items, or skeleton loaders anywhere.',
-          'Defects to flag: any card/thumbnail present, the empty state not centered, overlapping or clipped controls, truncated labels.',
+          'A modal-ish overlay panel floats centered over a dimmed canvas: a search input row at its top — a search field (placeholder about completed outputs across the session), four small filter chips reading "all", "video", "image", "audio", and an × close button at the right.',
+          'The body is the EMPTY state: a single muted centered line reading "Completed outputs appear here — every take is a canvas object.".',
+          'A thin footer bar at the panel\'s bottom: "0 of 0 outputs" at the left and a note line at the right mentioning "V toggles" and the no-silent-failure contract.',
+          'NO result rows, thumbnails, cards, or skeleton loaders anywhere in the panel.',
+          'Defects to flag: any result row present, the overlay not centered or clipped by the viewport, overlapping controls, truncated labels.',
         ].join(' '),
       },
     ],
   },
   {
-    id: 'create-keyboard-dialog',
-    label: 'Create view — keyboard-opened dialog with focus ring',
+    id: 'launcher-keyboard-dialog',
+    label: 'Launcher — keyboard-opened prompt library dialog with focus ring',
     run: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
       await page.goto('/')
-      await expect(page.locator('#prompt')).toBeVisible()
-      // Keyboard-only walk backward to the prompt-library trigger (the same
+      await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+      await expect(page.locator('[data-canvas-prompt]')).toBeVisible()
+      // Keyboard-only walk backward to the prompt-library chip (the same
       // route the keyboard-operability e2e takes) and open with Enter, so the
       // capture shows the dialog PLUS a genuine :focus-visible ring.
-      const prompt = page.locator('#prompt')
+      const prompt = page.locator('[data-canvas-prompt]')
       await prompt.focus()
       for (let index = 0; index < 60; index += 1) {
-        if (await page.evaluate(() => document.activeElement?.classList.contains('prompt-library-open') ?? false)) break
+        if (await page.evaluate(() => document.activeElement?.getAttribute('data-canvas-chip') === 'prompt-library')) break
         await page.keyboard.press('Shift+Tab')
       }
       await page.keyboard.press('Enter')
@@ -183,11 +198,11 @@ export const SCENARIOS: VisionScenario[] = [
     },
     checkpoints: [
       {
-        id: 'create-keyboard-dialog-1080p',
-        label: 'Create view — prompt library dialog opened by keyboard, focus ring visible',
+        id: 'launcher-keyboard-dialog-1080p',
+        label: 'Launcher — prompt library dialog opened by keyboard, focus ring visible',
         rubric: [
           SHELL_CONTEXT,
-          'The Create view behind a dimmed modal overlay — background controls stay recognizable (sidebar, heading silhouettes), never fully black.',
+          'The canvas launcher behind a dimmed modal overlay — background controls stay recognizable (titlebar, prompt bar silhouettes), never fully black.',
           'A dialog panel floats roughly centered: kicker "PROMPT LIBRARY", bold title about community & saved prompts, a one-line explainer, and a tab strip with a "Community" tab (active) and a "Saved" tab (its count varies — any count is fine).',
           'Dialog furniture: a search input row (search field plus filter dropdown/checkboxes), a "Load more" button and an attribution/footer line at the bottom when content is present, and an X close button at the panel\'s TOP-RIGHT corner — all inside the panel bounds.',
           'A keyboard-focus indicator is clearly visible: a bright green/chartreuse rectangular ring around the close (X) button.',

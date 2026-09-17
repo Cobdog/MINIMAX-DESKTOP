@@ -2503,12 +2503,11 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .caption-reference:disabled { opacity: .5; cursor: wait; }
 .reference-caption-notice { grid-column: 1 / -1; color: var(--muted-2); font-size: var(--text-sm); }
 
-/* ---- Canvas Phase 3: first view retirement (canvas-ui-v1 §8) -----------------
-   ClipEditor / VideoReferenceClipper / FrameBookmarkStudio are
-   capability-redundant now that the canvas ships op stacks + forks. The old
-   shell still LOADS every one of them when directly navigated (their
-   D-dependencies hold until Phase 5) — the entries grey out and point at the
-   canvas surface that absorbed them. */
+/* ---- Canvas Phase 3 → 5: view retirement → deletion (canvas-ui-v1 §8) --------
+   Phase 3 greyed the first trio out; Phase 5 DELETED all seven retired views
+   together with the shell that carried them — these rules are historical
+   (no .nav-button / .retired-affordance elements exist anymore; the e2e
+   absence assertions pin that). Kept for the git-visible design record. */
 .nav-button.retired-view { opacity: .55; }
 .nav-button.retired-view .retired-badge { margin-left: auto; padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted-2); font-size: var(--text-2xs); font-style: normal; letter-spacing: .04em; text-transform: uppercase; }
 .retired-affordance { opacity: .55; }

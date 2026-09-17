@@ -1,10 +1,15 @@
-/** The wave-2a transient-update probe pair, mounted in the Create view when
- *  `?probe=transient` is present (see transientProbe.ts for the discipline
+/** The wave-2a transient-update probe pair, mounted in the app root
+ *  (CanvasApp — the Create view carried it until Phase 5 deleted that shell)
+ *  when `?probe=transient` is present (see transientProbe.ts for the discipline
  *  and the driver). A "mover" element whose transform is written directly
  *  from the probe store's subscription (never React), beside a sibling that
  *  renders `data-render-count` — a canary for any re-render of the
  *  surrounding tree. */
 import { useRef } from 'react'
+// Side-effect import: binds window.__studioDriveTransient when (and only
+// when) the URL carries ?probe=transient — the e2e driver. Carried by the
+// old Create view's own import until Phase 5; the probe pair is its home now.
+import './transientProbe'
 
 /** Module-scoped so StrictMode's double render is visible but harmless — the
  *  assertion that matters is before/after equality around a drive, not the

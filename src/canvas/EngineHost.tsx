@@ -9,9 +9,9 @@
  * therefore read/write the SAME stores (spec §8 D1/D2): one queue, one
  * engine session, one flows core.
  *
- * The workspace facade (useCreateWorkspace) is deliberately NOT mounted: the
- * canvas keeps its generation state per chain in the document store — the
- * singleton unwind. The old CreateView keeps its own workspace untouched.
+ * The workspace facade (the old shell's useCreateWorkspace) died with the
+ * shell in Phase 5: the canvas keeps its generation state per chain in the
+ * document store — the singleton unwind, now the only state model.
  */
 import { useEffect, type ReactNode } from 'react'
 import { useStudioSession } from '../hooks/useStudioSession'
