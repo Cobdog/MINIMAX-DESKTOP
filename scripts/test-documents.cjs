@@ -54,6 +54,20 @@ function makeHome(label) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `minimax-documents-${label}-`))
 }
 
+/** Every server booted this run — the SUCCESS path and every FAILURE path
+ *  kill them all (a spawned child holds its stdio pipes open, so a missed
+ *  kill both orphans the server AND parks the runner in ep_poll forever:
+ *  the merge-verification hang, and the 50-orphan leak on failed runs). */
+const bootedServers = []
+const killAllServers = () => {
+  for (const child of bootedServers) {
+    try {
+      child.kill()
+    } catch { /* already gone — the exit-status kill below stays honest */ }
+  }
+}
+process.on('exit', killAllServers)
+
 async function bootServer(home, label) {
   const output = { text: '', label }
   const port = await freePort()
@@ -61,6 +75,7 @@ async function bootServer(home, label) {
     env: { ...process.env, MINIMAX_STUDIO_HOME: home, MINIMAX_LAN_PORT: String(port), MINIMAX_NO_HTTPS: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
+  bootedServers.push(child)
   child.stdout.on('data', (chunk) => { output.text += String(chunk) })
   child.stderr.on('data', (chunk) => { output.text += String(chunk) })
   const deadline = Date.now() + 15_000
@@ -1042,10 +1057,12 @@ async function main() {
     check(controlBlob.status === 200, 'the registered in-scope blob serves')
   }
 
+  killAllServers()
   console.log(`PASS: canvas document store — migration 002 (golden fixture N→N+1, divergence hard-error, ${canvasTables.length} canvas tables + jobs extension); §6 legacy import (5 jobs -> 3 takes + 1 failure output, counts + hash spot-checks + marker + clean retry, sources untouched); tombstones/trash round-trips + GC adversarials (fork-edge liveness over a tombstoned source, locked + canonical never evicted, session prune); take append-only + bake immutability trigger-enforced; §7 archive round-trip (zip, hash-verified blobs, global-asset placeholders, unknown-newer refusal); §4 FTS (chain/asset/plan/take/job, injection-safe, kind-filter-before-limit); unknown-newer document refusal names the writer; correctness wave 1 (shared-blob eviction survival + takeId-pinned priors, jobId-idempotent + stray-healing appendTake, torn-copy repair, poisoned-list isolation, locked-staleness gating, plan CAS 409, honest cancel verdicts, remote-output fetch+ingest, latent durability + visible missingBlobs, control-track blob lifecycle, shared-blob import upsert + staged-file rollback). ${assertions} assertions.`)
 }
 
 void main().catch((error) => {
+  killAllServers()
   console.error(`FAIL: ${error instanceof Error ? error.stack : String(error)}`)
   process.exit(1)
 })
