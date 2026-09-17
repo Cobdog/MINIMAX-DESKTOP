@@ -148,6 +148,21 @@ console.log('(g) tileStatus — the §4 priority ladder')
   eq(derive.tileStatus({ stale: true }, { id: 'j', status: 'queued', progress: 0 }, false), 'queued-gpu', 'status: live work beats the derived stale flag')
   eq(derive.tileStatus({ stale: false }, { id: 'j', status: 'failed', progress: 1 }, true), 'idle', 'status: dismissed failure degrades honestly (contract a)')
   eq(derive.tileStatus({ stale: true }, { id: 'j', status: 'failed', progress: 1 }, true), 'stale', 'status: dismissed failure on a stale chain shows stale')
+  // B2: an ERRORED LANDING (a completed render whose bytes could not be
+  // fetched) is durable on the take — deriveTiles surfaces it as the
+  // needs-attention ring with its reason, dismissable like any failure.
+  {
+    const erroredTake = { id: 'te', outputId: 'o', jobId: 'job-e', artifacts: [], latentPath: null, metrics: { kind: 'video', landingError: 'the engine output could not be fetched: engine offline' }, createdAt: 2, supersededBy: null, evicted: false, contentHash: null }
+    const erroredDoc = {
+      project: { id: 'pe', name: 'E', camera: {}, createdAt: 0, lastActiveAt: 0 },
+      chains: [{ id: 'chain-e', projectId: 'pe', kind: 'generation', inputSpec: { fresh: { prompt: 'remote render' } }, settings: {}, lockState: 'unlocked', hopCount: 0, driftMetrics: null, stale: false, createdAt: 1, outputs: [{ id: 'o', chainId: 'chain-e', substratesAvailable: [], createdAt: 1, canonicalTakeId: 'te', takes: [erroredTake] }], ops: [] }],
+    }
+    const tiles = derive.deriveTiles(erroredDoc, [{ id: 'job-e', status: 'completed', progress: 100 }], { 'chain-e': 'job-e' }, undefined, new Set())
+    eq(tiles[0].status, 'failed', 'errored landing: a completed-but-unlandable render shows the failure ring (never silent idle)')
+    eq(tiles[0].statusNote, 'the engine output could not be fetched: engine offline', 'errored landing: the reason is the status note')
+    const dismissedTiles = derive.deriveTiles(erroredDoc, [{ id: 'job-e', status: 'completed', progress: 100 }], { 'chain-e': 'job-e' }, undefined, new Set(['chain-e']))
+    eq(dismissedTiles[0].status, 'idle', 'errored landing: dismissable like any other failure')
+  }
 }
 
 /** Minimal document fixture builder. */
@@ -329,12 +344,30 @@ console.log('(m) fork substrates → input refs (§2 outputRef)')
   eq(generation.substratesForTake(withLatent, 'video'), ['decoded', 'extracted-frame', 'latents'], 'substrates: video take with a resident latent offers all three')
   eq(generation.substratesForTake(take('t2'), 'image'), ['decoded'], 'substrates: an image take offers decoded only')
   eq(generation.substratesForTake(null, 'video'), [], 'substrates: no take, no forks')
-  // media resolution prefers the engine-visible sourcePath and records kind
+  // media resolution prefers the VERIFIED blob artifact and records kind (m3:
+  // metrics.sourcePath is a convenience copy whose absolute path may be stale
+  // or foreign after an archive import — the wrong-file substitution guard)
   const outputs = generation.buildOutputIndex(doc)
   const resolved = generation.mediaForOutput(outputs.get('out-1'))
-  eq(resolved.media.path, '/out/a.mp4', 'media: metrics.sourcePath (the engine-visible copy) wins')
+  eq(resolved.media.path, 'canvas-blobs/aa/hash1', 'media: the verified content-addressed blob wins over metrics.sourcePath')
   eq(resolved.media.kind, 'video', 'media: kind read from the take metrics')
   eq(generation.mediaForOutput(undefined), null, 'media: unresolvable output answers null (honest)')
+  // the wrong-file class: after an archive import the sourcePath is the
+  // ORIGINAL machine's path — a render must consume the blob, never that
+  const importedTake = take('take-imported', { metrics: { kind: 'image', sourcePath: '/home/other-machine/works/image.png' }, artifacts: ['canvas-blobs/bb/hash2'] })
+  const importedDoc = {
+    project: { id: 'p2', name: 'Imported', camera: {}, createdAt: 1, lastActiveAt: 1 },
+    chains: [chainOf('imported-src', { outputs: [output('out-2', 'imported-src', [importedTake])] })],
+  }
+  const importedResolved = generation.mediaForOutput(generation.buildOutputIndex(importedDoc).get('out-2'))
+  eq(importedResolved.media.path, 'canvas-blobs/bb/hash2', 'media: a foreign absolute sourcePath NEVER substitutes for the verified blob (archive-import wrong-file guard)')
+  // a take with ONLY a local sourcePath still resolves (the pre-blob path)
+  const localOnly = take('take-local', { metrics: { kind: 'video', sourcePath: '/out/local.mp4' }, artifacts: [] })
+  const localDoc = {
+    project: { id: 'p3', name: 'Local', camera: {}, createdAt: 1, lastActiveAt: 1 },
+    chains: [chainOf('local-src', { outputs: [output('out-3', 'local-src', [localOnly])] })],
+  }
+  eq(generation.mediaForOutput(generation.buildOutputIndex(localDoc).get('out-3')).media.path, '/out/local.mp4', 'media: a sourcePath-only take still resolves through it')
 }
 
 console.log('(n) typed-hole option menus (§3 filtering + hints)')
