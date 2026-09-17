@@ -1,7 +1,8 @@
-# Dataset Manager v1 — spec (r2, post-blind-audit)
+# Dataset Manager v1 — spec (BLESSED)
 
-Status: DRAFT r2 — blind-audit findings applied (audit comment imocltl on sv14rt0);
-awaiting maintainer blessing. Written 2026-09-17 by the lead; r2 same day.
+Status: **BLESSED** (maintainer, 2026-09-17, after: locks → research → additions/removals
+round → blind audit r2 → five-flag resolution via question round). Written 2026-09-17 by
+the lead; r2 + blessing amendments same day. This is the build blueprint.
 Inputs: maintainer locks (sv14rt0 directive aaee5e7c + comments 3d8jpxf, gb5y98t) ·
 research (docs/research/video-dataset-prep-tools.md) · training guide · envelope ·
 canvas spec (house conventions). Where this doc and the Flux record disagree, the
@@ -45,20 +46,28 @@ Two persistent kinds, one attachment rule:
 
 ## 2. Import & library
 
-### 2.1 Source tracking (by reference — the contract that makes non-destructive possible)
+### 2.1 Source ingest & tracking — two ingest paths, one identity contract
 
-- A source is recorded as: absolute path + size + mtime + **content hash (xxhash128 —
-  identity tracking, not security)**. Nothing is copied at import; the library references
-  the file where it lives.
-- **Re-import of the same content** (any path) resolves to the SAME source (hash match) —
-  duplicate imports are deduplicated, never duplicated.
-- **Health check on library open and pre-bake (stat + hash when size/mtime moved):**
-  - path gone → source marked **MISSING** (visible state; children intact; bake refuses
-    with reason; re-link offered via file picker, matched by hash);
-  - same path, different content → **CHANGED** (children intact but crop/trim indices may
-    no longer align — bake warns and requires explicit accept);
-  - healthy → silent.
-  No disk change ever strands a layer silently.
+**Ingest path A — by reference (local files):** the library references the file where it
+lives; nothing is copied. Recorded as: absolute path + size + mtime + **content hash
+(xxhash128 — identity tracking, not security)**.
+
+**Ingest path B — by upload (LAN, blessing amendment 2026-09-17):** media uploaded from a
+LAN client machine to the host lands in the app's OWN media store (the upload IS the
+import). Content-hash tracked like path A; no missing-file risk (the app owns the bytes).
+
+- **Identity is the hash, for both paths:** re-import or re-upload of the same content
+  resolves to the SAME source — duplicates dedupe, never duplicate.
+- **Health check (path A only) on library open and pre-bake (stat + hash when size/mtime
+  moved):** path gone → **MISSING** (children intact; bake refuses with reason; re-link by
+  file picker, matched by hash); same path, different content → **CHANGED** (children
+  intact; crop/trim indices may no longer align — bake warns, explicit accept required);
+  healthy → silent. No disk change ever strands a layer silently.
+- **Trash semantics differ by path (blessing amendment):** trashing a REFERENCED source
+  removes the library entry only (the file on disk is untouchable — locked). Trashing an
+  UPLOADED source moves the app-owned bytes to the trash store (restorable); emptying the
+  trash is the one real delete in the tool — and it only ever touches app-owned storage,
+  never user originals.
 
 ### 2.2 Facts at import
 
@@ -89,8 +98,14 @@ Two persistent kinds, one attachment rule:
 ## 3. The layer system (crop + trim)
 
 - **Stamp crop tool**: drag places the crop stamp; **scroll-wheel resizes the crop**;
-  **shift+scroll cycles useful aspect ratios** (default cycle: 16:9, 9:16, 1:1, 4:3, 3:4,
-  21:9 — within the model's official 21:9–9:16 range; the cycle set is a setting).
+  **shift+scroll scrubs the aspect list** — one ordered spectrum from widest to tallest
+  (21:9, 16:9, 4:3, 1:1, 3:4, 9:16), **linear with hard stops at both ends — it never
+  loops**, organic step feel; **middle-click mirrors** the current ratio when its mirror
+  exists in the enabled list (16:9↔9:16, 4:3↔3:4; 1:1 mirrors to itself). The spectrum
+  spans both orientations, so scroll alone always reaches every enabled ratio. The list is
+  **managed**: official-range entries are always present, individually enable/disable-
+  able, **never deletable**; custom ratios are addable, disable-able, and deletable
+  (blessing amendment 2026-09-17).
   Crops are **full-resolution aspect-ratio crops**: pixels outside the rect are trimmed at
   bake; **the video is never resized** (resize requires an explicit per-layer action, off
   by default, and marks the layer).
@@ -163,9 +178,10 @@ user preference. Uncaptioned-but-present audio is valid — §10.
 - **Near-dup, two tiers, detect-everything/kill-selectively (hard rule):** tier-1 videohash
   (ratio-robust, cheap); tier-2 aspect-normalized CLIP clusters. Advisory views — the
   cross-ratio cluster browser presents same-content-different-AR as **bucket diversity**
-  (maintainer's call; mixed-bucket measured free). Nothing auto-deletes; per-source cap
-  warnings fire at export-gate time (cap = dataset setting, default 3 per cluster per
-  source, [SPEC-inferred first-attempt]).
+  (maintainer's call; mixed-bucket measured free). Nothing auto-deletes. **Clusters warn
+  on existence — no numeric cap** (blessing amendment 2026-09-17) — and are **grouped,
+  numbered, and highlighted in the gallery**: same-content items visibly clustered so
+  redundancy is identifiable at a glance, per the master/child grouping language.
 - **Slow-mo audit:** ffprobe metadata + frame-diff energy + freezedetect/mpdecimate,
   composed; suspects get dispositions (N6): retime (baked, tagged) / caption-honestly /
   exclude.
@@ -195,11 +211,12 @@ user preference. Uncaptioned-but-present audio is valid — §10.
 ## 8. QA gates (export-time; 1–4 and 8 are refusing, 6–7 and 9 warning-tier)
 
 1. Empty caption 2. Trigger duplicated 3. fps ≠ 24.000 after bake 4. Slow-mo suspicion
-   undispositioned 5. Decoded count outside [target, target+2] 6. Near-dup cluster over
-   cap per source 7. Real-audio rows missing their soundscape clause **when the dataset's
-   audio policy expects one** (§10) 8. Trigger-token format (single rare token, exactly
-   once, first — per §4's definition) 9. Trim window crossing a detected internal cut
-   (when scene data exists — one scene per clip, warning-tier).
+   undispositioned 5. Decoded count outside [target, target+2] 6. Near-dup cluster exists
+   (warning-tier; clusters grouped/numbered in the gallery per §6) 7. Real-audio rows
+   missing their soundscape clause **when the dataset's audio policy expects one** (§10)
+   8. Trigger-token format (single rare token, exactly once, first — per §4's definition)
+   9. Trim window crossing a detected internal cut (when scene data exists — one scene
+   per clip, warning-tier).
 
 Gates refuse item-by-item with reasons; warning-tier gates accept-all explicitly.
 
@@ -275,13 +292,20 @@ Audio rows always train (measured: no droppable budget; real vs silence cost-ide
     app's existing perf budgets (asserted in tests).
 11. Full gate + e2e + vision + both CI legs, the house standard.
 
-## 13. Open items (the blessing list)
+## 13. Decision record (all resolved at blessing, 2026-09-17)
 
-- **A1 FINAL** (maintainer 2026-09-17): RIFE/minterpolate only. NVIDIA OFSDK and other
-  accelerator options deferred to the watchlist entirely — not built, not wired; may
-  return later via the user-fetch wrapper pattern if batch-bake speed ever demands it.
-- **N9 RESOLVED — IN v1** (maintainer 2026-09-17): CLIP reference-triage on the tier-2
-  embedding index (§6).
+- **A1 FINAL:** RIFE/minterpolate only. NVIDIA OFSDK and other accelerator options
+  deferred to the watchlist entirely — not built, not wired; may return later via the
+  user-fetch wrapper pattern if batch-bake speed ever demands it.
+- **N9 — IN v1:** CLIP reference-triage on the tier-2 embedding index (§6).
+- **Five-flag round (via question tool):** trim-stale = crops AND trims; stills floors
+  kept as inferred defaults (warn < 512², refuse < 256²); soft-delete trash confirmed —
+  with LAN-upload ingest (path B) as a first-class import whose trash holds real bytes;
+  near-dup numeric cap REPLACED by cluster-existence warnings + gallery grouping/
+  numbering; aspect list = official-range spectrum, managed, linear scrub with hard
+  stops + middle-click mirror (customs addable/deletable, officials undeletable).
+- **Held-back features:** the maintainer has more in mind for a later discussion — v1
+  scope is exactly this doc. N3 whisper lane and D1–D3 deferrals recorded, not forgotten.
 - **Blessing flags (r2 changes beyond the signed locks, each needs a nod):**
   (a) trim-stale extends the signed crop-stale decision (same mechanism, flagged);
   (b) stills floors are SPEC-inferred, not measured (§2.3);
