@@ -287,6 +287,11 @@ export type RealtimeHubOptions = {
   /** Token gate: `presented` is the ?token= value (WS) or the header/query
    *  value (SSE). Constant-time comparison lives in the caller. */
   authorize(presented: string | undefined): boolean
+  /** Origin/Host gate for the WS upgrade (security hardening 1): browsers
+   *  always attach an Origin to cross-site handshakes — a foreign origin or
+   *  a disallowed Host name is refused before the handshake completes.
+   *  Absent here = allow (tests wire their own); core wires the real one. */
+  allowUpgrade?(request: IncomingMessage): boolean
   /** The configured ComfyUI origin, re-resolved on every upstream connect so
    *  runtime settings changes are honored without a server restart. */
   comfyUrl(): Promise<string>
@@ -325,9 +330,17 @@ export function createRealtimeHub(options: RealtimeHubOptions) {
     if (upstream.socket || upstream.retry || !upstream.wanted) return
     void options.comfyUrl().then((comfyUrl) => {
       if (upstream.socket || upstream.retry || !upstream.wanted || !comfyUrl) return
-      const host = comfyUrl.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '')
-      if (!host) return
-      const socket = new WebSocket(`ws://${host}/ws`)
+      // The shared upstream is fed by settings.comfyUrl — the one service
+      // URL the SSRF guard historically skipped. It runs through the same
+      // local-only gate as every other outbound target (security hardening
+      // 1); a non-local configured origin simply never connects.
+      if (!options.isLocalServiceUrl(comfyUrl)) {
+        logFailure('realtime/upstream-url', new Error('the configured ComfyUI address is not a local service address'), undefined, 'warn')
+        return
+      }
+      const parsed = new URL(comfyUrl)
+      const wsOrigin = parsed.origin
+      const socket = new WebSocket(`${wsOrigin.replace(/^http/, 'ws')}/ws`)
       socket.binaryType = 'nodebuffer'
       upstream.socket = socket
       socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
@@ -614,6 +627,14 @@ export function createRealtimeHub(options: RealtimeHubOptions) {
       const url = new URL(request.url ?? '/', 'http://minimax.local')
       if (url.pathname !== REALTIME_WS_PATH) {
         socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n')
+        socket.destroy()
+        return
+      }
+      // Origin/Host gate (security hardening 1): a browser-driven cross-site
+      // handshake carries a foreign Origin; a DNS-rebind carries a foreign
+      // Host. Both are refused before any upgrade work, token or otherwise.
+      if (options.allowUpgrade && !options.allowUpgrade(request)) {
+        socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n')
         socket.destroy()
         return
       }

@@ -30,7 +30,7 @@ const { createHash } = require('node:crypto')
 const Database = require('better-sqlite3')
 
 const { migrations, migrateDatabase } = require('../dist-server/server/db.js')
-const { packZip, unpackZip } = require('../dist-server/server/documentArchive.js')
+const { packZip, unpackZip, MAX_ZIP_ENTRIES, MAX_ZIP_ENTRY_BYTES } = require('../dist-server/server/documentArchive.js')
 
 /** Picks a port that verifiably has nothing listening. */
 async function freePort() {
@@ -570,6 +570,75 @@ async function main() {
   check(collision.status === 400 && /already exists/.test(collision.body.error ?? ''), 'importing onto a taken project id refuses loudly (documented seam: no silent re-id)')
 
   // =====================================================================
+  // (g2) security hardening 1: archive column allowlist + zip resource caps
+  // =====================================================================
+  // SQL injection through column names: a crafted take key rewrites the
+  // INSERT into an attacker-shaped statement. Pre-fix this import SUCCEEDED
+  // (the injected row landed); the allowlist must refuse the whole import.
+  // Runs against a FRESH studio (server C) so the id-collision refusal
+  // cannot mask the column verdict.
+  {
+    const homeC = makeHome('c')
+    const serverC = await bootServer(homeC, 'C')
+    const apiC = client(serverC.port)
+    await apiC.get('/api/lan/documents/bootstrap')
+    const craftTakeInjection = () => {
+      const files = unpackZip(archive)
+      const document = JSON.parse(files.get('document.json'))
+      const realOutputId = document.takes[0].output_id
+      document.takes = [{
+        [`id, output_id, artifacts_json, created_at) VALUES(?, '${realOutputId}', '["injected"]', 1750000000000) -- `]: 'injected-take-id',
+      }]
+      files.set('document.json', Buffer.from(JSON.stringify(document)))
+      return packZip([...files.entries()].map(([name, data]) => ({ name, data })))
+    }
+    const injected = await apiC.post('/api/lan/documents/import', { archiveBase64: craftTakeInjection().toString('base64') })
+    check(injected.status === 400 && /unknown canvas_take column/i.test(injected.body.error ?? ''), `a column-name injection in the archive is refused loudly (${JSON.stringify(injected.body).slice(0, 160)})`)
+    const injectedDoc = await apiC.get(`/api/lan/documents/project?id=${projectId}`)
+    check(injectedDoc.status === 404, 'the refused import left nothing behind (transaction rollback)')
+    // A benign-but-unknown key is equally refused (no silent column drops).
+    const benignUnknown = (() => {
+      const files = unpackZip(archive)
+      const document = JSON.parse(files.get('document.json'))
+      document.takes[0].not_a_real_column = 1
+      files.set('document.json', Buffer.from(JSON.stringify(document)))
+      return packZip([...files.entries()].map(([name, data]) => ({ name, data })))
+    })()
+    const refusedUnknown = await apiC.post('/api/lan/documents/import', { archiveBase64: benignUnknown.toString('base64') })
+    check(refusedUnknown.status === 400 && /not_a_real_column/.test(refusedUnknown.body.error ?? ''), 'an unknown archive column refuses the import naming the column')
+
+    // Zip resource caps: entry count, declared size, and lying headers.
+    const eocdOf = (buffer) => {
+      for (let index = buffer.length - 22; index >= Math.max(0, buffer.length - 22 - 65_536); index -= 1) {
+        if (buffer.readUInt32LE(index) === 0x06054b50) return index
+      }
+      throw new Error('no EOCD')
+    }
+    assert.throws(() => {
+      const buffer = Buffer.from(packZip([{ name: 'manifest.json', data: Buffer.from('{}') }]))
+      buffer.writeUInt16LE(MAX_ZIP_ENTRIES + 1, eocdOf(buffer) + 10) // EOCD total-entries field
+      unpackZip(buffer)
+    }, /too many entries/, 'an over-cap entry count is refused')
+    assertions += 1
+    assert.throws(() => {
+      const buffer = Buffer.from(packZip([{ name: 'manifest.json', data: Buffer.from('{}') }]))
+      const central = buffer.readUInt32LE(eocdOf(buffer) + 16)
+      buffer.writeUInt32LE(MAX_ZIP_ENTRY_BYTES + 1, central + 24)
+      unpackZip(buffer)
+    }, /oversized payload/, 'an over-cap declared entry size is refused before inflation')
+    assertions += 1
+    assert.throws(() => {
+      const zeros = Buffer.alloc(4096)
+      const buffer = Buffer.from(packZip([{ name: 'bomb.json', data: zeros }]))
+      const central = buffer.readUInt32LE(eocdOf(buffer) + 16)
+      buffer.writeUInt32LE(10, central + 24) // header lies: declares 10 bytes
+      unpackZip(buffer)
+    }, /inflated to/, 'a lying uncompressed-size header is refused after bounded inflation')
+    assertions += 1
+    serverC.child.kill()
+  }
+
+  // =====================================================================
   // restart = migrations no-op + document stability
   // =====================================================================
   serverA.child.kill()
@@ -582,6 +651,47 @@ async function main() {
   check(sessionAfterRestart.body.session.activeProject === projectId, 'session survives restart')
   const importStatusAfterRestart = await apiA2.get('/api/lan/documents/bootstrap')
   check(importStatusAfterRestart.body.legacyImport.imported === true, 'the legacy-import marker survives restart (never re-imports)')
+
+  // =====================================================================
+  // (g3) security hardening 1: blob-registration source scoping
+  // =====================================================================
+  {
+    // Route-level proof that uploads (output-contained) still register.
+    const scopedOutput = path.join(homeA, 'scoped-output')
+    fs.mkdirSync(scopedOutput, { recursive: true })
+    const currentSettings = (await apiA2.get('/api/lan/settings')).body.settings
+    const scopedSettings = await apiA2.post('/api/lan/settings', { settings: { ...currentSettings, outputDirectory: scopedOutput } })
+    check(scopedSettings.status === 200, 'pointing the output directory at a scratch dir succeeds')
+    const onePixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+    const ingested = await apiA2.post('/api/lan/documents/blobs/ingest', { kind: 'image', name: 'probe.png', data: onePixel.toString('base64') })
+    check(ingested.status === 200 && ingested.body.blob?.present === true, 'an output-contained upload still registers as a blob')
+
+    // The arbitrary-file-read primitive: an out-of-scope source (outside the
+    // studio home AND the output directory) must NOT be copied into the
+    // content-addressed tree and must NOT become servable. The take keeps
+    // the plain string; the would-be blob path 404s.
+    const outsideHome = makeHome('outside')
+    const secretFile = path.join(outsideHome, 'secret.txt')
+    const secretBytes = Buffer.from(`secret-bytes-${Math.random()}`)
+    fs.writeFileSync(secretFile, secretBytes)
+    const scopeProject = (await apiA2.post('/api/lan/documents/projects', { name: 'Scope test' })).body.project
+    const scopeChain = (await apiA2.post('/api/lan/documents/chains', { projectId: scopeProject.id, inputSpec: { fresh: { prompt: 'scope shot' } } })).body.chain
+    const scopeOutput = (await apiA2.post('/api/lan/documents/outputs', { chainId: scopeChain.id })).body.output
+    const refusedTake = await apiA2.post('/api/lan/documents/takes', { outputId: scopeOutput.id, artifacts: [secretFile] })
+    check(refusedTake.status === 200, 'appending a take with an out-of-scope artifact still succeeds (the STRING is kept)')
+    check(refusedTake.body.take.artifacts[0] === secretFile, `the out-of-scope artifact is stored as the plain string, never registered (got ${JSON.stringify(refusedTake.body.take.artifacts[0])})`)
+    const wouldBeRelPath = path.join('canvas-blobs', sha256(secretBytes).slice(0, 2), sha256(secretBytes))
+    const refusedBlob = await apiA2.getRaw(`/api/lan/documents/blobs/file?path=${encodeURIComponent(wouldBeRelPath)}`)
+    check(refusedBlob.status === 404, `the would-be blob path must NOT serve the secret bytes (got ${refusedBlob.status})`)
+
+    // In-scope control: a studio-home file still registers.
+    const inHomeFile = path.join(outDir, 'scope-control.latent')
+    fs.writeFileSync(inHomeFile, Buffer.from(`scope-control-${Math.random()}`))
+    const controlTake = await apiA2.post('/api/lan/documents/takes', { outputId: scopeOutput.id, artifacts: [inHomeFile] })
+    check(controlTake.status === 200 && controlTake.body.take.artifacts[0].startsWith(`canvas-blobs${path.sep}`), `an in-scope artifact still registers into the blob tree (got ${JSON.stringify(controlTake.body.take.artifacts[0])})`)
+    const controlBlob = await apiA2.getRaw(`/api/lan/documents/blobs/file?path=${encodeURIComponent(controlTake.body.take.artifacts[0])}`)
+    check(controlBlob.status === 200, 'the registered in-scope blob serves')
+  }
 
   serverA2.child.kill()
   serverB.child.kill()

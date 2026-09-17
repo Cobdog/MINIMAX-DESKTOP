@@ -33,6 +33,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs'
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import type Database from 'better-sqlite3'
+import { logEvent } from './logger'
 import { ftsMatchExpression } from './repo'
 
 /** The DOCUMENT schema version (distinct from migration ids): bumped only
@@ -386,6 +387,14 @@ export type DocumentStoreOptions = {
   blobRoot: string
   /** Writer app version stamped on documents (§2 refusal names it). */
   appVersion?: string
+  /** Security hardening 1 (blob-read scoping): resolves the directories OUTSIDE
+   *  the blob tree whose files may be REGISTERED into it (engine outputs, the
+   *  output tree's canvas-media uploads, the studio home's app-owned stores).
+   *  Registration copies + serves the file's bytes — an unscoped source would
+   *  be an arbitrary-file-read primitive (`~/.ssh/id_rsa` as a take artifact).
+   *  A resolver (not a static list) so settings changes are honored live.
+   *  Absent = only the studio home (dirname of the blob root) is allowed. */
+  allowedSourceRoots?: () => string[]
 }
 
 export type LegacyImportReport = {
@@ -411,6 +420,19 @@ export type LegacyImportReport = {
 export function createDocumentStore(db: Database.Database, options: DocumentStoreOptions) {
   const blobRoot = resolve(options.blobRoot)
   const appVersion = options.appVersion ?? resolveStudioAppVersion()
+
+  /** Security hardening 1: containment gate for blob REGISTRATION sources.
+   *  Legal sources are the studio home (the app-owned tree the blob root
+   *  lives in) plus the resolver's roots (the configured output directory).
+   *  Same lexical containment shape the media routes use. */
+  function isAllowedBlobSource(path: string): boolean {
+    const candidate = resolve(path)
+    const roots = [dirname(blobRoot), ...(options.allowedSourceRoots?.() ?? []).map((root) => resolve(root))]
+    return roots.some((root) => {
+      const rel = relative(root, candidate)
+      return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+    })
+  }
 
   // ---- statements ----------------------------------------------------------
   const statements = {
@@ -651,8 +673,13 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
   /** Registers a file into the content-addressed blob tree: hash, copy (or
    *  dedupe), upsert the row. Returns the registered relative path + hash, or
    *  a missing-marker registration when the file is absent (visible
-   *  degradation — invariant 9 — never a silent skip). */
+   *  degradation — invariant 9 — never a silent skip).
+   *  Security hardening 1: the SOURCE path must sit inside an allowed root —
+   *  registration copies and later serves the bytes, so an unscoped source is
+   *  an arbitrary-file-read primitive. Out-of-scope sources are refused
+   *  LOUDLY (thrown error naming the file), never silently copied. */
   function registerBlobFile(kind: string, path: string): { relPath: string; hash: string | null; size: number | null; present: boolean } {
+    if (!isAllowedBlobSource(path)) throw new Error(`Refusing to register "${path}" as a blob: the file is outside the studio home and the configured output directory.`)
     const hash = sha256File(path)
     if (!hash) {
       // Absent source: register a missing placeholder keyed by a stable
@@ -1466,20 +1493,33 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
       if (input.registerBlobs !== false) {
         const registered: string[] = []
         for (const artifact of artifacts) {
-          if (isAbsolute(artifact) && existsSync(artifact)) {
+          // Blob registration is scoped (security hardening 1): an in-scope
+          // existing file is hash-registered; anything else — absent, relative,
+          // or OUT OF SCOPE (outside the studio home / output directory) — is
+          // kept as the plain string the caller supplied. A refused copy is
+          // observable (no blob row, no hash on the take) and loud in the
+          // event log, never a silent traversal of someone's home directory.
+          if (isAbsolute(artifact) && existsSync(artifact) && isAllowedBlobSource(artifact)) {
             const result = registerBlobFile(blobKindForPath(artifact, 'video'), artifact)
             if (result.present && result.hash) {
               registered.push(result.relPath)
               contentHash = contentHash ?? result.hash
             } else registered.push(artifact)
-          } else registered.push(artifact)
+          } else {
+            if (isAbsolute(artifact) && existsSync(artifact)) logEvent({ kind: 'documents.blob-registration-refused', scope: 'artifact', present: true })
+            registered.push(artifact)
+          }
         }
         artifacts = registered
         if (latentPath && isAbsolute(latentPath) && existsSync(latentPath)) {
-          const result = registerBlobFile('latent', latentPath)
-          if (result.present && result.hash) {
-            latentPath = result.relPath
-            contentHash = contentHash ?? result.hash
+          if (isAllowedBlobSource(latentPath)) {
+            const result = registerBlobFile('latent', latentPath)
+            if (result.present && result.hash) {
+              latentPath = result.relPath
+              contentHash = contentHash ?? result.hash
+            }
+          } else {
+            logEvent({ kind: 'documents.blob-registration-refused', scope: 'latent', present: true })
           }
         }
       }
