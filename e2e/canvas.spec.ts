@@ -995,7 +995,7 @@ test('latent-fork rendering: the Motion-Context graph pins the source clip (prob
   // fork's own folder, Trim drops the overlap rows.
   const plan = page.evaluate.bind(page)
   const latent = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { graph: { motionContext: { loadLatent: Record<string, unknown> | null; context: boolean; saveLatent: Record<string, unknown> | null; trim: boolean } } } }).__canvasSubmitPlan(spec), { latentFrom: { folder: 'h3_context/src-chain/clip', clipIndex: 2 } })
-  expect(latent.graph.motionContext.loadLatent).toEqual({ latent_path: 'h3_context/src-chain/clip', clip_index: 2 })
+  expect(latent.graph.motionContext.loadLatent).toEqual({ latent_path: 'h3_context/src-chain', clip_index: 3 })
   expect(latent.graph.motionContext.context).toBe(true)
   expect(latent.graph.motionContext.trim).toBe(true)
   expect((latent.graph.motionContext.saveLatent as Record<string, unknown>)?.filename_prefix).toBe('h3_context/plan/clip')

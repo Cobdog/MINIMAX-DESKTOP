@@ -375,7 +375,10 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     // Rebuild chain→job links from persisted manifests (a reload restores the
     // link for jobs whose manifest carries the canvas facts).
     const links: Record<string, string> = { ...state.chainJobs }
-    for (const job of jobs) {
+    // Jobs are newest-first; walking them forward lets an OLDER job for the
+    // same chain clobber the link (a rerun or post-failure retry then never
+    // lands its take — audit D7). Reverse so the NEWEST job for a chain wins.
+    for (const job of [...jobs].reverse()) {
       const canvasLink = job.manifest && typeof job.manifest === 'object' ? (job.manifest as Record<string, unknown>).canvas : null
       const chainId = canvasLink && typeof canvasLink === 'object' ? (canvasLink as Record<string, unknown>).chainId : null
       if (typeof chainId === 'string' && activeDoc.chains.some((chain) => chain.id === chainId)) links[chainId] = job.id
@@ -419,6 +422,19 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
   const activeDocument = () => {
     const state = get()
     return state.activeProjectId ? state.documents[state.activeProjectId] ?? null : null
+  }
+
+  /** A completed render that landed while no client was watching (page
+   *  closed, server down at completion) must still land its take once the
+   *  document is (re)loaded — the landing loop only fires on jobs-store
+   *  changes, which do not happen at boot (and the jobs boot-load can
+   *  settle before this store's subscription attaches). Bounded retry
+   *  schedule covers the boot ordering either way; guarded by
+   *  landingInFlight against recursion from the landing's own reload. */
+  const landAfterDocumentLoad = () => {
+    for (const delay of [0, 600, 1800]) {
+      window.setTimeout(() => { if (!landingInFlight) void landCompletions() }, delay)
+    }
   }
 
   /** Completed jobs that have not landed a take on their chain yet → append
@@ -700,6 +716,10 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
             set({ layout: view.layout })
             recomputeTiles()
             get().requestCamera({ kind: 'jump', camera: view.camera })
+            // A render that completed while no client was watching lands
+            // its take now (audit D7: the loop otherwise only fires on
+            // jobs-store changes, which do not happen at boot).
+            landAfterDocumentLoad()
           }
         } else {
           // An empty or missing session boots to the launcher (§4).

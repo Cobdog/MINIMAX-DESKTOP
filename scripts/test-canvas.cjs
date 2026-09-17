@@ -352,6 +352,15 @@ console.log('(m) fork substrates → input refs (§2 outputRef)')
   eq(resolved.media.path, 'canvas-blobs/aa/hash1', 'media: the verified content-addressed blob wins over metrics.sourcePath')
   eq(resolved.media.kind, 'video', 'media: kind read from the take metrics')
   eq(generation.mediaForOutput(undefined), null, 'media: unresolvable output answers null (honest)')
+  // Audit D5 (junllxf): a canvas-resolved media file must carry a SERVABLE
+  // preview URL — prepareImage throws "No preview available" otherwise and
+  // canvas i2v/frames from document objects can never submit.
+  ok(typeof resolved.media.preview === 'string' && resolved.media.preview.includes('/api/lan/documents/blobs/file?path=canvas-blobs'), `media: a blob-artifact take gets the blob preview URL (got ${JSON.stringify(resolved.media.preview)})`)
+  const bareTake = take('t-bare', { metrics: { kind: 'image', sourcePath: '/out/pic.jpg' }, artifacts: [] })
+  const outputForBare = output('out-bare', 'src', [bareTake])
+  const bareEntry = generation.buildOutputIndex({ chains: [chainOf('src', { outputs: [outputForBare] })] }).get('out-bare')
+  const bareResolved = generation.mediaForOutput(bareEntry)
+  ok(bareResolved && typeof bareResolved.media.preview === 'string' && bareResolved.media.preview.startsWith('/api/lan/media?source=output&path='), `media: a take with no blob artifact falls back to the output-dir media preview URL (got ${JSON.stringify(bareResolved && bareResolved.media.preview)})`)
   // the wrong-file class: after an archive import the sourcePath is the
   // ORIGINAL machine's path — a render must consume the blob, never that
   const importedTake = take('take-imported', { metrics: { kind: 'image', sourcePath: '/home/other-machine/works/image.png' }, artifacts: ['canvas-blobs/bb/hash2'] })
@@ -690,8 +699,8 @@ console.log('(t) latent continuation — chain options + Motion-Context graph sh
   const forkGraph = generation.planCanvasGraph(request(forkOption), fakeSelection)
   const load = Object.values(forkGraph).find((node) => node.class_type === 'MiniMaxH3MotionContextLoadLatent')
   ok(Boolean(load), 'graph: the latent fork LOADS the saved clip (no re-encode)')
-  eq(load.inputs.latent_path, 'h3_context/chain-a/clip', 'graph: LoadLatent reads the SOURCE folder via loadFrom')
-  eq(load.inputs.clip_index, 0, 'graph: LoadLatent reads the SOURCE clip index (not index-1 of the fork)')
+  eq(load.inputs.latent_path, 'h3_context/chain-a', 'graph: LoadLatent reads the SOURCE folder (the /clip filename stem is stripped — the loader wants the directory)')
+  eq(load.inputs.clip_index, 1, 'graph: LoadLatent reads the pack-indexed slot (app clipIndex 0 + 1 — index 0 never reads a file)')
   const saveNode = Object.values(forkGraph).find((node) => node.class_type === 'MiniMaxH3MotionContextSaveLatent')
   eq(saveNode.inputs.filename_prefix, 'h3_context/chain-b/clip', 'graph: SaveLatent writes the fork\'s OWN folder')
   ok(classes(forkGraph).includes('MiniMaxH3MotionContextTrim'), 'graph: the continuation trims the overlap rows from the delivered output')

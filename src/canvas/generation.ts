@@ -244,7 +244,17 @@ export function mediaForOutput(entry: OutputIndexEntry | undefined, takeId?: str
     ?? take.artifacts.find((artifact) => artifact.startsWith('/')) ?? null
   if (!candidate || !kind) return null
   const name = typeof metrics.name === 'string' && metrics.name ? metrics.name : candidate.split('/').pop() ?? candidate
-  return { media: { path: candidate, name, kind }, take }
+  // A servable URL lets the upload path prepare the image (crop/fit) without
+  // a session-picked preview object URL — canvas objects resolve from the
+  // document, and prepareImage throws "No preview available" without this.
+  // (blobArtifact above — the wrong-file guard's verified artifact — doubles
+  // as the preferred preview source.)
+  const preview = blobArtifact
+    ? `/api/lan/documents/blobs/file?path=${encodeURIComponent(blobArtifact)}`
+    : candidate.startsWith('/')
+      ? `/api/lan/media?source=output&path=${encodeURIComponent(candidate)}`
+      : undefined
+  return { media: { path: candidate, name, kind, ...(preview ? { preview } : {}) }, take }
 }
 
 // ---- reference binding (the promptComposer model, per chain) -------------------

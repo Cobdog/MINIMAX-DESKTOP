@@ -699,15 +699,17 @@ assert.equal(applyH3DialoguePolicy('Quiet scene.', false), 'Quiet scene.', 'H3 h
 {
   const startGraph = buildMiniMaxWorkflow({ mode: 'text', prompt: 'p', width: 1344, height: 768, duration: 5, seed: 1, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', filenamePrefix: 't', referenceImages: [], referenceVideos: [], referenceAudios: [], chain: { index: 0, folder: 'h3_context/c1/clip' } }, models, { images: [], videos: [], audios: [] })
   assert.equal(startGraph['28'].class_type, 'MiniMaxH3MotionContextSaveLatent')
-  assert.equal(startGraph['28'].inputs.clip_index, 0)
+  // Pack indices are 1-based: the chain START saves its latent in slot 1
+  // (slot 0 never loads — an auto-numbered save is invisible to Load).
+  assert.equal(startGraph['28'].inputs.clip_index, 1)
   assert.equal(startGraph['28'].inputs.filename_prefix, 'h3_context/c1/clip')
   assert.equal(startGraph['24'], undefined, 'chain start loads nothing')
   assert.equal(startGraph['25'], undefined)
   assert.equal(startGraph['19'].inputs.video.join('|'), '18|0', 'start delivers the full clip')
   const contGraph = buildMiniMaxWorkflow({ mode: 'text', prompt: 'p', width: 1344, height: 768, duration: 5, seed: 1, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', filenamePrefix: 't', referenceImages: [], referenceVideos: [], referenceAudios: [], chain: { index: 2, folder: 'h3_context/c1/clip' } }, models, { images: [], videos: [], audios: [] })
   assert.equal(contGraph['24'].class_type, 'MiniMaxH3MotionContextLoadLatent')
-  assert.equal(contGraph['24'].inputs.clip_index, 1, 'segment 2 continues from clip 1')
-  assert.equal(contGraph['24'].inputs.latent_path, 'h3_context/c1/clip')
+  assert.equal(contGraph['24'].inputs.clip_index, 2, 'segment 3 (app index 2) continues from pack clip 2 = app clip 1')
+  assert.equal(contGraph['24'].inputs.latent_path, 'h3_context/c1')
   assert.equal(contGraph['25'].class_type, 'MiniMaxH3MotionContext')
   assert.equal(contGraph['25'].inputs.context_length, '22')
   assert.equal(contGraph['25'].inputs.conditioning.join('|'), '10|0', 'MotionContext wraps the R2V conditioning')
@@ -716,7 +718,7 @@ assert.equal(applyH3DialoguePolicy('Quiet scene.', false), 'Quiet scene.', 'H3 h
   assert.equal(contGraph['26'].inputs.trim_frames.join('|'), '25|1')
   assert.equal(contGraph['27'].inputs.images.join('|'), '26|0')
   assert.equal(contGraph['19'].inputs.video.join('|'), '27|0', 'continuation saves the trimmed clip')
-  assert.equal(contGraph['28'].inputs.clip_index, 2)
+  assert.equal(contGraph['28'].inputs.clip_index, 3)
 }
 
 
