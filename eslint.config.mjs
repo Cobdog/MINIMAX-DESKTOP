@@ -12,6 +12,11 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   { files: ['scripts/**/*.cjs'], languageOptions: { globals: { ...globals.node, WebSocket: 'readonly', fetch: 'readonly' } }, rules: { '@typescript-eslint/no-require-imports': 'off' } },
+  // Perf-profile harness (task eebh7ah): node .mjs modules with top-level
+  // await; same node globals as the .cjs suites. harness.js is the IN-PAGE
+  // browser instrument (installed via navigate initScript) — browser globals.
+  { files: ['scripts/**/*.mjs'], languageOptions: { globals: { ...globals.node } } },
+  { files: ['scripts/perf-profile/harness.js'], languageOptions: { globals: { ...globals.browser } } },
   // Benchmark harness CLI (task cp96zdM): node CLI modules with top-level
   // await; same node globals as the scripts/*.cjs suites.
   { files: ['benchmarks/**/*.mjs'], languageOptions: { globals: { ...globals.node } } },
