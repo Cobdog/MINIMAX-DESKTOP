@@ -407,10 +407,23 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     }
   }
 
+  // Stale-response sequencing (timeline-gap-menu vision FAIL, cleanup wave
+  // twmpu4m): concurrent plan writes each reload the project document, and
+  // HTTP responses can arrive OUT OF ORDER — applying them last-write-wins
+  // could REGRESS the store to an older document (segment ids churn, the
+  // editor remounts from the stale doc, and uncontrolled inputs repaint
+  // empty while the persisted document is correct — exactly the judged
+  // empty-textarea defect). Each fetch bumps a per-project token; only the
+  // latest-issued fetch may apply its response to the store. Callers still
+  // receive their own fetch's document (the plan-conflict rebase needs the
+  // freshest data IT can get; its CAS write catches any residual staleness).
+  const documentFetchTokens = new Map<string, number>()
   const loadDocument = async (id: string): Promise<CanvasDocument | null> => {
+    const token = (documentFetchTokens.get(id) ?? 0) + 1
+    documentFetchTokens.set(id, token)
     try {
       const loaded = await documentsApi.getProject(id)
-      set((state) => ({ documents: { ...state.documents, [id]: loaded } }))
+      if (documentFetchTokens.get(id) === token) set((state) => ({ documents: { ...state.documents, [id]: loaded } }))
       return loaded
     } catch (error) {
       get().toast('error', `Could not open this canvas: ${error instanceof Error ? error.message : String(error)}`)

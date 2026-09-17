@@ -246,7 +246,8 @@ export function buildMiniMaxWorkflow(
     inputs: { noise: ['11', 0], guider: ['12', 0], sampler: ['13', 0], sigmas: ['14', 0], latent_image: ['10', 1] },
   }
   // Latent chaining (ComfyUI-H3-Motion-Context): every segment saves its
-  // sampler latent as <folder><index>.latent under the output directory;
+  // sampler latent into its fixed slot <prefix>_%05d.safetensors (1-based
+  // clip index) under the output directory;
   // segment 0 is the chain start (LoadLatent with clip_index 0 never reads),
   // segment N pins clip N-1's tail as never-denoised conditioning rows and
   // trims the overlap from the delivered output so audio and motion stay

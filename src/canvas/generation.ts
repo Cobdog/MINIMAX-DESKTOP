@@ -536,9 +536,16 @@ export function canvasChainOption(chainId: string, continuation: MotionContextFa
   return { index: 1, folder, loadFrom: { folder: continuation.folder, clipIndex: continuation.clipIndex } }
 }
 
-/** The latent path a take records for a saved clip (engine-side relative
- *  identifier; the node resolves <folder><clipIndex> by its own convention —
- *  the recorded string is the durable, human-readable provenance). */
+/** The latent path a take records for a saved clip — the Motion-Context
+ *  pack's ACTUAL on-disk slot: SaveLatent with clip_index > 0 writes
+ *  `<prefix-basename>_%05d.safetensors` under the ComfyUI output directory
+ *  (verified against ComfyUI-H3-Motion-Context nodes.py, 2026-09-17; the
+ *  drive's live-verify captured clip_00001/clip_00002.safetensors on disk).
+ *  facts.clipIndex is the app's 0-based chain index; the pack's slots are
+ *  1-based (clip 1 is the first — Load's clip_index 0 never reads a file),
+ *  so +1 here. This must stay byte-aligned with what the engine saves or
+ *  the landing-time absolutization resolves against a nonexistent path and
+ *  latents never register as blobs. */
 export function latentPathFor(facts: MotionContextFacts): string {
-  return `${facts.folder}${facts.clipIndex}.latent`
+  return `${facts.folder}_${String(facts.clipIndex + 1).padStart(5, '0')}.safetensors`
 }

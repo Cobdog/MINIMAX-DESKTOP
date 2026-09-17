@@ -669,7 +669,9 @@ console.log('(u) Z-Image as an op — the still-surface validation ladder + grap
 // ---------------------------------------------------------------------------
 console.log('(t) latent continuation — chain options + Motion-Context graph shape')
 {
-  const mc = take('take-mc', { metrics: { kind: 'video', motionContext: { folder: 'h3_context/src/clip', clipIndex: 3 } }, latentPath: 'h3_context/src/clip3.latent' })
+  const mc = take('take-mc', { metrics: { kind: 'video', motionContext: { folder: 'h3_context/src/clip', clipIndex: 3 } }, latentPath: 'h3_context/src/clip_00004.safetensors' })
+  eq(generation.latentPathFor({ folder: 'h3_context/src/clip', clipIndex: 3 }), 'h3_context/src/clip_00004.safetensors', 'latent path: the recorded slot is the pack’s REAL on-disk name (1-based %05d .safetensors)')
+  eq(generation.latentPathFor({ folder: 'h3_context/chain-z/clip', clipIndex: 0 }), 'h3_context/chain-z/clip_00001.safetensors', 'latent path: chain start (app index 0) is the pack’s clip 1')
   eq(generation.takeMotionContext(mc), { folder: 'h3_context/src/clip', clipIndex: 3 }, 'motion-context: the saved-clip facts read tolerantly from take metrics')
   eq(generation.takeMotionContext(take('plain')), null, 'motion-context: a take without facts answers null (the honest refusal signal)')
   eq(generation.takeMotionContext(take('bad', { metrics: { motionContext: { folder: '', clipIndex: -1 } } })), null, 'motion-context: malformed facts refuse, never a guess')

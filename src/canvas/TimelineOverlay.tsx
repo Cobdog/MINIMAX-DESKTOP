@@ -17,13 +17,65 @@
  *    honest unplanned chronology; gaps implicit hard cuts) + the
  *    adopt-chronology upgrade ("Plan this chronology").
  */
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Film, Image as ImageIcon, LayoutList, Link2, Music2, Plus, Scissors, X } from 'lucide-react'
 import { documentsApi } from './api'
 import { STATUS_LABEL } from './derive'
 import { deriveTimeline, GAP_LABEL, GAP_MECHANISM_LABEL, GAP_MENU, readPlanDocument, type PlanGapKind } from './plan'
 import { useCanvasStore } from './store'
 import { useJobsStore } from '../state/jobsStore'
+
+/** Draft-state binding for one plan-editor field (cleanup wave twmpu4m).
+ *  The fields were uncontrolled (defaultValue): typing never fought the
+ *  store, but a remount after any document reload painted whatever the
+ *  store held at mount time and the field NEVER caught up — the judged
+ *  timeline-gap-menu defect (prompt textareas empty while the persisted
+ *  document was correct). The draft keeps typing local, commits on blur,
+ *  and repaints from the store whenever the user is not mid-edit, so the
+ *  DOM can never diverge from the persisted truth. */
+function useDraftField(value: string) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const [seen, setSeen] = useState(value)
+  if (seen !== value) {
+    // A store refresh landed: adopt it as the new baseline; an in-flight
+    // draft (user typing) keeps rendering until it settles.
+    setSeen(value)
+    if (draft === value) setDraft(null)
+  }
+  return {
+    fieldValue: draft ?? value,
+    commit: (next: string) => { setDraft(next) },
+    settled: (): string => {
+      const typed = draft ?? value
+      setDraft(null)
+      return typed
+    },
+  }
+}
+
+function PlanBriefField({ planRowId, brief }: { planRowId: string; brief: string }) {
+  const field = useDraftField(brief)
+  const updatePlanDocument = useCanvasStore((state) => state.updatePlanDocument)
+  return <textarea data-canvas-plan-brief value={field.fieldValue} placeholder="The film this plan produces — story, rules, intent…" onChange={(event) => field.commit(event.target.value)} onBlur={() => { const next = field.settled(); if (next !== brief) void updatePlanDocument(planRowId, (current) => ({ ...current, brief: next })) }} />
+}
+
+function SegmentTitleField({ planRowId, segmentId, title }: { planRowId: string; segmentId: string; title: string }) {
+  const field = useDraftField(title)
+  const updatePlanSegment = useCanvasStore((state) => state.updatePlanSegment)
+  return <input data-canvas-segment-title aria-label="Segment title" value={field.fieldValue} onChange={(event) => field.commit(event.target.value)} onBlur={() => { const next = field.settled(); if (next !== title) void updatePlanSegment(planRowId, segmentId, { title: next }) }} />
+}
+
+function SegmentDurationField({ planRowId, segmentId, duration }: { planRowId: string; segmentId: string; duration: number }) {
+  const field = useDraftField(String(duration))
+  const updatePlanSegment = useCanvasStore((state) => state.updatePlanSegment)
+  return <label className="canvas-plan-segment-duration">seconds<input data-canvas-segment-duration type="number" min={2} max={15} value={field.fieldValue} onChange={(event) => field.commit(event.target.value)} onBlur={() => { const typed = field.settled(); const next = Math.max(2, Math.min(15, Number(typed) || duration)); if (String(next) !== String(duration)) void updatePlanSegment(planRowId, segmentId, { duration: next }) }} /></label>
+}
+
+function SegmentPromptField({ planRowId, segmentId, prompt }: { planRowId: string; segmentId: string; prompt: string }) {
+  const field = useDraftField(prompt)
+  const updatePlanSegment = useCanvasStore((state) => state.updatePlanSegment)
+  return <textarea data-canvas-segment-prompt value={field.fieldValue} placeholder="This segment's prompt — subject, action, camera, light…" onChange={(event) => field.commit(event.target.value)} onBlur={() => { const next = field.settled(); if (next !== prompt) void updatePlanSegment(planRowId, segmentId, { prompt: next }) }} />
+}
 
 const STATUS_TONE: Record<string, string> = {
   idle: 'var(--muted-2)',
@@ -206,7 +258,7 @@ export function TimelineOverlay() {
       {planRow && plan && <div className="canvas-timeline-editor" data-canvas-plan-editor>
         <label className="canvas-timeline-brief">
           <span>Brief</span>
-          <textarea data-canvas-plan-brief defaultValue={plan.brief} placeholder="The film this plan produces — story, rules, intent…" onBlur={(event) => { if (event.target.value !== plan.brief) void store().updatePlanDocument(planRow.id, (current) => ({ ...current, brief: event.target.value })) }} />
+          <PlanBriefField planRowId={planRow.id} brief={plan.brief} />
         </label>
         <div className="canvas-plan-segments" data-canvas-plan-segments>
           {plan.segments.map((segment, index) => {
@@ -214,13 +266,13 @@ export function TimelineOverlay() {
             return <div className="canvas-plan-segment" data-canvas-segment={segment.id} key={segment.id}>
               <div className="canvas-plan-segment-head">
                 <span className="canvas-plan-segment-index">{index + 1}</span>
-                <input data-canvas-segment-title defaultValue={segment.title} aria-label="Segment title" onBlur={(event) => { if (event.target.value !== segment.title) void store().updatePlanSegment(planRow.id, segment.id, { title: event.target.value }) }} />
-                <label className="canvas-plan-segment-duration">seconds<input data-canvas-segment-duration type="number" min={2} max={15} defaultValue={segment.duration} onBlur={(event) => { const value = Math.max(2, Math.min(15, Number(event.target.value) || segment.duration)); if (value !== segment.duration) void store().updatePlanSegment(planRow.id, segment.id, { duration: value }) }} /></label>
+                <SegmentTitleField planRowId={planRow.id} segmentId={segment.id} title={segment.title} />
+                <SegmentDurationField planRowId={planRow.id} segmentId={segment.id} duration={segment.duration} />
                 {segment.chainId
                   ? <span className="canvas-plan-segment-state" data-canvas-segment-state={item?.status ?? 'idle'}>{item && item.status !== 'unseeded' ? STATUS_LABEL[item.status] : 'idle'}</span>
                   : <span className="canvas-plan-segment-state muted">no object</span>}
               </div>
-              <textarea data-canvas-segment-prompt defaultValue={segment.prompt} placeholder="This segment's prompt — subject, action, camera, light…" onBlur={(event) => { if (event.target.value !== segment.prompt) void store().updatePlanSegment(planRow.id, segment.id, { prompt: event.target.value }) }} />
+              <SegmentPromptField planRowId={planRow.id} segmentId={segment.id} prompt={segment.prompt} />
               <div className="canvas-plan-segment-refs" aria-label="Reference handoffs">
                 {libraries.characters.map((character) => (
                   <button key={character.id} type="button" className={`canvas-chip canvas-plan-ref ${segment.referenceCharacterIds.includes(character.id) ? 'active' : ''}`} data-canvas-segment-ref-character={character.id}
