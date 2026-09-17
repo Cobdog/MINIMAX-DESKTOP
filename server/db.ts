@@ -159,6 +159,45 @@ export const migrations: Migration[] = [
     name: '003-dataset-manager',
     up: upDatasetTables,
   },
+  {
+    // One-canonical-take (correctness audit M2′, cleanup wave twmpu4m): the
+    // document store enforces "at most one non-superseded take per output"
+    // (canvas invariant 2) with a PARTIAL UNIQUE INDEX, closing the crash
+    // window the single-process transaction could not (a hard-killed server
+    // between statements, a hostile archive, a future second writer).
+    // Databases from older builds may carry strays (two non-superseded takes
+    // on one output — the pre-fix crash window): the migration HEALS them
+    // first with appendTake's own semantics (the newest take of the output
+    // wins; the rest become its priors), then creates the index. The heal is
+    // marker-only — no rows are deleted (takes are append-only; copy-never-
+    // destroy applies to priors as much as canonicals).
+    id: 4,
+    name: '004-one-canonical-take',
+    up(db) {
+      const nonSuperseded = db.prepare(
+        'SELECT id, output_id FROM canvas_take WHERE superseded_by IS NULL ORDER BY output_id, created_at DESC, rowid DESC',
+      ).all() as Array<{ id: string; output_id: string }>
+      const winners = new Map<string, string>()
+      for (const row of nonSuperseded) if (!winners.has(row.output_id)) winners.set(row.output_id, row.id)
+      const heal = db.prepare('UPDATE canvas_take SET superseded_by = ? WHERE id = ? AND superseded_by IS NULL')
+      const healed = db.transaction(() => {
+        let strays = 0
+        for (const row of nonSuperseded) {
+          const winner = winners.get(row.output_id)
+          if (winner && winner !== row.id) {
+            heal.run(winner, row.id)
+            strays += 1
+          }
+        }
+        db.exec('CREATE UNIQUE INDEX canvas_take_one_canonical ON canvas_take(output_id) WHERE superseded_by IS NULL')
+        return strays
+      })()
+      if (healed > 0) {
+        // Observable, never silent: the heal is the audit trail.
+        console.warn(`[db] migration 004: superseded ${healed} stray non-superseded take(s) to restore the one-canonical invariant (newest take wins per output).`)
+      }
+    },
+  },
 ]
 
 /** Applies pending migrations. Throws when the persisted history is not a

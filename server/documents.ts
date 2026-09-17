@@ -81,6 +81,20 @@ export class CanvasSchemaVersionError extends Error {
   }
 }
 
+/** A business-rule refusal (audit minor, cleanup wave twmpu4m): the store's
+ *  guards — a missing target, a state refusal like "already canonical", an
+ *  imported archive that violates a store invariant — answer with their
+ *  status (400 state refusal / 404 missing target) and the reason, never an
+ *  opaque structural 500. Internal integrity aborts stay plain Errors. */
+export class DocumentsRuleError extends Error {
+  readonly status: 400 | 404
+  constructor(message: string, status: 400 | 404 = 400) {
+    super(message)
+    this.name = 'DocumentsRuleError'
+    this.status = status
+  }
+}
+
 /** Resolves the running app version for schema-version stamps. Reads the
  *  package.json next to the built server; never throws (stamps fall back to
  *  'unknown', which the refusal message still surfaces honestly). */
@@ -1530,7 +1544,7 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
     // chains ---------------------------------------------------------------------
     createChain: (input: { id?: string; projectId: string; kind?: string; inputSpec?: Record<string, unknown>; settings?: Record<string, unknown>; lockState?: string }) => {
       const project = guardProject(statements.getProject.get(input.projectId) as Record<string, unknown> | undefined)
-      if (!project) throw new Error(`project ${input.projectId} does not exist`)
+      if (!project) throw new DocumentsRuleError(`No project with id ${input.projectId}.`, 404)
       const id = input.id ?? randomUUID()
       const stackId = randomUUID()
       statements.insertChain.run({
@@ -1566,7 +1580,7 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
       inputSpec?: Record<string, unknown>
     }) => {
       const row = statements.getChain.get(input.id) as Record<string, unknown> | undefined
-      if (!row) throw new Error(`chain ${input.id} does not exist`)
+      if (!row) throw new DocumentsRuleError(`No chain with id ${input.id}.`, 404)
       const settingsChanged = input.settings !== undefined
       statements.setChainSettings.run(
         JSON.stringify(input.settings ?? parseJson<Record<string, unknown>>(row.settings_json, {})),
@@ -1596,7 +1610,7 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
     // outputs & takes ---------------------------------------------------------
     createOutput: (input: { id?: string; chainId: string; substrates?: string[] }) => {
       const chain = statements.getChain.get(input.chainId) as Record<string, unknown> | undefined
-      if (!chain) throw new Error(`chain ${input.chainId} does not exist`)
+      if (!chain) throw new DocumentsRuleError(`No chain with id ${input.chainId}.`, 404)
       const id = input.id ?? randomUUID()
       statements.insertOutput.run(id, input.chainId, JSON.stringify(input.substrates ?? []), now())
       statements.touchProject.run(now(), str(chain.project_id))
@@ -1623,7 +1637,7 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
       registerBlobs?: boolean
     }) => {
       const output = statements.output.get(input.outputId) as Record<string, unknown> | undefined
-      if (!output) throw new Error(`output ${input.outputId} does not exist`)
+      if (!output) throw new DocumentsRuleError(`No output with id ${input.outputId}.`, 404)
       if (input.jobId) {
         const existing = statements.takeByJob.get(input.jobId) as Record<string, unknown> | undefined
         if (existing) return hydrateTake(existing)
@@ -1665,6 +1679,17 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
           }
         }
       }
+      // The pointer switch IS the supersession marker (invariant 2): a new
+      // result landing makes the previous canonical a prior — nothing is
+      // overwritten, at most one non-superseded take exists per output.
+      // Supersede EVERY stray non-superseded take of this output BEFORE the
+      // insert (migration 004's partial unique index enforces the invariant
+      // at the statement boundary — supersede-then-insert keeps each
+      // statement legal), not just the first: restoring the invariant beats
+      // assuming it.
+      for (const take of statements.takesByOutput.all(input.outputId) as Array<Record<string, unknown>>) {
+        if (take.superseded_by === null) statements.supersedeTake.run(id, str(take.id))
+      }
       statements.insertTake.run({
         id,
         output_id: input.outputId,
@@ -1675,14 +1700,6 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
         created_at: now(),
         content_hash: contentHash,
       })
-      // The pointer switch IS the supersession marker (invariant 2): a new
-      // result landing makes the previous canonical a prior — nothing is
-      // overwritten, at most one non-superseded take exists per output.
-      // Supersede EVERY stray non-superseded take of this output, not just
-      // the first: restoring the invariant beats assuming it.
-      for (const take of statements.takesByOutput.all(input.outputId) as Array<Record<string, unknown>>) {
-        if (str(take.id) !== id && take.superseded_by === null) statements.supersedeTake.run(id, str(take.id))
-      }
       indexTake(statements.take.get(id) as Record<string, unknown>)
       return hydrateTake(statements.take.get(id) as Record<string, unknown>)
     }),
@@ -1699,20 +1716,24 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
      *  switches the pointer automatically.) */
     supersedeTake: db.transaction((input: { outputId: string; takeId: string }) => {
       const next = statements.take.get(input.takeId) as Record<string, unknown> | undefined
-      if (!next || str(next.output_id) !== input.outputId) throw new Error(`take ${input.takeId} does not belong to output ${input.outputId}`)
+      if (!next || str(next.output_id) !== input.outputId) throw new DocumentsRuleError(`Take ${input.takeId} does not belong to output ${input.outputId}.`, 404)
       const current = statements.canonicalTake.get(input.outputId) as Record<string, unknown> | undefined
-      if (current && str(current.id) === input.takeId) throw new Error('the take is already canonical')
-      db.prepare('UPDATE canvas_take SET superseded_by = NULL WHERE id = ?').run(input.takeId)
+      if (current && str(current.id) === input.takeId) throw new DocumentsRuleError('The take is already canonical.', 400)
+      // Supersede the displaced canonical (and any stray) BEFORE clearing the
+      // chosen take's marker: migration 004's partial unique index makes two
+      // non-superseded takes per output a statement-level violation, so the
+      // clear must land on an output whose other takes are already priors.
       for (const take of statements.takesByOutput.all(input.outputId) as Array<Record<string, unknown>>) {
         if (str(take.id) !== input.takeId && take.superseded_by === null) statements.supersedeTake.run(input.takeId, str(take.id))
       }
+      db.prepare('UPDATE canvas_take SET superseded_by = NULL WHERE id = ?').run(input.takeId)
       return hydrateTake(statements.take.get(input.takeId) as Record<string, unknown>)
     }),
 
     // op stacks -----------------------------------------------------------------
     addOp: (input: { chainId: string; kind: string; settings?: Record<string, unknown> }) => {
       const chain = statements.getChain.get(input.chainId) as Record<string, unknown> | undefined
-      if (!chain || !chain.op_stack_id) throw new Error(`chain ${input.chainId} has no op stack`)
+      if (!chain || !chain.op_stack_id) throw new DocumentsRuleError(`Chain ${input.chainId} has no op stack.`, 404)
       const id = randomUUID()
       const ordinal = (statements.nextOpOrdinal.get(chain.op_stack_id) as { ordinal: number }).ordinal
       statements.insertOp.run(id, str(chain.op_stack_id), ordinal, input.kind, JSON.stringify(input.settings ?? {}))
@@ -1725,29 +1746,29 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
     /** Ordinal reorder = an UPDATE of ordinals only (undo cursor support). */
     reorderOps: db.transaction((chainId: string, orderedIds: string[]) => {
       const chain = statements.getChain.get(chainId) as Record<string, unknown> | undefined
-      if (!chain || !chain.op_stack_id) throw new Error(`chain ${chainId} has no op stack`)
+      if (!chain || !chain.op_stack_id) throw new DocumentsRuleError(`Chain ${chainId} has no op stack.`, 404)
       const current = statements.opsByStack.all(str(chain.op_stack_id)) as Array<Record<string, unknown>>
       const currentIds = new Set(current.map((op) => str(op.id)))
       if (currentIds.size !== orderedIds.length || !orderedIds.every((id) => currentIds.has(id))) {
-        throw new Error('reorder must be a permutation of the stack op ids')
+        throw new DocumentsRuleError('Reorder must be a permutation of the stack op ids.', 400)
       }
       orderedIds.forEach((id, index) => statements.setOpOrdinal.run(index + 1, id))
     }),
     updateOpSettings: (id: string, settings: Record<string, unknown>) => {
       const op = statements.op.get(id) as Record<string, unknown> | undefined
-      if (!op) throw new Error(`op ${id} does not exist`)
+      if (!op) throw new DocumentsRuleError(`No op with id ${id}.`, 404)
       statements.setOpSettings.run(JSON.stringify(settings), id)
     },
     /** Bake = explicit irreversible marker (S10): frozen by trigger afterwards. */
     bakeOp: (id: string) => {
       const op = statements.op.get(id) as Record<string, unknown> | undefined
-      if (!op) throw new Error(`op ${id} does not exist`)
+      if (!op) throw new DocumentsRuleError(`No op with id ${id}.`, 404)
       statements.bakeOp.run(now(), id)
     },
     deleteOp: (id: string) => {
       const op = statements.op.get(id) as Record<string, unknown> | undefined
       if (!op) return 0
-      if (op.baked_at !== null) throw new Error('baked ops cannot be deleted — bake is irreversible')
+      if (op.baked_at !== null) throw new DocumentsRuleError('Baked ops cannot be deleted — bake is irreversible.', 400)
       return statements.deleteOp.run(id).changes
     },
 
@@ -1761,7 +1782,7 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
       perSlotStrengths?: Record<string, number> | null
     }) => {
       const chain = statements.getChain.get(input.chainId) as Record<string, unknown> | undefined
-      if (!chain) throw new Error(`chain ${input.chainId} does not exist`)
+      if (!chain) throw new DocumentsRuleError(`No chain with id ${input.chainId}.`, 404)
       const existing = statements.identityByChain.get(input.chainId) as Record<string, unknown> | undefined
       const id = existing ? str(existing.id) : randomUUID()
       statements.upsertIdentity.run({
@@ -1787,7 +1808,7 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
     },
     addControlTrack: (input: { chainId: string; kind: string; source: string; inputRef: string; maskRef?: string | null; params?: Record<string, unknown> | null }) => {
       const chain = statements.getChain.get(input.chainId) as Record<string, unknown> | undefined
-      if (!chain) throw new Error(`chain ${input.chainId} does not exist`)
+      if (!chain) throw new DocumentsRuleError(`No chain with id ${input.chainId}.`, 404)
       const id = randomUUID()
       // Blob lifecycle (the appendTake contract, applied to control tracks):
       // a referenced real file is registered into the content-addressed tree
@@ -1816,7 +1837,7 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
 
     // global assets ----------------------------------------------------------------
     upsertAsset: (input: { id?: string; kind: string; fields: Record<string, unknown>; canonicalReferenceSet?: string[] | null }) => {
-      if (!['character', 'location', 'wardrobe', 'refmod', 'prompt'].includes(input.kind)) throw new Error(`unknown asset kind ${input.kind}`)
+      if (!['character', 'location', 'wardrobe', 'refmod', 'prompt'].includes(input.kind)) throw new DocumentsRuleError(`Unknown asset kind ${input.kind}.`, 400)
       const id = input.id ?? randomUUID()
       statements.insertAsset.run({
         id,
@@ -1850,9 +1871,9 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
     /** Fork-into-project (F3 decided): consent-gated copy with lineage home. */
     forkAssetIntoProject: (input: { projectId: string; assetId: string; forkedSettings?: Record<string, unknown>; consent: true }) => {
       const project = statements.getProject.get(input.projectId) as Record<string, unknown> | undefined
-      if (!project) throw new Error(`project ${input.projectId} does not exist`)
+      if (!project) throw new DocumentsRuleError(`No project with id ${input.projectId}.`, 404)
       const asset = statements.asset.get(input.assetId) as Record<string, unknown> | undefined
-      if (!asset) throw new Error(`asset ${input.assetId} does not exist`)
+      if (!asset) throw new DocumentsRuleError(`No asset with id ${input.assetId}.`, 404)
       statements.insertAssetFork.run(
         input.projectId,
         input.assetId,
@@ -1873,7 +1894,7 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
      *  the legacy unconditional upsert (create flows). */
     upsertPlan: (input: { id?: string; projectId: string; document: Record<string, unknown>; expectedUpdatedAt?: number }) => {
       const project = guardProject(statements.getProject.get(input.projectId) as Record<string, unknown> | undefined)
-      if (!project) throw new Error(`project ${input.projectId} does not exist`)
+      if (!project) throw new DocumentsRuleError(`No project with id ${input.projectId}.`, 404)
       const id = input.id ?? randomUUID()
       if (input.id !== undefined && input.expectedUpdatedAt !== undefined) {
         const current = statements.plan.get(input.id) as Record<string, unknown> | undefined
@@ -1901,7 +1922,7 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
     // job extensions (§1 "extend existing") ----------------------------------------------
     setJobState: (input: { id: string; gpuQueueState?: 'active' | 'queued_for_gpu' | null; planRef?: string | null; failure?: { stage: string; reason: string; ref?: string } | null }) => {
       const job = statements.job.get(input.id) as Record<string, unknown> | undefined
-      if (!job) throw new Error(`job ${input.id} does not exist`)
+      if (!job) throw new DocumentsRuleError(`No job with id ${input.id}.`, 404)
       const queue = input.gpuQueueState === undefined ? (job.gpu_queue_state === undefined ? null : (job.gpu_queue_state as string | null)) : input.gpuQueueState
       const planRef = input.planRef === undefined ? ((job.plan_ref as string | null) ?? null) : input.planRef
       const failure = input.failure === undefined ? ((job.failure_json as string | null) ?? null) : input.failure === null ? null : JSON.stringify(input.failure)
