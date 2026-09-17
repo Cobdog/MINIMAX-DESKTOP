@@ -38,11 +38,15 @@ export function validateMusic3(options: Music3GenerationOptions, facts: Pick<Mus
 }
 
 /** Validates, builds, and submits one Music 3 song through the shared queue
- *  bookkeeping. Never parks a job when validation refuses. */
+ *  bookkeeping. Never parks a job when validation refuses. The optional
+ *  manifestExtra rides the job from CREATION (queued): the canvas link must
+ *  be on the persisted record before the first debounced save, or a reload
+ *  mid-render orphans the landing (M1). */
 export async function submitMusic3(
   options: Music3GenerationOptions,
   facts: Music3SubmitFacts,
   io: Music3SubmitIo,
+  manifestExtra?: Record<string, unknown>,
 ): Promise<{ ok: true; jobId: string } | { ok: false; message: string }> {
   const refusal = validateMusic3(options, facts)
   if (refusal) {
@@ -55,6 +59,7 @@ export async function submitMusic3(
     id: localId, provider: 'music3', mediaType: 'audio', mode: 'text', prompt: options.caption,
     createdAt: Date.now(), status: 'queued', progress: 2, progressLabel: 'Preparing Music 3 workflow',
     width: 0, height: 0, duration: options.duration,
+    ...(manifestExtra ? { manifest: manifestExtra } : {}),
   }
   io.setJobs((current) => [job, ...current])
   io.onJobCreated?.(localId)

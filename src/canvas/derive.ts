@@ -314,6 +314,13 @@ export function deriveTiles(
     const place = placed.get(chain.id) ?? GRID_ORIGIN
     const kind: TileKind = canonical || chain.kind === 'media' ? 'media' : 'seed'
     const width = layout?.[chain.id]?.w ?? TILE_W
+    // A completed render whose bytes could not be landed parks an ERRORED
+    // take (metrics.landingError, B2) — the failure is durable on the object
+    // and surfaces as the needs-attention ring with its reason, dismissable
+    // like any other failure. Never a silent idle tile.
+    const landingError = canonical?.metrics && typeof canonical.metrics.landingError === 'string' ? canonical.metrics.landingError : null
+    const jobStatus = tileStatus(chain, job, dismissed.has(chain.id))
+    const erroredLanding = landingError && jobStatus === 'idle' && !dismissed.has(chain.id)
     return {
       id: chain.id,
       kind,
@@ -323,8 +330,8 @@ export function deriveTiles(
       y: place.y,
       w: width,
       h: kind === 'media' ? TILE_H_MEDIA : TILE_H_SEED,
-      status: tileStatus(chain, job, dismissed.has(chain.id)),
-      statusNote: job && job.status === 'failed' ? job.error ?? 'generation failed' : null,
+      status: erroredLanding ? 'failed' : jobStatus,
+      statusNote: erroredLanding ? landingError : job && job.status === 'failed' ? job.error ?? 'generation failed' : null,
       jobId,
       refOutputs: refs,
       ops: chain.ops.map((op) => ({ id: op.id, kind: op.kind, settings: op.settings ?? null, bakedAt: op.bakedAt ?? null })),

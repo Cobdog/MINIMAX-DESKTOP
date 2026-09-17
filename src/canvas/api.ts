@@ -7,12 +7,23 @@
 import type { CanvasDocument, DocumentChain } from './derive'
 import type { CameraState } from './camera'
 
+/** Documents-route failure carrying its HTTP status — the conflict surface
+ *  (M5) keys off it (409 = rebase-and-retry, not a user-facing error). */
+export class DocumentsHttpError extends Error {
+  readonly status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'DocumentsHttpError'
+    this.status = status
+  }
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   headers.set('x-minimax-token', new URLSearchParams(window.location.search).get('token') ?? '')
   const response = await fetch(path, { ...init, headers })
   const body = await response.json().catch(() => ({})) as Record<string, unknown> & T
-  if (!response.ok) throw new Error(typeof body.error === 'string' ? body.error : `documents request failed (${response.status})`)
+  if (!response.ok) throw new DocumentsHttpError(response.status, typeof body.error === 'string' ? body.error : `documents request failed (${response.status})`)
   return body
 }
 
@@ -38,12 +49,21 @@ export type DocumentAsset = {
   fields: Record<string, unknown>
   canonicalReferenceSet: string[] | null
   createdAt: number
+  /** Trash listings carry it; live listings leave it undefined. */
+  deletedAt?: number
 }
+
+/** One newer-schema project row the server refused to hydrate (M4) — the
+ *  list route reports these instead of letting them poison the boot. */
+export type SkippedProject = { id: string; name: string; schemaVersion: number | null; writerAppVersion: string }
 
 export const documentsApi = {
   bootstrap: () => call<{ schemaVersion: number; appVersion: string }>('/api/lan/documents/bootstrap'),
 
-  listProjects: async () => (await call<{ projects: ProjectMeta[] }>('/api/lan/documents/projects')).projects,
+  listProjects: async (): Promise<{ projects: ProjectMeta[]; skipped: SkippedProject[] }> => {
+    const body = await call<{ projects: ProjectMeta[]; skipped?: SkippedProject[] }>('/api/lan/documents/projects')
+    return { projects: body.projects ?? [], skipped: body.skipped ?? [] }
+  },
 
   getProject: (id: string) => call<CanvasDocument>(`/api/lan/documents/project?id=${encodeURIComponent(id)}`),
 
@@ -99,6 +119,12 @@ export const documentsApi = {
   ingestBlob: async (input: { dataBase64: string; name: string; kind: 'image' | 'video' | 'audio' }) =>
     post<{ path: string; blob: { relPath: string; hash: string | null; size: number | null; present: boolean } }>('/api/lan/documents/blobs/ingest', { data: input.dataBase64, name: input.name, kind: input.kind }),
 
+  /** Remote-engine output ingest (B2): fetch a completed render's bytes from
+   *  the engine's /view (through the server proxy) into the output dir +
+   *  blob tree — the exact ComfyUI output descriptor, never a path. */
+  ingestEngineOutput: async (input: { filename: string; subfolder?: string; type?: string; kind: 'image' | 'video' | 'audio' }) =>
+    post<{ path: string; blob: { relPath: string; hash: string | null; size: number | null; present: boolean } }>('/api/lan/documents/blobs/ingest-output', input),
+
   /** Blob media URL for <img>/<video> sources (token rides the query — the
    *  route is in the server's query-token set exactly like /api/lan/media). */
   blobFileUrl: (relPath: string) => {
@@ -116,13 +142,24 @@ export const documentsApi = {
 
   // ---- the global asset store (§2 asset, F3; Phase 4 canvas surface) ------
 
-  listAssets: async (kind?: string): Promise<DocumentAsset[]> => {
-    const kindQuery = kind ? `?kind=${encodeURIComponent(kind)}` : ''
-    return (await call<{ assets: DocumentAsset[] }>(`/api/lan/documents/assets${kindQuery}`)).assets ?? []
+  listAssets: async (kind?: string, trash = false): Promise<DocumentAsset[]> => {
+    const query = new URLSearchParams()
+    if (kind) query.set('kind', encodeURIComponent(kind))
+    if (trash) query.set('trash', '1')
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    return (await call<{ assets: DocumentAsset[] }>(`/api/lan/documents/assets${suffix}`)).assets ?? []
   },
 
   upsertAsset: async (input: { id?: string; kind: DocumentAsset['kind']; fields: Record<string, unknown>; canonicalReferenceSet?: string[] | null }) =>
     (await post<{ asset: { id: string; kind: string } }>('/api/lan/documents/assets', input)).asset,
+
+  /** Projection hygiene (m5): the library projection tombstones/restores its
+   *  own rows as their source entries disappear and return. */
+  deleteAsset: async (id: string) =>
+    (await post<{ deleted: number }>('/api/lan/documents/assets/delete', { id })).deleted,
+
+  restoreAsset: async (id: string) =>
+    (await post<{ restored: number }>('/api/lan/documents/assets/restore', { id })).restored,
 
   /** Consent-gated fork-into-project (§2 asset_fork): the explicit consent
    *  record — the panel's bind flow calls this BEFORE the first reference. */
@@ -130,8 +167,10 @@ export const documentsApi = {
     post<{ fork: { projectId: string; assetId: string } }>('/api/lan/documents/assets/fork', { ...input, consent: true }),
 
   /** Phase 5b (§6): plan-document upsert — the document store's canvas_plan
-   *  row (id omitted = create; hydrated plans ride getProject). */
-  upsertPlan: async (input: { projectId: string; id?: string; document: Record<string, unknown> }) =>
+   *  row (id omitted = create; hydrated plans ride getProject).
+   *  expectedUpdatedAt (M5) makes updates compare-and-swap: a stale version
+   *  answers 409 (DocumentsHttpError) with the current document attached. */
+  upsertPlan: async (input: { projectId: string; id?: string; document: Record<string, unknown>; expectedUpdatedAt?: number }) =>
     (await post<{ plan: { id: string } }>('/api/lan/documents/plans', input)).plan,
 
   getSession: async (): Promise<CanvasSession> => {

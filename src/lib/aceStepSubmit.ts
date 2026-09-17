@@ -41,11 +41,15 @@ export function validateAceStep(options: AceStepGenerationOptions, facts: Pick<A
 }
 
 /** Validates, builds, and submits one ACE-Step track through the shared
- *  queue bookkeeping. Never parks a job when validation refuses. */
+ *  queue bookkeeping. Never parks a job when validation refuses. The
+ *  optional manifestExtra rides the job from CREATION (queued): the canvas
+ *  link must be on the persisted record before the first debounced save, or
+ *  a reload mid-render orphans the landing (M1). */
 export async function submitAceStep(
   options: AceStepGenerationOptions,
   facts: AceStepSubmitFacts,
   io: AceStepSubmitIo,
+  manifestExtra?: Record<string, unknown>,
 ): Promise<{ ok: true; jobId: string } | { ok: false; message: string }> {
   const refusal = validateAceStep(options, facts)
   if (refusal) {
@@ -58,6 +62,7 @@ export async function submitAceStep(
     id: localId, provider: 'acestep', mediaType: 'audio', mode: 'text', prompt: options.tags,
     createdAt: Date.now(), status: 'queued', progress: 2, progressLabel: 'Preparing ACE-Step workflow',
     width: 0, height: 0, duration: options.duration,
+    ...(manifestExtra ? { manifest: manifestExtra } : {}),
   }
   io.setJobs((current) => [job, ...current])
   io.onJobCreated?.(localId)
