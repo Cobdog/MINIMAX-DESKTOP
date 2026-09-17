@@ -50,10 +50,16 @@ export type VisionScenario = {
 /** Chrome shared by every rubric: the intended look of the app — the CANVAS
  *  world since Phase 5 (the old shell is deleted: no left sidebar, no nav
  *  groups, no retirement badges — their absence is the design, not a
- *  regression). */
+ *  regression).
+ *
+ *  Rubric amendment (2026-09-17, Phase 5b): the titlebar gained a "timeline
+ *  V" projection button BEFORE "library V" (the §7 V-flip family grew — V now
+ *  cycles timeline → library); and the Studios dock lost its Movie tab
+ *  (MoviePlanner retired — plan documents + the timeline projection are the
+ *  planning surface). */
 const SHELL_CONTEXT = [
   'Context for every clause: a dark-theme desktop studio app at 1920x1080 whose ONLY surface is a video canvas — a slim top titlebar over a near-black dotted-grid infinite canvas. There is NO left sidebar and NO grouped navigation: the old shell was deleted (Phase 5); do not flag its absence.',
-  'Top titlebar (slim): canvas tabs (a named tab like "Canvas <date>" with an × affordance), a pill-shaped radar button (reading "calm" or a queue count), a muted "engine offline" chip — the engine being offline in tests is CORRECT, not a defect — then small "library V", "studios", "diagnostics", "settings", "index ⌘K" buttons at the right.',
+  'Top titlebar (slim): canvas tabs (a named tab like "Canvas <date>" with an × affordance), a pill-shaped radar button (reading "calm" or a queue count), a muted "engine offline" chip — the engine being offline in tests is CORRECT, not a defect — then small "timeline V", "library V", "studios", "diagnostics", "settings", "index ⌘K" buttons at the right.',
   'A slim contextual bottom bar spans the canvas foot; a small object counter may sit bottom-right.',
   'Dimmed/disabled controls and small muted sub-labels are the app\'s intentional dense design language, NOT contrast defects — only flag text that is genuinely unreadable against its immediate background.',
 ].join(' ')
@@ -147,8 +153,9 @@ export const SCENARIOS: VisionScenario[] = [
       await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
       await page.goto('/')
       await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
-      // V summons the library projection (§7).
-      await page.keyboard.press('v')
+      // The titlebar library button (stable entry — V cycles the family
+      // since Phase 5b: timeline first).
+      await page.locator('[data-canvas-library-button]').click()
       await expect(page.locator('[data-canvas-library]')).toBeVisible()
       await page.waitForTimeout(400)
     },
@@ -164,9 +171,61 @@ export const SCENARIOS: VisionScenario[] = [
           SHELL_CONTEXT,
           'A modal-ish overlay panel floats centered over a dimmed canvas: a search input row at its top — a search field (placeholder about completed outputs across the session), four small filter chips reading "all", "video", "image", "audio", and an × close button at the right.',
           'The body is the EMPTY state: a single muted centered line reading "Completed outputs appear here — every take is a canvas object.".',
-          'A thin footer bar at the panel\'s bottom: "0 of 0 outputs" at the left and a note line at the right mentioning "V toggles" and the no-silent-failure contract.',
+          'A thin footer bar at the panel\'s bottom: "0 of 0 outputs" at the left and a note line at the right mentioning "V cycles" (timeline → library → canvas) and the no-silent-failure contract.',
           'NO result rows, thumbnails, cards, or skeleton loaders anywhere in the panel.',
           'Defects to flag: any result row present, the overlay not centered or clipped by the viewport, overlapping controls, truncated labels.',
+        ].join(' '),
+      },
+    ],
+  },
+  {
+    // Canvas Phase 5b (task 2u0rent) — the required NEW scenario: the
+    // Director Suite's timeline projection with the MEASURED gap menu open.
+    // UI-driven: a real plan document is created through the overlay, two
+    // segments authored, and the gap between them opens the transition menu.
+    id: 'timeline-gap-menu',
+    label: 'Director Suite — the timeline projection + the measured gap menu (V)',
+    run: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+      await page.goto('/')
+      await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+      // V opens the timeline first (the §7 flip family, Phase 5b).
+      await page.keyboard.press('v')
+      const overlay = page.locator('[data-canvas-timeline]')
+      await expect(overlay).toBeVisible()
+      await overlay.locator('[data-canvas-timeline-new-plan]').click()
+      await expect(overlay.locator('[data-canvas-plan-brief]')).toBeVisible({ timeout: 10_000 })
+      await overlay.locator('[data-canvas-plan-add-segment]').click()
+      await overlay.locator('[data-canvas-plan-add-segment]').click()
+      await expect(overlay.locator('[data-canvas-segment]')).toHaveCount(2)
+      await overlay.locator('[data-canvas-segment-prompt]').nth(0).fill('the drummer steps off the night train into the rain')
+      await overlay.locator('[data-canvas-segment-prompt]').nth(0).blur()
+      await overlay.locator('[data-canvas-segment-prompt]').nth(1).fill('the corridor lights stutter as she passes')
+      await overlay.locator('[data-canvas-segment-prompt]').nth(1).blur()
+      await page.waitForTimeout(400)
+      await overlay.locator('[data-canvas-gap]').first().click()
+      await expect(overlay.locator('[data-canvas-gap-menu]')).toBeVisible()
+      await page.waitForTimeout(400)
+    },
+    after: async (page) => {
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(150)
+      await page.keyboard.press('Escape')
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
+    },
+    checkpoints: [
+      {
+        id: 'timeline-gap-menu-1080p',
+        label: 'Director Suite — timeline overlay with the measured transition menu open over a two-segment plan',
+        rubric: [
+          SHELL_CONTEXT,
+          'A wide modal-ish overlay panel floats over the dimmed canvas: a header row reading "Timeline — plan (2 segments)" with a small total note ("2 items · 12s planned"), a "+ New plan" pill button, and an × close at the right.',
+          'Below the header, a horizontal STRIP: two segment cards (titled "Segment 1" and "Segment 2", each with a muted placeholder icon area and a meta line reading "no object · 6s") separated by ONE dashed gap chip reading "Hard cut" with a small uppercase "assembly" sub-label.',
+          'Over the strip, a transition MENU popover is open, titled "Transition" with an × close: FIVE stacked option cards, each with a bold name, a small uppercase mechanism pill, and a one-line verdict: (1) "Hard cut" · assembly · text mentioning "9.8 dB" and marked "current"; (2) "NLE transition" · post-production · mentions an external editor; (3) "FLF continuation splice" · in-model · mentions "36.2/34.3 dB"; (4) "Dip-to-black" · post-production · mentions a structural dip AND rendered DIMMED/disabled with a warm-toned reason line about bridge render engine work; (5) "Diegetic bridge" · in-model · also DIMMED/disabled with the engine-work reason. The disabled state of options 4–5 is INTENTIONAL honesty (queued engine work), not a defect.',
+          'A small menu footer line mentioning the segment boundary and "tranche-1 measurements".',
+          'Below the strip, the PLAN EDITOR: a "BRIEF" label with a wide textarea on the left, and on the right two segment rows — each with an index badge, a title input ("Segment 1"/"Segment 2"), a small "seconds" number input, a muted "no object" pill, a prompt textarea (one filled with text about a drummer stepping off a night train), and "Seed object" + "Remove" pill buttons.',
+          'A thin footer bar: "V cycles · timeline → library → canvas" at the left and a note about transitions being measured choices at the right.',
+          'Defects to flag: fewer than five menu options, an option missing its verdict line, the strip cards or menu overlapping each other illegibly, inputs clipped by the panel edge, text unreadable mid-glyph, a pure-white or pure-black dead region covering the panel.',
         ].join(' '),
       },
     ],

@@ -142,7 +142,7 @@ export function LibraryOverlay() {
       </ul>
       <footer className="canvas-library-footer">
         <span>{visible.length} of {rows.length} outputs</span>
-        <span>V toggles · projections inherit the no-silent-failure contract</span>
+        <span>V cycles · timeline → library → canvas · projections inherit the no-silent-failure contract</span>
       </footer>
     </div>
   </div>

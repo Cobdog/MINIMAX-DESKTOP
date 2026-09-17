@@ -724,12 +724,14 @@ console.log('(w) the extracted engine cores — ladders stay verbatim (one code 
 // ---------------------------------------------------------------------------
 // Phase 5 (task 7mcp11b) — the deletion wave's extracted cores: the character
 // contact-sheet submission (ContactSheet-REQUIRED — the LTX survey fallback
-// died with the shell) and the MoviePlanner latent scene-chain (its new home
-// is the canvas Studios dock). Async (the submissions are async functions);
-// the suite's tail summary moves inside the runner.
+// died with the shell). The MoviePlanner latent scene-chain core died with
+// its only caller in Phase 5b (MoviePlanner retired — the scene-chain
+// successor is the store's submitPlanEpisode over canvas chains; its ladder
+// reuses submitH3Render's, asserted in (p)). Async (the submission is an
+// async function); the suite's tail summary moves inside the runner.
 // ---------------------------------------------------------------------------
 async function phase5Cores() {
-  console.log('(x) Phase-5 extracted cores — contact sheet (ContactSheet-only) + scene chains')
+  console.log('(x) Phase-5 extracted cores — contact sheet (ContactSheet-only)')
   const contact = loadTs('src/lib/contactSheetSubmit.ts')
   const contactFacts = (overrides = {}) => ({ settings: { comfyUrl: 'http://x' }, connected: true, models: [], selection: { ref2va: 'r', textEncoder: 't', videoVae: 'v' }, clientId: 'c', ...overrides })
   const project = { id: 'char-1', name: 'Mira', baseImage: media('/refs/mira.png', 'image') }
@@ -738,16 +740,109 @@ async function phase5Cores() {
   eq(await contact.submitCharacterContactSheet(project, contactFacts({ connected: false }), io), 'Start ComfyUI and verify the server connection in Settings.', 'contact sheet: offline refuses first (the shared ladder)')
   eq(await contact.submitCharacterContactSheet({ id: 'char-2', name: 'Mira' }, contactFacts(), io), 'Approve a character identity image first.', 'contact sheet: no approved identity image refuses')
   eq(await contact.submitCharacterContactSheet(project, contactFacts(), io), 'Install the ComfyUI-H3-ContactSheet nodes and the five-view turnaround LoRA (minimax_h3_five_view_*), then refresh the engine.', 'contact sheet: the ContactSheet nodes + turnaround LoRA are REQUIRED (Phase-4 cleanup applied — the LTX survey fallback is gone)')
+}
 
-  const scenes = loadTs('src/lib/sceneChainSubmit.ts')
-  const chainFacts = (overrides = {}) => ({ settings: { comfyUrl: 'http://x', generationDefaults: { steps: 30, turbo: 'off', experimentalSampling: false, loraStrength: 1, sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', duration: 6, resolution: '1344x768' } }, connected: true, modelReady: true, selection: {}, clientId: 'c', ...overrides })
-  const sceneProject = { id: 'mv-1', title: 'Nightfall', aspectRatio: '16:9', scenes: [] }
-  const singleShotScene = { id: 'sc-1', title: 'Alley', transition: 'cut', locationId: '', shots: [{ id: 'sh-1', title: 'Open', duration: 6, prompt: 'a lone figure', dialogue: '', mode: 'text', characterIds: [], stage: 'planned' }] }
-  eq(await scenes.submitSceneChain(sceneProject, singleShotScene, [], true, chainFacts({ connected: false }), io), 'Start ComfyUI and verify the server connection in Settings.', 'scene chain: offline refuses first')
-  eq(await scenes.submitSceneChain(sceneProject, singleShotScene, [], true, chainFacts({ modelReady: false }), io), 'One or more required MiniMax H3 model components are missing.', 'scene chain: incomplete model stack refuses')
-  eq(await scenes.submitSceneChain(sceneProject, singleShotScene, [], false, chainFacts(), io), 'Install the ComfyUI-H3-Motion-Context custom nodes first, then refresh the engine.', 'scene chain: absent Motion-Context nodes refuse (latent continuity is the whole point)')
-  eq(await scenes.submitSceneChain(sceneProject, singleShotScene, [], true, chainFacts(), io), 'A chain needs at least two shots with prompts.', 'scene chain: fewer than two prompted shots refuses honestly')
-  eq(await scenes.submitSceneChain(sceneProject, { ...singleShotScene, shots: [{ ...singleShotScene.shots[0], prompt: '' }] }, [], true, chainFacts(), io), 'A chain needs at least two shots with prompts.', 'scene chain: un-prompted shots are filtered before the count (settings-stable, never a doomed graph)')
+// ---------------------------------------------------------------------------
+// Phase 5b (task 2u0rent) — the Director Suite pure layer: the plan document
+// (canvas_plan.document_json per document-model §1), the MEASURED gap menu
+// (verdicts from docs/research/h3-transitions-and-latent-continuity.md), and
+// the timeline projection (chronological chain outputs / plan segments).
+// ---------------------------------------------------------------------------
+console.log('(y) Phase 5b — plan documents + the measured gap menu + the timeline projection')
+{
+  const plan = loadTs('src/canvas/plan.ts')
+
+  eq(plan.GAP_KINDS, ['cut', 'nle', 'flf', 'black', 'bridge'], 'gap kinds: the schema\'s five, hard cut first (the measured default)')
+  eq(plan.GAP_MENU.map((entry) => entry.kind), plan.GAP_KINDS, 'gap menu: exactly one entry per kind, in menu order')
+  ok(plan.GAP_MENU.every((entry) => entry.verdict.length > 40), 'gap menu: every entry carries its measured verdict')
+  const flf = plan.gapMenuEntry('flf')
+  eq([flf.mechanism, flf.executable, flf.engineDependent], ['in-model', true, false], 'gap menu: FLF is THE executable in-model splice (36 dB class, tranche 1)')
+  const bridge = plan.gapMenuEntry('bridge')
+  eq([bridge.mechanism, bridge.executable, bridge.engineDependent], ['in-model', false, true], 'gap menu: the diegetic bridge is in-model but engine-dependent (a labeled choice, never a pretend button)')
+  ok(plan.gapMenuEntry('nle').mechanism === 'post' && plan.gapMenuEntry('cut').mechanism === 'assembly', 'gap menu: NLE is post-production, the hard cut is assembly')
+  ok(plan.gapMenuEntry('black').engineDependent === true, 'gap menu: the guided dip-to-black is engine-dependent (the plain dip is post)')
+
+  const read = plan.readPlanDocument({
+    brief: 'a night train heist',
+    segments: [
+      { id: 's1', title: 'Open', prompt: 'rain on the platform', duration: 8, chainId: 'c1', referenceCharacterIds: ['lib-char'], referenceLocationIds: [] },
+      { id: 's2', duration: 'garbage', chainId: 7 },
+    ],
+    gaps: [
+      { afterSegmentId: 's1', kind: 'flf' },
+      { afterSegmentId: 's1', kind: 'nle' },
+      { afterSegmentId: 'missing', kind: 'cut' },
+      { afterSegmentId: 's2', kind: 'warp' },
+    ],
+  })
+  eq(read.brief, 'a night train heist', 'plan read: the brief round-trips')
+  eq(read.segments.length, 2, 'plan read: segments survive a tolerant read')
+  eq(read.segments[1].duration, 6, 'plan read: a garbage duration falls back to the default')
+  ok(read.segments[1].chainId === null, 'plan read: a non-string chain_ref reads null, never a crash')
+  eq(read.segments[1].title, 'Segment 2', 'plan read: an absent title gets an indexed fallback')
+  eq(read.gaps.map((gap) => `${gap.afterSegmentId}:${gap.kind}`), ['s1:flf', 's1:nle'], 'plan read: dangling + unknown-kind gaps drop; duplicates read raw')
+  eq(plan.gapAfter(read, 's1').kind, 'flf', 'gapAfter: the first recorded gap wins')
+  eq(plan.gapAfter(read, 's2').kind, 'cut', 'gapAfter: a missing gap is the measured default (hard cut)')
+  eq(plan.gapAfter(plan.readPlanDocument({}), 'anything').kind, 'cut', 'gapAfter: an empty plan defaults to hard cut')
+
+  eq(plan.episodeRunEnd(read, 0), 2, 'episode run: the recorded FLF gap extends the run over the next segment')
+  const flfPlan = plan.readPlanDocument({ segments: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }], gaps: [{ afterSegmentId: 'a', kind: 'flf' }, { afterSegmentId: 'b', kind: 'flf' }, { afterSegmentId: 'c', kind: 'nle' }] })
+  eq(plan.episodeRunEnd(flfPlan, 0), 3, 'episode run: contiguous FLF joins extend; a non-FLF gap ends the episode')
+  eq(plan.episodeRunEnd(flfPlan, 3), 4, 'episode run: a lone tail segment is its own (degenerate) run')
+
+  // The projection over a small document: c1 has a rendered video take, c2
+  // is an unrendered seed, c3 has an image take.
+  const doc = {
+    project: { id: 'p1', name: 'P', camera: {}, createdAt: 1, lastActiveAt: 1 },
+    chains: [
+      chainOf('c1', { settings: { prompt: 'the drummer boards. rain sheets the platform', duration: 8 }, outputs: [output('o1', 'c1', [take('t1', { outputId: 'o1', metrics: { kind: 'video', duration: 8.2, sourcePath: '/out/a.mp4' } })])] }),
+      chainOf('c2', { settings: { prompt: 'the corridor', duration: 6 }, outputs: [] }),
+      chainOf('c3', { settings: { prompt: 'a still of the platform clock', duration: 5 }, outputs: [output('o3', 'c3', [take('t3', { outputId: 'o3', metrics: { kind: 'image', duration: 5, sourcePath: '/out/c.png' } })])] }),
+    ],
+    plans: [],
+  }
+
+  const unplanned = plan.deriveTimeline({ document: doc, plan: null, jobs: [], links: {} })
+  eq(unplanned.planId, null, 'timeline (unplanned): no plan id')
+  eq(unplanned.items.map((item) => item.chainId), ['c1', 'c3'], 'timeline (unplanned): chain OUTPUTS in creation order (unrendered seeds excluded)')
+  ok(Math.abs(unplanned.plannedDuration - 13.2) < 1e-9, 'timeline (unplanned): durations come from the real takes')
+  eq(unplanned.gaps.map((gap) => gap.kind), ['cut'], 'timeline (unplanned): implicit hard cuts between outputs')
+  eq(unplanned.gaps[0].flfReady, true, 'timeline (unplanned): FLF readiness reads the left take (a video with a renderable path)')
+
+  const planRow = {
+    id: 'plan-1',
+    document: {
+      brief: 'b',
+      segments: [
+        { id: 's1', title: 'Board', prompt: 'the drummer boards', duration: 8, chainId: 'c1', referenceCharacterIds: [], referenceLocationIds: [] },
+        { id: 's2', title: 'Corridor', prompt: 'the corridor', duration: 6, chainId: 'c2', referenceCharacterIds: [], referenceLocationIds: [] },
+        { id: 's3', title: 'Clock', prompt: 'the platform clock', duration: 5, chainId: null, referenceCharacterIds: [], referenceLocationIds: [] },
+      ],
+      gaps: [{ afterSegmentId: 's1', kind: 'flf' }],
+    },
+  }
+  const projected = plan.deriveTimeline({ document: doc, plan: planRow, jobs: [], links: {} })
+  eq(projected.planId, 'plan-1', 'timeline (plan): the plan id rides the projection')
+  eq(projected.items.map((item) => item.segmentId), ['s1', 's2', 's3'], 'timeline (plan): segments in plan order')
+  eq(projected.items.map((item) => [item.start, item.end]), [[0, 8], [8, 14], [14, 19]], 'timeline (plan): cumulative planned ranges')
+  eq(projected.items.map((item) => item.status), ['idle', 'idle', 'unseeded'], 'timeline (plan): the F7 status ladder rides the items (unseeded without a chain)')
+  ok(Math.abs(projected.renderedDuration - 8.2) < 1e-9, 'timeline (plan): rendered duration sums real takes only')
+  eq(projected.gaps.map((gap) => gap.kind), ['flf', 'cut'], 'timeline (plan): the recorded gap + the default between s2/s3')
+  eq(projected.gaps[0].flfReady, true, 'timeline (plan): FLF ready — s1\'s canonical take is a renderable video')
+  eq(projected.gaps[1].flfReady, false, 'timeline (plan): FLF not ready past an unrendered segment')
+
+  const failed = plan.deriveTimeline({ document: doc, plan: planRow, jobs: [{ id: 'j2', status: 'failed', progress: 0, error: 'engine exploded' }], links: { c2: 'j2' } })
+  eq(failed.items[1].status, 'failed', 'timeline: a failed linked job surfaces on its segment (projections inherit the no-silent-failure contract)')
+  eq(failed.items[1].statusNote, 'engine exploded', 'timeline: the failure reason rides the item')
+
+  const adopted = plan.planDocumentFromChains(doc)
+  eq(adopted.segments.map((segment) => segment.chainId), ['c1', 'c3'], 'adopt chronology: every chain with a canonical take becomes a segment carrying its chain_ref')
+  ok(Math.abs(adopted.segments[0].duration - 8.2) < 1e-9, 'adopt chronology: the segment duration comes from the take')
+  eq(adopted.segments[0].title, 'the drummer boards', 'adopt chronology: titles derive from the prompts (first clause, capped)')
+  eq(adopted.gaps.length, 0, 'adopt chronology: gaps start at the measured default (implicit hard cuts)')
+
+  eq(plan.formatTimelineDuration(83), '1:23', 'format: m:ss')
+  eq(plan.formatTimelineDuration(0), '0:00', 'format: zero')
 }
 
 phase5Cores()

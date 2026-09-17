@@ -121,13 +121,14 @@ export function Launcher({ onPickFile }: { onPickFile(): void }) {
         <button type="button" className="canvas-chip" data-canvas-chip="prompt-library" title="Search public Civitai generation metadata for reusable prompts" onClick={() => setLibraryOpen(true)}>
           <Sparkles size={13} /> prompt library
         </button>
-        {/* Phase 5: the kept authoring surfaces dock from the launcher too —
-            the asset studios + the movie planner (dated decisions in
-            StudiosDock.tsx). */}
+        {/* Phase 5: the kept authoring surfaces dock from the launcher too
+            (dated decisions in StudiosDock.tsx). The movie-plan chip re-pointed
+            2026-09-17 (Phase 5b): MoviePlanner retired — the planning surface
+            is the timeline projection + plan documents (V). */}
         <button type="button" className="canvas-chip" data-canvas-chip="studios" title="Asset authoring studios — characters, hair, wardrobe, accessories, locations" onClick={() => useCanvasStore.getState().setStudiosDock({ tab: 'characters' })}>
           <Users size={13} /> studios
         </button>
-        <button type="button" className="canvas-chip" data-canvas-chip="movie" title="The movie planner — brief, scenes, shots, chains (the Director Suite ancestor)" onClick={() => useCanvasStore.getState().setStudiosDock({ tab: 'movie' })}>
+        <button type="button" className="canvas-chip" data-canvas-chip="movie" title="The timeline projection — the plan chronology + measured transitions (the Director Suite)" onClick={() => useCanvasStore.getState().setTimelineOpen(true)}>
           <Clapperboard size={13} /> movie plan
         </button>
       </div>

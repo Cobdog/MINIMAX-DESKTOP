@@ -63,6 +63,20 @@ export type CanvasDocument = {
   /** §2 asset_fork rows for this project (the consent records — present once
    *  a global asset is forked in; absent on older documents, tolerated). */
   assetForks?: Array<{ projectId: string; assetId: string; forkedSettingsSnapshot: Record<string, unknown>; lineage: Record<string, unknown> | null; consentAt: number }>
+  /** Phase 5b (§6): plan documents for this project (canvas_plan rows the
+   *  server hydrates — brief/segments/gaps per document-model §1; absent on
+   *  older documents, tolerated). */
+  plans?: DocumentPlan[]
+}
+
+/** One hydrated canvas_plan row (server/documents.ts hydration shape). */
+export type DocumentPlan = {
+  id: string
+  projectId: string
+  schemaVersion: number
+  document: Record<string, unknown>
+  createdAt: number
+  updatedAt: number
 }
 
 /** The job facts the status ring needs — GenerationJob is structural here so

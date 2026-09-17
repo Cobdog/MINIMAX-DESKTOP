@@ -129,6 +129,11 @@ export const documentsApi = {
   forkAsset: (input: { projectId: string; assetId: string; forkedSettings?: Record<string, unknown> }) =>
     post<{ fork: { projectId: string; assetId: string } }>('/api/lan/documents/assets/fork', { ...input, consent: true }),
 
+  /** Phase 5b (§6): plan-document upsert — the document store's canvas_plan
+   *  row (id omitted = create; hydrated plans ride getProject). */
+  upsertPlan: async (input: { projectId: string; id?: string; document: Record<string, unknown> }) =>
+    (await post<{ plan: { id: string } }>('/api/lan/documents/plans', input)).plan,
+
   getSession: async (): Promise<CanvasSession> => {
     const body = await call<{ session: CanvasSession | null }>('/api/lan/documents/session')
     return body.session ?? { openProjects: [], activeProject: null }

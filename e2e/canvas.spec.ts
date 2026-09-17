@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 
 // Canvas Phase 2 (task flyuh6h) — the ?canvas=1 route against the production
@@ -1106,8 +1107,10 @@ test('the library projection (V): outputs across the session, filtered + navigat
   await dropPng(page, 'library-object.png')
   await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
 
-  // V summons the projection; every completed output (the dropped media's
-  // take IS one) lists with its kind + owning canvas.
+  // V cycles the projection family (§7, Phase 5b): ∅ → timeline → library.
+  // First press = the timeline; second = the library this test exercises.
+  await page.keyboard.press('v')
+  await expect(page.locator('[data-canvas-timeline]')).toBeVisible()
   await page.keyboard.press('v')
   const overlay = page.locator('[data-canvas-library]')
   await expect(overlay).toBeVisible()
@@ -1200,7 +1203,10 @@ test('Phase-5 deletion smoke: Create / Queue / Library / LTX 2.5 are gone; the c
   await expect(page.locator('[data-canvas-index]')).toBeVisible()
   await page.keyboard.press('Escape')
 
-  // Library → V summons the library projection.
+  // Library → V cycles the projection family (5b: timeline first, library
+  // second — one more press).
+  await page.keyboard.press('v')
+  await expect(page.locator('[data-canvas-timeline]')).toBeVisible()
   await page.keyboard.press('v')
   await expect(page.locator('[data-canvas-library]')).toBeVisible()
   await page.keyboard.press('Escape')
@@ -1237,6 +1243,201 @@ test('the Studios dock shot handoff seeds a chain, consent-gated (nothing auto-e
   expect(chain!.settings.prompt).toContain('drummer steps off the night train')
   expect(chain!.settings.duration).toBe(9)
   expect(chain!.settings.resolution).toBe('768x1344')
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+// ---- Phase 5b (task 2u0rent): the Director Suite — timeline projection,
+// plan documents, the measured gap menu, MoviePlanner retirement. ----------
+
+/** The active project's RAW document (plans included — the typed helper
+ *  predates them). */
+async function rawDocument(page: Page) {
+  const session = await page.evaluate(async () => {
+    const response = await fetch('/api/lan/documents/session')
+    return (await response.json()).session as { activeProject: string | null }
+  })
+  expect(session.activeProject).toBeTruthy()
+  return page.evaluate(async (id) => {
+    const response = await fetch(`/api/lan/documents/project?id=${encodeURIComponent(id)}`)
+    return await response.json() as {
+      chains: Array<{ id: string; kind: string; settings: Record<string, unknown> }>
+      plans: Array<{ id: string; document: { brief: string; segments: Array<{ id: string; title: string; prompt: string; duration: number; chainId: string | null }>; gaps: Array<{ afterSegmentId: string; kind: string }> } }>
+    }
+  }, session.activeProject!)
+}
+
+test('the timeline projection (V): chain outputs chronologically + adopt-chronology + navigate-to', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await dropPng(page, 'timeline-object.png')
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+
+  // V opens the TIMELINE first (the §7 flip family: ∅ → timeline → library).
+  // Unplanned: the dropped media's output is item one; one item = no gaps.
+  await page.keyboard.press('v')
+  const overlay = page.locator('[data-canvas-timeline]')
+  await expect(overlay).toBeVisible()
+  await expect(overlay.locator('[data-canvas-timeline-item]')).toHaveCount(1)
+  await expect(overlay.locator('[data-canvas-gap]')).toHaveCount(0)
+
+  // Adopt chronology → a persisted canvas_plan whose segment carries the
+  // chain_ref (the API read is the durable truth).
+  await overlay.locator('[data-canvas-timeline-adopt]').click()
+  await expect(overlay.locator('[data-canvas-plan-editor]')).toBeVisible({ timeout: 10_000 })
+  await page.waitForTimeout(400)
+  const document = await rawDocument(page)
+  expect(document.plans.length).toBe(1)
+  expect(document.plans[0]!.document.segments.length).toBe(1)
+  expect(document.plans[0]!.document.segments[0]!.chainId).toBe(document.chains[0]!.id)
+
+  // Navigate-to: clicking the item flies to the object and closes.
+  await overlay.locator('[data-canvas-timeline-item]').first().click()
+  await expect(overlay).toHaveCount(0)
+  await expect(page.locator('[data-canvas-tile]').first()).toBeVisible()
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('plan documents: brief + segments + reference handoffs, consent-gated seeding (chain_ref written), persistence across reload', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await page.keyboard.press('v')
+  const overlay = page.locator('[data-canvas-timeline]')
+  await expect(overlay).toBeVisible()
+
+  // A fresh plan; the brief + two segments commit on blur (document writes).
+  await overlay.locator('[data-canvas-timeline-new-plan]').click()
+  await expect(overlay.locator('[data-canvas-plan-brief]')).toBeVisible({ timeout: 10_000 })
+  await overlay.locator('[data-canvas-plan-brief]').fill('a night train heist in three beats')
+  await overlay.locator('[data-canvas-plan-brief]').blur()
+  await overlay.locator('[data-canvas-plan-add-segment]').click()
+  await overlay.locator('[data-canvas-plan-add-segment]').click()
+  await expect(overlay.locator('[data-canvas-segment]')).toHaveCount(2)
+  await overlay.locator('[data-canvas-segment-prompt]').nth(0).fill('the drummer steps off the night train into the rain')
+  await overlay.locator('[data-canvas-segment-prompt]').nth(0).blur()
+  await overlay.locator('[data-canvas-segment-prompt]').nth(1).fill('the corridor lights stutter as she passes')
+  await overlay.locator('[data-canvas-segment-prompt]').nth(1).blur()
+  await page.waitForTimeout(500)
+  let document = await rawDocument(page)
+  expect(document.plans[0]!.document.brief).toContain('night train heist')
+  expect(document.plans[0]!.document.segments.map((segment) => segment.prompt)).toEqual(['the drummer steps off the night train into the rain', 'the corridor lights stutter as she passes'])
+
+  // Seed segment 1 — the consent gate (created + selected, ZERO jobs; the
+  // reference-handoff ids ride the chain settings for the panel to bind).
+  const jobsBefore = ((await (await page.request.get('/api/lan/jobs')).json()) as { jobs?: unknown[] }).jobs?.length ?? 0
+  await overlay.locator('[data-canvas-segment-seed]').first().click()
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+  await page.waitForTimeout(600)
+  const jobsAfter = ((await (await page.request.get('/api/lan/jobs')).json()) as { jobs?: unknown[] }).jobs?.length ?? 0
+  expect(jobsAfter).toBe(jobsBefore)
+  document = await rawDocument(page)
+  const seededChainId = document.plans[0]!.document.segments[0]!.chainId
+  expect(seededChainId).toBeTruthy()
+  expect(document.chains.find((chain) => chain.id === seededChainId)!.settings.prompt).toContain('drummer steps off')
+
+  // Persistence across reload: the plan rides the document (canvas_plan),
+  // not session state — the timeline reprojects it identically.
+  await page.reload()
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await page.keyboard.press('v')
+  await expect(page.locator('[data-canvas-timeline] [data-canvas-segment]')).toHaveCount(2, { timeout: 10_000 })
+  await expect(page.locator('[data-canvas-timeline] [data-canvas-segment-state]').first()).toContainText(/idle/i)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('the measured gap menu: five entries with honest verdicts; the FLF splice wires the REAL continuation frame', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  // A REAL video object (the committed sample clip) — the splice extracts
+  // its final frame server-side through ffmpeg, no engine involved.
+  await page.setInputFiles('[data-canvas-file-input]', path.resolve(__dirname, 'fixtures/sample-clip.mp4'))
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 20_000 })
+  await page.keyboard.press('v')
+  const overlay = page.locator('[data-canvas-timeline]')
+  await expect(overlay).toBeVisible()
+  await overlay.locator('[data-canvas-timeline-adopt]').click()
+  await expect(overlay.locator('[data-canvas-plan-editor]')).toBeVisible({ timeout: 10_000 })
+  await overlay.locator('[data-canvas-plan-add-segment]').click()
+  await expect(overlay.locator('[data-canvas-segment]')).toHaveCount(2)
+  await overlay.locator('[data-canvas-segment-prompt]').nth(1).fill('she rounds the corner into the strobing corridor')
+  await overlay.locator('[data-canvas-segment-prompt]').nth(1).blur()
+  // The blur commits through the document store; the seed button enables
+  // when the reloaded plan lands (uncontrolled inputs commit on blur).
+  // Segment 1 is already seeded by adopt-chronology — its button is GONE;
+  // the remaining seed button belongs to segment 2.
+  await expect(overlay.locator('[data-canvas-segment-seed]')).toHaveCount(1)
+  await expect(overlay.locator('[data-canvas-segment-seed]').first()).toBeEnabled({ timeout: 10_000 })
+  await overlay.locator('[data-canvas-segment-seed]').first().click()
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(2, { timeout: 10_000 })
+  await page.waitForTimeout(400)
+
+  // The gap between the two segments opens the MEASURED menu: five entries,
+  // honest mechanism labels, engine-dependent renders disabled by design.
+  await overlay.locator('[data-canvas-gap]').first().click()
+  const menu = overlay.locator('[data-canvas-gap-menu]')
+  await expect(menu).toBeVisible()
+  await expect(menu.locator('[data-canvas-gap-option]')).toHaveCount(5)
+  await expect(menu.locator('[data-canvas-gap-option="cut"]')).toContainText(/9.8 dB/i)
+  await expect(menu.locator('[data-canvas-gap-option="flf"]')).toContainText(/36.2\/34.3 dB/i)
+  await expect(menu.locator('[data-canvas-gap-mechanism="in-model"]')).toHaveCount(2)
+  await expect(menu.locator('[data-canvas-gap-mechanism="post"]')).toHaveCount(2)
+  await expect(menu.locator('[data-canvas-gap-mechanism="assembly"]')).toHaveCount(1)
+  await expect(menu.locator('[data-canvas-gap-option="bridge"]')).toBeDisabled()
+  await expect(menu.locator('[data-canvas-gap-option="black"]')).toBeDisabled()
+  await expect(menu.locator('[data-canvas-gap-option="bridge"]')).toContainText(/engine work/i)
+
+  // FLF EXECUTES (the Phase-5 toast-note handoff, now gap machinery): the
+  // prior segment's FINAL frame is extracted and wired as the next
+  // segment's first frame — real document state, not a toast.
+  await menu.locator('[data-canvas-gap-option="flf"]').click()
+  await expect(page.locator('[data-canvas-toast="success"]').last()).toContainText(/splice wired/i, { timeout: 20_000 })
+  await page.waitForTimeout(600)
+  const document = await rawDocument(page)
+  const plan = document.plans[0]!.document
+  const rightChain = document.chains.find((chain) => chain.id === plan.segments[1]!.chainId)!
+  const firstFrameOutputId = rightChain.settings.firstFrameOutputId as string | undefined
+  expect(firstFrameOutputId).toBeTruthy()
+  const frameChain = document.chains.find((chain) => chain.outputs.some((output) => (output as unknown as { id: string }).id === firstFrameOutputId))
+  expect(frameChain, 'the continuation frame is its own media object').toBeTruthy()
+  expect(plan.gaps).toContainEqual({ afterSegmentId: plan.segments[0]!.id, kind: 'flf' })
+  // The strip shows the recorded gap kind now.
+  await expect(overlay.locator('[data-canvas-gap]').first()).toContainText(/FLF splice/i)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('MoviePlanner retired (5b): no movie tab; the plan surface is the timeline; the handoff probe still seeds consent-gated', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+
+  // The Studios dock carries the five ASSET studios — the movie tab died
+  // with its surface (the plan lives on the document store now).
+  await page.locator('[data-canvas-studios-button]').click()
+  const dock = page.locator('[data-canvas-studios-dock]')
+  await expect(dock).toBeVisible()
+  await expect(dock.locator('[data-canvas-studios-tab]')).toHaveCount(5)
+  await expect(dock.locator('[data-canvas-studios-tab="movie"]')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: /movie planner/i })).toHaveCount(0)
+  await page.locator('[data-canvas-studios-close]').click()
+
+  // The launcher's movie-plan chip opens the TIMELINE (the Director Suite).
+  await page.locator('[data-canvas-chip="movie"]').click()
+  await expect(page.locator('[data-canvas-timeline]')).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  // The consent-gated chain seeding survived retirement (the store path the
+  // shot handoff used — now the segment-seeding core).
+  await page.goto('/?canvas=1&probe=canvas')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  const result = await page.evaluate(() => (window as unknown as { __canvasScenario(name: string): { ok: boolean; chainId?: string; selected?: boolean; jobsCreated?: number; reason?: string } }).__canvasScenario('seed-chain'))
+  expect(result.ok, result.reason).toBe(true)
+  expect(result.jobsCreated).toBe(0)
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 

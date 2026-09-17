@@ -9,7 +9,7 @@
  * is here per the spec; Phase 1 renders the chip honestly as not-yet-wired
  * (the canvas consumes no engine — generation is Phase 2).
  */
-import { Activity, Briefcase, Library, Settings, Stethoscope } from 'lucide-react'
+import { Activity, Briefcase, LayoutList, Library, Settings, Stethoscope } from 'lucide-react'
 import { useJobsStore } from '../state/jobsStore'
 import { attention } from './derive'
 import { useCanvasStore } from './store'
@@ -93,6 +93,9 @@ export function Radar() {
     </button>
 
     <div className="canvas-titlebar-spacer" />
+    <button type="button" className="canvas-index-button" data-canvas-timeline-button onClick={() => useCanvasStore.getState().setTimelineOpen(true)} title="The timeline projection — the plan chronology + measured transitions (V)">
+      <LayoutList size={12} /> timeline <kbd>V</kbd>
+    </button>
     <button type="button" className="canvas-index-button" data-canvas-library-button onClick={() => useCanvasStore.getState().setLibraryOpen(true)} title="The library projection — every completed output across the session (V)">
       <Library size={12} /> library <kbd>V</kbd>
     </button>

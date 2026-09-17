@@ -27,8 +27,9 @@
 import { create } from 'zustand'
 
 /** Phase 5: which kept surface the Studios dock shows (the asset-authoring
- *  studios + MoviePlanner — dated decisions live in StudiosDock.tsx). */
-export type StudiosDockTab = 'characters' | 'hair' | 'wardrobes' | 'accessories' | 'locations' | 'movie'
+ *  studios — dated decisions live in StudiosDock.tsx; the movie tab retired
+ *  with MoviePlanner in Phase 5b: the plan surface is the timeline). */
+export type StudiosDockTab = 'characters' | 'hair' | 'wardrobes' | 'accessories' | 'locations'
 import { documentsApi, type ProjectMeta } from './api'
 import { type CameraState, createCamera, parseViewBlob, type ViewBlob } from './camera'
 import {
@@ -56,6 +57,7 @@ import {
   latentPathFor,
   mediaForOutput,
   MODE_LABEL,
+  motionContextFolder,
   MOTION_CONTEXT_NODES,
   planCanvasGraph,
   readChainSettings,
@@ -67,6 +69,18 @@ import {
   type ForkSubstrate,
   type MotionContextFacts,
 } from './generation'
+import {
+  episodeRunEnd,
+  gapAfter,
+  GAP_LABEL,
+  newPlanDocument,
+  newSegment,
+  planDocumentFromChains,
+  readPlanDocument,
+  type PlanDocumentData,
+  type PlanGapKind,
+  type PlanSegment,
+} from './plan'
 import { DEFAULT_SETTINGS, type OpKind } from './ops'
 import type { EndpointDirection, EndpointOption, OptionAvailability } from './options'
 import { findH3PreviewOverrideNode } from '../lib/h3Stack'
@@ -195,11 +209,21 @@ type CanvasState = {
   poseRig: { chainId: string } | null
   /** Phase 4 (§7 V): the library projection overlay (library-as-projection). */
   libraryOpen: boolean
+  /** Phase 5b (§6): the timeline projection overlay — the chronological
+   *  projection of chain outputs / the plan (the V-flip family's second
+   *  member; V cycles ∅ → timeline → library → ∅, dated 2026-09-17). */
+  timelineOpen: boolean
+  /** The plan the timeline projects — null = the unplanned chronology (chain
+   *  outputs in creation order). */
+  timelinePlanId: string | null
+  /** The measured gap menu popover (§6): hard cut / NLE / FLF splice /
+   *  dip-to-black / diegetic bridge, verdicts from the transitions research. */
+  gapMenu: { planId: string; afterSegmentId: string } | null
   /** Phase 4 (§8): Settings docked as a floating panel (the thin surface). */
   settingsDock: boolean
-  /** Phase 5: the asset-authoring studios + MoviePlanner docked (the kept
-   *  surfaces' canvas home until their full absorption — dated decisions in
-   *  StudiosDock.tsx). */
+  /** Phase 5: the asset-authoring studios docked (the kept surfaces' canvas
+   *  home until their full absorption — dated decisions in StudiosDock.tsx;
+   *  the movie tab retired with MoviePlanner in Phase 5b). */
   studiosDock: { tab: StudiosDockTab } | null
   /** Phase 5: the PII-scrubbed diagnostics surface docked (inventory row 10:
    *  "diagnostics ride the radar/engine chip"). */
@@ -224,6 +248,37 @@ type CanvasActions = {
   bindGlobalAsset(chainId: string, assetId: string): Promise<void>
   /** Phase 4 overlays: the library projection (V) + the Settings dock. */
   setLibraryOpen(open: boolean): void
+  /** Phase 5b (§6): the timeline projection + the Director actions — plan
+   *  documents, the measured gap menu, segment seeding (consent-gated), and
+   *  the latent-episode render (the scene-chain successor). */
+  setTimelineOpen(open: boolean): void
+  /** §7 V — the projection flip through the family: ∅ → timeline → library
+   *  → ∅ (the spec's listed order; the library stays one button away). */
+  cycleProjection(): void
+  setGapMenu(menu: { planId: string; afterSegmentId: string } | null): void
+  createPlan(): Promise<string | null>
+  /** The unplanned chronology becomes a persisted plan (adopt-chronology). */
+  adoptChronology(): Promise<string | null>
+  /** Read-modify-write the plan document through the mutator, then reload. */
+  updatePlanDocument(planId: string, mutate: (plan: PlanDocumentData) => PlanDocumentData): Promise<void>
+  addPlanSegment(planId: string): Promise<void>
+  updatePlanSegment(planId: string, segmentId: string, patch: Partial<Pick<PlanSegment, 'title' | 'prompt' | 'duration' | 'referenceCharacterIds' | 'referenceLocationIds'>>): Promise<void>
+  removePlanSegment(planId: string, segmentId: string): Promise<void>
+  /** Choose a gap kind (persisted); an FLF choice runs the continuation-frame
+   *  splice when both sides can wire (the Phase-5 toast-note handoff, moved
+   *  into the gap machinery). */
+  setPlanGap(planId: string, afterSegmentId: string, kind: PlanGapKind): Promise<void>
+  /** The MoviePlanner shot-handoff successor: seed the segment's chain
+   *  (consent-gated — created + selected, never submitted) and write the
+   *  chain_ref back into the plan. An FLF gap before this segment auto-wires
+   *  the continuation frame when the prior take exists. */
+  seedSegmentChain(planId: string, segmentId: string): Promise<string | null>
+  /** One segment's consented generation (a click IS the consent). */
+  submitSegment(planId: string, segmentId: string): Promise<{ ok: boolean; message?: string }>
+  /** The scene-chain successor: a contiguous run of seeded segments rendered
+   *  as ONE Motion-Context latent episode (segment N continues N-1's latent;
+   *  every job links to its segment chain so takes LAND on the objects). */
+  submitPlanEpisode(planId: string, fromSegmentId: string): Promise<{ ok: boolean; message?: string }>
   setSettingsDock(open: boolean): void
   setStudiosDock(dock: { tab: StudiosDockTab } | null): void
   setDiagnosticsDock(open: boolean): void
@@ -486,6 +541,41 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     return { doc, chain, settings, outputs, bindings, firstFrame, lastFrame, referenceMedia, referenceVideos, referenceAudios, isLatentFork, latentContinuation, latentRefusal }
   }
 
+  /** The FLF continuation-frame splice (§6 — the measured champion, 36 dB
+   *  class): the left chain's canonical VIDEO take → its FINAL frame
+   *  (server-side ffmpeg 'last' extraction, no engine) → a real media object
+   *  whose output wires as the right chain's first frame. This is the
+   *  Phase-5 toast-note handoff moved into the gap machinery. Returns the
+   *  frame output id, or an honest refusal. */
+  const continuationFrameFor = async (leftChainId: string): Promise<{ outputId: string } | { refusal: string }> => {
+    const doc = activeDocument()
+    const chain = doc?.chains.find((entry) => entry.id === leftChainId)
+    const session = useSessionStore.getState()
+    if (!doc || !chain || !session.settings) return { refusal: 'The prior segment has no chain on this canvas.' }
+    const outputs = buildOutputIndex(doc)
+    const outputId = chain.outputs[0]?.id ?? null
+    const resolved = outputId ? mediaForOutput(outputs.get(outputId)) : null
+    if (!resolved || resolved.media.kind !== 'video') return { refusal: 'Render the prior segment first — the continuation frame comes from its final rendered frame.' }
+    try {
+      const frame = await window.minimax.extractVideoFrame(resolved.media.path, 'last', session.settings.outputDirectory, session.settings.ffmpegPath)
+      const frameChain = await documentsApi.createChain({
+        projectId: doc.project.id,
+        kind: 'media',
+        inputSpec: { fresh: { media: { name: frame.name, kind: 'image', path: frame.path } } },
+        settings: { name: frame.name, mediaType: 'image' },
+      })
+      const frameOutput = await documentsApi.createOutput({ chainId: frameChain.id, substrates: ['decoded'] })
+      await documentsApi.appendTake({
+        outputId: frameOutput.id,
+        artifacts: [frame.path],
+        metrics: { kind: 'image', name: frame.name, sourcePath: frame.path, continuationOf: { chainId: leftChainId, takeId: resolved.take.id } },
+      })
+      return { outputId: frameOutput.id }
+    } catch (error) {
+      return { refusal: `The continuation frame could not be extracted: ${error instanceof Error ? error.message : String(error)}` }
+    }
+  }
+
 
   return {
     phase: 'boot',
@@ -511,6 +601,9 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     opEditor: null,
     poseRig: null,
     libraryOpen: false,
+    timelineOpen: false,
+    timelinePlanId: null,
+    gapMenu: null,
     settingsDock: false,
     studiosDock: null,
     diagnosticsDock: false,
@@ -648,6 +741,234 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     },
 
     setLibraryOpen: (open) => set({ libraryOpen: open }),
+
+    // ---- Phase 5b (§6): the Director Suite -----------------------------------
+
+    setTimelineOpen: (open) => set({ timelineOpen: open, gapMenu: null }),
+
+    cycleProjection: () => {
+      // §7 V — the projection flip through the family. Dated 2026-09-17: the
+      // cycle is ∅ → timeline → library → ∅ (the spec's listed order; the
+      // library stays one titlebar button away). Phase 4's V toggled the
+      // library alone — the family grew.
+      const state = get()
+      if (state.timelineOpen) set({ timelineOpen: false, libraryOpen: true, gapMenu: null })
+      else if (state.libraryOpen) set({ libraryOpen: false })
+      else set({ timelineOpen: true })
+    },
+
+    setGapMenu: (menu) => set({ gapMenu: menu }),
+
+    createPlan: async () => {
+      let projectId = get().activeProjectId
+      if (!projectId) {
+        const created = await get().createCanvas()
+        if (!created) return null
+        projectId = created
+      }
+      try {
+        const plan = await documentsApi.upsertPlan({ projectId, document: newPlanDocument() as unknown as Record<string, unknown> })
+        const refreshed = await loadDocument(projectId)
+        if (refreshed) recomputeTiles()
+        set({ timelinePlanId: plan.id })
+        return plan.id
+      } catch (error) {
+        get().toast('error', `The plan could not be created: ${error instanceof Error ? error.message : String(error)}`)
+        return null
+      }
+    },
+
+    adoptChronology: async () => {
+      const doc = activeDocument()
+      if (!doc) {
+        get().toast('neutral', 'Open a canvas first — the chronology comes from its objects.')
+        return null
+      }
+      try {
+        const document = planDocumentFromChains(doc)
+        if (!document.segments.length) {
+          get().toast('neutral', 'Nothing to plan yet — chain outputs land here as the chronology.')
+          return null
+        }
+        const plan = await documentsApi.upsertPlan({ projectId: doc.project.id, document: document as unknown as Record<string, unknown> })
+        const refreshed = await loadDocument(doc.project.id)
+        if (refreshed) recomputeTiles()
+        set({ timelinePlanId: plan.id })
+        get().toast('success', `Plan created from ${document.segments.length} chain output${document.segments.length === 1 ? '' : 's'} — the chronology is editable with measured transitions.`)
+        return plan.id
+      } catch (error) {
+        get().toast('error', `The plan could not be created: ${error instanceof Error ? error.message : String(error)}`)
+        return null
+      }
+    },
+
+    updatePlanDocument: async (planId, mutate) => {
+      const doc = activeDocument()
+      const planRow = doc?.plans?.find((plan) => plan.id === planId)
+      if (!doc || !planRow) return
+      try {
+        const next = mutate(readPlanDocument(planRow.document))
+        await documentsApi.upsertPlan({ projectId: doc.project.id, id: planId, document: next as unknown as Record<string, unknown> })
+        const refreshed = await loadDocument(doc.project.id)
+        if (refreshed) recomputeTiles()
+      } catch (error) {
+        get().toast('error', `The plan could not be saved: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    },
+
+    addPlanSegment: async (planId) => {
+      await get().updatePlanDocument(planId, (plan) => ({ ...plan, segments: [...plan.segments, newSegment(plan.segments.length + 1)] }))
+    },
+
+    updatePlanSegment: async (planId, segmentId, patch) => {
+      await get().updatePlanDocument(planId, (plan) => ({ ...plan, segments: plan.segments.map((segment) => segment.id === segmentId ? { ...segment, ...patch } : segment) }))
+    },
+
+    removePlanSegment: async (planId, segmentId) => {
+      await get().updatePlanDocument(planId, (plan) => ({
+        ...plan,
+        segments: plan.segments.filter((segment) => segment.id !== segmentId),
+        gaps: plan.gaps.filter((gap) => gap.afterSegmentId !== segmentId),
+      }))
+    },
+
+    setPlanGap: async (planId, afterSegmentId, kind) => {
+      set({ gapMenu: null })
+      await get().updatePlanDocument(planId, (plan) => ({
+        ...plan,
+        gaps: [...plan.gaps.filter((gap) => gap.afterSegmentId !== afterSegmentId), { afterSegmentId, kind }],
+      }))
+      if (kind !== 'flf') {
+        get().toast('neutral', `Transition set: ${GAP_LABEL[kind]}.`)
+        return
+      }
+      // FLF: run the continuation-frame splice now (the menu gates readiness,
+      // this is the retryable execution).
+      const doc = activeDocument()
+      const planRow = doc?.plans?.find((plan) => plan.id === planId)
+      if (!doc || !planRow) return
+      const plan = readPlanDocument(planRow.document)
+      const index = plan.segments.findIndex((segment) => segment.id === afterSegmentId)
+      const left = index >= 0 ? plan.segments[index] : undefined
+      const right = index >= 0 ? plan.segments[index + 1] : undefined
+      if (!left || !right) return
+      if (!left.chainId || !right.chainId) {
+        get().toast('neutral', 'FLF splice recorded — seed both segments to wire the continuation frame.')
+        return
+      }
+      const frame = await continuationFrameFor(left.chainId)
+      if ('refusal' in frame) {
+        get().toast('error', frame.refusal)
+        return
+      }
+      await get().setChainSettings(right.chainId, { firstFrameOutputId: frame.outputId, lastFrameOutputId: null })
+      get().toast('success', 'FLF splice wired — the prior segment’s final frame is the next segment’s first frame (36 dB class, tranche 1).')
+    },
+
+    seedSegmentChain: async (planId, segmentId) => {
+      const doc = activeDocument()
+      const planRow = doc?.plans?.find((plan) => plan.id === planId)
+      if (!doc || !planRow) return null
+      const plan = readPlanDocument(planRow.document)
+      const index = plan.segments.findIndex((segment) => segment.id === segmentId)
+      const segment = index >= 0 ? plan.segments[index] : undefined
+      if (!segment) return null
+      // An FLF gap before this segment wires the continuation frame when the
+      // prior take exists (MoviePlanner BLOCKED the handoff until the frame
+      // existed; the canvas seeds anyway + reports honestly — dated 2026-09-17,
+      // the splice is retryable from the gap menu once the prior renders).
+      let firstFrameOutputId: string | null = null
+      const previous = index > 0 ? plan.segments[index - 1] : undefined
+      if (previous && previous.chainId && gapAfter(plan, previous.id).kind === 'flf') {
+        const frame = await continuationFrameFor(previous.chainId)
+        if ('outputId' in frame) firstFrameOutputId = frame.outputId
+        else get().toast('neutral', `${frame.refusal} Seeding without it — retry the splice from the gap once it renders.`)
+      }
+      const chainId = await get().seedChain({
+        prompt: segment.prompt,
+        mediaType: 'video',
+        duration: Math.max(2, Math.min(15, segment.duration)),
+        referenceCharacterIds: segment.referenceCharacterIds,
+        referenceLocationIds: segment.referenceLocationIds,
+        ...(firstFrameOutputId ? { firstFrameOutputId } : {}),
+      })
+      if (!chainId) return null
+      await get().updatePlanDocument(planId, (current) => ({ ...current, segments: current.segments.map((entry) => entry.id === segmentId ? { ...entry, chainId } : entry) }))
+      return chainId
+    },
+
+    submitSegment: async (planId, segmentId) => {
+      const doc = activeDocument()
+      const planRow = doc?.plans?.find((plan) => plan.id === planId)
+      const segment = planRow ? readPlanDocument(planRow.document).segments.find((entry) => entry.id === segmentId) : undefined
+      if (!segment) return { ok: false, message: 'That segment is not in this plan.' }
+      if (!segment.chainId) return { ok: false, message: 'Seed this segment first — it has no object to generate.' }
+      return get().submitChain(segment.chainId)
+    },
+
+    submitPlanEpisode: async (planId, fromSegmentId) => {
+      const doc = activeDocument()
+      const planRow = doc?.plans?.find((plan) => plan.id === planId)
+      if (!doc || !planRow) return { ok: false, message: 'The plan is not on an open canvas.' }
+      const plan = readPlanDocument(planRow.document)
+      const fromIndex = plan.segments.findIndex((segment) => segment.id === fromSegmentId)
+      if (fromIndex < 0) return { ok: false, message: 'That segment is not in this plan.' }
+      const facts = engineFacts()
+      if (!facts.settings) return { ok: false, message: 'Studio settings are still loading.' }
+      if (!facts.connected) return { ok: false, message: 'Start ComfyUI and verify the server connection in Settings.' }
+      if (!motionContextReady()) return { ok: false, message: 'Latent chaining needs the ComfyUI-H3-Motion-Context custom nodes — install them, then refresh the engine.' }
+      // The run: contiguous FLF-connected segments (a non-FLF gap is a
+      // deliberate discontinuity — it ends the episode), stopping at the
+      // first unseeded segment.
+      const runEnd = episodeRunEnd(plan, fromIndex)
+      let effectiveEnd = fromIndex
+      while (effectiveEnd < runEnd && plan.segments[effectiveEnd].chainId) effectiveEnd += 1
+      if (effectiveEnd - fromIndex < 2) return { ok: false, message: 'A latent chain needs at least two seeded segments joined by FLF gaps.' }
+      const episodeKey = plan.segments[fromIndex].chainId!
+      let queued = 0
+      for (let index = fromIndex; index < effectiveEnd; index += 1) {
+        const segment = plan.segments[index]
+        const context = chainRenderContext(segment.chainId!)
+        if (!context) continue
+        const selection = selectionFor(context.settings.turbo, context.settings.turboFamily)
+        // The scene-chain convention: segment N saves clip N into the episode
+        // folder; N > 0 loads clip N-1 as never-denoised conditioning.
+        const chainOption = { index: index - fromIndex, folder: motionContextFolder(episodeKey) }
+        const request = buildCanvasRenderRequest(context.settings, { firstFrame: context.firstFrame, lastFrame: context.lastFrame, referenceImages: context.referenceMedia, referenceVideos: context.referenceVideos, referenceAudios: context.referenceAudios }, context.bindings, chainOption)
+        const result = await submitH3Render(
+          { ...request, manifestExtra: { canvas: { chainId: segment.chainId, projectId: doc.project.id } } },
+          {
+            settings: facts.settings,
+            connected: facts.connected,
+            modelReady: modelReadyFor(selection, context.settings.turbo),
+            selection,
+            models: facts.models,
+            info: facts.info,
+            clientId: engineBridge.clientId,
+            h3PreviewOverrideNode: findH3PreviewOverrideNode(facts.info) || undefined,
+          },
+          {
+            notify: (tone, text) => get().toast(tone === 'neutral' ? 'neutral' : tone, text),
+            setJobs: (update) => useJobsStore.getState().setJobs(update),
+            cancellationRequests: engineBridge.cancellationRequests ?? { current: new Set<string>() },
+            onJobCreated: (jobId) => {
+              set((current) => ({ chainJobs: { ...current.chainJobs, [segment.chainId!]: jobId } }))
+              recomputeTiles()
+            },
+          },
+        )
+        if (!result.ok) {
+          // The latent chain breaks at a refused segment — the remaining
+          // segments stay unqueued (never a doomed continuation).
+          get().toast('error', `Segment ${index - fromIndex + 1} refused: ${result.message} The chain stopped there — earlier segments are queued.`)
+          return queued ? { ok: true } : { ok: false, message: result.message }
+        }
+        queued += 1
+      }
+      get().toast('success', `${queued}-segment latent chain queued — motion and audio continue at the latent level; each take lands on its own object.`)
+      return { ok: true }
+    },
+
     setSettingsDock: (open) => set({ settingsDock: open }),
     setStudiosDock: (dock) => set({ studiosDock: dock }),
     setDiagnosticsDock: (open) => set({ diagnosticsDock: open }),

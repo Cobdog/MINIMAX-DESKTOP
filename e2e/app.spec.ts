@@ -107,8 +107,10 @@ test('every kept surface renders without renderer errors through its canvas dock
   await page.goto('/')
   await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
 
-  // The Studios dock: all six kept authoring surfaces (Characters, Hair,
-  // Wardrobe, Accessories, Locations, Movie) — lazy chunks load + render.
+  // The Studios dock: the five kept ASSET-authoring surfaces (Characters,
+  // Hair, Wardrobe, Accessories, Locations) — lazy chunks load + render.
+  // Movie retired with MoviePlanner in Phase 5b: the plan surface is the
+  // timeline projection (plan documents on the document store).
   await page.locator('[data-canvas-studios-button]').click()
   await expect(page.locator('[data-canvas-studios-dock]')).toBeVisible()
   const studioHeadings: Array<[string, RegExp]> = [
@@ -117,15 +119,20 @@ test('every kept surface renders without renderer errors through its canvas dock
     ['wardrobes', /wardrobe studio/i],
     ['accessories', /accessory studio/i],
     ['locations', /location studio/i],
-    ['movie', /movie planner/i],
   ]
   for (const [tab, heading] of studioHeadings) {
     await page.locator(`[data-canvas-studios-tab="${tab}"]`).click()
     await expect(page.getByRole('heading', { name: heading }).first()).toBeVisible({ timeout: 15_000 })
     await page.waitForTimeout(150)
   }
+  await expect(page.locator('[data-canvas-studios-tab="movie"]')).toHaveCount(0)
   await page.locator('[data-canvas-studios-close]').click()
   await expect(page.locator('[data-canvas-studios-dock]')).toHaveCount(0)
+
+  // The Director Suite (Phase 5b): the timeline projection summons by V.
+  await page.keyboard.press('v')
+  await expect(page.locator('[data-canvas-timeline]')).toBeVisible()
+  await page.keyboard.press('Escape')
 
   // The Diagnostics dock (inventory row 10).
   await page.locator('[data-canvas-diagnostics-button]').click()
@@ -148,11 +155,14 @@ test('captures 1920x1080 screenshots of the post-deletion surfaces for vision in
   await expect(page.getByRole('heading', { name: /character studio/i }).first()).toBeVisible({ timeout: 15_000 })
   await page.waitForTimeout(400)
   await page.screenshot({ path: 'test-results/shots/02-studios-characters.png' })
-  await page.locator('[data-canvas-studios-tab="movie"]').click()
-  await expect(page.getByRole('heading', { name: /movie planner/i }).first()).toBeVisible({ timeout: 15_000 })
-  await page.waitForTimeout(400)
-  await page.screenshot({ path: 'test-results/shots/03-studios-movie.png' })
   await page.locator('[data-canvas-studios-close]').click()
+  // Phase 5b: the plan surface is the timeline projection (MoviePlanner
+  // retired); capture its summoned empty state.
+  await page.keyboard.press('v')
+  await expect(page.locator('[data-canvas-timeline]')).toBeVisible()
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: 'test-results/shots/03-timeline.png' })
+  await page.keyboard.press('Escape')
   await page.locator('[data-canvas-diagnostics-button]').click()
   await expect(page.getByRole('heading', { name: /diagnostics/i }).first()).toBeVisible({ timeout: 10_000 })
   await page.waitForTimeout(400)

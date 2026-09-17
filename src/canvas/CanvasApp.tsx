@@ -24,6 +24,7 @@ import { EndpointMenu } from './EndpointMenu'
 import { ForkMenu } from './ForkMenu'
 import { IndexOverlay } from './IndexOverlay'
 import { LibraryOverlay } from './LibraryOverlay'
+import { TimelineOverlay } from './TimelineOverlay'
 import { OpEditor } from './OpEditor'
 import { PoseRigDock } from './PoseRigDock'
 import { PropertiesPanel } from './PropertiesPanel'
@@ -82,6 +83,8 @@ export function CanvasApp() {
       if (event.key === 'Escape') {
         const state = useCanvasStore.getState()
         if (state.indexOpen) setIndexOpen(false)
+        else if (state.gapMenu) state.setGapMenu(null)
+        else if (state.timelineOpen) state.setTimelineOpen(false)
         else if (state.libraryOpen) state.setLibraryOpen(false)
         else if (state.endpointMenu || state.forkMenu) {
           state.setEndpointMenu(null)
@@ -95,9 +98,10 @@ export function CanvasApp() {
       const state = useCanvasStore.getState()
       // The modal surfaces own Escape/keys while open.
       if (state.opEditor || state.poseRig) return
-      // §7 V — projection flip: the library projection overlay (Phase 4).
+      // §7 V — the projection flip through the family: ∅ → timeline →
+      // library → ∅ (Phase 5b; Phase 4's V toggled the library alone).
       if (event.key === 'v') {
-        state.setLibraryOpen(!state.libraryOpen)
+        state.cycleProjection()
         return
       }
       if (!state.tiles.length) return
@@ -212,6 +216,7 @@ export function CanvasApp() {
       <DiagnosticsDock />
       <IndexOverlay />
       <LibraryOverlay />
+      <TimelineOverlay />
     </CanvasEngineHost>
     <div className="canvas-toasts" aria-live="polite">
       {toasts.map((toast) => (
