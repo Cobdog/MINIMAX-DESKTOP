@@ -1,11 +1,11 @@
-# Dataset Manager v1 — spec
+# Dataset Manager v1 — spec (r2, post-blind-audit)
 
-Status: DRAFT for blind audit → maintainer blessing. Written 2026-09-17 by the lead.
-Inputs: maintainer locks (sv14rt0 directive aaee5e7c + comment 3d8jpxf) · research
-(docs/research/video-dataset-prep-tools.md, 7drm5qt) · training guide
-(docs/research/h3-lora-training-guide.md) · envelope (docs/research/h3-lora-training-envelope.md)
-· maintainer signoff (sv14rt0 comment gb5y98t). Where this doc and the Flux record disagree,
-the Flux record wins.
+Status: DRAFT r2 — blind-audit findings applied (audit comment imocltl on sv14rt0);
+awaiting maintainer blessing. Written 2026-09-17 by the lead; r2 same day.
+Inputs: maintainer locks (sv14rt0 directive aaee5e7c + comments 3d8jpxf, gb5y98t) ·
+research (docs/research/video-dataset-prep-tools.md) · training guide · envelope ·
+canvas spec (house conventions). Where this doc and the Flux record disagree, the
+Flux record wins.
 
 ## 0. What this is
 
@@ -28,204 +28,257 @@ analytics (deferred, D3); training itself (the sidecar's job — this tool ships
 
 Two persistent kinds, one attachment rule:
 
-- **Source** — an imported file, immutable on disk. Owns its ffprobe facts (below),
-  provenance fields, and every child derived from it.
+- **Source** — an imported file, immutable on disk, tracked **by reference** (§2.1). Owns
+  its probe facts, provenance fields, and every child derived from it.
 - **Layer** — a derived view of a source: a crop rect, a trim window, or both (one source →
   N layers; every export item IS a layer). Layers carry their own captions, audit results,
   and bake settings.
 - **Child artifacts attach visibly to their master.** The gallery shows sources as masters;
-  layers and scene-splits hang off their source, visibly grouped (expand a master to see its
-  children). Children never orphan: deleting a source (v1: removing it from the library —
-  the file itself is never touched) removes its layers with an explicit confirm that names
-  the blast radius (N layers, N captions).
-
-Scene-split results (§6) are children too — the same attachment rule, the same visible
-grouping. There is exactly one parent relation; no child-of-child in v1.
+  layers and scene-splits hang off their source, visibly grouped (expand a master to see
+  its children). There is exactly one parent relation; no child-of-child in v1. A "crop
+  layer group" (same source, same trim, multiple rects) is a UI grouping of layers, not a
+  third kind. Two identical crops are two valid layers — the dedup view (§6) flags the
+  redundancy; nothing forbids it.
+- **Deletion is soft everywhere** (the house trash rule, canvas R29): removing a source or
+  layer moves it to a restorable trash; removing a source names the blast radius
+  (N layers, N captions) in the confirm. The file on disk is never touched by any deletion.
 
 ## 2. Import & library
 
-- Folder/watch import of raw sources: video (mp4/mov/mkv/webm) and stills (png/jpg/webp).
-  Video-first; stills are one bucket type among several.
-- **ffprobe facts recorded at import, and the ones that lie are measured, not asked:**
-  fps, container-claimed duration AND **decoded frame count** (the f56 trap — container
-  metadata rounds; the trainer floors; a 56f clip silently trains as 39f), resolution,
-  aspect, audio presence, dBFS.
+### 2.1 Source tracking (by reference — the contract that makes non-destructive possible)
+
+- A source is recorded as: absolute path + size + mtime + **content hash (xxhash128 —
+  identity tracking, not security)**. Nothing is copied at import; the library references
+  the file where it lives.
+- **Re-import of the same content** (any path) resolves to the SAME source (hash match) —
+  duplicate imports are deduplicated, never duplicated.
+- **Health check on library open and pre-bake (stat + hash when size/mtime moved):**
+  - path gone → source marked **MISSING** (visible state; children intact; bake refuses
+    with reason; re-link offered via file picker, matched by hash);
+  - same path, different content → **CHANGED** (children intact but crop/trim indices may
+    no longer align — bake warns and requires explicit accept);
+  - healthy → silent.
+  No disk change ever strands a layer silently.
+
+### 2.2 Facts at import
+
+- ffprobe facts: fps, container-claimed duration, resolution, aspect, audio presence,
+  dBFS — recorded immediately (cheap).
+- **Decoded frame count** (the f56 trap's antidote) requires a full decode — it runs as a
+  **background probe job per source**, arriving asynchronously with a visible "probing"
+  state. Import of 1000 items never blocks on decode; the fact is required before a
+  source's first bake and gates §8.5.
 - Provenance per source: free-text origin note, date, **AI-generated flag**, consent/license
-  note (fields only — no workflow ceremony in v1).
-- Browse: virtualized grid (5→1000 items), filmstrip poster per video source,
-  representative frame per layer; filter by kind/class/caption-state/audit-flags.
-- **Too-small refusal:** sources (or crops, §3) below the usable floor are refused at
-  import with the measured reason. Floors from the envelope: hard refuse < 160×96 (the
-  mechanical floor — conditioning rows dominate); warn-and-allow ≥ 160×96 < 320×192 (the
-  measured practical motion floor); stills: hard refuse < 256², warn < 512² (the validated
-  identity recipe). On-demand upscale-on-refuse is deferred — v1 just refuses, honestly.
+  note (fields only, no ceremony).
+
+### 2.3 Browse & refusal floors
+
+- Virtualized grid (5→1000 items), filmstrip poster per source, representative frame per
+  layer; **FTS search over captions/provenance**; filter by kind/class/caption-state/
+  audit-flags; hover-scrub playback in the gallery.
+- **Too-small refusal, measured floors (video, from the envelope):** hard refuse
+  < 160×96 (the mechanical floor); warn ≥ 160×96 and < 320×192 (the practical motion
+  floor — below ~224 short-side, conditioning rows start dominating the sequence).
+  Sources are refused at import; **crops are refused at crop-time** when the rect falls
+  below the same floors.
+- **Stills floors [SPEC-inferred, first-attempt — NOT measured]:** warn < 512² (the
+  guide's validated character-recipe size), hard refuse < 256². Flagged for the
+  maintainer's blessing; adjust freely.
+- On-demand upscale-on-refuse is deferred — v1 refuses, honestly, with the measured reason.
 
 ## 3. The layer system (crop + trim)
 
 - **Stamp crop tool**: drag places the crop stamp; **scroll-wheel resizes the crop**;
-  **shift+scroll cycles useful aspect ratios** (16:9, 9:16, 1:1, 4:3, 3:4, 21:9, 9:21 —
-  cycle set configurable in settings). Crops are **full-resolution aspect-ratio crops**:
-  pixels outside the rect are trimmed at bake; **the video is never resized** (resize
-  requires an explicit per-layer action, off by default, and marks the layer).
-- Crop rects snap to the 32-px grid (the trainer's dimension grid) so a crop is always
-  bakeable without silent re-rounding.
-- Trim windows: frame-accurate in/out on the timeline; the grid target (§5) is chosen per
-  layer at export, never baked into the trim.
-- One source → N layers, each independently cropped/trimmed/captioned; the same scene may
-  want multiple crops (a crop layer group: same source, same trim, different rects —
-  export emits one item per layer).
-- Layers preview their effective view (the crop applied, trim applied) without touching the
-  source.
+  **shift+scroll cycles useful aspect ratios** (default cycle: 16:9, 9:16, 1:1, 4:3, 3:4,
+  21:9 — within the model's official 21:9–9:16 range; the cycle set is a setting).
+  Crops are **full-resolution aspect-ratio crops**: pixels outside the rect are trimmed at
+  bake; **the video is never resized** (resize requires an explicit per-layer action, off
+  by default, and marks the layer).
+- Crop rects snap to the 32-px grid so a crop is always bakeable without silent re-rounding.
+- Trim windows: frame-accurate in/out; the grid target is chosen per layer at export, never
+  baked into the trim.
+- Layers preview their effective view (crop + trim applied) without touching the source.
 
 ## 4. Captions
 
-- **Captions attach to LAYERS, never sources** — you caption what the crop will show, not
-  what the raw file contains. Caption after cropping.
-- **Stale flag:** editing a layer's crop or trim after captioning flags the caption stale →
-  the recaption queue. A stale caption is a visible state, exportable only past an explicit
-  warning (never a silent mismatch).
-- **Format: natural language only** (hard lock — no tag lists as primary form), per the
-  guide §4: one flowing paragraph, trigger token first and exactly once, mid-density, H3
-  vocabulary; soundscape clause when audio is real and described; per-class template
-  presets (style / character / motion) seed the editor.
-- **Authorship and history (N2):** every caption records author (hand or VLM+model) and a
-  full edit history. **Batch VLM runs never silently overwrite hand-written captions** —
+- **Captions attach to LAYERS, never sources** — you caption what the crop will show.
+  Caption after cropping.
+- **Stale flag:** editing a layer's **crop or trim** after captioning flags the caption
+  stale → the recaption queue. (The signed decision named crops; trim extends it by the
+  same mechanism — content removed from view — **flagged for blessing**, not silent.) A
+  stale caption exports only past an explicit warning.
+- **Format: natural language only** (hard lock), per the guide §4: one flowing paragraph,
+  trigger token first and exactly once, mid-density, H3 vocabulary; soundscape clause when
+  audio is real and described. Per-class templates seed the editor, and the class rules
+  carry: **character class — appearance NEVER in captions** (identity flows through the
+  trigger); motion class — name the repeated movement precisely.
+- **Trigger-token validation (the gate-8 definition):** the trigger must be a single token,
+  rare (not a common dictionary word — checked against a frequency list), used exactly
+  once, first. Live in the editor, enforced at export.
+- **Authorship and history (N2):** every caption records author (hand or VLM+model) and
+  full edit history. **Batch VLM never silently overwrites hand-written captions** —
   hand-written items are skipped or queued for review, per run setting.
-- **VLM captioning, from scratch on upstream llama.cpp (N1 superseded llama-video):**
-  - Native `input_video` where available; **≤8 s chunks hard rule** (upstream hang,
-    llama.cpp #27587); default frame strategy **~2 fps N-even client-side extraction**
-    (dodges both hang classes and the qwen over-merge bug); token budget shown live.
-  - **Automation spectrum:** interactive modal at one end — caption, recaption, and
-    free-form discussion of the clip with the model — headless batch at the other, with
-    user-provided instructions; every point between (e.g. batch-draft → per-clip review).
-  - **Dense → condense two-pass:** pass 1 dense draft, pass 2 text-only condensation into
-    the class template. Both passes local.
-  - The VLM target set and router are the app's existing LLM layer (llama.cpp router);
-    caption models are config, not code.
-- **Trigger-token validation** runs live in the editor (format rules above) and as an
-  export gate (§8).
+- **VLM captioning, from scratch on upstream llama.cpp (N1):**
+  - Native `input_video` where available; **≤8 s chunks hard rule** (upstream hang
+    #27587); default frame strategy **~2 fps N-even client-side extraction** — this dodges
+    the hang classes; it does **not** dodge the qwen frame-merge over-merge bug (#24303,
+    which bites image-set sends on qwen-family models) — mitigation: non-qwen models for
+    image-set passes until fixed upstream. Token budget shown live.
+  - **Automation spectrum, concretely:** (a) headless batch with user instruction
+    templates; (b) batch-draft → per-clip review queue; (c) per-clip caption/recaption
+    modal; (d) free-form discussion of the clip with the model. These four modes ARE the
+    spectrum — nothing vaguer.
+  - **Dense → condense two-pass:** dense draft, then text-only condensation into the class
+    template. Both local; models are router config, not code.
 
 ## 5. The bake pipeline (export-time conform)
 
 Exactly one pipeline, four stages, in order — the ONLY place source pixels are read and
 rewritten, always to a new file:
 
-1. **Trim window** → 2. **Crop rect** (full-res, 32-grid) → 3. **CFR 24.000 fps**
-(retime first; then drop/dup; interpolation LAST — rife-ncnn-vulkan and/or ffmpeg
-minterpolate, items interpolated are tagged; **NVIDIA OFSDK is license-barred** — A1,
-pending the maintainer's explicit word but the AGPL conflict is not optional) →
-4. **17n+5 grid conform** with trim-to-target **+2 frames** headroom (the runbook rule),
-then the **decoded-frame-count assertion**: the baked file is re-probed and its decoded
-count must equal the grid target exactly, or the item refuses to export with the delta.
+1. **Trim window** → 2. **Crop rect** (full-res, 32-grid) →
+3. **CFR 24.000 fps**, speed-preserving by default: **retime only for near-24 corrections**
+   (e.g. 23.976 → 24.000 — the research's condition; unconditional retiming would warp
+   30fps content 1.25×); **drop/dup for integer-ratio downsampling** (30→24, 60→24 —
+   speed preserved); **interpolation LAST and only for upsampling gaps**
+   (rife-ncnn-vulkan / ffmpeg minterpolate; interpolated items are tagged). NVIDIA OFSDK
+   is license-barred for AGPL (A1 — pending the maintainer's explicit word; the license
+   conflict itself is not optional) →
+4. **17n+5 grid conform: bake to grid target +2 frames.** The trainer's own loader floors
+   the container duration and clamps DOWN the 17n+5 grid; the +2 headroom is what makes
+   the clamp land exactly on target instead of walking down 17 (the f56 mechanism,
+   measured). **The decoded-frame-count assertion therefore accepts decoded ∈
+   [target, target+2]** — an exact-equality assertion here would refuse every conforming
+   export (audit blocker 1); decoded < target refuses with the delta (the f56 class
+   caught at OUR door, before the trainer sees it).
 
-Audio at bake (N8): clips without audio get a **silent wav muxed** (the trainers expect
-audio rows); OR, per user preference, existing audio is **blank-replaced** (junk-audio
-option). Both are per-layer settings with a dataset-level default. Uncaptioned-but-present
-audio is a valid choice — see §10.
+Audio at bake (N8): clips without audio get silence in the form each trainer expects
+(**musubi: wav sidecar; DiffSynX: its input_audio manifest rows**) — the bake emits the
+trainer's shape, not a generic mux. Optionally, existing audio is **blank-replaced** per
+user preference. Uncaptioned-but-present audio is valid — §10.
 
 ## 6. Curation
 
 - **Near-dup, two tiers, detect-everything/kill-selectively (hard rule):** tier-1 videohash
-  (ratio-robust, cheap); tier-2 aspect-normalized CLIP clusters. Results are **advisory
-  views** — the cross-ratio cluster browser presents same-content-different-AR as **bucket
-  diversity, a good thing** (maintainer's practitioner call; mixed-bucket training measured
-  free). Nothing is ever auto-deleted; per-source cap WARNINGS fire at export-gate time.
+  (ratio-robust, cheap); tier-2 aspect-normalized CLIP clusters. Advisory views — the
+  cross-ratio cluster browser presents same-content-different-AR as **bucket diversity**
+  (maintainer's call; mixed-bucket measured free). Nothing auto-deletes; per-source cap
+  warnings fire at export-gate time (cap = dataset setting, default 3 per cluster per
+  source, [SPEC-inferred first-attempt]).
 - **Slow-mo audit:** ffprobe metadata + frame-diff energy + freezedetect/mpdecimate,
-  composed; suspects get a **disposition menu** (N6): retime (with the retime baked and
-  tagged) / caption-honestly (keep the slow motion, caption says so) / exclude.
-- **Scene-split (N5, manual):** a user-invoked option per source from the gallery —
-  PySceneDetect content detector proposes cut points; the user accepts/edits; accepted
-  splits become **child artifacts visibly attached to the master** (§1). Non-destructive:
-  the split is a layer-set, not a file operation. (Detector is imperfect — that's why it's
-  a proposal UI, never automatic.)
-- **CLIP reference-triage** ("find this character across the library") — N9, PENDING the
-  maintainer's word; the embeddings exist for tier-2 regardless, so this is a UI decision,
-  not an architecture one.
+  composed; suspects get dispositions (N6): retime (baked, tagged) / caption-honestly /
+  exclude.
+- **Scene-split (N5, manual):** user-invoked per source; PySceneDetect proposes cut points;
+  the user accepts/edits; accepted splits become child layers visibly attached to the
+  master. Cut points are editable until children exist; re-running after children exist
+  creates NEW children (never mutates old ones).
+- **CLIP reference-triage** ("find this character across the library") — N9, PENDING.
 
 ## 7. Balance & budget dashboard
 
-- Distributions at a glance: aspect / duration / resolution / content-class /
-  caption-coverage / staleness — the bucket-mix the maintainer asked for, with explicit
-  "add more of X / less of Y" guidance derived from the dataset's own shape.
-- **Per-bucket composition against the measured walls** (envelope): the budget formula
-  (VRAM ≈ 5.1 GB fixed + ~2.6 GB per mega-token of px×frames, card wall ~23.5 GB) computes
-  **projected peak VRAM for the dataset's worst item and its buckets**, BEFORE any run —
-  the preflight verdict at dataset time, not at 2am trainer time.
+- Distributions: aspect / duration / resolution / content-class / caption-coverage /
+  staleness — with "more of X / less of Y" guidance. **Honesty note: no canonical target
+  distribution exists** — guidance is shape-based heuristics (outliers, holes, over-
+  concentration) plus optional user-set targets; it never pretends to know the right mix.
+- **Per-trainer VRAM preflight:** projected peak computed with EACH trainer's measured
+  profile — DiffSynX (budget formula ≈ 5.1 GB + ~2.6 GB/Mtok) and musubi (its own measured
+  peaks, e.g. 20,074 MiB at 480×832×124f vs DiffSynX's 17,286) — showing the worst case
+  and labeling which trainer binds. A near-wall dataset must not pass preflight against
+  the lenient profile and OOM on the stricter one (audit major).
 
-## 8. QA gates (export-time, each mapped to a documented failure)
+## 8. QA gates (export-time; 1–4 and 8 are refusing, 6–7 and 9 warning-tier)
 
-1. Empty caption 2. Trigger duplicated (baked + prepended) 3. fps ≠ 24.000 after bake
-4. Slow-mo suspicion undispositioned 5. Duration truncation vs grid target (the f56 class)
-6. Near-dup cluster over-cap per source (warning-tier) 7. Real-audio rows missing their
-soundscape clause **when the dataset's audio policy expects one** (see §10) 8. Trigger
-token format (obfuscated single token, one insertion path).
+1. Empty caption 2. Trigger duplicated 3. fps ≠ 24.000 after bake 4. Slow-mo suspicion
+   undispositioned 5. Decoded count outside [target, target+2] 6. Near-dup cluster over
+   cap per source 7. Real-audio rows missing their soundscape clause **when the dataset's
+   audio policy expects one** (§10) 8. Trigger-token format (single rare token, exactly
+   once, first — per §4's definition) 9. Trim window crossing a detected internal cut
+   (when scene data exists — one scene per clip, warning-tier).
 
-Gates refuse the export item-by-item with the reason; dataset-level export proceeds with
-explicit accept-all for warning-tier gates only.
+Gates refuse item-by-item with reasons; warning-tier gates accept-all explicitly.
 
 ## 9. Export
 
 - **Shapes:** musubi TOML (+ caption sidecars/JSONL, one_frame stills, wav sidecars) and
-  DiffSynX stage-1 manifest (video/prompt/input_audio/frame_rate rows) — both emit from one
-  dataset; per-trainer class-conditioned **recipe card** (N7): rank 16, LR band, steps
-  band, de-distillation method per content class, surfaced as a card — a hint document,
-  never a silent behavior.
-- **External-trainer export (N7 extension):** the set exports standalone — correct folder
-  structure, prefilled configs, captions in place — runnable by any trainer outside the
-  app. Our trainers are OPTIONAL components: when absent, in-app training is disabled
-  (availability gating, the optimization-registry pattern) but export is fully functional.
-- Exports are immutable snapshots written to a user-chosen folder + recorded in the
-  library with their recipe card and gate report.
+  DiffSynX stage-1 manifest rows — both from one dataset; per-trainer **class-conditioned
+  recipe card** (N7): rank (16 for style/character; **16–32 band for motion** — the
+   guide's class nuance, not a flat 16), LR band, steps band, de-distillation method. A
+   hint document, never a silent behavior.
+- **External-trainer export (N7 ext):** the set exports standalone — correct folder
+  structure, prefilled configs, captions in place — runnable by any external trainer. Our
+  trainers are OPTIONAL: in-app training is disabled when absent (availability gating);
+  export is always fully functional. **Validation: the musubi shape must pass musubi's own
+  dataset-config validation, and the DiffSynX shape must load in DiffSynX's stage-1 dry
+  path — named checks at build (audit note).**
+- Exports are immutable snapshots: written to a user-chosen folder, recorded with recipe
+  card and gate report.
+- **Operational contracts:** bakes run through the app's serialized job queue (no
+  concurrent bakes of the same dataset; the queue is the arbiter); mid-bake cancel
+  discards partial outputs and records no snapshot (sources untouched by definition);
+  disk-full fails the item with a retryable error and no partial snapshot; watch-folder
+  re-import resolves by hash (§2.1).
 
 ## 10. Audio policy
 
-Audio rows always train (measured: no droppable audio budget; real vs silence is
-cost-identical). Therefore:
-- **Absent audio** → silent wav (trainers expect the rows).
+Audio rows always train (measured: no droppable budget; real vs silence cost-identical).
+- **Absent audio** → silence in the trainer's expected form (§5).
 - **Junk audio** → optional blank-replace, per preference.
-- **Real audio, uncaptioned** → VALID (maintainer's call): the audio distribution still
-trains and video quality is unaffected; the cost is **promptability** — without a
-soundscape clause the text pathway never learns to describe the sound, so audio at
-generation time follows the scene's learned distribution but can't be steered by prompt.
-The gate (§8.7) fires only when the dataset's audio-caption policy is set to expect
-clauses — the policy is the user's, per dataset.
+- **Real audio, uncaptioned** → VALID: video quality unaffected; the cost is
+  promptability — without a soundscape clause the text pathway never learns to describe
+  the sound, so generated audio follows the scene's learned distribution but cannot be
+  steered by prompt. Gate 7 fires only when the dataset's audio-caption policy expects
+  clauses — the policy is the user's, per dataset.
+- **musubi consistency rule:** still/one-frame rows and silent rows STATE sound absence in
+  their captions (the trainer's documented convention — silence described, not implied).
 
-## 11. Interaction map (v1 surface)
+## 11. Surfaces & the canvas bridge
 
-A dedicated surface (not the canvas — this is a workbench, summoned from the app like
-Settings/Diagnostics docks or its own route; final placement at build). Gallery of masters
-(left/center), inspector per selection (facts, provenance, children), the stamp-crop editor
-on the video viewer, caption editor with live trigger validation and the VLM modal, the
-balance dashboard as a tab, export as a final-step wizard (shape → gates → bake → report).
-Keyboard: the app's existing conventions; scroll/shift-scroll belong to the crop stamp
-inside the crop editor.
+- A dedicated workbench surface (placement decided at build — its own route vs a dock);
+  gallery of masters, inspector, the crop editor on the video viewer, caption editor with
+  live trigger validation and the VLM modal, dashboard tab, export wizard
+  (shape → gates → bake → report). Scroll/shift-scroll belong to the crop stamp inside
+  the crop editor only (the canvas's wheel-zoom semantics are untouched — audit clean).
+- **Canvas bridge (task AC uddsvkv):** a canvas media object or completed take can be
+  **sent to the dataset manager as a source** (consent-gated, the MoviePlanner-seeding
+  pattern; the take's file becomes a referenced source like any import) — and dataset
+  layers can be **pinned onto the canvas as reference assets** for op stacks. One bridge,
+  two directions, both explicit user actions.
+- Per-layer bucket badge (its res×duration class against §7's walls) visible in gallery
+  and inspector.
 
 ## 12. Acceptance criteria (build gates)
 
-1. Import refuses nothing silently: every source has decoded-frame-count facts; refusals
-   name the measured reason.
-2. A source file's bytes are never modified (verifiable: checksum before/after any
-   operation, asserted in tests).
-3. Crop/trim produce N layers per source; every export item is a layer; caption-stale
-   flows visible and gate-enforced.
-4. The bake pipeline order is fixed; the decoded-count assertion catches a crafted f56-class
-   truncation in tests.
+1. Import refuses nothing silently; every source carries facts; refusals name the measured
+   reason; decoded counts arrive async and are required pre-bake.
+2. A source file's bytes are never modified (checksum before/after any operation,
+   test-asserted); disk changes surface as MISSING/CHANGED, never silent strandings.
+3. Crop/trim produce N layers per source; every export item is a layer; stale flows
+   visible and gate-enforced; deletions are soft and restorable.
+4. The bake order is fixed; the assertion range [target, target+2] catches a crafted
+   f56-class truncation (decoded < target) in tests while passing conforming +2 bakes.
 5. Batch VLM never overwrites hand-written captions (test-proven); authorship + history
-   round-trips.
-6. Dedup is advisory-only (no delete path exists outside explicit user action); cross-ratio
-   clusters present as diversity.
-7. The dashboard's predicted peak VRAM matches the envelope formula on crafted datasets
-   (golden tests).
-8. Both trainer shapes export; an external-trainer export runs without our trainers
-   installed; in-app training is gated off when trainers are absent.
-9. All 8 gates refuse with reasons; accept-all only for warning-tier.
-10. Full gate + e2e + vision + both CI legs, the house standard.
+   round-trip.
+6. Dedup is advisory-only; cross-ratio clusters present as diversity.
+7. Per-trainer preflight computes BOTH profiles on crafted datasets; golden tests against
+   the envelope's measured numbers.
+8. Both trainer shapes export; the musubi shape passes musubi's own config validation and
+   the DiffSynX shape loads in its stage-1 dry path; an external export runs without our
+   trainers installed; in-app training gated off when trainers absent.
+9. All gates refuse/warn with reasons; accept-all only for warning-tier.
+10. Scale gate: 1000-item library browses, searches, and opens the dashboard within the
+    app's existing perf budgets (asserted in tests).
+11. Full gate + e2e + vision + both CI legs, the house standard.
 
-## 13. Open items
+## 13. Open items (the blessing list)
 
-- **A1** (NVIDIA OFSDK → rife/minterpolate): license-barred for AGPL; awaiting the
+- **A1** NVIDIA OFSDK → rife/minterpolate (license-barred for AGPL) — needs the
   maintainer's explicit yes.
-- **N9** (CLIP reference-triage): awaiting the maintainer's word.
+- **N9** CLIP reference-triage — in or out of v1.
+- **Blessing flags (r2 changes beyond the signed locks, each needs a nod):**
+  (a) trim-stale extends the signed crop-stale decision (same mechanism, flagged);
+  (b) stills floors are SPEC-inferred, not measured (§2.3);
+  (c) soft-delete trash added per the house R29 convention;
+  (d) per-source near-dup cap default 3 (inferred);
+  (e) the aspect-ratio cycle defaults to the model's official 21:9–9:16 range.
 - Held-back features: the maintainer has more in mind for a later discussion — v1 scope
-  is exactly this doc.
-- N3 whisper lane and D1–D3 deferrals are recorded, not forgotten.
+  is exactly this doc. N3 whisper lane and D1–D3 deferrals recorded, not forgotten.
