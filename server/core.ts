@@ -39,6 +39,7 @@ import { createLlmService, type LlmService } from './llm'
 import { createRouterProvider } from './llm/providers/router'
 import { familyManifest, inferFamily } from './llm/registry'
 import { evaluateRequestGuard } from './requestGuard'
+import { planVlmPass } from './datasets/vlm'
 
 export type StudioServerPaths = {
   settingsFile: string
@@ -1164,6 +1165,100 @@ export function createStudioServer(paths: StudioServerPaths) {
     return { checks, ranAt: Date.now() }
   }
 
+  /** rife-ncnn-vulkan on PATH when present (dataset-manager A1: shipped
+   * default is minterpolate; RIFE is the availability-gated preference).
+   * Resolved lazily once per server process. */
+  let rifeBinaryCache: string | null | undefined
+  function rifeBinary(): Promise<string | null> {
+    if (rifeBinaryCache !== undefined) return Promise.resolve(rifeBinaryCache)
+    return new Promise((resolve) => {
+      execFile('which', ['rife-ncnn-vulkan'], (error: Error | null, stdout: string) => {
+        rifeBinaryCache = error ? null : stdout.trim() || null
+        resolve(rifeBinaryCache)
+      })
+    })
+  }
+
+  /** Dataset bake/export destination containment: RELATIVE paths resolve under
+ *  the user's output directory (never the repo or cwd by accident); absolute
+ *  paths are honored as explicit user intent but must resolve (no null bytes,
+ *  no unresolved traversal). Same posture as the rest of the server's
+ *  user-supplied-path surfaces. */
+function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: string): string {
+  const trimmed = raw.slice(0, 4000)
+  if (trimmed.includes('\0')) throw new Error('The destination path contains a null byte.')
+  if (!trimmed) return join(settings.outputDirectory, defaultName)
+  if (isAbsolute(trimmed)) return resolve(trimmed)
+  return resolve(join(settings.outputDirectory, trimmed))
+}
+
+/** Provenance fields from an ingest body (fields only, no ceremony — §2.2). */
+  function provenanceFromBody(body: Record<string, unknown>) {
+    return {
+      originNote: typeof body.originNote === 'string' ? body.originNote.slice(0, 2000) : undefined,
+      originDate: typeof body.originDate === 'string' ? body.originDate.slice(0, 40) : undefined,
+      aiGenerated: body.aiGenerated === true ? true : undefined,
+      consentNote: typeof body.consentNote === 'string' ? body.consentNote.slice(0, 2000) : undefined,
+    }
+  }
+
+  /** The dataset manager's VLM seam: the llama.cpp router provider wrapped
+   * for multi-image chats, text-only passes, and native input_video
+   * (qwen-family). No cloud — the hard lock. */
+  function datasetVlmSeam(): import('./datasets/vlm').VlmSeam {
+    return {
+      async chat(input) {
+        const current = await loadSettings()
+        const { provider, error } = llm.activeProvider(current)
+        if (error) throw new Error(error)
+        if (provider.kind !== 'router') throw new Error('Dataset VLM captioning requires the llama.cpp router provider with a vision-capable model.')
+        let model = input.model?.trim() || current.llamaVisionModel.trim()
+        if (!model) {
+          const models = await provider.listModels().catch(() => [])
+          model = models.find((entry) => entry.vision)?.id ?? ''
+        }
+        if (!model) throw new Error('No vision-capable model is available on the llama.cpp router.')
+        const manifest = familyManifest(inferFamily(model))
+        const imageFirst = manifest.vision.imageFirst
+        const parts: Array<Record<string, unknown>> = []
+        if (input.video) parts.push({ type: 'input_video', input_video: { url: input.video } })
+        for (const image of input.images ?? []) parts.push({ type: 'image_url', image_url: { url: image } })
+        parts.push({ type: 'text', text: input.instruction })
+        const content = imageFirst ? [...parts.slice(0, -1).reverse(), parts[parts.length - 1]] : parts
+        const messages: Array<{ role: string; content: unknown }> = (input.history ?? []).map((turn) => ({ role: turn.role, content: turn.content }))
+        messages.push({ role: 'user', content })
+        const result = await provider.chat({ model, messages: messages as never, manifest, thinking: false, maxTokens: 1024 })
+        if (!result.content.trim()) throw new Error('The vision model returned an empty response.')
+        return { text: result.content.trim(), model }
+      },
+      async textOnly(prompt, system) {
+        const current = await loadSettings()
+        const { provider, error } = llm.activeProvider(current)
+        if (error) throw new Error(error)
+        if (provider.kind !== 'router') throw new Error('The condense pass requires the llama.cpp router provider.')
+        const model = current.llamaCppModel.trim() || (await llm.resolveActiveModel(provider, current))
+        const manifest = familyManifest(inferFamily(model))
+        const messages: Array<{ role: string; content: unknown }> = system
+          ? [{ role: 'system', content: system }, { role: 'user', content: prompt }]
+          : [{ role: 'user', content: prompt }]
+        const result = await provider.chat({ model, messages: messages as never, manifest, thinking: false, maxTokens: 768 })
+        return result.content.trim()
+      },
+      async visionModel() {
+        const current = await loadSettings()
+        const { provider } = llm.activeProvider(current)
+        if (provider.kind !== 'router') return null
+        if (current.llamaVisionModel.trim()) return current.llamaVisionModel.trim()
+        const models = await provider.listModels().catch(() => [])
+        return models.find((entry) => entry.vision)?.id ?? null
+      },
+      async supportsNativeVideo() {
+        const model = await this.visionModel()
+        return Boolean(model && inferFamily(model).includes('qwen'))
+      },
+    }
+  }
+
   async function handleLanRequest(request: IncomingMessage, response: ServerResponse) {
     // Route (pathname only — never the query, which can carry user text) for
     // the structural 500 body and the log stage if anything below throws.
@@ -1196,7 +1291,7 @@ export function createStudioServer(paths: StudioServerPaths) {
           const headerToken = Array.isArray(header) ? header[0] : header
           // The filmstrip GET joins the browser-native group: <img> posters
           // cannot set headers either. Query tokens stay GET-only there.
-          const queryTokenAllowed = url.pathname === '/api/lan/events' || url.pathname === '/api/lan/realtime' || url.pathname === '/api/lan/media' || (url.pathname === '/api/lan/assets/filmstrip' && request.method === 'GET') || (url.pathname === '/api/lan/documents/blobs/file' && request.method === 'GET')
+          const queryTokenAllowed = url.pathname === '/api/lan/events' || url.pathname === '/api/lan/realtime' || url.pathname === '/api/lan/media' || (url.pathname === '/api/lan/assets/filmstrip' && request.method === 'GET') || (url.pathname === '/api/lan/documents/blobs/file' && request.method === 'GET') || (url.pathname === '/api/lan/datasets/media' && request.method === 'GET')
           const presented = headerToken ?? (queryTokenAllowed ? url.searchParams.get('token') ?? undefined : undefined)
           if (!tokenMatches(presented, lanToken)) return sendJson(response, 401, { error: 'This link is no longer authorized. Request a fresh link with the current access token.' })
         }
@@ -1961,6 +2056,382 @@ export function createStudioServer(paths: StudioServerPaths) {
           } catch (providerFailure) {
             return sendJson(response, 502, { error: providerFailure instanceof Error ? providerFailure.message : String(providerFailure) })
           }
+        }
+        // ---- Dataset manager (sv14rt0, docs/specs/dataset-manager-v1.md) ----
+        // /api/lan/datasets/* — import/browse/layers/captions/VLM/curation/
+        // dashboard/bake/export. All bodies validated shape-first; the media
+        // GET is query-token-allowed (it feeds <img>/<video> elements).
+        if (url.pathname.startsWith('/api/lan/datasets')) {
+          if (!studioRepo) return sendJson(response, 503, { error: 'The studio database is unavailable; the dataset manager cannot be accessed.' })
+          const manager = studioRepo.datasets
+          studioRepo.setDatasetTools({ ffmpegPath: settings.ffmpegPath || 'ffmpeg', logFailure, logEvent })
+          // rife-ncnn-vulkan availability (A1-final: shipped-default minterpolate; RIFE preferred when present).
+          const rifePath: string | null = await rifeBinary()
+          const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+          const fail = (error: unknown, status = 500) => sendJson(response, status, { error: error instanceof Error ? error.message : String(error) })
+          const idParam = (name: string, maximum = 400) => {
+            const value = url.searchParams.get(name) ?? ''
+            return value && value.length <= maximum ? value : null
+          }
+
+          if (url.pathname === '/api/lan/datasets/bootstrap' && request.method === 'GET') {
+            return sendJson(response, 200, { settings: manager.store.getSettings(), aspects: manager.store.listAspects(), rifeAvailable: Boolean(rifePath), exports: manager.listExports() })
+          }
+          if (url.pathname === '/api/lan/datasets/library' && request.method === 'GET') {
+            return sendJson(response, 200, manager.library())
+          }
+          if (url.pathname === '/api/lan/datasets/search' && request.method === 'GET') {
+            const query = url.searchParams.get('q') ?? ''
+            return sendJson(response, 200, { hits: manager.store.searchLayers(query.slice(0, 400)) })
+          }
+          if (url.pathname === '/api/lan/datasets/ingest/reference' && request.method === 'POST') {
+            const body = await readJson(request, 100_000)
+            const path = typeof body.path === 'string' ? body.path.trim() : ''
+            if (!path || path.length > 4000) return sendJson(response, 400, { error: 'An absolute file path is required.' })
+            try {
+              const result = await manager.ingestReference(path, provenanceFromBody(body))
+              return sendJson(response, 200, { source: result.source, deduped: result.deduped, refusal: result.refusal })
+            } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/ingest/upload' && request.method === 'POST') {
+            const body = await readJson(request, 200_000_000)
+            const name = typeof body.name === 'string' ? body.name : ''
+            const data = typeof body.data === 'string' ? body.data : ''
+            if (!name || !data) return sendJson(response, 400, { error: 'A file name and base64 data are required.' })
+            let bytes: Buffer
+            try { bytes = Buffer.from(data, 'base64') } catch { return sendJson(response, 400, { error: 'The upload bytes are not valid base64.' }) }
+            try {
+              const result = await manager.ingestUpload(name, bytes, provenanceFromBody(body))
+              return sendJson(response, 200, { source: result.source, deduped: result.deduped, refusal: result.refusal })
+            } catch (error) { return fail(error, 400) }
+          }
+          // Canvas bridge, direction 1 (§11): a take/media file becomes a referenced source.
+          if (url.pathname === '/api/lan/datasets/ingest/canvas' && request.method === 'POST') {
+            const body = await readJson(request, 100_000)
+            const path = typeof body.path === 'string' ? body.path.trim() : ''
+            if (!path || path.length > 4000) return sendJson(response, 400, { error: 'A canvas media path is required.' })
+            try {
+              const result = await manager.ingestFromCanvas(path, { originNote: `Canvas take — ${new Date().toISOString().slice(0, 10)}` })
+              return sendJson(response, 200, { source: result.source, deduped: result.deduped, refusal: result.refusal })
+            } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/health' && request.method === 'POST') {
+            const body = await readJson(request, 20_000).catch(() => ({}) as Record<string, unknown>)
+            const ids = Array.isArray(body.sourceIds) ? body.sourceIds.filter((id: unknown) => typeof id === 'string') : undefined
+            return sendJson(response, 200, await manager.store.checkHealth(ids))
+          }
+          if (url.pathname === '/api/lan/datasets/relink' && request.method === 'POST') {
+            const body = await readJson(request, 20_000)
+            const sourceId = typeof body.sourceId === 'string' ? body.sourceId : ''
+            const path = typeof body.path === 'string' ? body.path.trim() : ''
+            if (!sourceId || !path) return sendJson(response, 400, { error: 'A sourceId and a picked file path are required.' })
+            try { return sendJson(response, 200, await manager.store.relinkSource(sourceId, path)) } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/probe' && request.method === 'POST') {
+            const body = await readJson(request, 20_000)
+            const sourceId = typeof body.sourceId === 'string' ? body.sourceId : ''
+            if (!sourceId) return sendJson(response, 400, { error: 'A sourceId is required.' })
+            await manager.store.runDecodeProbe(sourceId)
+            return sendJson(response, 200, { source: manager.store.getSource(sourceId) })
+          }
+          if (url.pathname === '/api/lan/datasets/sources/provenance' && request.method === 'POST') {
+            const body = await readJson(request, 200_000)
+            const sourceId = typeof body.sourceId === 'string' ? body.sourceId : ''
+            if (!sourceId) return sendJson(response, 400, { error: 'A sourceId is required.' })
+            try {
+              const source = manager.store.setProvenance(sourceId, {
+                originNote: typeof body.originNote === 'string' ? body.originNote : undefined,
+                originDate: typeof body.originDate === 'string' ? body.originDate : undefined,
+                aiGenerated: body.aiGenerated === true ? true : body.aiGenerated === false ? false : undefined,
+                consentNote: typeof body.consentNote === 'string' ? body.consentNote : undefined,
+              })
+              return sendJson(response, 200, { source })
+            } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/sources/trash' && request.method === 'POST') {
+            const body = await readJson(request, 20_000)
+            const sourceId = typeof body.sourceId === 'string' ? body.sourceId : ''
+            if (!sourceId) return sendJson(response, 400, { error: 'A sourceId is required.' })
+            try {
+              const result = await manager.store.trashSource(sourceId)
+              logEvent({ kind: 'datasets.trash-source', id: sourceId, ...result })
+              return sendJson(response, 200, result)
+            } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/sources/restore' && request.method === 'POST') {
+            const body = await readJson(request, 20_000)
+            const sourceId = typeof body.sourceId === 'string' ? body.sourceId : ''
+            if (!sourceId) return sendJson(response, 400, { error: 'A sourceId is required.' })
+            try { return sendJson(response, 200, await manager.store.restoreSource(sourceId)) } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/trash/empty' && request.method === 'POST') {
+            const result = await manager.store.emptyTrash()
+            logEvent({ kind: 'datasets.trash-empty', ...result })
+            return sendJson(response, 200, result)
+          }
+          // Source media serving for the workbench (video streaming w/ Range,
+          // image bytes) — the crop editor previews the ORIGINAL and applies
+          // crop/trim visually; the bake applies them for real.
+          if (url.pathname === '/api/lan/datasets/media' && (request.method === 'GET' || request.method === 'HEAD')) {
+            const sourceId = idParam('source')
+            if (!sourceId) return sendJson(response, 400, { error: 'A source id is required.' })
+            const source = manager.store.getSource(sourceId)
+            if (!source) return sendJson(response, 404, { error: 'No source with that id.' })
+            if (source.health === 'missing') return sendJson(response, 410, { error: 'The source file is MISSING — re-link it by content hash.' })
+            return serveLocalMediaHttp(request, response, source.absPath)
+          }
+          if (url.pathname === '/api/lan/datasets/layers' && request.method === 'POST') {
+            const body = await readJson(request, 100_000)
+            const sourceId = typeof body.sourceId === 'string' ? body.sourceId : ''
+            if (!sourceId) return sendJson(response, 400, { error: 'A sourceId is required.' })
+            try {
+              const layer = manager.store.createLayer({
+                sourceId,
+                name: typeof body.name === 'string' ? body.name : '',
+                crop: isRecord(body.crop) ? { x: Number(body.crop.x) || 0, y: Number(body.crop.y) || 0, w: Number(body.crop.w) || 0, h: Number(body.crop.h) || 0 } : null,
+                trim: body.trim && isRecord(body.trim) ? { inFrame: body.trim.inFrame === null ? null : Number(body.trim.inFrame), outFrame: body.trim.outFrame === null ? null : Number(body.trim.outFrame) } : null,
+                contentClass: body.contentClass === 'style' || body.contentClass === 'character' || body.contentClass === 'motion' ? body.contentClass : null,
+              })
+              return sendJson(response, 200, { layer })
+            } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/layers/update' && request.method === 'POST') {
+            const body = await readJson(request, 100_000)
+            const layerId = typeof body.layerId === 'string' ? body.layerId : ''
+            if (!layerId) return sendJson(response, 400, { error: 'A layerId is required.' })
+            try {
+              const layer = manager.store.updateLayerGeometry(layerId, {
+                name: typeof body.name === 'string' ? body.name : undefined,
+                crop: 'crop' in body ? (isRecord(body.crop) ? { x: Number(body.crop.x) || 0, y: Number(body.crop.y) || 0, w: Number(body.crop.w) || 0, h: Number(body.crop.h) || 0 } : null) : undefined,
+                trim: 'trim' in body ? (body.trim && isRecord(body.trim) ? { inFrame: body.trim.inFrame === null ? null : Number(body.trim.inFrame), outFrame: body.trim.outFrame === null ? null : Number(body.trim.outFrame) } : null) : undefined,
+                contentClass: body.contentClass === 'style' || body.contentClass === 'character' || body.contentClass === 'motion' ? body.contentClass : body.contentClass === null ? null : undefined,
+              })
+              return sendJson(response, 200, { layer })
+            } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/layers/trash' && request.method === 'POST') {
+            const body = await readJson(request, 20_000)
+            const layerId = typeof body.layerId === 'string' ? body.layerId : ''
+            if (!layerId) return sendJson(response, 400, { error: 'A layerId is required.' })
+            return sendJson(response, 200, { layer: manager.store.trashLayer(layerId) })
+          }
+          if (url.pathname === '/api/lan/datasets/layers/restore' && request.method === 'POST') {
+            const body = await readJson(request, 20_000)
+            const layerId = typeof body.layerId === 'string' ? body.layerId : ''
+            if (!layerId) return sendJson(response, 400, { error: 'A layerId is required.' })
+            return sendJson(response, 200, { layer: manager.store.restoreLayer(layerId) })
+          }
+          if (url.pathname === '/api/lan/datasets/layers/class' && request.method === 'POST') {
+            const body = await readJson(request, 20_000)
+            const layerId = typeof body.layerId === 'string' ? body.layerId : ''
+            const contentClass = body.contentClass === 'style' || body.contentClass === 'character' || body.contentClass === 'motion' ? body.contentClass : null
+            if (!layerId) return sendJson(response, 400, { error: 'A layerId is required.' })
+            return sendJson(response, 200, { layer: manager.store.setLayerClass(layerId, contentClass) })
+          }
+          if (url.pathname === '/api/lan/datasets/layers/slowmo' && request.method === 'POST') {
+            const body = await readJson(request, 20_000)
+            const layerId = typeof body.layerId === 'string' ? body.layerId : ''
+            const disposition = body.disposition === 'retime' || body.disposition === 'caption' || body.disposition === 'exclude' ? body.disposition : null
+            if (!layerId) return sendJson(response, 400, { error: 'A layerId is required.' })
+            return sendJson(response, 200, { layer: manager.store.setLayerSlowmo(layerId, disposition) })
+          }
+          if (url.pathname === '/api/lan/datasets/captions' && request.method === 'POST') {
+            const body = await readJson(request, 200_000)
+            const layerId = typeof body.layerId === 'string' ? body.layerId : ''
+            const text = typeof body.text === 'string' ? body.text : ''
+            if (!layerId) return sendJson(response, 400, { error: 'A layerId is required.' })
+            try { return sendJson(response, 200, { layer: manager.store.setCaption(layerId, text, 'hand') }) } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/captions/history' && request.method === 'GET') {
+            const layerId = idParam('layerId')
+            if (!layerId) return sendJson(response, 400, { error: 'A layerId is required.' })
+            return sendJson(response, 200, { history: manager.store.captionHistory(layerId), validation: manager.validateTriggerFor(manager.store.getLayer(layerId)?.caption?.text ?? '') })
+          }
+          if (url.pathname === '/api/lan/datasets/captions/validate' && request.method === 'POST') {
+            const body = await readJson(request, 100_000)
+            const text = typeof body.text === 'string' ? body.text : ''
+            return sendJson(response, 200, manager.validateTriggerFor(text))
+          }
+          if (url.pathname === '/api/lan/datasets/captions/review' && request.method === 'POST') {
+            const body = await readJson(request, 20_000)
+            const layerId = typeof body.layerId === 'string' ? body.layerId : ''
+            const reviewState = body.reviewState === 'queued' || body.reviewState === 'approved' ? body.reviewState : null
+            if (!layerId) return sendJson(response, 400, { error: 'A layerId is required.' })
+            manager.store.setCaptionReview(layerId, reviewState)
+            return sendJson(response, 200, { layer: manager.store.getLayer(layerId) })
+          }
+          if (url.pathname === '/api/lan/datasets/settings' && request.method === 'GET') {
+            return sendJson(response, 200, { settings: manager.store.getSettings() })
+          }
+          if (url.pathname === '/api/lan/datasets/settings' && request.method === 'POST') {
+            const body = await readJson(request, 100_000)
+            const settings = manager.store.saveSettings({
+              triggerToken: typeof body.triggerToken === 'string' ? body.triggerToken : undefined,
+              contentClass: body.contentClass === 'style' || body.contentClass === 'character' || body.contentClass === 'motion' ? body.contentClass : undefined,
+              audioPolicy: isRecord(body.audioPolicy) ? {
+                expectSoundscapeClauses: body.audioPolicy.expectSoundscapeClauses === true,
+                blankReplaceExisting: body.audioPolicy.blankReplaceExisting === true,
+              } : undefined,
+            })
+            return sendJson(response, 200, { settings })
+          }
+          if (url.pathname === '/api/lan/datasets/aspects' && request.method === 'GET') {
+            return sendJson(response, 200, { aspects: manager.store.listAspects() })
+          }
+          if (url.pathname === '/api/lan/datasets/aspects/toggle' && request.method === 'POST') {
+            const body = await readJson(request, 20_000)
+            const id = typeof body.id === 'string' ? body.id : ''
+            if (!id) return sendJson(response, 400, { error: 'An aspect id is required.' })
+            try { return sendJson(response, 200, { aspects: manager.store.setAspectEnabled(id, body.enabled !== false) }) } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/aspects/add' && request.method === 'POST') {
+            const body = await readJson(request, 20_000)
+            const label = typeof body.label === 'string' ? body.label : ''
+            const ratio = Number(body.ratio)
+            if (!label || !Number.isFinite(ratio)) return sendJson(response, 400, { error: 'A label and a numeric w/h ratio are required.' })
+            try { return sendJson(response, 200, { aspects: manager.store.addCustomAspect(label, ratio) }) } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/aspects/delete' && request.method === 'POST') {
+            const body = await readJson(request, 20_000)
+            const id = typeof body.id === 'string' ? body.id : ''
+            if (!id) return sendJson(response, 400, { error: 'An aspect id is required.' })
+            try { return sendJson(response, 200, { aspects: manager.store.deleteAspect(id) }) } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/dedup' && request.method === 'POST') {
+            try { return sendJson(response, 200, await manager.runDedupPass()) } catch (error) { return fail(error) }
+          }
+          if (url.pathname === '/api/lan/datasets/triage' && request.method === 'POST') {
+            const body = await readJson(request, 40_000_000)
+            const data = typeof body.image === 'string' ? body.image : ''
+            if (!data || data.length < 16) return sendJson(response, 400, { error: 'A base64 reference image is required.' })
+            let bytes: Buffer
+            try { bytes = Buffer.from(data.replace(/^data:[^;]+;base64,/, ''), 'base64') } catch { return sendJson(response, 400, { error: 'The reference bytes are not valid base64.' }) }
+            if (!bytes.length) return sendJson(response, 400, { error: 'The reference image decoded to zero bytes.' })
+            try { return sendJson(response, 200, await manager.referenceTriage(bytes, Number(body.limit) || 50)) } catch (error) { return fail(error) }
+          }
+          if (url.pathname === '/api/lan/datasets/similar' && request.method === 'GET') {
+            const layerId = idParam('layerId')
+            if (!layerId) return sendJson(response, 400, { error: 'A layerId is required.' })
+            return sendJson(response, 200, { results: manager.findSimilar(layerId) })
+          }
+          if (url.pathname === '/api/lan/datasets/audit/slowmo' && request.method === 'POST') {
+            const body = await readJson(request, 20_000)
+            const sourceId = typeof body.sourceId === 'string' ? body.sourceId : ''
+            if (!sourceId) return sendJson(response, 400, { error: 'A sourceId is required.' })
+            try { return sendJson(response, 200, await manager.auditSourceSlowMo(sourceId)) } catch (error) { return fail(error) }
+          }
+          if (url.pathname === '/api/lan/datasets/scenes/propose' && request.method === 'POST') {
+            const body = await readJson(request, 20_000)
+            const sourceId = typeof body.sourceId === 'string' ? body.sourceId : ''
+            if (!sourceId) return sendJson(response, 400, { error: 'A sourceId is required.' })
+            try { return sendJson(response, 200, { proposals: await manager.proposeSceneSplits(sourceId) }) } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/scenes/accept' && request.method === 'POST') {
+            const body = await readJson(request, 100_000)
+            const sourceId = typeof body.sourceId === 'string' ? body.sourceId : ''
+            const frames = Array.isArray(body.frames) ? body.frames.map((frame: unknown) => Math.round(Number(frame))).filter((frame: number) => Number.isFinite(frame) && frame >= 0) : null
+            if (!sourceId || !frames) return sendJson(response, 400, { error: 'A sourceId and a frames array are required.' })
+            manager.store.proposeCuts(sourceId, frames, frames.map(() => true))
+            return sendJson(response, 200, { cuts: manager.store.cutsFor(sourceId) })
+          }
+          if (url.pathname === '/api/lan/datasets/scenes/split' && request.method === 'POST') {
+            const body = await readJson(request, 20_000)
+            const sourceId = typeof body.sourceId === 'string' ? body.sourceId : ''
+            if (!sourceId) return sendJson(response, 400, { error: 'A sourceId is required.' })
+            try { return sendJson(response, 200, { children: manager.splitAtCuts(sourceId) }) } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/vlm/plan' && request.method === 'POST') {
+            const body = await readJson(request, 20_000)
+            const layerId = typeof body.layerId === 'string' ? body.layerId : ''
+            if (!layerId) return sendJson(response, 400, { error: 'A layerId is required.' })
+            const layer = manager.store.getLayer(layerId)
+            const source = layer ? manager.store.getSource(layer.sourceId) : null
+            if (!layer || !source) return sendJson(response, 404, { error: 'No layer with that id.' })
+            const fps = source.probe.fps ?? 24
+            const duration = ((layer.trim?.outFrame ?? source.decodedFrames ?? (source.probe.durationSec ?? 1) * fps) - (layer.trim?.inFrame ?? 0)) / fps
+            const model = settings.llamaVisionModel.trim() || null
+            const nativeVideo = model ? inferFamily(model).includes('qwen') : false
+            return sendJson(response, 200, { plan: planVlmPass({ durationSec: Math.max(0.1, duration), nativeVideo }), model })
+          }
+          if (url.pathname === '/api/lan/datasets/vlm/caption' && request.method === 'POST') {
+            const body = await readJson(request, 100_000)
+            const layerId = typeof body.layerId === 'string' ? body.layerId : ''
+            if (!layerId) return sendJson(response, 400, { error: 'A layerId is required.' })
+            try { return sendJson(response, 200, await manager.captionLayer(datasetVlmSeam(), layerId, typeof body.instruction === 'string' ? body.instruction.slice(0, 4000) : undefined)) } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/vlm/batch' && request.method === 'POST') {
+            const body = await readJson(request, 200_000)
+            const layerIds = Array.isArray(body.layerIds) ? body.layerIds.filter((id: unknown) => typeof id === 'string') : []
+            if (!layerIds.length || layerIds.length > 500) return sendJson(response, 400, { error: 'Provide between 1 and 500 layer ids.' })
+            const guard = body.guard === 'queue' ? 'queue' : 'skip'
+            try { return sendJson(response, 200, await manager.captionBatch(datasetVlmSeam(), layerIds, { instruction: typeof body.instruction === 'string' ? body.instruction.slice(0, 4000) : undefined, guard })) } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/vlm/discuss' && request.method === 'POST') {
+            const body = await readJson(request, 200_000)
+            const layerId = typeof body.layerId === 'string' ? body.layerId : ''
+            const message = typeof body.message === 'string' ? body.message.slice(0, 20_000) : ''
+            if (!layerId || !message.trim()) return sendJson(response, 400, { error: 'A layerId and a message are required.' })
+            const history = Array.isArray(body.history) ? (body.history as Array<Record<string, unknown>>).slice(0, 24).flatMap((turn) => {
+              if (!turn || typeof turn !== 'object' || (turn.role !== 'user' && turn.role !== 'assistant') || typeof turn.content !== 'string') return []
+              return [{ role: turn.role as 'user' | 'assistant', content: turn.content.slice(0, 20_000) }]
+            }) : undefined
+            try { return sendJson(response, 200, await manager.discuss(datasetVlmSeam(), layerId, message, history)) } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/dashboard' && request.method === 'GET') {
+            return sendJson(response, 200, manager.dashboard())
+          }
+          if (url.pathname === '/api/lan/datasets/bake' && request.method === 'POST') {
+            const body = await readJson(request, 100_000)
+            const layerId = typeof body.layerId === 'string' ? body.layerId : ''
+            if (!layerId) return sendJson(response, 400, { error: 'A layerId is required.' })
+            const folder = resolveDatasetFolder(typeof body.folder === 'string' ? body.folder.trim() : '', settings, 'dataset-bakes')
+            try {
+              const outcome = await manager.bakeLayer(layerId, {
+                outputFolder: folder,
+                gridTarget: Number.isFinite(Number(body.gridTarget)) ? Number(body.gridTarget) : null,
+                acceptChanged: body.acceptChanged === true,
+              })
+              return sendJson(response, 200, { outcome })
+            } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/export' && request.method === 'POST') {
+            const body = await readJson(request, 200_000)
+            const shape = body.shape === 'musubi' || body.shape === 'diffsynx' || body.shape === 'external' ? body.shape : null
+            const trainer = body.trainer === 'musubi' ? 'musubi' : 'diffsynx'
+            const folder = resolveDatasetFolder(typeof body.folder === 'string' ? body.folder.trim() : '', settings, 'dataset-exports')
+            const layerIds = Array.isArray(body.layerIds) ? body.layerIds.filter((id: unknown) => typeof id === 'string') : []
+            if (!shape) return sendJson(response, 400, { error: 'An export shape (musubi / diffsynx / external) is required.' })
+            if (!layerIds.length) return sendJson(response, 400, { error: 'Select at least one layer to export.' })
+            try {
+              const result = await manager.exportDataset({ shape, trainer, folder, layerIds, gridTarget: Number.isFinite(Number(body.gridTarget)) ? Number(body.gridTarget) : null, acceptWarnings: body.acceptWarnings === true })
+              logEvent({ kind: 'datasets.export', shape, items: result.written.length, refused: result.refused.length })
+              return sendJson(response, 200, result)
+            } catch (error) { return fail(error, 400) }
+          }
+          if (url.pathname === '/api/lan/datasets/exports' && request.method === 'GET') {
+            return sendJson(response, 200, { exports: manager.listExports() })
+          }
+          // Canvas bridge, direction 2 (§11): a dataset layer pinned as a
+          // reference asset for op stacks — returns the reference descriptor
+          // the canvas consumes (media URL + caption + geometry).
+          if (url.pathname === '/api/lan/datasets/canvas/pin' && request.method === 'POST') {
+            const body = await readJson(request, 20_000)
+            const layerId = typeof body.layerId === 'string' ? body.layerId : ''
+            if (!layerId) return sendJson(response, 400, { error: 'A layerId is required.' })
+            const layer = manager.store.getLayer(layerId)
+            if (!layer) return sendJson(response, 404, { error: 'No layer with that id.' })
+            return sendJson(response, 200, {
+              pin: {
+                layerId: layer.id,
+                media: `/api/lan/datasets/media?source=${layer.sourceId}`,
+                crop: layer.crop,
+                trim: layer.trim,
+                caption: layer.caption?.text ?? '',
+                name: layer.name || `dataset layer ${layer.id.slice(0, 8)}`,
+              },
+            })
+          }
+          return sendJson(response, 404, { error: `Unknown dataset-manager route ${url.pathname}.` })
         }
         // ---- LLM layer routes (v2 wave) --------------------------------------
         // Model listing from the ACTIVE provider, shaped for the client:

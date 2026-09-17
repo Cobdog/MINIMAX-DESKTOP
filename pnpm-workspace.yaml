@@ -8,6 +8,14 @@ allowBuilds:
   # better-sqlite3 ships prebuilt binaries for common ABIs; the postinstall
   # (prebuild-install) only compiles from source on unusual platforms.
   better-sqlite3: true
+  # @huggingface/transformers (dataset manager tier-2 CLIP): we deliberately
+  # do NOT run onnxruntime-node's postinstall — the native binding is absent
+  # and transformers.js falls back to its bundled onnxruntime-web (WASM)
+  # backend, which is the path that works identically on every platform incl.
+  # CI. Declared false so the choice is explicit, not silent.
+  onnxruntime-node: false
+  # protobufjs' postinstall only regenerates well-known types; not needed.
+  protobufjs: false
 
 overrides:
   # pnpm 11 blocks git-resolved subdeps (blockExoticSubdeps). @electron/rebuild

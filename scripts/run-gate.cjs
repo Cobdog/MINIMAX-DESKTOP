@@ -88,6 +88,12 @@ const SUITES = [
   // metric math fixtures, blind-bundle/vision:report compatibility. GPU
   // validation is a staged local follow-up, never part of the gate.
   { name: 'test:benchmarks', command: 'pnpm run test:benchmarks', timeoutMs: 10 * MINUTE },
+  // Dataset manager (sv14rt0): boots the built server on a scratch home with
+  // synthetic ffmpeg clips — ingest both paths, health flows, layers/captions
+  // (stale, batch-guard, trigger validation), bake assertion (incl. the
+  // crafted f56-class refusal), gates, all three export shapes, curation,
+  // FTS/aspects, and the 1000-item scale gate. Needs ffmpeg on PATH.
+  { name: 'test:datasets', command: 'pnpm run test:datasets', timeoutMs: 15 * MINUTE, dependents: ['smoke:server', 'e2e', 'vision-capture'] },
   // build:web + build:server directly — typecheck already ran as its own suite
   // (the plain `build` script re-runs typecheck; redundant here).
   { name: 'build', command: 'pnpm run build:web && pnpm run build:server', timeoutMs: 15 * MINUTE, dependents: ['smoke:server', 'e2e', 'vision-capture'] },

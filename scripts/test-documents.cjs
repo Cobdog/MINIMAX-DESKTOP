@@ -129,8 +129,11 @@ async function main() {
     prompts: fixtureDb.prepare('SELECT * FROM saved_prompts').all(),
     projects: fixtureDb.prepare('SELECT * FROM projects').all(),
   }))
-  const applied = migrateDatabase(fixtureDb) // applies 002 (one-way, append-only)
-  check(applied === 1, `golden fixture migration applies exactly 002 (got ${applied})`)
+  const applied = migrateDatabase(fixtureDb) // applies 002 + 003 (one-way, append-only)
+  // 003 (dataset manager, sv14rt0) is additive-only: it creates its OWN
+  // tables and never touches a legacy or canvas column — the golden rows
+  // below stay byte-identical through it.
+  check(applied === 2, `golden fixture migration applies exactly 002 + 003 (got ${applied})`)
   const goldenAfter = sha256(JSON.stringify({
     jobs: fixtureDb.prepare('SELECT id, provider, media_type, mode, status, prompt, params_json, created_at, updated_at, error, width, height, duration, output_url FROM jobs').all(),
     workspace: fixtureDb.prepare('SELECT * FROM workspace_state').all(),

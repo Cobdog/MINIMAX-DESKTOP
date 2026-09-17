@@ -21,6 +21,7 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import Database from 'better-sqlite3'
 import { upCanvasDocuments } from './documents'
+import { upDatasetTables } from './datasets/store'
 
 export type Migration = {
   id: number
@@ -146,6 +147,17 @@ export const migrations: Migration[] = [
     id: 2,
     name: '002-canvas-documents',
     up: upCanvasDocuments,
+  },
+  {
+    // Dataset manager v1 (docs/specs/dataset-manager-v1.md §1/§2): sources
+    // (by-reference + LAN-upload, identity = content hash), layers, captions
+    // with append-only history, the managed aspect spectrum, scene cuts, the
+    // tier-2 embedding index, bake jobs, immutable export snapshots, dataset
+    // settings, and the dataset FTS surface. Own tables only — nothing
+    // existing is touched.
+    id: 3,
+    name: '003-dataset-manager',
+    up: upDatasetTables,
   },
 ]
 

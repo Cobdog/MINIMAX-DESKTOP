@@ -93,6 +93,10 @@ for (const scenario of SCENARIOS) {
       checkpoints: [],
     }
     for (const checkpoint of scenario.checkpoints) {
+      // Optional per-checkpoint driver (datasets-workbench, sv14rt0): lets
+      // one scenario present several states. Absent on older scenarios —
+      // the loop captures the state run() left, exactly as before.
+      if (checkpoint.drive) await checkpoint.drive(page)
       const image = `${runId}--${checkpoint.id}.png`
       await page.screenshot({ path: path.join(bundleDir, image), fullPage: true })
       entry.checkpoints.push({ id: checkpoint.id, label: checkpoint.label, image, rubric: checkpoint.rubric })
