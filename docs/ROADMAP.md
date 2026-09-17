@@ -1,6 +1,6 @@
 # Roadmap — state of play
 
-> **Derived from Flux (project `r2lnrfw`); refreshed 2026-09-17 after the Phase-4
+> **Derived from Flux (project `r2lnrfw`); refreshed 2026-09-17 after the Phase-5b
 > landing (lead).** Flux is the source of truth; this file is the human-readable
 > state of play — if it disagrees with the board, the board wins. Task ids are Flux ids.
 
@@ -26,7 +26,7 @@
   rows, candidate CLI); **AutoContext catalog + temporal-exclusivity guidance**
   (p8oyfy1).
 - **Canvas spec BLESSED** (0rtwaj4, 8378214) after three adversarial audits.
-- **Canvas Phases 0–5 SHIPPED**: document store (oiavqh8, 904825c) → substrate +
+- **Canvas Phases 0–5b SHIPPED**: document store (oiavqh8, 904825c) → substrate +
   launcher + spatial queue (jl4ye8x, 0ee1bcb) → generation on canvas (flyuh6h, 2ae8ce1)
   → ops/forks/takes + engines-as-ops + first view retirement (j5sj28v, 80f48eb) →
   latent-fork rendering + the retirement wave + LocationStudio→H3 + engines-as-ops
@@ -36,7 +36,16 @@
   Diagnostics + the five asset studios + MoviePlanner dock; MoviePlanner's shot handoff
   seeds consent-gated canvas chains; ContactSheet-required cleanup applied). Vision
   9/9 on the final tree (new default-boot scenario). Engine-side latent handoff still
-  deferred to the live-verify follow-up (puy428n — offline seam asserted in-tree).
+  deferred to the live-verify follow-up (puy428n — offline seam asserted in-tree) →
+  **the Director Suite** (2u0rent — the timeline projection as V's second family
+  member: plan segments with chain facts, or the unplanned chain-output chronology
+  with the adopt-chronology upgrade; plan documents on canvas_plan per schema §1;
+  the MEASURED gap menu — only the FLF splice executes offline (36 dB
+  continuation-frame wiring: ffmpeg 'last'-frame → next segment's first frame),
+  dip-to-black + diegetic bridge carry honest engine-work labels; MoviePlanner
+  RETIRED — seedSegmentChain (chain_ref written into the plan) + the latent-episode
+  render (submitPlanEpisode) carry its parity; the Ollama plan copilot is the named
+  retirement gap).
 - **Experiment program**: tranches 1–3b + E-FC0.5/1 + E-MD1 + E-K1 + the MATLOWAI
   bake-off — every verdict in the research docs as dated addenda. Headlines: AddGuide
   movement director (E-MD1 winner); hybrid wins identity edits (E-ED1); turbo sharpest
@@ -71,15 +80,15 @@
 
 ## Building (in flight)
 
-(none — Phase 5 landed; next dispatch per the maintainer)
+(none — Phase 5b landed; next dispatch per the maintainer)
 
 ## Queued (specced/planning)
 
-- **Canvas Phase 5b — the Director Suite** (scope call resolved at Phase-5 landing,
-  2026-09-17): timeline projection + plan documents (the MoviePlanner inheritance) +
-  the measured gap menu. Spec §8 named it inside Phase 5, but the Phase-5 task's
-  authoritative ACs framed it report-first; it queues as its OWN build task.
-  MoviePlanner stays docked (StudiosDock, dated decision) until its successor ships.
+- **Canvas Phase 5b follow-ups (inherited at 5b landing, 2026-09-17)**: the
+  **plan copilot** (the retired MoviePlanner's Ollama brief→shots revisions,
+  re-homed on plan documents); the **guided dip-to-black + diegetic-bridge
+  renders** (AddGuide-pinned bridge generations — the gap menu labels them
+  honestly as engine work; E7 identity-across-bridge still unmeasured).
 - **Canvas Phase 6 candidates (inherited from Phase 5)**: the five asset studios'
   authoring flows become canvas macros (batch → approve → survey → extract; the
   LocationStudio guided builder is the best macro template); `syncLibraryAssets`

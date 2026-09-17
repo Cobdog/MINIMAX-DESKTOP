@@ -377,6 +377,32 @@ its own build task — spec §8 named it inside Phase 5, but the task's
 authoritative ACs re-framed it as a report-first scope call (decision
 reported to the lead before building; see task 7mcp11b).
 
+**Phase 5b landed (task 2u0rent, 2026-09-17):** the Director Suite (§6).
+The **timeline projection** is the V-flip family's second member (V cycles
+∅ → timeline → library → ∅, dated 2026-09-17; titlebar button + the
+launcher's plan chip) — with a plan it projects the plan's segments with
+their chains' facts (planned vs rendered duration, the F7 status ladder);
+without one, the project's chain outputs in creation order, upgradable by
+**adopt-chronology** ("plan this chronology" → a canvas_plan from the
+chain outputs). **Plan documents** ride the Phase-0 `canvas_plan` table
+exactly as the schema spec §1 shapes them (brief, segments[{chain_ref}],
+gaps[{kind: cut|nle|flf|black|bridge}], per-segment reference handoffs as
+library ids). The **gap menu** is the measured one — hard cut (9.8 dB, the
+default) / NLE handoff (post, deterministic) / **FLF continuation splice**
+(36.2/34.3 dB champion — the one that EXECUTES offline: the prior segment's
+final frame is ffmpeg-extracted and wired as the next segment's first
+frame; the Phase-5 toast-note continuation handoff moved into this
+machinery) / dip-to-black (structural ~0.7 s, audio-friendly; the GUIDED
+variant is labeled engine work) / diegetic bridge (opt-in; the Strategy-B
+render is labeled engine work — E1 diegetic-only, E7 identity hold
+unmeasured). **MoviePlanner retired** (StudiosDock's movie tab + the
+component deleted): plan documents + seedSegmentChain (the consent-gated
+seeding, now writing chain_ref back into the plan) + submitPlanEpisode
+(the scene-chain successor: FLF-connected runs render as ONE Motion-Context
+latent episode, each take landing on its own chain) carry its parity. The
+named retirement gap: the Ollama copilot chat (Phase-6 plan copilot); the
+guided dip + bridge renders are the queued engine work.
+
 **Phase 4 landed (task 6rymbx3, 2026-09-16):** latent-fork rendering ships
 (the Phase-3 seam closed) — canvas H3 renders save their sampler latents
 through the Motion-Context nodes when installed, takes carry the saved-clip
