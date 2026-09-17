@@ -114,6 +114,17 @@ export type VlmPlanPayload = {
   model: string | null
 }
 
+/** CLIP consent state (security wave 2): the curation pass downloads CLIP
+ *  weights from huggingface.co only behind a recorded consent; the dedup /
+ *  triage responses carry this so the UI can offer the choice honestly. */
+export type ClipConsentInfo = {
+  consented: boolean
+  id: string
+  model: string
+  licenseSpdx: string
+  note: string
+}
+
 export const datasetsApi = {
   bootstrap: () => call<{ settings: DatasetSettings; aspects: AspectEntry[]; rifeAvailable: boolean; exports: Array<{ id: string; shape: string; folder: string; itemCount: number; createdAt: number }> }>('/api/lan/datasets/bootstrap'),
   library: () => call<LibraryPayload>('/api/lan/datasets/library'),
@@ -144,8 +155,9 @@ export const datasetsApi = {
   setAspectEnabled: async (id: string, enabled: boolean) => (await post<{ aspects: AspectEntry[] }>('/api/lan/datasets/aspects/toggle', { id, enabled })).aspects,
   addAspect: async (label: string, ratio: number) => (await post<{ aspects: AspectEntry[] }>('/api/lan/datasets/aspects/add', { label, ratio })).aspects,
   deleteAspect: async (id: string) => (await post<{ aspects: AspectEntry[] }>('/api/lan/datasets/aspects/delete', { id })).aspects,
-  runDedup: () => post<{ tier1Clusters: number; tier2Clusters: number; embedBackend: string }>('/api/lan/datasets/dedup', {}),
-  triage: (imageBase64: string, limit?: number) => post<{ backend: string; results: Array<{ layerId: string; score: number }> }>('/api/lan/datasets/triage', { image: imageBase64, limit }),
+  runDedup: () => post<{ tier1Clusters: number; tier2Clusters: number; embedBackend: string; clipConsent: ClipConsentInfo }>('/api/lan/datasets/dedup', {}),
+  triage: (imageBase64: string, limit?: number) => post<{ backend: string; results: Array<{ layerId: string; score: number }>; clipConsent: ClipConsentInfo }>('/api/lan/datasets/triage', { image: imageBase64, limit }),
+  clipConsent: (consented: boolean) => post<{ consented: boolean; model: string; licenseSpdx: string }>('/api/lan/datasets/clip/consent', { consented }),
   similar: async (layerId: string) => (await call<{ results: Array<{ layerId: string; score: number }> }>(`/api/lan/datasets/similar?layerId=${encodeURIComponent(layerId)}`)).results,
   auditSlowMo: (sourceId: string) => post<{ suspect: boolean; reasons: string[] }>('/api/lan/datasets/audit/slowmo', { sourceId }),
   proposeScenes: async (sourceId: string) => (await post<{ proposals: Array<{ frameNo: number; atSec: number }> }>('/api/lan/datasets/scenes/propose', { sourceId })).proposals,

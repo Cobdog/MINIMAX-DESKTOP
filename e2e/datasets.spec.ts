@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
@@ -32,9 +31,12 @@ async function trackErrors(page: Page) {
 
 async function seedLibrary(request: APIRequestContext) {
   // One synthetic 480×832 24 fps clip, ingested by reference through the
-  // same HTTP surface a real client uses. The file stays in tmp (the source
-  // is sacred — referenced, never moved).
-  const dir = mkdtempSync(join(tmpdir(), 'ds-e2e-'))
+  // same HTTP surface a real client uses. The fixture lives INSIDE the
+  // server's studio home (test-home) — by-reference ingest is scope-gated
+  // (security wave 2) — and the file stays put (the source is sacred).
+  const home = join(process.cwd(), 'test-home')
+  mkdirSync(home, { recursive: true })
+  const dir = mkdtempSync(join(home, 'ds-e2e-'))
   const clip = join(dir, 'e2e-clip.mp4')
   await exec('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=duration=3:size=480x832:rate=24', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', clip])
   const response = await request.post('/api/lan/datasets/ingest/reference', { data: { path: clip } })

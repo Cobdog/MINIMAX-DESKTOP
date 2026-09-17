@@ -42,6 +42,7 @@ export function DatasetsApp() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [dedupState, setDedupState] = useState<string | null>(null)
+  const [clipConsent, setClipConsent] = useState<{ consented: boolean; model: string; note: string } | null>(null)
   const [dashboard, setDashboard] = useState<DashboardPayload | null>(null)
   const [exportResult, setExportResult] = useState<ExportResultPayload | null>(null)
   const fileInput = useRef<HTMLInputElement | null>(null)
@@ -159,7 +160,7 @@ export function DatasetsApp() {
   }
 
   const ingestByPath = async () => {
-    const path = window.prompt('Absolute path of the media file to reference (the file stays where it is — the source is sacred):')
+    const path = window.prompt('Absolute path of the media file to reference (must sit inside the studio home or the output directory — the file stays where it is; anything else: use LAN upload):')
     if (!path) return
     try {
       const result = await datasetsApi.ingestReference(path)
@@ -191,10 +192,28 @@ export function DatasetsApp() {
     try {
       const result = await datasetsApi.runDedup()
       setDedupState(`Clusters: ${result.tier1Clusters} near-dup groups, ${result.tier2Clusters} cross-ratio groups (${result.embedBackend} embeddings). Advisory only — nothing was deleted.`)
+      setClipConsent(result.clipConsent ?? null)
       await refresh()
     } catch (dedupError) {
       setDedupState(null)
       setError(dedupError instanceof Error ? dedupError.message : String(dedupError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Records the CLIP consent (LOW-2): the download happens only after this
+   *  explicit action — then the pass re-runs so the backend label is honest. */
+  const enableClip = async () => {
+    if (!window.confirm('Enable CLIP embeddings? The first use downloads the model weights (Xenova/clip-vit-base-patch32, Apache-2.0) from huggingface.co to this machine. The perceptual fallback stays available otherwise.')) return
+    setBusy(true)
+    try {
+      await datasetsApi.clipConsent(true)
+      setClipConsent((current) => (current ? { ...current, consented: true } : current))
+      setNotice('CLIP consent recorded — the next dedup pass will use CLIP embeddings when the model loads.')
+      await runDedup()
+    } catch (consentError) {
+      setError(consentError instanceof Error ? consentError.message : String(consentError))
     } finally {
       setBusy(false)
     }
@@ -296,6 +315,15 @@ export function DatasetsApp() {
           <h4>Curation</h4>
           <button type="button" className="ds-btn" onClick={() => void runDedup()} disabled={busy}><Layers size={13} /> Dedup pass</button>
           {dedupState && <p className="ds-hint">{dedupState}</p>}
+          {clipConsent && !clipConsent.consented && (
+            <p className="ds-hint">
+              CLIP embeddings are off (perceptual fallback).{' '}
+              <button type="button" className="ds-btn ghost" onClick={() => void enableClip()} disabled={busy}>
+                Enable CLIP
+              </button>{' '}
+              — downloads its model ({clipConsent.model}, Apache-2.0) from huggingface.co once, behind this explicit consent.
+            </p>
+          )}
           <button type="button" className="ds-btn" onClick={() => void batchVlm('skip')} disabled={busy}><Sparkles size={13} /> Batch VLM (skip hand)</button>
           <button type="button" className="ds-btn" onClick={() => void batchVlm('queue')} disabled={busy}><Sparkles size={13} /> Batch draft → review queue</button>
         </div>
@@ -667,7 +695,7 @@ function ExportWizard(props: {
       </div>
       <div className="ds-field">
         <label>Destination folder</label>
-        <input value={folder} onChange={(event) => setFolder(event.target.value)} placeholder="dataset-export-2026-09-17 (relative to the server cwd) or an absolute path" />
+        <input value={folder} onChange={(event) => setFolder(event.target.value)} placeholder="dataset-export-2026-09-17 (relative names land inside the studio output directory; every destination must stay inside it)" />
       </div>
       <div className="ds-field">
         <label>Grid target (optional — default: the largest 17n+5 that fits each trim with +2 headroom)</label>

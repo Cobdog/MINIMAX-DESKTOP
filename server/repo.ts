@@ -61,13 +61,17 @@ export function createStudioRepository(dbFile: string, options?: { allowedSource
   // Dataset manager (sv14rt0) on the same handle/migrations: its own tables
   // beside the others; app-owned media/trash roots next to the db like
   // canvas-blobs. The ffmpeg path refreshes from settings per request
-  // (core.ts calls datasets.tools.ffmpegPath = settings.ffmpegPath).
-  const datasetTools: { ffmpegPath: string; logFailure: (stage: string, error: unknown, detail?: Record<string, unknown>) => void; logEvent: (event: { kind: string; [key: string]: unknown }) => void } = { ffmpegPath: 'ffmpeg', logFailure: () => undefined, logEvent: () => undefined }
+  // (core.ts calls datasets.tools.ffmpegPath = settings.ffmpegPath); the
+  // CLIP-consent flag rides the same live seam (security wave 2: the
+  // resolver pattern, so settings changes are honored without a rebuild).
+  const datasetTools: { ffmpegPath: string; logFailure: (stage: string, error: unknown, detail?: Record<string, unknown>) => void; logEvent: (event: { kind: string; [key: string]: unknown }) => void; clipConsentGranted: boolean } = { ffmpegPath: 'ffmpeg', logFailure: () => undefined, logEvent: () => undefined, clipConsentGranted: false }
   const datasets: DatasetManager = createDatasetManager({
     db,
     mediaRoot: join(dirname(dbFile), 'dataset-media'),
     trashRoot: join(dirname(dbFile), 'dataset-trash'),
     tools: datasetTools,
+    allowedSourceRoots: options?.allowedSourceRoots,
+    clipConsent: () => datasetTools.clipConsentGranted,
     logEvent: () => undefined,
     logFailure: () => undefined,
   })
@@ -256,10 +260,11 @@ export function createStudioRepository(dbFile: string, options?: { allowedSource
 
     /** Refreshes the dataset manager's tool seams from live settings (cheap;
      * called by the datasets routes per request). */
-    setDatasetTools(next: { ffmpegPath: string; logFailure(stage: string, error: unknown, detail?: Record<string, unknown>): void; logEvent(event: { kind: string; [key: string]: unknown }): void; rifePath?: string | null }): void {
+    setDatasetTools(next: { ffmpegPath: string; logFailure(stage: string, error: unknown, detail?: Record<string, unknown>): void; logEvent(event: { kind: string; [key: string]: unknown }): void; rifePath?: string | null; clipConsentGranted?: boolean }): void {
       datasetTools.ffmpegPath = next.ffmpegPath
       datasetTools.logFailure = next.logFailure
       datasetTools.logEvent = next.logEvent
+      if (next.clipConsentGranted !== undefined) datasetTools.clipConsentGranted = next.clipConsentGranted
     },
 
     /** Per-job upsert keyed by id — NEVER a whole-list replace. Two clients

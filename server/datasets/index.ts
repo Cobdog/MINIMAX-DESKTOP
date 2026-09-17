@@ -68,6 +68,13 @@ export type DatasetManagerOptions = {
   tools: ToolOptions
   /** rife-ncnn-vulkan binary when present on PATH (availability-gated). */
   rifePath?: string | null
+  /** Security wave 2 (HIGH-1): by-reference sources must sit inside the
+   *  studio home or one of these resolver roots (see the store's gate). */
+  allowedSourceRoots?: () => string[]
+  /** Security wave 2 (LOW-2): resolves whether a CONSENT for the CLIP
+   *  embedder download is recorded. Absent/false = the perceptual fallback
+   *  only — the network is never touched from a curation pass. */
+  clipConsent?: () => boolean
   logEvent(event: { kind: string; [key: string]: unknown }): void
   logFailure(stage: string, error: unknown, detail?: Record<string, unknown>): void
 }
@@ -77,6 +84,7 @@ export function createDatasetManager(options: DatasetManagerOptions) {
     mediaRoot: options.mediaRoot,
     trashRoot: options.trashRoot,
     tools: options.tools,
+    allowedSourceRoots: options.allowedSourceRoots,
     logEvent: options.logEvent,
   })
   const queue = createBakeQueue()
@@ -130,8 +138,9 @@ export function createDatasetManager(options: DatasetManagerOptions) {
     }
     const tier1 = clusterBy(members.filter((member) => member.signature), (a, b) => tier1Distance(a.signature!, b.signature!), TIER1_NEAR_DUP_MAX_DISTANCE)
     // Tier 2 — aspect-normalized embeddings at each layer's representative
-    // frame; CLIP backend when it can load, else the perceptual fallback.
-    const clip = await clipEmbedder()
+    // frame; CLIP backend when a recorded consent allows its download, else
+    // the perceptual fallback (LOW-2: no LAN-peer-triggered weight fetches).
+    const clip = await clipEmbedder(options.clipConsent?.() ?? false)
     const embedBackend = clip ? 'clip' : 'perceptual'
     const embedMembers: Array<{ layerId: string; embed: EmbedVector }> = []
     for (const layer of layers) {
@@ -193,7 +202,7 @@ export function createDatasetManager(options: DatasetManagerOptions) {
   async function referenceTriage(referenceBytes: Buffer, limit = 50): Promise<{ backend: string; results: Array<{ layerId: string; score: number }> }> {
     const rows = options.db.prepare('SELECT layer_id, backend, vector FROM dataset_embeds').all() as Array<{ layer_id: string; backend: string; vector: Buffer }>
     if (!rows.length) return { backend: 'none', results: [] }
-    const clip = await clipEmbedder()
+    const clip = await clipEmbedder(options.clipConsent?.() ?? false)
     let reference: EmbedVector | null = null
     if (clip) {
       try {
@@ -202,13 +211,19 @@ export function createDatasetManager(options: DatasetManagerOptions) {
     }
     if (!reference) {
       // Perceptual ranking needs raw pixels — decode the reference through
-      // ffmpeg into gray (the deterministic fallback path).
-      const { writeFile: writeTemp } = await import('node:fs/promises')
+      // ffmpeg into gray (the deterministic fallback path). The temp frame
+      // is removed in finally (audit NOTE, wave 2: one leaked /tmp file per
+      // call otherwise).
+      const { writeFile: writeTemp, unlink: unlinkTemp } = await import('node:fs/promises')
       const { tmpdir } = await import('node:os')
       const temp = join(tmpdir(), `ds-ref-${randomUUID().slice(0, 8)}.jpg`)
-      await writeTemp(temp, referenceBytes)
-      const pixels = await extractGrayPixels(temp, options.tools, 0, 32)
-      reference = perceptualEmbed(pixels)
+      try {
+        await writeTemp(temp, referenceBytes)
+        const pixels = await extractGrayPixels(temp, options.tools, 0, 32)
+        reference = perceptualEmbed(pixels)
+      } finally {
+        await unlinkTemp(temp).catch(() => undefined)
+      }
     }
     const ranked = rows
       .map((row) => ({ layerId: row.layer_id, score: cosineSimilarity(reference!, new Float32Array(row.vector.buffer, row.vector.byteOffset, row.vector.length / 4)) }))
@@ -539,47 +554,55 @@ export function createDatasetManager(options: DatasetManagerOptions) {
     }
     const bakeFolder = join(options.mediaRoot, 'bake-scratch', randomUUID().slice(0, 8))
     await mkdir(bakeFolder, { recursive: true })
-    const baked: BakeOutcome[] = []
-    for (const entry of preGated) {
-      if (entry.findings.some((finding) => finding.tier === 'refuse')) continue
-      if (entry.findings.some((finding) => finding.tier === 'warn') && !request.acceptWarnings) continue
-      baked.push(await bakeLayer(entry.layer.id, { outputFolder: bakeFolder, gridTarget: request.gridTarget ?? null }))
-    }
-    // Post-gate with baked facts, then write the export.
-    const exportItems = preGated
-      .filter((entry) => baked.some((outcome) => outcome.layerId === entry.layer.id))
-      .map((entry) => {
-        const outcome = baked.find((candidate) => candidate.layerId === entry.layer.id)!
-        const source = store.getSource(entry.layer.sourceId)!
-        const slowMo = slowMoCache.get(entry.layer.sourceId)
-        const findings = evaluateGates({
-          layer: entry.layer,
-          caption: entry.layer.caption?.text ?? '',
-          triggerToken: settings.triggerToken,
-          baked: outcome,
-          slowMoSuspect: Boolean(slowMo?.suspect),
-          inCluster: Boolean(entry.layer.clusterId),
-          sourceCuts: store.cutsFor(entry.layer.sourceId).filter((cut) => cut.accepted).map((cut) => cut.frameNo),
-          audioPolicy: settings.audioPolicy,
-          sourceHasAudio: source.probe.hasAudio,
-          bakedFpsExact: outcome.state === 'done',
+    try {
+      const baked: BakeOutcome[] = []
+      for (const entry of preGated) {
+        if (entry.findings.some((finding) => finding.tier === 'refuse')) continue
+        if (entry.findings.some((finding) => finding.tier === 'warn') && !request.acceptWarnings) continue
+        baked.push(await bakeLayer(entry.layer.id, { outputFolder: bakeFolder, gridTarget: request.gridTarget ?? null }))
+      }
+      // Post-gate with baked facts, then write the export.
+      const exportItems = preGated
+        .filter((entry) => baked.some((outcome) => outcome.layerId === entry.layer.id))
+        .map((entry) => {
+          const outcome = baked.find((candidate) => candidate.layerId === entry.layer.id)!
+          const source = store.getSource(entry.layer.sourceId)!
+          const slowMo = slowMoCache.get(entry.layer.sourceId)
+          const findings = evaluateGates({
+            layer: entry.layer,
+            caption: entry.layer.caption?.text ?? '',
+            triggerToken: settings.triggerToken,
+            baked: outcome,
+            slowMoSuspect: Boolean(slowMo?.suspect),
+            inCluster: Boolean(entry.layer.clusterId),
+            sourceCuts: store.cutsFor(entry.layer.sourceId).filter((cut) => cut.accepted).map((cut) => cut.frameNo),
+            audioPolicy: settings.audioPolicy,
+            sourceHasAudio: source.probe.hasAudio,
+            bakedFpsExact: outcome.state === 'done',
+          })
+          return { layer: entry.layer, caption: entry.layer.caption?.text ?? '', baked: outcome, findings }
         })
-        return { layer: entry.layer, caption: entry.layer.caption?.text ?? '', baked: outcome, findings }
-      })
-    const result = await writeExport({
-      shape: request.shape,
-      trainer: request.trainer,
-      folder: request.folder,
-      triggerToken: settings.triggerToken,
-      contentClass: settings.contentClass,
-      items: exportItems,
-      audioPolicy: settings.audioPolicy,
-      acceptWarnings: Boolean(request.acceptWarnings),
-    }, store, options.tools)
-    options.db.prepare(`INSERT INTO dataset_exports (id, shape, folder, trigger_token, content_class, recipe_json, gate_report_json, items_json, item_count, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(result.exportId, request.shape, request.folder, settings.triggerToken, settings.contentClass, JSON.stringify(result.recipe), JSON.stringify(result.gateReport), JSON.stringify(result.refused), result.written.length, Date.now())
-    return result
+      const result = await writeExport({
+        shape: request.shape,
+        trainer: request.trainer,
+        folder: request.folder,
+        triggerToken: settings.triggerToken,
+        contentClass: settings.contentClass,
+        items: exportItems,
+        audioPolicy: settings.audioPolicy,
+        acceptWarnings: Boolean(request.acceptWarnings),
+      }, store, options.tools)
+      options.db.prepare(`INSERT INTO dataset_exports (id, shape, folder, trigger_token, content_class, recipe_json, gate_report_json, items_json, item_count, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(result.exportId, request.shape, request.folder, settings.triggerToken, settings.contentClass, JSON.stringify(result.recipe), JSON.stringify(result.gateReport), JSON.stringify(result.refused), result.written.length, Date.now())
+      return result
+    } finally {
+      // Security wave 2 (LOW-1): bake-scratch is per-export intermediate
+      // space — sweep it on completion AND failure so every export leaves
+      // the media store as it found it (previously each export permanently
+      // abandoned its full intermediate set inside dataset-media).
+      await import('node:fs/promises').then((fs) => fs.rm(bakeFolder, { recursive: true, force: true })).catch((error: unknown) => options.logFailure('datasets/bake-scratch-cleanup', error, { folder: bakeFolder }))
+    }
   }
 
   function listExports() {
