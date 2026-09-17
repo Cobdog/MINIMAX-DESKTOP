@@ -24,7 +24,7 @@ import type { AppSettings, GpuTelemetry, LanStatus, ModelKind } from '../src/typ
 import { failureRef, logEvent, logFailure } from './logger'
 import { sanitizeErrorMessage } from './logSanitize'
 import { createStudioRepository, type StudioRepository } from './repo'
-import { CANVAS_SCHEMA_VERSION, CanvasSchemaVersionError } from './documents'
+import { CANVAS_SCHEMA_VERSION, CanvasSchemaVersionError, PlanConflictError } from './documents'
 import { exportProjectArchive, importProjectArchive } from './documentArchive'
 import { createRealtimeHub, type RealtimeHub } from './realtime'
 import { EngineProcess } from './engineProcess'
@@ -752,6 +752,14 @@ export function createStudioServer(paths: StudioServerPaths) {
     if (source && typeof source === 'object' && !Array.isArray(source)) {
       const spec = source as { output?: unknown; comfy?: unknown }
       if (typeof spec.output === 'string' && spec.output) {
+        // Canvas blob references resolve through the verified content-
+        // addressed tree (the m3 wrong-file guard: renders extract frames
+        // from the take's registered blob, not a stale absolute path).
+        if (spec.output.startsWith('canvas-blobs/')) {
+          const resolved = studioRepo?.documents.resolveBlobFile(spec.output)
+          if (!resolved) throw new Error('The requested blob is unavailable.')
+          return resolved.absPath
+        }
         const root = resolve((await loadSettings()).outputDirectory)
         const candidate = resolve(spec.output)
         const containment = relative(root, candidate)
@@ -1217,12 +1225,20 @@ export function createStudioServer(paths: StudioServerPaths) {
           const documents = studioRepo.documents
           ensureDocumentsImported()
           // Unknown-newer versions are a LOUD refusal (400), never a silent
-          // downgrade; everything else propagates to the structural 500.
+          // downgrade; plan write conflicts answer 409 with the current
+          // document (the clean rebase surface); everything else propagates
+          // to the structural 500.
           const documentsFailure = (error: unknown): ReturnType<typeof sendJson> | null => {
             if (error instanceof CanvasSchemaVersionError) {
               return sendJson(response, 400, {
                 error: error.message,
                 schemaVersion: { found: error.found, supported: error.supported, writerAppVersion: error.writerAppVersion },
+              })
+            }
+            if (error instanceof PlanConflictError) {
+              return sendJson(response, 409, {
+                error: error.message,
+                conflict: { planId: error.planId, currentUpdatedAt: error.currentUpdatedAt, currentDocument: error.currentDocument },
               })
             }
             return null
@@ -1236,7 +1252,17 @@ export function createStudioServer(paths: StudioServerPaths) {
           }
           if (url.pathname === '/api/lan/documents/projects' && request.method === 'GET') {
             const trash = url.searchParams.get('trash') === '1'
-            return sendJson(response, 200, { projects: trash ? documents.listTrashedProjects() : documents.listProjects() })
+            try {
+              // Version-refusal isolation (M4): rows this build cannot open
+              // are skipped and reported per row — one newer-schema project
+              // degrades ITSELF, never the boot's whole project list.
+              const listing = trash ? documents.listTrashedProjects() : documents.listProjects()
+              return sendJson(response, 200, { projects: listing.projects, skipped: listing.skipped })
+            } catch (error) {
+              const mapped = documentsFailure(error)
+              if (mapped) return mapped
+              throw error
+            }
           }
           if (url.pathname === '/api/lan/documents/projects' && request.method === 'POST') {
             const body = await readJson(request, 100_000)
@@ -1589,8 +1615,12 @@ export function createStudioServer(paths: StudioServerPaths) {
             const body = await readJson(request, 8_000_000)
             const projectId = typeof body.projectId === 'string' ? body.projectId : ''
             if (!projectId || projectId.length > 400 || !isRecord(body.document)) return sendJson(response, 400, { error: 'A projectId and a plan document are required.' })
+            // Optimistic concurrency (M5): expectedUpdatedAt (ms epoch, the
+            // hydrated plan row's updatedAt) makes this a compare-and-swap;
+            // a stale version answers 409 + the current document.
+            const expectedUpdatedAt = typeof body.expectedUpdatedAt === 'number' && Number.isFinite(body.expectedUpdatedAt) ? Math.trunc(body.expectedUpdatedAt) : undefined
             try {
-              return sendJson(response, 200, { plan: documents.upsertPlan({ projectId, id: typeof body.id === 'string' && body.id ? body.id : undefined, document: body.document }) })
+              return sendJson(response, 200, { plan: documents.upsertPlan({ projectId, id: typeof body.id === 'string' && body.id ? body.id : undefined, document: body.document, ...(expectedUpdatedAt !== undefined ? { expectedUpdatedAt } : {}) }) })
             } catch (error) {
               const mapped = documentsFailure(error)
               if (mapped) return mapped
@@ -1663,6 +1693,42 @@ export function createStudioServer(paths: StudioServerPaths) {
               return sendJson(response, 200, { path: outputPath, blob })
             } catch (error) {
               return sendJson(response, 500, { error: `The dropped media could not be stored: ${error instanceof Error ? error.message : String(error)}` })
+            }
+          }
+          // Remote-engine output ingest (B2): a completed job whose output
+          // never resolved to a LOCAL file (external ComfyUI, or a
+          // subfolder/output-dir mismatch) is fetched from the engine's /view
+          // through the same proxy the media route uses, landed as an
+          // output-dir copy + content-addressed blob — the render becomes
+          // durable instead of dying with the engine's output rotation.
+          if (url.pathname === '/api/lan/documents/blobs/ingest-output' && request.method === 'POST') {
+            const body = await readJson(request, 100_000)
+            const filename = typeof body.filename === 'string' ? body.filename : ''
+            const subfolder = typeof body.subfolder === 'string' ? body.subfolder : ''
+            const kind = body.kind === 'image' || body.kind === 'video' || body.kind === 'audio' ? body.kind : ''
+            if (!kind) return sendJson(response, 400, { error: 'A media kind (image / video / audio) is required.' })
+            // The exact filename/subfolder validation the media proxy applies
+            // (proxyLanMedia) — an output descriptor, never a path.
+            if (!filename || filename.includes('/') || filename.includes('\\')) return sendJson(response, 400, { error: 'Invalid output filename.' })
+            if (subfolder && (isAbsolute(subfolder) || subfolder.split(/[\\/]/).includes('..'))) return sendJson(response, 400, { error: 'Invalid output subfolder.' })
+            const fileType = body.type === 'input' ? 'input' : 'output'
+            try {
+              const query = new URLSearchParams({ filename, subfolder, type: fileType })
+              const upstream = await fetch(`${cleanUrl(settings.comfyUrl)}/view?${query}`)
+              if (!upstream.ok || !upstream.body) return sendJson(response, 502, { error: 'The engine output could not be fetched — the engine may be unreachable or the output rotated away.' })
+              const bytes = Buffer.from(await upstream.arrayBuffer())
+              if (!bytes.length) return sendJson(response, 400, { error: 'The engine output carried no bytes.' })
+              const extension = extname(filename).toLowerCase().slice(0, 8) || (kind === 'image' ? '.png' : kind === 'audio' ? '.mp3' : '.mp4')
+              const safeStem = basename(filename, extname(filename)).replace(/[^a-z0-9._-]+/gi, '_').slice(0, 80) || 'engine-output'
+              const folder = join(settings.outputDirectory, 'canvas-media')
+              const outputPath = join(folder, `${safeStem}-${randomUUID().slice(0, 8)}${extension}`)
+              await mkdir(folder, { recursive: true })
+              await writeFile(outputPath, bytes)
+              const blob = documents.registerBlobFile(kind, outputPath)
+              logEvent({ kind: 'documents.blob-ingest', bytes: bytes.length, hash: blob.hash ? 'present' : 'missing' })
+              return sendJson(response, 200, { path: outputPath, blob })
+            } catch (error) {
+              return sendJson(response, 502, { error: `The engine output could not be stored: ${error instanceof Error ? error.message : String(error)}` })
             }
           }
           // Blob media serving for canvas previews: <img>/<video> sources
@@ -1763,6 +1829,16 @@ export function createStudioServer(paths: StudioServerPaths) {
         if (url.pathname === '/api/lan/upload-output' && request.method === 'POST') {
           const body = await readJson(request, 10_000)
           const requested = typeof body.path === 'string' ? body.path : ''
+          // Canvas blob references (canvas-blobs/…) resolve through the
+          // document store's verified tree — imported/verified content is
+          // uploadable to the engine without a volatile output-dir copy, and
+          // the VERIFIED blob always wins over a stale absolute path
+          // (wrong-file substitution guard, m3).
+          if (requested.startsWith('canvas-blobs/')) {
+            const resolved = studioRepo?.documents.resolveBlobFile(requested)
+            if (!resolved) return sendJson(response, 404, { error: 'The referenced blob is unavailable.' })
+            return sendJson(response, 200, await uploadFileAt(settings.comfyUrl, resolved.absPath, typeof body.subfolder === 'string' && body.subfolder ? body.subfolder : 'minimax-desktop'))
+          }
           const root = resolve(settings.outputDirectory)
           const candidate = requested ? resolve(requested) : root
           const containment = relative(root, candidate)
@@ -2096,8 +2172,11 @@ export function createStudioServer(paths: StudioServerPaths) {
           const body = await readJson(request, 10_000)
           const promptId = typeof body.promptId === 'string' ? body.promptId : ''
           if (!promptId) return sendJson(response, 400, { error: 'A prompt ID is required.' })
-          await cancelPromptAt(settings.comfyUrl, promptId)
-          return sendJson(response, 200, { cancelled: true })
+          // The honest verdict rides through (M5′): {cancelled:false,
+          // state:'finished'} tells the client the render COMPLETED — the job
+          // must not be marked cancelled (it still lands as a take).
+          const result = await cancelPromptAt(settings.comfyUrl, promptId)
+          return sendJson(response, 200, result)
         }
         if (url.pathname.startsWith('/api/lan/history/') && request.method === 'GET') {
           const promptId = decodeURIComponent(url.pathname.slice('/api/lan/history/'.length))

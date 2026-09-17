@@ -23,7 +23,7 @@
  * collision is a UX decision for the canvas import flow).
  */
 import { createHash } from 'node:crypto'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { deflateRawSync, inflateRawSync } from 'node:zlib'
 import { CANVAS_ARCHIVE_VERSION, CANVAS_SCHEMA_VERSION, CanvasSchemaVersionError, type DocumentStore } from './documents'
@@ -220,7 +220,14 @@ export function exportProjectArchive(store: DocumentStore, projectId: string): {
   const missingBlobs: ArchiveManifest['missingBlobs'] = []
   for (const relPath of referencedPaths) {
     const row = db.prepare('SELECT * FROM canvas_blob WHERE path = ?').get(relPath) as Record<string, unknown> | undefined
-    if (!row) continue
+    if (!row) {
+      // Referenced but never registered (a pre-blob latent recorded as a
+      // relative engine path, a legacy control ref): VISIBLE in the
+      // manifest's missing list — never a silent omission while the counts
+      // claim full blob coverage.
+      missingBlobs.push({ path: relPath, kind: relPath.endsWith('.latent') ? 'latent' : 'media', hash: 'unregistered' })
+      continue
+    }
     blobRows.set(relPath, row)
     const hash = String(row.content_hash)
     if (hash.startsWith('unverified:')) {
@@ -314,7 +321,13 @@ export type ArchiveImportReport = {
 /** Imports a project archive. Unknown-newer archive/document versions refuse
  *  loudly (CanvasSchemaVersionError); a taken project id refuses with a clear
  *  reason (id-remap UX is the canvas import flow's call, not ours). The whole
- *  import is one transaction — a failure leaves nothing behind. */
+ *  import is one transaction and a failure leaves NOTHING behind: blob
+ *  payloads are staged under import-temp names and renamed into the
+ *  content-addressed tree only after the transaction commits (rolled-back
+ *  rows never leave orphan files). Shared content (the same hash in two
+ *  archives, or bytes this studio already ingested) upserts instead of
+ *  colliding on canvas_blob's path PK — content-addressed rows are
+ *  idempotent by construction. */
 export function importProjectArchive(store: DocumentStore, archive: Buffer): ArchiveImportReport {
   const db = store.db
   const files = unpackZip(archive)
@@ -337,80 +350,119 @@ export function importProjectArchive(store: DocumentStore, archive: Buffer): Arc
     throw new CanvasSchemaVersionError(manifest.schemaVersion, CANVAS_SCHEMA_VERSION, manifest.writerAppVersion, `project archive for "${manifest.projectName}"`)
   }
 
-  return db.transaction((): ArchiveImportReport => {
-    const projectId = manifest.projectId
-    const existing = db.prepare('SELECT id FROM canvas_project WHERE id = ?').get(projectId)
-    if (existing) throw new Error(`A project with id ${projectId} already exists in this studio. Delete or rename it before importing this archive.`)
-    if (!payload.project || typeof payload.project !== 'object' || Array.isArray(payload.project)) {
-      throw new Error('The archive document payload has no project row.')
-    }
-
-    const rows = {
-      project: payload.project as Record<string, unknown>,
-      chains: (payload.chains ?? []) as Array<Record<string, unknown>>,
-      outputs: (payload.outputs ?? []) as Array<Record<string, unknown>>,
-      takes: (payload.takes ?? []) as Array<Record<string, unknown>>,
-      opStacks: (payload.opStacks ?? []) as Array<Record<string, unknown>>,
-      ops: (payload.ops ?? []) as Array<Record<string, unknown>>,
-      identityPayloads: (payload.identityPayloads ?? []) as Array<Record<string, unknown>>,
-      controlTracks: (payload.controlTracks ?? []) as Array<Record<string, unknown>>,
-      plans: (payload.plans ?? []) as Array<Record<string, unknown>>,
-      assetForks: (payload.assetForks ?? []) as Array<Record<string, unknown>>,
-      blobRows: (payload.blobRows ?? []) as Array<Record<string, unknown>>,
-    }
-
-    // Global assets ride by id + hash: a fork whose global asset is absent
-    // locally gets a VISIBLE placeholder (never a silent drop, never an FK
-    // hole) — reported as missingGlobalAssets.
-    const missingGlobalAssets: ArchiveImportReport['missingGlobalAssets'] = []
-    for (const asset of manifest.globalAssets) {
-      const present = db.prepare('SELECT id FROM canvas_asset WHERE id = ?').get(asset.id)
-      if (present) continue
-      missingGlobalAssets.push(asset)
-      db.prepare('INSERT INTO canvas_asset (id, kind, fields_json, canonical_reference_set_json, created_at, deleted_at) VALUES (?, ?, ?, NULL, ?, NULL)')
-        .run(asset.id, asset.kind, JSON.stringify({ __placeholder: true, note: 'imported from archive; global asset content not present locally', fieldsHash: asset.fieldsHash }), Date.now())
-    }
-
-    // blobs first (takes reference them)
-    let restoredBlobs = 0
-    let verifiedBlobs = 0
-    for (const blob of manifest.blobs) {
-      const data = files.get(`blobs/${blob.hash}`)
-      if (!data) continue
-      const actual = createHash('sha256').update(data).digest('hex')
-      if (actual !== blob.hash) throw new Error(`Archive blob ${blob.hash} failed its content-hash check — the archive is corrupt; nothing was imported.`)
-      const target = join(store.blobRoot, blob.hash.slice(0, 2), blob.hash)
-      mkdirSync(join(store.blobRoot, blob.hash.slice(0, 2)), { recursive: true })
-      writeFileSync(target, data)
-      restoredBlobs += 1
-      verifiedBlobs += 1
-    }
-    for (const blob of manifest.missingBlobs) {
-      // missing blobs stay missing by design — the manifest records them and
-      // the F8 relink seam can repair them from user-nominated roots
-      db.prepare('UPDATE canvas_blob SET missing = 1 WHERE path = ?').run(blob.path)
-    }
-
-    const insertAll = (table: string, rowsToInsert: Array<Record<string, unknown>>) => {
-      if (!rowsToInsert.length) return
-      for (const row of rowsToInsert) {
-        const keys = Object.keys(row)
-        db.prepare(`INSERT INTO ${table} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(',')})`).run(...keys.map((key) => (row[key] === undefined ? null : row[key])))
+  // Blob payloads are written to STAGED names inside the transaction and
+  // renamed only after it commits; a failure un-stages them.
+  const staged: Array<{ stagedPath: string; targetPath: string }> = []
+  try {
+    const report = db.transaction((): ArchiveImportReport => {
+      const projectId = manifest.projectId
+      const existing = db.prepare('SELECT id FROM canvas_project WHERE id = ?').get(projectId)
+      if (existing) throw new Error(`A project with id ${projectId} already exists in this studio. Delete or rename it before importing this archive.`)
+      if (!payload.project || typeof payload.project !== 'object' || Array.isArray(payload.project)) {
+        throw new Error('The archive document payload has no project row.')
       }
-    }
-    insertAll('canvas_project', [rows.project])
-    // FK order: chains before their op stacks (canvas_op_stack.chain_id ->
-    // canvas_chain.id), outputs before takes, assets before forks.
-    insertAll('canvas_chain', rows.chains)
-    insertAll('canvas_op_stack', rows.opStacks)
-    insertAll('canvas_output', rows.outputs)
-    insertAll('canvas_take', rows.takes)
-    insertAll('canvas_op', rows.ops)
-    insertAll('canvas_identity_payload', rows.identityPayloads)
-    insertAll('canvas_control_track', rows.controlTracks)
-    insertAll('canvas_plan', rows.plans)
-    insertAll('canvas_asset_fork', rows.assetForks)
-    insertAll('canvas_blob', rows.blobRows)
+
+      const rows = {
+        project: payload.project as Record<string, unknown>,
+        chains: (payload.chains ?? []) as Array<Record<string, unknown>>,
+        outputs: (payload.outputs ?? []) as Array<Record<string, unknown>>,
+        takes: (payload.takes ?? []) as Array<Record<string, unknown>>,
+        opStacks: (payload.opStacks ?? []) as Array<Record<string, unknown>>,
+        ops: (payload.ops ?? []) as Array<Record<string, unknown>>,
+        identityPayloads: (payload.identityPayloads ?? []) as Array<Record<string, unknown>>,
+        controlTracks: (payload.controlTracks ?? []) as Array<Record<string, unknown>>,
+        plans: (payload.plans ?? []) as Array<Record<string, unknown>>,
+        assetForks: (payload.assetForks ?? []) as Array<Record<string, unknown>>,
+        blobRows: (payload.blobRows ?? []) as Array<Record<string, unknown>>,
+      }
+
+      // Global assets ride by id + hash: a fork whose global asset is absent
+      // locally gets a VISIBLE placeholder (never a silent drop, never an FK
+      // hole) — reported as missingGlobalAssets.
+      const missingGlobalAssets: ArchiveImportReport['missingGlobalAssets'] = []
+      for (const asset of manifest.globalAssets) {
+        const present = db.prepare('SELECT id FROM canvas_asset WHERE id = ?').get(asset.id)
+        if (present) continue
+        missingGlobalAssets.push(asset)
+        db.prepare('INSERT INTO canvas_asset (id, kind, fields_json, canonical_reference_set_json, created_at, deleted_at) VALUES (?, ?, ?, NULL, ?, NULL)')
+          .run(asset.id, asset.kind, JSON.stringify({ __placeholder: true, note: 'imported from archive; global asset content not present locally', fieldsHash: asset.fieldsHash }), Date.now())
+      }
+
+      // blobs first (takes reference them): hash-verify, write STAGED, and
+      // remember whether the payload actually rode the archive (a deduped
+      // export lists the path without resending the bytes).
+      let restoredBlobs = 0
+      let verifiedBlobs = 0
+      const payloadAbsent: Array<{ path: string; targetPath: string }> = []
+      for (const blob of manifest.blobs) {
+        const targetPath = join(store.blobRoot, blob.hash.slice(0, 2), blob.hash)
+        const data = files.get(`blobs/${blob.hash}`)
+        if (!data) {
+          // Content deduped at export (or a hostile manifest): the row may
+          // still import — but if the file is not present locally either,
+          // the blob must be marked missing, never claimed present.
+          payloadAbsent.push({ path: blob.path, targetPath })
+          continue
+        }
+        const actual = createHash('sha256').update(data).digest('hex')
+        if (actual !== blob.hash) throw new Error(`Archive blob ${blob.hash} failed its content-hash check — the archive is corrupt; nothing was imported.`)
+        const stagedPath = `${targetPath}.importing-${Math.random().toString(36).slice(2, 10)}`
+        mkdirSync(join(store.blobRoot, blob.hash.slice(0, 2)), { recursive: true })
+        writeFileSync(stagedPath, data)
+        staged.push({ stagedPath, targetPath })
+        restoredBlobs += 1
+        verifiedBlobs += 1
+      }
+
+      const insertAll = (table: string, rowsToInsert: Array<Record<string, unknown>>) => {
+        if (!rowsToInsert.length) return
+        for (const row of rowsToInsert) {
+          const keys = Object.keys(row)
+          db.prepare(`INSERT INTO ${table} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(',')})`).run(...keys.map((key) => (row[key] === undefined ? null : row[key])))
+        }
+      }
+      insertAll('canvas_project', [rows.project])
+      // FK order: chains before their op stacks (canvas_op_stack.chain_id ->
+      // canvas_chain.id), outputs before takes, assets before forks.
+      insertAll('canvas_chain', rows.chains)
+      insertAll('canvas_op_stack', rows.opStacks)
+      insertAll('canvas_output', rows.outputs)
+      insertAll('canvas_take', rows.takes)
+      insertAll('canvas_op', rows.ops)
+      insertAll('canvas_identity_payload', rows.identityPayloads)
+      insertAll('canvas_control_track', rows.controlTracks)
+      insertAll('canvas_plan', rows.plans)
+      insertAll('canvas_asset_fork', rows.assetForks)
+      // canvas_blob rows: UPSERT-WITH-VERIFY (the path is the PK and content
+      // addressing makes rows idempotent). A pre-existing row with the SAME
+      // hash is refreshed to present (this import just proved the bytes); a
+      // divergent row is replaced by the archive's verified one. Never a raw
+      // UNIQUE-constraint abort on shared content.
+      for (const row of rows.blobRows) {
+        const path = typeof row.path === 'string' ? row.path : ''
+        if (!path) continue
+        const hash = typeof row.content_hash === 'string' ? row.content_hash : ''
+        const existing = db.prepare('SELECT content_hash FROM canvas_blob WHERE path = ?').get(path) as { content_hash: string } | undefined
+        if (existing && existing.content_hash === hash) {
+          db.prepare('UPDATE canvas_blob SET kind = ?, size = ?, last_verified_at = ?, missing = 0 WHERE path = ?')
+            .run(typeof row.kind === 'string' ? row.kind : 'media', row.size === undefined || row.size === null ? null : Number(row.size), Date.now(), path)
+          continue
+        }
+        if (existing) {
+          db.prepare('UPDATE canvas_blob SET kind = ?, content_hash = ?, size = ?, last_verified_at = ?, missing = 0, relinked_from = ? WHERE path = ?')
+            .run(typeof row.kind === 'string' ? row.kind : 'media', hash, row.size === undefined || row.size === null ? null : Number(row.size), Date.now(), typeof row.relinked_from === 'string' ? row.relinked_from : null, path)
+          continue
+        }
+        insertAll('canvas_blob', [row])
+      }
+      // missingBlobs AFTER the rows exist (the pre-insert order was a no-op),
+      // plus payload-absent blobs whose file is not present locally either.
+      const markMissing = new Set<string>()
+      for (const blob of manifest.missingBlobs) markMissing.add(blob.path)
+      for (const absent of payloadAbsent) {
+        if (!existsSync(absent.targetPath)) markMissing.add(absent.path)
+      }
+      for (const path of markMissing) db.prepare('UPDATE canvas_blob SET missing = 1 WHERE path = ?').run(path)
 
     // reindex what landed (FTS is a projection, not exported state)
     const jsonText = (raw: unknown): Record<string, unknown> => {
@@ -441,5 +493,22 @@ export function importProjectArchive(store: DocumentStore, archive: Buffer): Arc
       restoredBlobs,
       verifiedBlobs,
     }
-  })()
+    })()
+    // Commit succeeded: the staged payloads become the content-addressed
+    // files (atomic rename — a torn import file can never sit at a canonical
+    // hash path).
+    for (const { stagedPath, targetPath } of staged) {
+      renameSync(stagedPath, targetPath)
+    }
+    return report
+  } catch (error) {
+    // Rows rolled back; the staged payloads must not survive the failure
+    // ("a failure leaves nothing behind" — files included).
+    for (const { stagedPath } of staged) {
+      try {
+        unlinkSync(stagedPath)
+      } catch { /* already gone — nothing to unstage */ }
+    }
+    throw error
+  }
 }
