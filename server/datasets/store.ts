@@ -181,14 +181,17 @@ export function upDatasetTables(db: Database.Database): void {
     );
     INSERT INTO dataset_settings (id, updated_at) VALUES (1, 0);
 
-    -- FTS over captions + provenance (contentless; managed explicitly).
+    -- FTS over captions + provenance. Contentful (unlike prompts_fts):
+    -- the hit rows must carry source_id/layer_id back to the caller without
+    -- a join, and dataset captions are small — the storage trade is trivial.
+    -- Managed explicitly (delete-then-insert by rowid) like the other FTS.
+    -- [2026-09-17, pre-release fix: was contentless, which returns NULL
+    -- columns; edited in place before any database carried migration 003.]
     CREATE VIRTUAL TABLE dataset_fts USING fts5(
       text,
       source_id UNINDEXED,
       layer_id UNINDEXED,
-      kind UNINDEXED,
-      content='',
-      contentless_delete=1
+      kind UNINDEXED
     );
   `)
 }
@@ -450,10 +453,15 @@ export function createDatasetStore(db: Database.Database, options: DatasetStoreO
 
   // -- ingest (§2.1: both paths, one identity contract) ----------------------
 
-  /** Shared file-ingest core (both paths): hash → dedupe-or-insert. */
+  /** Shared file-ingest core (both paths): probe → hash → dedupe-or-insert.
+   * Containment: the media probe runs BEFORE any hashing, so a probed path
+   * that is not consumable media fails without producing a content digest
+   * (no arbitrary-file fingerprinting through the ingest surface). */
   async function ingestFileAt(resolved: string, ingestPath: 'reference' | 'upload', provenance?: ProvenanceInput): Promise<IngestResult> {
+    if (resolved.includes('\0')) throw new Error('The path contains a null byte.')
     const info = await stat(resolved).catch(() => null)
     if (!info?.isFile()) throw new Error(`No file at ${resolved} — ingest needs an existing file.`)
+    const probe = await probeMedia(resolved, options.tools)
     const hash = await contentHashOfFile(resolved)
     const existing = hydrateSource(st.sourceByHash.get(hash) as Record<string, unknown>)
     if (existing) {
@@ -468,7 +476,6 @@ export function createDatasetStore(db: Database.Database, options: DatasetStoreO
       }
       return { source: hydrateSource(st.sourceById.get(existing.id))!, deduped: true }
     }
-    const probe = await probeMedia(resolved, options.tools)
     const floor = floorVerdict(probe.kind, probe.width, probe.height)
     const id = randomUUID()
     st.insertSource.run({
@@ -551,7 +558,7 @@ export function createDatasetStore(db: Database.Database, options: DatasetStoreO
       const info = await stat(source.absPath).catch(() => null)
       if (!info) {
         if (source.health !== 'missing') {
-          st.updateSourceHealth.run('missing', `The file at ${source.absPath} is gone. Layers are intact; bake refuses until re-linked (pick a file with the same content — hash ${source.contentHash.slice(0, 12)}).`, source.mtimeMs, source.sizeBytes, now(), source.id)
+          st.updateSourceHealth.run('missing', `The file at ${source.absPath} is gone. Layers are intact; bake refuses until re-linked. Re-link by picking a file with the same content (hash ${source.contentHash.slice(0, 12)}).`, source.mtimeMs, source.sizeBytes, now(), source.id)
           missing += 1
         }
         continue
@@ -560,7 +567,10 @@ export function createDatasetStore(db: Database.Database, options: DatasetStoreO
         // Came back? Verify by hash before declaring healthy.
         const hash = await contentHashOfFile(source.absPath).catch(() => null)
         if (hash === source.contentHash) st.updateSourceHealth.run('healthy', null, Math.round(info.mtimeMs), info.size, now(), source.id)
-        else st.updateSourceHealth.run('changed', 'The file at this path now holds DIFFERENT content — crop/trim indices may no longer align. Bake warns; explicit accept required.', Math.round(info.mtimeMs), info.size, now(), source.id)
+        else {
+          st.updateSourceHealth.run('changed', 'Same path, different content (hash mismatch) — crop/trim indices may no longer align. Bake warns; explicit accept is required before these layers bake.', Math.round(info.mtimeMs), info.size, now(), source.id)
+          changed += 1
+        }
         continue
       }
       if (Math.round(info.mtimeMs) !== source.mtimeMs || info.size !== source.sizeBytes) {
@@ -582,8 +592,16 @@ export function createDatasetStore(db: Database.Database, options: DatasetStoreO
   async function relinkSource(sourceId: string, newPath: string): Promise<{ relinked: boolean; reason?: string }> {
     const source = hydrateSource(st.sourceById.get(sourceId))
     if (!source) throw new Error(`No source ${sourceId}.`)
+    if (newPath.includes('\0')) return { relinked: false, reason: 'The path contains a null byte.' }
     const info = await stat(newPath).catch(() => null)
     if (!info?.isFile()) return { relinked: false, reason: `No file at ${newPath}.` }
+    // Containment: the pick must probe as consumable media before it is
+    // hashed (no arbitrary-file digests through the re-link surface).
+    try {
+      await probeMedia(newPath, options.tools)
+    } catch {
+      return { relinked: false, reason: 'The picked file is not consumable media.' }
+    }
     const hash = await contentHashOfFile(newPath)
     if (hash !== source.contentHash) {
       return { relinked: false, reason: `Content hash mismatch: the picked file is not the same content as the missing source (want ${source.contentHash.slice(0, 12)}, got ${hash.slice(0, 12)}).` }
@@ -855,12 +873,12 @@ export function createDatasetStore(db: Database.Database, options: DatasetStoreO
       // children exist creates NEW children (never mutates old ones) — so the
       // proposal is APPENDED, existing accepted cuts untouched.
       for (let index = 0; index < frames.length; index += 1) {
-        st.upsertCut.run(sourceId, Math.round(frames[index]), Boolean(accepted[index]), true, now())
+        st.upsertCut.run(sourceId, Math.round(frames[index]), accepted[index] ? 1 : 0, 1, now())
       }
     } else {
       st.clearCuts.run(sourceId)
       for (let index = 0; index < frames.length; index += 1) {
-        st.upsertCut.run(sourceId, Math.round(frames[index]), Boolean(accepted[index]), true, now())
+        st.upsertCut.run(sourceId, Math.round(frames[index]), accepted[index] ? 1 : 0, 1, now())
       }
     }
     return { sourceId, cuts: cutsFor(sourceId) }

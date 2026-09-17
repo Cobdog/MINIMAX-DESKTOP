@@ -156,7 +156,9 @@ export function createDatasetManager(options: DatasetManagerOptions) {
     }
     const embedByLayer = new Map(embedMembers.map((member) => [member.layerId, member.embed]))
     persistEmbeds(embedByLayer, embedBackend)
-    const tier2 = clusterBy(embedMembers, (a, b) => cosineSimilarity(a.embed, b.embed), TIER2_CLUSTER_THRESHOLD)
+    // clusterBy takes a DISTANCE (lower = closer); cosine similarity is
+    // inverted: distance = 1 − cos, threshold = 1 − 0.94.
+    const tier2 = clusterBy(embedMembers, (a, b) => 1 - cosineSimilarity(a.embed, b.embed), 1 - TIER2_CLUSTER_THRESHOLD)
     let tier1Clusters = 0
     let tier2Clusters = 0
     for (const [layerId, assignment] of tier1) {

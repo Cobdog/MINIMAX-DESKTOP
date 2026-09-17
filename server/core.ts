@@ -1092,7 +1092,20 @@ export function createStudioServer(paths: StudioServerPaths) {
     })
   }
 
-  /** Provenance fields from an ingest body (fields only, no ceremony — §2.2). */
+  /** Dataset bake/export destination containment: RELATIVE paths resolve under
+ *  the user's output directory (never the repo or cwd by accident); absolute
+ *  paths are honored as explicit user intent but must resolve (no null bytes,
+ *  no unresolved traversal). Same posture as the rest of the server's
+ *  user-supplied-path surfaces. */
+function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: string): string {
+  const trimmed = raw.slice(0, 4000)
+  if (trimmed.includes('\0')) throw new Error('The destination path contains a null byte.')
+  if (!trimmed) return join(settings.outputDirectory, defaultName)
+  if (isAbsolute(trimmed)) return resolve(trimmed)
+  return resolve(join(settings.outputDirectory, trimmed))
+}
+
+/** Provenance fields from an ingest body (fields only, no ceremony — §2.2). */
   function provenanceFromBody(body: Record<string, unknown>) {
     return {
       originNote: typeof body.originNote === 'string' ? body.originNote.slice(0, 2000) : undefined,
@@ -2268,7 +2281,7 @@ export function createStudioServer(paths: StudioServerPaths) {
             const body = await readJson(request, 100_000)
             const layerId = typeof body.layerId === 'string' ? body.layerId : ''
             if (!layerId) return sendJson(response, 400, { error: 'A layerId is required.' })
-            const folder = typeof body.folder === 'string' && body.folder.trim() ? body.folder.trim() : join(settings.outputDirectory, 'dataset-bakes')
+            const folder = resolveDatasetFolder(typeof body.folder === 'string' ? body.folder.trim() : '', settings, 'dataset-bakes')
             try {
               const outcome = await manager.bakeLayer(layerId, {
                 outputFolder: folder,
@@ -2282,10 +2295,9 @@ export function createStudioServer(paths: StudioServerPaths) {
             const body = await readJson(request, 200_000)
             const shape = body.shape === 'musubi' || body.shape === 'diffsynx' || body.shape === 'external' ? body.shape : null
             const trainer = body.trainer === 'musubi' ? 'musubi' : 'diffsynx'
-            const folder = typeof body.folder === 'string' ? body.folder.trim() : ''
+            const folder = resolveDatasetFolder(typeof body.folder === 'string' ? body.folder.trim() : '', settings, 'dataset-exports')
             const layerIds = Array.isArray(body.layerIds) ? body.layerIds.filter((id: unknown) => typeof id === 'string') : []
             if (!shape) return sendJson(response, 400, { error: 'An export shape (musubi / diffsynx / external) is required.' })
-            if (!folder || folder.length > 4000) return sendJson(response, 400, { error: 'A destination folder is required.' })
             if (!layerIds.length) return sendJson(response, 400, { error: 'Select at least one layer to export.' })
             try {
               const result = await manager.exportDataset({ shape, trainer, folder, layerIds, gridTarget: Number.isFinite(Number(body.gridTarget)) ? Number(body.gridTarget) : null, acceptWarnings: body.acceptWarnings === true })
