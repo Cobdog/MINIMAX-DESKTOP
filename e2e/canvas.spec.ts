@@ -1294,50 +1294,42 @@ test('context menus clamp inside the viewport when opened near the bottom (F8)',
   await dropPng(page, 'clamp-source.png')
   const mediaTile = page.locator('[data-canvas-tile]').first()
   await expect(mediaTile).toBeVisible({ timeout: 10_000 })
-  await page.waitForTimeout(900) // fly-to settle before forking
+  await page.waitForTimeout(900) // fly-to settle before seeding
 
-  // The menu positions itself by the tile's WORLD coordinates (derive.ts
-  // grid/adjacency layout — panning the camera never moves it), so the F8
-  // defect needs a tile whose WORLD y is deep, not a panned camera. Forks
-  // of the SAME source stack vertically (source.y + n*(TILE_H_MEDIA+60));
-  // three forks put the third at world y ≈ 96 + 2*326 = 748 — its produce
-  // menu (measured 480px tall) extended 170+px below the fold pre-clamp,
-  // the judge-confirmed-twice defect.
-  for (let fork = 0; fork < 3; fork += 1) {
-    await mediaTile.locator('[data-canvas-endpoint="tail"]').click()
-    const forkMenu = page.locator('[data-canvas-endpoint-menu="produce"]')
-    await expect(forkMenu).toBeVisible()
-    await forkMenu.locator('[data-canvas-menu-row="produce:fork-decoded"]').click()
-    await expect(page.locator('[data-canvas-tile]')).toHaveCount(2 + fork, { timeout: 10_000 })
-    await page.waitForTimeout(300)
+  // The menu positions itself by the tile's WORLD coordinates on a
+  // viewport-fixed backdrop (derive.ts grid: y = 96 + row*376, 4 rows per
+  // column) — panning the camera never moves it, so the F8 defect needs a
+  // tile whose WORLD y is deep, not a panned camera. Spawn seeds through
+  // the bar until a grid row-2+ tile exists (world y ≥ 848): its produce
+  // menu opens at y ≥ 872 — past the 1080 fold pre-clamp at ANY realistic
+  // menu height, the judge-confirmed-twice defect.
+  const deepestTile = async (): Promise<{ id: string; top: number } | null> => page.evaluate(() => {
+    let best: { id: string; top: number } | null = null
+    document.querySelectorAll('[data-canvas-tile]').forEach((node) => {
+      const id = (node as HTMLElement).getAttribute('data-canvas-tile') ?? ''
+      const top = Number.parseFloat((node as HTMLElement).style.top) || 0
+      if (!best || top > best.top) best = { id, top }
+    })
+    return best
+  })
+  for (let seed = 0; seed < 10 && ((await deepestTile())?.top ?? 0) < 1000; seed += 1) {
+    await page.keyboard.press('Escape') // deselect — the contextual bar is the spawn surface
+    await page.locator('[data-canvas-bar-prompt]').fill(`clamp probe seed ${seed}`)
+    await page.locator('[data-canvas-bar-prompt]').press('Enter')
+    await page.waitForTimeout(700) // spawn + fly settle
   }
-  // The lowest tile on screen is the third fork. Let the fit camera settle
-  // (d3 transition), then pick the max-y tile by measured box — DOM order
-  // and mid-flight cameras are not trustworthy position signals. The MENU
-  // positions at world coordinates on a viewport-fixed backdrop (that
-  // decoupling from the camera IS the F8 defect surface).
-  await page.waitForTimeout(1200)
-  const tileHandles = page.locator('[data-canvas-tile]')
-  const tileCount = await tileHandles.count()
-  let lowestIndex = 0
-  let lowestBottom = -1
-  for (let index = 0; index < tileCount; index += 1) {
-    const box = (await tileHandles.nth(index).boundingBox())!
-    if (box.y + box.height > lowestBottom) {
-      lowestBottom = box.y + box.height
-      lowestIndex = index
-    }
-  }
-  const lowest = tileHandles.nth(lowestIndex)
-  expect(lowestBottom).toBeGreaterThan(600)
-  await lowest.locator('[data-canvas-endpoint="tail"]').click()
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(400)
+  const lowestId = await deepestTile()
+  expect(lowestId?.id, 'a deep grid tile must exist').toBeTruthy()
+  // Row-3 depth: the menu's natural top (world y + 24) is past the 1080 fold
+  // by itself — pre-clamp this menu was UNREACHABLE at any height.
+  expect(lowestId!.top).toBeGreaterThan(1000)
+  const lowestTail = page.locator(`[data-canvas-tile="${lowestId!.id}"] [data-canvas-endpoint="tail"]`)
+  await lowestTail.click({ timeout: 20_000 })
   const menu = page.locator('[data-canvas-endpoint-menu="produce"]')
   await expect(menu).toBeVisible()
   const menuBox = (await menu.boundingBox())!
-  // The natural position (world y ≈ 748 + 24 = 772) puts the 480px menu's
-  // bottom ~170px past the fold pre-clamp — the clamp must have pulled it
-  // up into the viewport.
-  expect(menuBox.y).toBeLessThan(700)
   // The whole menu sits inside the viewport — the footer included (its
   // reachability was the defect), with a small margin for shadows.
   expect(menuBox.y).toBeGreaterThanOrEqual(0)

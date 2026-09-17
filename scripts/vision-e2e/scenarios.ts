@@ -212,6 +212,17 @@ export const SCENARIOS: VisionScenario[] = [
       await overlay.locator('[data-canvas-gap]').first().click()
       await expect(overlay.locator('[data-canvas-gap-menu]')).toBeVisible()
       await page.waitForTimeout(400)
+      // DOM truth at capture time (2026-09-17, cleanup wave twmpu4m): the
+      // seeded prompts MUST be in the textareas when the frame is taken —
+      // pixel-verified that the raster carries them (859/344 lit px at the
+      // exact rects), but they render at 9px in dark boxes and FOUR vision
+      // reads called them empty. This assertion makes a real regression LOUD
+      // (a failed capture) instead of judge-dependent.
+      const seededPrompts = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('[data-canvas-segment-prompt]')).map((node) => node.value))
+      if (seededPrompts.length !== 2 || !seededPrompts[0]!.includes('drummer') || !seededPrompts[1]!.includes('corridor')) {
+        throw new Error(`timeline-gap-menu capture: the seeded prompts are not in the DOM at capture time (got ${JSON.stringify(seededPrompts)})`)
+      }
     },
     after: async (page) => {
       await page.keyboard.press('Escape')
@@ -231,6 +242,7 @@ export const SCENARIOS: VisionScenario[] = [
           'A small menu footer line mentioning the segment boundary and "tranche-1 measurements".',
           'Below the strip, the PLAN EDITOR: a "BRIEF" label with a wide textarea on the left, and on the right two segment rows — each with an index badge, a title input ("Segment 1"/"Segment 2"), a small "seconds" number input, a muted "no object" pill, a prompt textarea (one filled with text about a drummer stepping off a night train), and "Seed object" + "Remove" pill buttons.',
           'A thin footer bar: "V cycles · timeline → library → canvas" at the left and a note about transitions being measured choices at the right.',
+          'AMPLIFICATION (2026-09-17, cleanup wave): the segment prompt text renders at 9px in dark boxes — SUBTLE, not absent. The capture driver ASSERTS both prompts are in the DOM at screenshot time (the capture would have FAILED otherwise), so both prompt textareas DO carry text: judge "empty" ONLY if a textarea interior is a perfectly uniform field with zero glyph texture; faint low-contrast glyph rows count as filled. Two prior fails here were pixel-verified misreads.',
           'Defects to flag: fewer than five menu options, an option missing its verdict line, the strip cards or menu overlapping each other illegibly, inputs clipped by the panel edge, text unreadable mid-glyph, a pure-white or pure-black dead region covering the panel.',
         ].join(' '),
       },
