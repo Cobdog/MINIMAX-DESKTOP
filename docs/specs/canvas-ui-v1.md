@@ -357,6 +357,26 @@ still directly navigable (their D-dependencies hold until Phase 5);
 CreateView stays (the D1 dependency, Phase 4). CreateView/JobsView/Library
 full retirement follows their Phase-4 capability absorbments.
 
+**Phase 5 landed (task 7mcp11b, 2026-09-17):** the deletion wave — the canvas
+is THE app. The 7 greyed views (ClipEditor, VideoReferenceClipper,
+FrameBookmarkStudio, CreateView, JobsView, LibraryView, Ltx25Workspace) are
+deleted (files, routes, nav); the old shell (App.tsx) and the `View` union die;
+main.tsx routes default traffic to the canvas (`?canvas=1` stays a harmless
+alias; `?mobile=1` keeps booting unmaintained per L10). Every still-live
+surface is accounted: Music / Music 3 / Create Image ride their Phase-3/4
+canvas surfaces (AudioDock, image intent) and their old workspaces die;
+Settings stays the Phase-4 dock; **Diagnostics docks** (new DiagnosticsDock —
+the view was built for it); the five asset-authoring studios + MoviePlanner
+dock in the new **StudiosDock** (react-rnd, the SettingsDock pattern) with
+dated decisions — their authoring flows become canvas macros at Phase-6
+scope, and MoviePlanner's "open shot" handoff now seeds a real canvas chain
+(consent-gated, library references re-bound by id). The per-surface
+ErrorBoundary discipline survives inside the docks. The **Director Suite
+(timeline projection + plan documents + gap menu) is queued as Phase 5b** as
+its own build task — spec §8 named it inside Phase 5, but the task's
+authoritative ACs re-framed it as a report-first scope call (decision
+reported to the lead before building; see task 7mcp11b).
+
 **Phase 4 landed (task 6rymbx3, 2026-09-16):** latent-fork rendering ships
 (the Phase-3 seam closed) — canvas H3 renders save their sampler latents
 through the Motion-Context nodes when installed, takes carry the saved-clip

@@ -26,14 +26,17 @@
   rows, candidate CLI); **AutoContext catalog + temporal-exclusivity guidance**
   (p8oyfy1).
 - **Canvas spec BLESSED** (0rtwaj4, 8378214) after three adversarial audits.
-- **Canvas Phases 0–4 SHIPPED**: document store (oiavqh8, 904825c) → substrate +
+- **Canvas Phases 0–5 SHIPPED**: document store (oiavqh8, 904825c) → substrate +
   launcher + spatial queue (jl4ye8x, 0ee1bcb) → generation on canvas (flyuh6h, 2ae8ce1)
   → ops/forks/takes + engines-as-ops + first view retirement (j5sj28v, 80f48eb) →
   latent-fork rendering + the retirement wave + LocationStudio→H3 + engines-as-ops
-  completion + libraries/Settings docking (6rymbx3, 44d25df; CI green on both legs,
-  vision 9/9 after two real defect rounds). All behind `?canvas=1`; vision-verified;
-  old shell still default until Phase 5. Engine-side latent handoff deferred to the
-  live-verify follow-up (puy428n — offline seam asserted in-tree).
+  completion + libraries/Settings docking (6rymbx3, 44d25df) → **the deletion wave:
+  the canvas became THE app** (7mcp11b, c61e4c5 — the 7 greyed views + the old shell +
+  the `View` union deleted; default route is the canvas, `?canvas=1` a harmless alias;
+  Diagnostics + the five asset studios + MoviePlanner dock; MoviePlanner's shot handoff
+  seeds consent-gated canvas chains; ContactSheet-required cleanup applied). Vision
+  9/9 on the final tree (new default-boot scenario). Engine-side latent handoff still
+  deferred to the live-verify follow-up (puy428n — offline seam asserted in-tree).
 - **Experiment program**: tranches 1–3b + E-FC0.5/1 + E-MD1 + E-K1 + the MATLOWAI
   bake-off — every verdict in the research docs as dated addenda. Headlines: AddGuide
   movement director (E-MD1 winner); hybrid wins identity edits (E-ED1); turbo sharpest
@@ -68,12 +71,21 @@
 
 ## Building (in flight)
 
-- **Canvas Phase 5** (7mcp11b) — the deletion wave: 7 greyed views + old shell +
-  `View` union die; canvas becomes THE app. Dispatched 2026-09-17 per the standing
-  sequential-development directive.
+(none — Phase 5 landed; next dispatch per the maintainer)
 
 ## Queued (specced/planning)
 
+- **Canvas Phase 5b — the Director Suite** (scope call resolved at Phase-5 landing,
+  2026-09-17): timeline projection + plan documents (the MoviePlanner inheritance) +
+  the measured gap menu. Spec §8 named it inside Phase 5, but the Phase-5 task's
+  authoritative ACs framed it report-first; it queues as its OWN build task.
+  MoviePlanner stays docked (StudiosDock, dated decision) until its successor ships.
+- **Canvas Phase 6 candidates (inherited from Phase 5)**: the five asset studios'
+  authoring flows become canvas macros (batch → approve → survey → extract; the
+  LocationStudio guided builder is the best macro template); `syncLibraryAssets`
+  becomes the libraries' primary write path when the studios retire (deferred at
+  Phase 5 — the studios still author into the shared libraries; projection stays
+  copy-never-destroy); pruning the dead old-shell CSS blocks in styles.css.
 - **Latent-fork live-verify** (puy428n) — one engine-side render confirming the
   LoadLatent handoff + latent retention across restarts; next GPU window.
 - **Dataset manager** (sv14rt0) — mixed-media training browser (import/browse/preview/
