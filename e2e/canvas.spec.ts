@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 
@@ -1016,14 +1018,22 @@ test('latent-fork rendering: the Motion-Context graph pins the source clip (prob
   await page.locator('[data-canvas-bar-prompt]').fill('the source chain whose latent we fork')
   await page.locator('[data-canvas-bar-prompt]').press('Enter')
   await expect(page.locator('[data-canvas-tile]')).toHaveCount(2, { timeout: 10_000 })
-  await page.evaluate(() => (window as unknown as { __canvasScenario(name: string): unknown }).__canvasScenario('seed-mock'))
+  const seeded = await page.evaluate(() => (window as unknown as { __canvasScenario(name: string): { ok: boolean; chainId?: string } }).__canvasScenario('seed-mock'))
+  expect(seeded.ok).toBe(true)
+  // B1 (latent durability): the engine-side latent file EXISTS under the
+  // output directory when the render completes — the landing path resolves
+  // the engine-relative path against it and registers the substrate into
+  // the content-addressed blob tree (hashed, evictable, exported).
+  const latentFile = path.join(os.homedir(), 'Documents', 'ComfyUI', 'output', 'h3_context', seeded.chainId!, 'clip0.latent')
+  fs.mkdirSync(path.dirname(latentFile), { recursive: true })
+  fs.writeFileSync(latentFile, `e2e-latent-substrate-${seeded.chainId}`)
   const landed = await page.evaluate(() => (window as unknown as { __canvasScenario(name: string): { ok: boolean; chainId?: string } }).__canvasScenario('complete-mock-latent'))
   expect(landed.ok).toBe(true)
   await page.waitForTimeout(600)
   let document = await activeDocument(page)
   const seedChain = document.chains.find((chain) => chain.id === landed.chainId)!
   const landedTake = seedChain.outputs[0]!.takes[0]!
-  expect(landedTake.latentPath).toContain(`${landed.chainId}/clip0.latent`)
+  expect(landedTake.latentPath).toMatch(/^canvas-blobs\//)
   expect((landedTake.metrics?.motionContext as Record<string, unknown>)?.folder).toContain(`h3_context/${landed.chainId}/clip`)
 
   // The fork menu on that object now offers the latents substrate (the take
@@ -1043,6 +1053,80 @@ test('latent-fork rendering: the Motion-Context graph pins the source clip (prob
   const forkChain = document.chains.find((chain) => (chain.inputSpec.outputRef as Record<string, unknown> | undefined)?.substrate === 'latents')!
   expect(forkChain).toBeTruthy()
   await expect(page.locator('[data-canvas-validation]')).toContainText('Motion-Context', { timeout: 10_000 })
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('external-engine completions land visibly (B2): honest fetch attempt, errored take, descriptor preserved', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1&probe=canvas')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await dropPng(page, 'remote-source.png')
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+  await page.keyboard.press('Escape')
+  await page.locator('[data-canvas-bar-prompt]').fill('a render whose engine output never resolves locally')
+  await page.locator('[data-canvas-bar-prompt]').press('Enter')
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(2, { timeout: 10_000 })
+  await page.evaluate(() => (window as unknown as { __canvasScenario(name: string): unknown }).__canvasScenario('seed-mock'))
+  // Complete the job the way an external-engine render does: outputUrl only,
+  // no localOutputPath. The landing attempts the server-side fetch (fails —
+  // no engine), retries are bounded, and the failure parks VISIBLY.
+  const remote = await page.evaluate(() => (window as unknown as { __canvasScenario(name: string): { ok: boolean; reason?: string; landedError?: string | null; descriptorPreserved?: string | null; artifacts?: number; tileStatus?: string | null } }).__canvasScenario('complete-mock-remote'))
+  expect(remote.ok).toBe(true)
+  expect(remote.landedError).toContain('could not be fetched')
+  expect(remote.descriptorPreserved).toBe('Canvas_Remote_Mock.mp4')
+  expect(remote.artifacts).toBe(0)
+  expect(remote.tileStatus).toBe('failed')
+  // Durable on the object (server truth) — dismissable like any failure.
+  const document = await activeDocument(page)
+  const erroredTake = document.chains.flatMap((chain) => chain.outputs.flatMap((output) => output.takes)).find((take) => typeof (take.metrics as Record<string, unknown> | null)?.landingError === 'string')
+  expect(erroredTake).toBeTruthy()
+  expect((erroredTake!.metrics as Record<string, unknown>).landingError).toContain('could not be fetched')
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('audio jobs relink after a mid-render reload through the canvas manifest (M1)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1&probe=canvas')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await dropPng(page, 'audio-source.png')
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+  const seeded = await page.evaluate(() => (window as unknown as { __canvasScenario(name: string): { ok: boolean; reason?: string; chainId?: string; jobId?: string } }).__canvasScenario('seed-audio-mock'))
+  expect(seeded.ok).toBe(true)
+  // Persist the queued mock job before the reload (the debounced flush rides
+  // pagehide, but pin it deterministically for the test).
+  await page.waitForTimeout(1_400)
+  // RELOAD mid-render: the audio job is queued. The relink after reload
+  // reads manifest.canvas.chainId — which the fixed audio submit cores
+  // attach from job creation. Pre-fix there was no manifest at all.
+  await page.reload()
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  const ring = page.locator(`[data-canvas-tile="${seeded.chainId}"] .canvas-tile-ring`)
+  await expect(ring).toHaveAttribute('data-status', 'queued-gpu', { timeout: 10_000 })
+  // Complete it (local media source) — the take lands on the AUDIO chain.
+  const completed = await page.evaluate(() => (window as unknown as { __canvasScenario(name: string): { ok: boolean; reason?: string; jobId?: string; source?: string } }).__canvasScenario('complete-mock'))
+  expect(completed.ok).toBe(true)
+  await page.waitForTimeout(700)
+  const document = await activeDocument(page)
+  const audioChain = document.chains.find((chain) => chain.id === seeded.chainId)
+  expect(audioChain).toBeTruthy()
+  const audioTake = audioChain!.outputs[0]?.takes.find((take) => take.supersededBy === null)
+  expect(audioTake).toBeTruthy()
+  expect((audioTake!.metrics as Record<string, unknown>).kind).toBe('audio')
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test("the 'r' rerunStale gesture clears the stale flags it remediates (M2)", async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1&probe=canvas')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await dropPng(page, 'stale-source.png')
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+  const result = await page.evaluate(() => (window as unknown as { __canvasScenario(name: string): { ok: boolean; reason?: string; chainId?: string; staleCleared?: boolean | null } }).__canvasScenario('rerun-stale-clears'))
+  expect(result.ok).toBe(true)
+  expect(result.staleCleared).toBe(true)
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
@@ -1450,3 +1534,4 @@ test('the mobile companion still boots, marked unmaintained (L10)', async ({ pag
   await expect(page.locator('.mobile-header')).toContainText('MiniMax Studio')
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
+

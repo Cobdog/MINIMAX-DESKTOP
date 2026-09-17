@@ -108,7 +108,11 @@ export function LibraryOverlay() {
     setLibraryOpen(false)
   }
 
-  const visible = filtered.length ? filtered : rows.filter((row) => ftsMatches.includes(row.chainId))
+  // The FTS fallback widens beyond the loaded documents, but it must RESPECT
+  // the active kind filter — an image row must never surface under the audio
+  // filter (the fallback used to bypass it; a latent race the deterministic
+  // kind-filtered search exposed).
+  const visible = filtered.length ? filtered : rows.filter((row) => ftsMatches.includes(row.chainId) && (kindFilter === 'all' || row.kind === kindFilter))
 
   return <div className="canvas-index-overlay" data-canvas-library role="dialog" aria-label="Library" onClick={() => setLibraryOpen(false)}>
     <div className="canvas-index-panel canvas-library-panel" onClick={(event) => event.stopPropagation()}>
