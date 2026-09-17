@@ -303,6 +303,53 @@ async function main() {
   assert.equal(failingStorage.getItem('minimax.data-migrated'), null, 'failed migration must not set the marker')
   assert.ok(warned.some((line) => line.includes('migration deferred')), 'failure must log structurally')
 
+  // (f) Model scan follows SYMLINKS (audit D1, task junllxf): the canonical
+  // shared install keeps most weights as symlinks into a central registry
+  // (link-never-copy) — a Dirent type test hides them and the app can never
+  // reach engine-ready. A symlinked model must appear in the bootstrap scan.
+  {
+    const modelRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-scan-'))
+    const realBytes = Buffer.from('not-a-real-model-but-scannable')
+    fs.writeFileSync(path.join(modelRoot, 'real_diffusion_v1.safetensors'), realBytes)
+    fs.symlinkSync(path.join(modelRoot, 'real_diffusion_v1.safetensors'), path.join(modelRoot, 'linked_alias_v2.safetensors'))
+    fs.symlinkSync(path.join(modelRoot, 'nowhere.safetensors'), path.join(modelRoot, 'dangling_alias.safetensors')) // dangling: skipped, never fatal
+    fs.mkdirSync(path.join(modelRoot, 'nested'))
+    fs.symlinkSync(path.join(modelRoot, 'nested'), path.join(modelRoot, 'linked_dir'))
+    fs.writeFileSync(path.join(modelRoot, 'nested', 'deep_model_v3.safetensors'), realBytes)
+    const current = (await get('/api/lan/settings')).body.settings
+    const patched = { ...current, paths: { ...current.paths, diffusion_models: modelRoot } }
+    const savedScan = await post('/api/lan/settings', { settings: patched })
+    assert.equal(savedScan.status, 200, `settings PATCH for scan test failed: ${JSON.stringify(savedScan.body).slice(0, 200)}`)
+    const bootstrapped = await get('/api/lan/bootstrap')
+    assert.equal(bootstrapped.status, 200, 'bootstrap must answer with the engine down (degraded but scanned)')
+    const names = (bootstrapped.body.models || []).filter((model) => model.kind === 'diffusion_models').map((model) => model.name)
+    assert.ok(names.includes('real_diffusion_v1.safetensors'), `real file must scan (got ${names.join(',')})`)
+    assert.ok(names.includes('linked_alias_v2.safetensors'), `SYMLINKED model must scan — the link-never-copy layout depends on it (got ${names.join(',')})`)
+    assert.ok(names.includes('deep_model_v3.safetensors'), `file inside a SYMLINKED directory must scan (got ${names.join(',')})`)
+    assert.ok(!names.includes('dangling_alias.safetensors'), 'a dangling symlink must be skipped, never listed nor fatal')
+  }
+
+  // (g) Output resolve contract (audit D4, task junllxf): the route must
+  // answer BOTH a local file path and the media URL — the web bridge returns
+  // the PATH (job.localOutputPath; take landing registers it as the blob
+  // source). A route that only served the URL left every completed render
+  // without a durable blob artifact.
+  {
+    const outDir = path.join(home, 'resolve-output')
+    fs.mkdirSync(outDir, { recursive: true })
+    fs.writeFileSync(path.join(outDir, 'rendered_00001_.mp4'), Buffer.from('mp4-bytes'))
+    const current2 = (await get('/api/lan/settings')).body.settings
+    const saved2 = await post('/api/lan/settings', { settings: { ...current2, outputDirectory: outDir } })
+    assert.equal(saved2.status, 200, 'settings PATCH for resolve test must save')
+    const resolved = await get('/api/lan/outputs/resolve?filename=rendered_00001_.mp4&type=output')
+    assert.equal(resolved.status, 200, `resolve must find the file in the output dir: ${JSON.stringify(resolved.body).slice(0, 160)}`)
+    assert.ok(typeof resolved.body.path === 'string' && resolved.body.path.startsWith('/'), `resolve must answer a LOCAL PATH (got ${JSON.stringify(resolved.body.path)})`)
+    assert.ok(fs.existsSync(resolved.body.path), 'the answered path must exist on disk')
+    assert.ok(resolved.body.url.startsWith('/api/lan/media?'), `the answered url must be the media route (got ${resolved.body.url})`)
+    const missing = await get('/api/lan/outputs/resolve?filename=absent.mp4&type=output')
+    assert.equal(missing.status, 404, 'a file outside the output directory must 404')
+  }
+
   child.kill()
   console.log(`PASS: storage substrate — studio.db boots with versioned migrations (${appliedMigrations.length} applied); jobs upsert per-job (graph stripped, manifest kept, events on terminal); FTS5 search is injection-safe and the technique corpus seeds idempotently; workspace/projects round-trip; the localStorage migration copies+verifies without touching the originals; degraded API writes leave no marker. Server: ${base}`)
 }

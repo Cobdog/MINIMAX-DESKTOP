@@ -335,6 +335,15 @@ console.log('(m) fork substrates → input refs (§2 outputRef)')
   eq(resolved.media.path, '/out/a.mp4', 'media: metrics.sourcePath (the engine-visible copy) wins')
   eq(resolved.media.kind, 'video', 'media: kind read from the take metrics')
   eq(generation.mediaForOutput(undefined), null, 'media: unresolvable output answers null (honest)')
+  // Audit D5 (junllxf): a canvas-resolved media file must carry a SERVABLE
+  // preview URL — prepareImage throws "No preview available" otherwise and
+  // canvas i2v/frames from document objects can never submit.
+  ok(typeof resolved.media.preview === 'string' && resolved.media.preview.includes('/api/lan/documents/blobs/file?path=canvas-blobs'), `media: a blob-artifact take gets the blob preview URL (got ${JSON.stringify(resolved.media.preview)})`)
+  const bareTake = take('t-bare', { metrics: { kind: 'image', sourcePath: '/out/pic.jpg' }, artifacts: [] })
+  const outputForBare = output('out-bare', 'src', [bareTake])
+  const bareEntry = generation.buildOutputIndex({ chains: [chainOf('src', { outputs: [outputForBare] })] }).get('out-bare')
+  const bareResolved = generation.mediaForOutput(bareEntry)
+  ok(bareResolved && typeof bareResolved.media.preview === 'string' && bareResolved.media.preview.startsWith('/api/lan/media?source=output&path='), `media: a take with no blob artifact falls back to the output-dir media preview URL (got ${JSON.stringify(bareResolved && bareResolved.media.preview)})`)
 }
 
 console.log('(n) typed-hole option menus (§3 filtering + hints)')
