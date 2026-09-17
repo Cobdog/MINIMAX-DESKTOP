@@ -681,9 +681,22 @@ export function createStudioServer(paths: StudioServerPaths) {
       }
       for (const entry of entries) {
         const fullPath = join(current, entry.name)
-        if (entry.isDirectory()) {
+        // Symlinks resolve through stat (the central-registry layout is
+        // link-never-copy: most models on a shared install are symlinks, and
+        // a Dirent type test alone hides them). Dangling links throw in the
+        // stat below and are skipped like any unreadable entry.
+        let linked: 'file' | 'dir' | null = null
+        if (entry.isSymbolicLink()) {
+          try {
+            const resolved = await stat(fullPath)
+            linked = resolved.isDirectory() ? 'dir' : resolved.isFile() ? 'file' : null
+          } catch {
+            linked = null
+          }
+        }
+        if (entry.isDirectory() || linked === 'dir') {
           if (!entry.name.startsWith('.')) pending.push(fullPath)
-        } else if (entry.isFile() && modelExtensions.has(extname(entry.name).toLowerCase())) {
+        } else if ((entry.isFile() || linked === 'file') && modelExtensions.has(extname(entry.name).toLowerCase())) {
           // Skip unreadable files instead of rejecting the whole scan — one
           // EACCES entry must not blank the model list.
           try {

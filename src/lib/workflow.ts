@@ -210,7 +210,10 @@ export function buildMiniMaxWorkflow(
   if (options.chain && options.chain.index > 0) {
     // Phase-4 latent forks pin an explicit source clip (their own folder is a
     // fresh continuation); scene chains keep the previous-clip default.
-    prompt['24'] = { class_type: 'MiniMaxH3MotionContextLoadLatent', inputs: { latent_path: options.chain.loadFrom?.folder ?? options.chain.folder, clip_index: options.chain.loadFrom?.clipIndex ?? options.chain.index - 1 } }
+    // The pack's indices are 1-BASED (clip 1 is the first; index 0 never
+    // reads a file), while the app's chain index is 0-based — +1 on both
+    // Load and Save below, or a fork silently renders without its source.
+    prompt['24'] = { class_type: 'MiniMaxH3MotionContextLoadLatent', inputs: { latent_path: (options.chain.loadFrom?.folder ?? options.chain.folder).replace(/\/clip$/, ''), clip_index: (options.chain.loadFrom?.clipIndex ?? options.chain.index - 1) + 1 } }
     prompt['25'] = {
       class_type: 'MiniMaxH3MotionContext',
       inputs: {
@@ -249,7 +252,7 @@ export function buildMiniMaxWorkflow(
   // trims the overlap from the delivered output so audio and motion stay
   // continuous across clips.
   if (options.chain) {
-    prompt['28'] = { class_type: 'MiniMaxH3MotionContextSaveLatent', inputs: { latent: ['15', 0], filename_prefix: options.chain.folder, clip_index: options.chain.index } }
+    prompt['28'] = { class_type: 'MiniMaxH3MotionContextSaveLatent', inputs: { latent: ['15', 0], filename_prefix: options.chain.folder, clip_index: options.chain.index + 1 } }
   }
   prompt['16'] = { class_type: 'VAEDecode', inputs: { samples: ['15', 0], vae: ['3', 0] } }
   prompt['17'] = { class_type: 'VAEDecodeAudio', inputs: { samples: ['15', 0], vae: ['4', 0] } }

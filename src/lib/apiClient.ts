@@ -220,8 +220,12 @@ export function createWebApiClient(): DesktopApi {
     },
     async resolveOutput(_outputDirectory: string, file: { filename: string; subfolder?: string; type?: string }) {
       const query = new URLSearchParams({ filename: file.filename, subfolder: file.subfolder ?? '', type: file.type ?? 'output' })
-      const body = await apiFetch<{ url: string } | { error: string }>(`/api/lan/outputs/resolve?${query}`)
-      return 'url' in body ? body.url : null
+      // The contract is a LOCAL FILE PATH (the queue stores it as
+      // job.localOutputPath; take landing registers it as the blob source).
+      // Returning the /api/lan/media URL here left every completed render
+      // without a canvas-blobs artifact — no durable poster after reload.
+      const body = await apiFetch<{ path: string; url: string } | { error: string }>(`/api/lan/outputs/resolve?${query}`)
+      return 'path' in body ? body.path : null
     },
     async syncMobileCharacters(characters: unknown[]) {
       return postJson('/api/lan/characters', { characters })
