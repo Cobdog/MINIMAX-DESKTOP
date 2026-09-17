@@ -40,6 +40,15 @@ export type ProjectMeta = {
 
 export type CanvasSession = { openProjects: string[]; activeProject: string | null }
 
+/** Conditional full-document reads (perf wave 1): the last body + its
+ *  content-hash ETag per project. The server's ETag is derived from the
+ *  serialized document, so a 304 means byte-identical content — returning
+ *  the remembered body is the same data a 200 would carry, minus the parse.
+ *  The memo holds references the canvas store already keeps alive (the
+ *  store replaces documents whole; nothing mutates them in place), so it
+ *  costs a Map, not a second copy. */
+const rememberedDocuments = new Map<string, { etag: string; document: CanvasDocument }>()
+
 export type SearchHit = { source_id: string; source_kind: string }
 
 /** One global asset-store row (§2 asset, F3 decided — above projects). */
@@ -65,7 +74,30 @@ export const documentsApi = {
     return { projects: body.projects ?? [], skipped: body.skipped ?? [] }
   },
 
-  getProject: (id: string) => call<CanvasDocument>(`/api/lan/documents/project?id=${encodeURIComponent(id)}`),
+  /** Conditional GET: re-reads of an unchanged document are a header
+   *  exchange (304) instead of a full re-parse — the per-edit/landing
+   *  reload's unchanged case is free (perf wave 1). Falls back to a plain
+   *  GET on the first read of a project. */
+  getProject: async (id: string): Promise<CanvasDocument> => {
+    const headers = new Headers()
+    const token = new URLSearchParams(window.location.search).get('token')
+    if (token) headers.set('x-minimax-token', token)
+    const remembered = rememberedDocuments.get(id)
+    if (remembered) headers.set('if-none-match', remembered.etag)
+    const response = await fetch(`/api/lan/documents/project?id=${encodeURIComponent(id)}`, { headers })
+    if (response.status === 304) {
+      const fresh = rememberedDocuments.get(id)?.document
+      // Unreachable in practice (we only send If-None-Match when a body is
+      // remembered) — but a 304 without one is a broken contract, not data.
+      if (!fresh) throw new DocumentsHttpError(304, 'The server answered not-modified without a known document version — reopening.')
+      return fresh
+    }
+    const body = await response.json().catch(() => ({})) as CanvasDocument & Record<string, unknown>
+    if (!response.ok) throw new DocumentsHttpError(response.status, typeof body.error === 'string' ? body.error : `documents request failed (${response.status})`)
+    const etag = response.headers.get('etag')
+    if (etag) rememberedDocuments.set(id, { etag, document: body })
+    return body
+  },
 
   createProject: async (name: string) => (await post<{ project: ProjectMeta }>('/api/lan/documents/projects', { name })).project,
 

@@ -1503,9 +1503,26 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
             const id = url.searchParams.get('id') ?? ''
             if (!id || id.length > 400) return sendJson(response, 400, { error: 'A project id is required.' })
             try {
-              const document = documents.getProjectDocument(id)
-              if (!document) return sendJson(response, 404, { error: `No project with id ${id}.` })
-              return sendJson(response, 200, document)
+              // Perf wave 1: the fail-closed read cache (documents.ts) — a
+              // hit serves the pre-serialized body without re-hydrating, and
+              // a matching If-None-Match answers 304 with no body at all
+              // (the SPA's conditional re-fetch rides this). The
+              // x-minimax-document-cache header is the debug/test affordance.
+              const cached = documents.getProjectDocumentCached(id)
+              if (!cached) return sendJson(response, 404, { error: `No project with id ${id}.` })
+              const ifNoneMatch = request.headers['if-none-match']
+              const matched = Array.isArray(ifNoneMatch) ? ifNoneMatch[0] : ifNoneMatch
+              if (matched === cached.etag || matched === `W/${cached.etag}` || matched === '*') {
+                response.writeHead(304, { etag: cached.etag, 'cache-control': 'no-store' })
+                return response.end()
+              }
+              response.writeHead(200, {
+                'content-type': 'application/json; charset=utf-8',
+                'cache-control': 'no-store',
+                etag: cached.etag,
+                'x-minimax-document-cache': cached.cached ? 'hit' : 'miss',
+              })
+              return response.end(cached.json)
             } catch (error) {
               const mapped = documentsFailure(error)
               if (mapped) return mapped

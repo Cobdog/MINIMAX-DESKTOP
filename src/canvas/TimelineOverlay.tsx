@@ -24,6 +24,7 @@ import { STATUS_LABEL } from './derive'
 import { deriveTimeline, GAP_LABEL, GAP_MECHANISM_LABEL, GAP_MENU, readPlanDocument, type PlanGapKind } from './plan'
 import { useCanvasStore } from './store'
 import { useJobsStore } from '../state/jobsStore'
+import { useWindowedList } from './useWindowedList'
 
 const STATUS_TONE: Record<string, string> = {
   idle: 'var(--muted-2)',
@@ -69,6 +70,15 @@ export function TimelineOverlay() {
     : { planId: null, items: [], gaps: [], plannedDuration: 0, renderedDuration: 0 }, [document, planRow, jobs, chainJobs, dismissedFailures])
   const plan = planRow ? readPlanDocument(planRow.document) : null
   const store = useCanvasStore.getState
+
+  // Perf wave 1: windowed mounting for the strip (profile rec 2) — 300
+  // cards (most carrying a <video preload="metadata">) in one commit cost a
+  // 453 ms open with a 229 ms long task; only the horizontal scroll window
+  // (+overscan) mounts now. Slot pitch is measured at runtime from the
+  // mounted cells, so the CSS card/gap widths stay the single source of
+  // truth. The plan editor below is untouched — plans are hand-authored,
+  // not density-seeded.
+  const stripWindow = useWindowedList({ count: projection.items.length, axis: 'x' })
 
   if (!open) return null
 
@@ -132,31 +142,36 @@ export function TimelineOverlay() {
         <button type="button" className="icon-button" aria-label="Close timeline" data-canvas-timeline-close onClick={close}><X size={14} /></button>
       </header>
 
-      {/* The strip: items + the measured gaps between them. */}
-      <div className="canvas-timeline-strip" data-canvas-timeline-strip>
-        {projection.items.map((item) => {
-          const gap = projection.gaps.find((entry) => entry.afterSegmentId === item.segmentId)
-          return <div className="canvas-timeline-slot" key={item.segmentId}>
-            <button type="button" className="canvas-timeline-item" data-canvas-timeline-item={item.segmentId} onClick={() => item.chainId && navigate(item.chainId)} disabled={!item.chainId}>
-              {item.artifactPath && item.mediaKind === 'image' && <img className="canvas-timeline-poster" src={documentsApi.blobFileUrl(item.artifactPath)} alt="" />}
-              {item.artifactPath && item.mediaKind === 'video' && <video className="canvas-timeline-poster" src={documentsApi.blobFileUrl(item.artifactPath)} muted preload="metadata" />}
-              {!item.artifactPath && item.previewPath && <video className="canvas-timeline-poster" src={item.previewPath} muted preload="metadata" />}
-              {!item.artifactPath && !item.previewPath && <span className="canvas-timeline-poster empty"><KindIcon kind={item.mediaKind} /></span>}
-              <span className="canvas-timeline-item-title">{item.title}</span>
-              <span className="canvas-timeline-item-meta">
-                <i style={{ background: STATUS_TONE[item.status] ?? 'var(--muted-2)' }} data-canvas-timeline-item-status={item.status} />
-                {item.status === 'unseeded' ? 'no object' : STATUS_LABEL[item.status]}
-                {' · '}{item.plannedDuration}s{item.renderedDuration != null ? ` · rendered ${Math.round(item.renderedDuration)}s` : ''}
-              </span>
-            </button>
-            {gap && (planRow
-              ? <button type="button" className={`canvas-timeline-gap kind-${gap.kind}`} data-canvas-gap={gap.afterSegmentId} onClick={() => openGapMenu(gap.afterSegmentId)} title={`${GAP_LABEL[gap.kind]} — click to change the transition`}>
-                  <span className="canvas-timeline-gap-kind">{GAP_LABEL[gap.kind]}</span>
-                  <span className="canvas-timeline-gap-mechanism">{GAP_MECHANISM_LABEL[GAP_MENU.find((entry) => entry.kind === gap.kind)?.mechanism ?? 'assembly']}</span>
-                </button>
-              : <span className="canvas-timeline-gap implicit" data-canvas-gap={gap.afterSegmentId}><span className="canvas-timeline-gap-kind">Hard cut</span><span className="canvas-timeline-gap-mechanism">implicit</span></span>)}
-          </div>
-        })}
+      {/* The strip: items + the measured gaps between them (window-mounted —
+          see stripWindow above). */}
+      <div className="canvas-timeline-strip" data-canvas-timeline-strip ref={stripWindow.containerRef} onScroll={stripWindow.onScroll}>
+        {stripWindow.range.padStartPx > 0 && <div aria-hidden="true" style={{ width: stripWindow.range.padStartPx, flex: '0 0 auto' }} />}
+        <div style={{ display: 'contents' }} ref={stripWindow.itemsRef}>
+          {projection.items.slice(stripWindow.range.start, stripWindow.range.end).map((item) => {
+            const gap = projection.gaps.find((entry) => entry.afterSegmentId === item.segmentId)
+            return <div className="canvas-timeline-slot" key={item.segmentId}>
+              <button type="button" className="canvas-timeline-item" data-canvas-timeline-item={item.segmentId} onClick={() => item.chainId && navigate(item.chainId)} disabled={!item.chainId}>
+                {item.artifactPath && item.mediaKind === 'image' && <img className="canvas-timeline-poster" src={documentsApi.blobFileUrl(item.artifactPath)} alt="" />}
+                {item.artifactPath && item.mediaKind === 'video' && <video className="canvas-timeline-poster" src={documentsApi.blobFileUrl(item.artifactPath)} muted preload="metadata" />}
+                {!item.artifactPath && item.previewPath && <video className="canvas-timeline-poster" src={item.previewPath} muted preload="metadata" />}
+                {!item.artifactPath && !item.previewPath && <span className="canvas-timeline-poster empty"><KindIcon kind={item.mediaKind} /></span>}
+                <span className="canvas-timeline-item-title">{item.title}</span>
+                <span className="canvas-timeline-item-meta">
+                  <i style={{ background: STATUS_TONE[item.status] ?? 'var(--muted-2)' }} data-canvas-timeline-item-status={item.status} />
+                  {item.status === 'unseeded' ? 'no object' : STATUS_LABEL[item.status]}
+                  {' · '}{item.plannedDuration}s{item.renderedDuration != null ? ` · rendered ${Math.round(item.renderedDuration)}s` : ''}
+                </span>
+              </button>
+              {gap && (planRow
+                ? <button type="button" className={`canvas-timeline-gap kind-${gap.kind}`} data-canvas-gap={gap.afterSegmentId} onClick={() => openGapMenu(gap.afterSegmentId)} title={`${GAP_LABEL[gap.kind]} — click to change the transition`}>
+                    <span className="canvas-timeline-gap-kind">{GAP_LABEL[gap.kind]}</span>
+                    <span className="canvas-timeline-gap-mechanism">{GAP_MECHANISM_LABEL[GAP_MENU.find((entry) => entry.kind === gap.kind)?.mechanism ?? 'assembly']}</span>
+                  </button>
+                : <span className="canvas-timeline-gap implicit" data-canvas-gap={gap.afterSegmentId}><span className="canvas-timeline-gap-kind">Hard cut</span><span className="canvas-timeline-gap-mechanism">implicit</span></span>)}
+            </div>
+          })}
+        </div>
+        {stripWindow.range.padEndPx > 0 && <div aria-hidden="true" style={{ width: stripWindow.range.padEndPx, flex: '0 0 auto' }} />}
         {!projection.items.length && <div className="canvas-timeline-empty" data-canvas-timeline-empty>
           {planRow ? 'No segments yet — add the first below.' : 'Chain outputs appear here in creation order — drop or generate media, then plan the chronology.'}
         </div>}
