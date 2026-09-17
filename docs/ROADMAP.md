@@ -77,6 +77,17 @@
   (ffmpeg server-side); Gemma 4 31B-IT video-capable today; Qwen3-VL only family with
   temporal frame merging; DeepSeek V4 Flash Vision image-only; GLM 5.3 Flash not yet
   in llama.cpp (issue #27922).
+- **Overnight full audit SHIPPED** (junllxf, 5 PRs merged: d06cc82 security w1,
+  9111c40 correctness w1, f85fdf9 perf profile + harness, 08fe916 security w2 datasets,
+  d45fd2f E2E-audit fixes): four blind audits + a real-engine drive (4 H3 renders
+  through the app; the latent live-verify POSITIVE — true continuation, 0.01ms drift;
+  puy428n closed) + the perf density answer (300 mixed objects: 44fps, media path never
+  binds; the first cliff is server-side project hydration). Every blocker/major fixed
+  and CI-proven; deferreds consolidated into the cleanup wave (twmpu4m); perf
+  improvements queued (pq7d48a); maintainer design desk items named (F6 live progress,
+  fetch-consent, token-mode, settings-GET gating). New process assets: the agent
+  resource ledger + coordination protocol, PID-only kills, the branch→CI→PR merge train,
+  the reusable perf harness. Demo project persists at /home/agent/audit-e2e/home.
 - **Dataset Manager v1 SHIPPED** (sv14rt0, 1ab8176 + ba3ffd1): the blessed spec built
   end-to-end — dual-path ingest (by-reference hash-tracked + LAN-upload with per-path
   trash), master/child layers with the stamp-crop editor (managed aspect spectrum,
@@ -91,12 +102,7 @@
 
 ## Building (in flight)
 
-- **Overnight full audit** (junllxf) — E2E UI driving + real-engine chains + Intern-media
-  demo project + sonnet vision reads; two audits complete (security: 1 CRITICAL + 2 HIGH,
-  fix branch `security/hardening-1`; correctness ×2: 3 blockers incl. GC deleting
-  live-referenced blobs + latent non-durability, fix branch `correctness/fix-wave-1`);
-  dataset-manager security follow-up (kr85qx1) dispatched post-build. Consolidation
-  pending the maintainer.
+(none — the overnight audit program landed; next dispatch per the maintainer)
 
 ## Queued (specced/planning)
 
