@@ -15,6 +15,7 @@ import { Film, Image as ImageIcon, Music2, Search, X } from 'lucide-react'
 import { documentsApi } from './api'
 import { mediaForOutput, buildOutputIndex } from './generation'
 import { useCanvasStore } from './store'
+import { useWindowedList } from './useWindowedList'
 
 type LibraryRow = {
   key: string
@@ -99,6 +100,18 @@ export function LibraryOverlay() {
     return () => window.clearTimeout(timer)
   }, [open, query, documents])
 
+  // The FTS fallback widens beyond the loaded documents, but it must RESPECT
+  // the active kind filter — an image row must never surface under the audio
+  // filter (the fallback used to bypass it; a latent race the deterministic
+  // kind-filtered search exposed).
+  const visible = filtered.length ? filtered : rows.filter((row) => ftsMatches.includes(row.chainId) && (kindFilter === 'all' || row.kind === kindFilter))
+
+  // Perf wave 1: windowed mounting (profile rec 2) — 300 rows in one commit
+  // cost a 228 ms open; only the scroll window (+overscan) mounts now, with
+  // spacer <li>s carrying the unmounted extent so the scrollbar is exact.
+  // Lives ABOVE the closed-overlay early return like every other hook.
+  const rowsWindow = useWindowedList({ count: visible.length, axis: 'y' })
+
   if (!open) return null
 
   const activate = async (row: LibraryRow) => {
@@ -107,12 +120,6 @@ export function LibraryOverlay() {
     requestCamera({ kind: 'fly', tileId: row.chainId })
     setLibraryOpen(false)
   }
-
-  // The FTS fallback widens beyond the loaded documents, but it must RESPECT
-  // the active kind filter — an image row must never surface under the audio
-  // filter (the fallback used to bypass it; a latent race the deterministic
-  // kind-filtered search exposed).
-  const visible = filtered.length ? filtered : rows.filter((row) => ftsMatches.includes(row.chainId) && (kindFilter === 'all' || row.kind === kindFilter))
 
   return <div className="canvas-index-overlay" data-canvas-library role="dialog" aria-label="Library" onClick={() => setLibraryOpen(false)}>
     <div className="canvas-index-panel canvas-library-panel" onClick={(event) => event.stopPropagation()}>
@@ -132,16 +139,20 @@ export function LibraryOverlay() {
         </div>
         <button type="button" className="icon-button" aria-label="Close library" data-canvas-library-close onClick={() => setLibraryOpen(false)}><X size={14} /></button>
       </div>
-      <ul className="canvas-index-rows" data-canvas-library-rows>
-        {visible.map((row) => (
-          <li key={row.key} className="canvas-index-li">
-            <button type="button" className="canvas-index-row" data-canvas-library-row={row.kind} onClick={() => void activate(row)}>
-              {row.kind === 'video' ? <Film size={13} /> : row.kind === 'audio' ? <Music2 size={13} /> : <ImageIcon size={13} />}
-              <span className="canvas-index-row-label">{row.label}</span>
-              <span className="canvas-index-row-note">{row.note}</span>
-            </button>
-          </li>
-        ))}
+      <ul className="canvas-index-rows" data-canvas-library-rows ref={rowsWindow.containerRef} onScroll={rowsWindow.onScroll}>
+        {rowsWindow.range.padStartPx > 0 && <li aria-hidden="true" style={{ height: rowsWindow.range.padStartPx }} />}
+        <div style={{ display: 'contents' }} ref={rowsWindow.itemsRef}>
+          {visible.slice(rowsWindow.range.start, rowsWindow.range.end).map((row) => (
+            <li key={row.key} className="canvas-index-li">
+              <button type="button" className="canvas-index-row" data-canvas-library-row={row.kind} onClick={() => void activate(row)}>
+                {row.kind === 'video' ? <Film size={13} /> : row.kind === 'audio' ? <Music2 size={13} /> : <ImageIcon size={13} />}
+                <span className="canvas-index-row-label">{row.label}</span>
+                <span className="canvas-index-row-note">{row.note}</span>
+              </button>
+            </li>
+          ))}
+        </div>
+        {rowsWindow.range.padEndPx > 0 && <li aria-hidden="true" style={{ height: rowsWindow.range.padEndPx }} />}
         {!visible.length && <li className="canvas-index-empty">{rows.length ? 'Nothing matches these filters.' : 'Completed outputs appear here — every take is a canvas object.'}</li>}
       </ul>
       <footer className="canvas-library-footer">

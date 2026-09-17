@@ -941,6 +941,90 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
     }
   }
 
+  // ---- document-read cache (perf wave 1) -------------------------------------
+  //
+  // GET /api/lan/documents/project re-hydrated and re-serialized the whole
+  // graph on every request: at 300 objects that measured p99 ~400 ms at 16x
+  // concurrency — the first hard cliff in docs/research/app-performance-
+  // profile.md. The cache holds the serialized body + a content-hash ETag
+  // per project; a hit costs two O(1) stamp reads and a socket write.
+  //
+  // Invalidation is FAIL-CLOSED, not seam-enumerated: the freshness stamp is
+  // (PRAGMA data_version, total_changes()). total_changes() bumps on every
+  // row THIS connection inserts/updates/deletes (any table — session, jobs,
+  // FTS included); data_version bumps when ANY other connection commits. A
+  // stamp change drops every entry, so no write path — present or future,
+  // in-process or external — can serve a stale document. The price of that
+  // conservatism (a rebuilt entry after an unrelated write) is exactly the
+  // previous uncached behavior, never worse.
+  type CachedProjectDocument = { etag: string; json: string; dataVersion: number; totalChanges: number }
+  const documentReadCache = new Map<string, CachedProjectDocument>()
+  const DOCUMENT_READ_CACHE_MAX = 4
+  const totalChangesStatement = db.prepare('SELECT total_changes() AS n')
+  const readWriteStamp = (): { dataVersion: number; totalChanges: number } => ({
+    dataVersion: Number(db.pragma('data_version', { simple: true })),
+    totalChanges: Number((totalChangesStatement.get() as { n: number | null }).n ?? 0),
+  })
+
+  /** The hydration fold behind both getProjectDocument and the read cache —
+   *  unchanged behavior, extracted so the cached path builds exactly what
+   *  the uncached path returns. */
+  const foldProjectDocument = (id: string) => {
+    const project = guardProject(statements.getProject.get(id) as Record<string, unknown> | undefined)
+    if (!project) return null
+    const chains = (statements.chainsByProject.all(id) as Array<Record<string, unknown>>).map((chainRow) => {
+      const chain = hydrateChain(chainRow)
+      const outputs = (statements.outputsByChain.all(chain.id) as Array<Record<string, unknown>>).map(hydrateOutput)
+      const ops = (statements.opsByChain.all(chain.id) as Array<Record<string, unknown>>).map((op) => ({
+        id: str(op.id),
+        stackId: str(op.stack_id),
+        ordinal: Number(op.ordinal),
+        kind: str(op.kind),
+        settings: parseJson<Record<string, unknown>>(op.settings_json, {}),
+        bakedAt: op.baked_at === null ? null : Number(op.baked_at),
+      }))
+      const identityRow = statements.identityByChain.get(chain.id) as Record<string, unknown> | undefined
+      const identity = identityRow
+        ? {
+            id: str(identityRow.id),
+            refAssetIds: parseJson<string[]>(identityRow.ref_asset_ids_json, []),
+            refmodIds: parseJson<string[]>(identityRow.refmod_ids_json, []),
+            subjectText: str(identityRow.subject_text),
+            strength: Number(identityRow.strength),
+            perSlotStrengths: parseJson<Record<string, number> | null>(identityRow.per_slot_strengths_json, null),
+          }
+        : null
+      const controlTracks = (statements.controlTracksByChain.all(chain.id) as Array<Record<string, unknown>>).map((track) => ({
+        id: str(track.id),
+        kind: str(track.kind),
+        source: str(track.source),
+        inputRef: str(track.input_ref),
+        maskRef: track.mask_ref === null ? null : str(track.mask_ref),
+        params: parseJson<Record<string, unknown> | null>(track.params_json, null),
+      }))
+      return { ...chain, outputs, ops, identity, controlTracks }
+    })
+    const plans = (statements.plansByProject.all(id) as Array<Record<string, unknown>>).map((plan) => {
+      guardDocumentVersion(plan.schema_version, plan.app_version, `plan "${plan.id}"`)
+      return {
+        id: str(plan.id),
+        projectId: id,
+        schemaVersion: Number(plan.schema_version),
+        document: parseJson<Record<string, unknown>>(plan.document_json, {}),
+        createdAt: Number(plan.created_at),
+        updatedAt: Number(plan.updated_at),
+      }
+    })
+    const assetForks = (statements.assetForksByProject.all(id) as Array<Record<string, unknown>>).map((fork) => ({
+      projectId: str(fork.project_id),
+      assetId: str(fork.asset_id),
+      forkedSettingsSnapshot: parseJson<Record<string, unknown>>(fork.forked_settings_snapshot_json, {}),
+      lineage: parseJson<Record<string, unknown> | null>(fork.lineage_json, null),
+      consentAt: Number(fork.consent_at),
+    }))
+    return { project: hydrateProject(project), chains, plans, assetForks }
+  }
+
   // ---- retention / GC (§3) ----------------------------------------------------
 
   /** MARK phase: the set of take ids whose latents must stay resident.
@@ -1449,60 +1533,34 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
 
     /** The full document (§2 canvas-ui-v1: every view is a projection of
      *  this graph). Unknown-newer versions refuse loudly (§2/F9). */
-    getProjectDocument: (id: string) => {
-      const project = guardProject(statements.getProject.get(id) as Record<string, unknown> | undefined)
-      if (!project) return null
-      const chains = (statements.chainsByProject.all(id) as Array<Record<string, unknown>>).map((chainRow) => {
-        const chain = hydrateChain(chainRow)
-        const outputs = (statements.outputsByChain.all(chain.id) as Array<Record<string, unknown>>).map(hydrateOutput)
-        const ops = (statements.opsByChain.all(chain.id) as Array<Record<string, unknown>>).map((op) => ({
-          id: str(op.id),
-          stackId: str(op.stack_id),
-          ordinal: Number(op.ordinal),
-          kind: str(op.kind),
-          settings: parseJson<Record<string, unknown>>(op.settings_json, {}),
-          bakedAt: op.baked_at === null ? null : Number(op.baked_at),
-        }))
-        const identityRow = statements.identityByChain.get(chain.id) as Record<string, unknown> | undefined
-        const identity = identityRow
-          ? {
-              id: str(identityRow.id),
-              refAssetIds: parseJson<string[]>(identityRow.ref_asset_ids_json, []),
-              refmodIds: parseJson<string[]>(identityRow.refmod_ids_json, []),
-              subjectText: str(identityRow.subject_text),
-              strength: Number(identityRow.strength),
-              perSlotStrengths: parseJson<Record<string, number> | null>(identityRow.per_slot_strengths_json, null),
-            }
-          : null
-        const controlTracks = (statements.controlTracksByChain.all(chain.id) as Array<Record<string, unknown>>).map((track) => ({
-          id: str(track.id),
-          kind: str(track.kind),
-          source: str(track.source),
-          inputRef: str(track.input_ref),
-          maskRef: track.mask_ref === null ? null : str(track.mask_ref),
-          params: parseJson<Record<string, unknown> | null>(track.params_json, null),
-        }))
-        return { ...chain, outputs, ops, identity, controlTracks }
-      })
-      const plans = (statements.plansByProject.all(id) as Array<Record<string, unknown>>).map((plan) => {
-        guardDocumentVersion(plan.schema_version, plan.app_version, `plan "${plan.id}"`)
-        return {
-          id: str(plan.id),
-          projectId: id,
-          schemaVersion: Number(plan.schema_version),
-          document: parseJson<Record<string, unknown>>(plan.document_json, {}),
-          createdAt: Number(plan.created_at),
-          updatedAt: Number(plan.updated_at),
-        }
-      })
-      const assetForks = (statements.assetForksByProject.all(id) as Array<Record<string, unknown>>).map((fork) => ({
-        projectId: str(fork.project_id),
-        assetId: str(fork.asset_id),
-        forkedSettingsSnapshot: parseJson<Record<string, unknown>>(fork.forked_settings_snapshot_json, {}),
-        lineage: parseJson<Record<string, unknown> | null>(fork.lineage_json, null),
-        consentAt: Number(fork.consent_at),
-      }))
-      return { project: hydrateProject(project), chains, plans, assetForks }
+    getProjectDocument: (id: string) => foldProjectDocument(id),
+
+    /** The GET-route read (perf wave 1): fold once, serve many. Returns the
+     *  serialized body + content-hash ETag, rebuilding (and re-caching) only
+     *  when the fail-closed write stamp moved — see the cache block above.
+     *  null when the project does not exist (same contract as
+     *  getProjectDocument); version refusals still throw loudly, uncached. */
+    getProjectDocumentCached: (id: string): { etag: string; json: string; cached: boolean } | null => {
+      const stamp = readWriteStamp()
+      const cached = documentReadCache.get(id)
+      if (cached && cached.dataVersion === stamp.dataVersion && cached.totalChanges === stamp.totalChanges) {
+        // LRU refresh: re-insertion keeps hot projects resident under the cap.
+        documentReadCache.delete(id)
+        documentReadCache.set(id, cached)
+        return { etag: cached.etag, json: cached.json, cached: true }
+      }
+      if (cached) documentReadCache.delete(id)
+      const document = foldProjectDocument(id)
+      if (!document) return null
+      const json = JSON.stringify(document)
+      const etag = `"doc-${createHash('sha256').update(json).digest('hex').slice(0, 24)}"`
+      documentReadCache.set(id, { etag, json, dataVersion: stamp.dataVersion, totalChanges: stamp.totalChanges })
+      while (documentReadCache.size > DOCUMENT_READ_CACHE_MAX) {
+        const oldest = documentReadCache.keys().next().value
+        if (oldest === undefined) break
+        documentReadCache.delete(oldest)
+      }
+      return { etag, json, cached: false }
     },
 
     // session ------------------------------------------------------------------

@@ -258,3 +258,55 @@ Each item: measured cost → root cause (evidence) → estimated win → risk.
 Corrections arrive as dated addenda — never silent rewrites. Re-run this
 profile (harness: `scripts/perf-profile/`) whenever the substrate, tile
 anatomy, or document hydration path changes materially.
+
+## Addendum 2026-09-17 — improvement wave 1 landed (task pq7d48a)
+
+**MEASURED** before/after with this same harness, same box, same seeded data
+(the 300-tier home was copied byte-for-byte between arms; 240-GET bursts at
+16× concurrency, V/V×2 overlay opens via real keydowns, untraced pan drives
+at zoom-to-fit). The three top recommendations shipped:
+
+| Metric (300 objects) | Before | After | Verdict |
+|---|---|---|---|
+| Project GET burst p99 / p50 / rps | 439 / 193 ms / 71 | **31 / 16 ms / 894** | rec 1 **landed** (target was <100 ms p99) |
+| Timeline (V) open / max long task | 330/328/195 ms / 99–147 ms | **24–63 ms / 0 ms** | rec 2 **landed** (6 slots mounted, scroll-windowed) |
+| Library (V×2) open / max long task | 111–158 ms / 83–131 ms | **28–48 ms / 0 ms** | rec 2 **landed** (28 rows mounted, scroll-windowed) |
+| Pan renders / 2 s | 26–28 | 27–30 | rec 3 landed; see honest note |
+| Pan fps / >25 ms frames | 30.5–51 / 47,17 | 31.5–60.5 / 44,9,0 | rec 3 landed; directionally better, not several-fold |
+
+How (all **[DOC]** in shipped code, tests in `scripts/test-documents.cjs` §j):
+
+1. **Document-read cache + ETag** (`server/documents.ts`
+   `getProjectDocumentCached`, `server/core.ts` route, `src/canvas/api.ts`
+   conditional re-fetch): the hydrated document is folded once per
+   write-generation and served as a pre-serialized body with a content-hash
+   ETag; unchanged re-reads hit the cache and matching `If-None-Match`
+   answers 304. Invalidation is FAIL-CLOSED, not seam-enumerated: the
+   freshness stamp is (PRAGMA data_version, total_changes()) — own-connection
+   writes bump the latter, any other connection's commits bump the former,
+   so NO write path can serve a stale document (the test walks every
+   mutation route + an external-connection write). The price — a rebuild
+   after unrelated-table writes — equals the old uncached behavior.
+2. **Overlay windowing** (`src/canvas/useWindowedList.ts` + the two
+   overlays): uniform-cell scroll windows with runtime-measured pitch and
+   spacer padding, the substrate-culling philosophy applied to 1-D lists.
+   Lists at or below the probe size (16) render whole — small-fixture
+   e2e/vision behavior unchanged.
+3. **Cull-recompute coalescing** (`src/canvas/Substrate.tsx`): the O(N)
+   cull recompute runs once per frame on the rAF applier (latest-state-wins,
+   never a timer) instead of once per camera.set (up to 6×/frame).
+   **Honest correction of rec 3's estimate:** the predicted several-fold
+   drop in >25 ms frames did not materialize — React already batched the
+   per-set state updates, and the surviving >25 ms frames are dominated by
+   the commit + video-element work of GENUINE cull-set changes (each a real
+   membership change; suppressing them would pop tiles at pan edges). The
+   correctness property is proven: after motion stops the mounted set is
+   already final.
+
+Also fixed here: `scripts/perf-profile/gen-media.sh` shipped with an
+unbalanced quote in its `cd` line (never ran as committed); the timeline
+projection at this tier counts **250** items, not 300 — the load driver's
+phase-5 fanout-probe takes (empty artifacts) auto-become canonical on the
+first 50 chains and drop out of the chronology projection while the library
+keeps them as priors (300 rows). Both arms of every comparison above share
+that state.

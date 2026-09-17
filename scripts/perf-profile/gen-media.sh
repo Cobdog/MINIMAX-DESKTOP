@@ -6,7 +6,7 @@
 # Every file varies a parameter so content hashes are DISTINCT (the blob store
 # is content-addressed; identical bytes dedupe to one blob).
 set -euo pipefail
-cd "$(dirname "$0")/../..   # worktree root
+cd "$(dirname "$0")/../.." # worktree root
 OUT=test-results/perf-profile/media
 export OUT
 mkdir -p "$OUT/video" "$OUT/still"

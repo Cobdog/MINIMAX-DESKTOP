@@ -19,6 +19,9 @@
 //   (h) §4 FTS: chain/asset/plan/take/job surfaces, kind filter, injection
 //   (i) unknown-newer document version refuses loudly (§2/F9); old surface
 //       untouched (jobs upsert keeps the new columns)
+//   (j) document-read cache + ETag (perf wave 1): hit/miss/304, and NO
+//       STALE READS across every mutation route + external-connection
+//       writes (fail-closed stamp invalidation)
 // Run after `pnpm build` (the server + modules are loaded from dist-server).
 const { spawn } = require('node:child_process')
 const http = require('node:http')
@@ -1057,8 +1060,121 @@ async function main() {
     check(controlBlob.status === 200, 'the registered in-scope blob serves')
   }
 
+  // =====================================================================
+  // (j) Document-read cache + ETag (perf wave 1): GET /project folds once
+  //     and serves many (fail-closed stamp invalidation — see
+  //     server/documents.ts). The correctness bar here is NO STALE READS:
+  //     after EVERY mutation route the next read must be rebuilt (cache
+  //     miss) AND reflect the change; a conditional read holding the
+  //     pre-mutation ETag must re-validate (200), never 304. Unchanged
+  //     reads hit the cache; If-None-Match with the current ETag is 304.
+  //     Unrelated-table writes (session, blob ingest) also drop the entry
+  //     (over-invalidation by design — the stamp is global, the safety is
+  //     total); their documents are content-identical, so a conditional
+  //     read MAY 304 — content-hash ETags make that correct, not stale.
+  // =====================================================================
+  {
+    const base = `http://127.0.0.1:${serverA2.port}`
+    const project = (await apiA2.post('/api/lan/documents/projects', { name: 'read-cache' })).body.project
+    const chain = (await apiA2.post('/api/lan/documents/chains', { projectId: project.id, inputSpec: { fresh: { prompt: 'cache probe' } } })).body.chain
+    const output = (await apiA2.post('/api/lan/documents/outputs', { chainId: chain.id })).body.output
+    await apiA2.post('/api/lan/documents/takes', { outputId: output.id, artifacts: [], metrics: { kind: 'image', name: 'cache-probe' } })
+
+    const docPath = `/api/lan/documents/project?id=${encodeURIComponent(project.id)}`
+    const fetchDoc = async (etag) => {
+      const response = await fetch(base + docPath, { headers: etag ? { 'if-none-match': etag } : {} })
+      return { status: response.status, etag: response.headers.get('etag'), cache: response.headers.get('x-minimax-document-cache'), body: await response.text() }
+    }
+
+    const first = await fetchDoc()
+    check(first.status === 200 && first.cache === 'miss' && typeof first.etag === 'string' && first.etag.length > 8, 'first read is a cache miss carrying a content ETag')
+    const second = await fetchDoc()
+    check(second.status === 200 && second.cache === 'hit' && second.etag === first.etag && second.body === first.body, 'unchanged re-read is a cache hit with a byte-identical body')
+    const notModified = await fetchDoc(first.etag)
+    check(notModified.status === 304 && notModified.body === '' && notModified.etag === first.etag, 'a matching If-None-Match answers 304 with no body')
+
+    /** Mutate → the read MUST be rebuilt AND show the change; the OLD etag
+     *  MUST re-validate. changeCheck receives the parsed fresh document. */
+    const expectFresh = async (label, mutate, changeCheck) => {
+      const before = await fetchDoc()
+      const etagBefore = before.etag
+      const mutation = await mutate()
+      if (mutation && typeof mutation === 'object' && 'status' in mutation) {
+        check(mutation.status === 200, `${label}: the mutation route answered 200 (got ${mutation.status}: ${JSON.stringify(mutation.body ?? {}).slice(0, 160)})`)
+      }
+      const after = await fetchDoc()
+      check(after.status === 200, `${label}: read answers after the write`)
+      check(after.cache === 'miss', `${label}: the cached entry was dropped (no stale serve)`)
+      const parsed = JSON.parse(after.body)
+      check(changeCheck(parsed), `${label}: the fresh document reflects the change`)
+      check(after.etag !== etagBefore, `${label}: the content ETag moved`)
+      const revalidate = await fetchDoc(etagBefore)
+      check(revalidate.status === 200, `${label}: a conditional read with the pre-write ETag re-validates (never 304)`)
+      return parsed
+    }
+    /** Write that cannot change THIS document (other tables): the entry
+     *  still drops (fail-closed stamp), content is identical. */
+    const expectDroppedOnly = async (label, mutate) => {
+      await mutate()
+      const after = await fetchDoc()
+      check(after.status === 200 && after.cache === 'miss', `${label}: the global stamp dropped the entry (over-invalidation by design)`)
+    }
+
+    const chainsOf = (doc) => doc.chains.filter((entry) => entry.id === chain.id)
+    await expectFresh('rename project', () => apiA2.post('/api/lan/documents/projects/update', { id: project.id, name: 'read-cache-2' }), (doc) => doc.project.name === 'read-cache-2')
+    await expectFresh('project camera autosave', () => apiA2.post('/api/lan/documents/projects/update', { id: project.id, camera: { camera: { x: 123, y: 5, k: 0.9 }, layout: {} } }), (doc) => doc.project.camera?.camera?.x === 123)
+    await expectFresh('chain create', () => apiA2.post('/api/lan/documents/chains', { projectId: project.id, kind: 'media', inputSpec: { fresh: { media: { kind: 'image', name: 'x.png' } } } }), (doc) => doc.chains.length === 2)
+    await expectFresh('chain settings update', () => apiA2.post('/api/lan/documents/chains/update', { id: chain.id, settings: { seed: 77 } }), (doc) => chainsOf(doc)[0].settings.seed === 77)
+    await expectFresh('chain staleness flip', () => apiA2.post('/api/lan/documents/chains/update', { id: chain.id, stale: true }), (doc) => chainsOf(doc)[0].stale === true)
+    await expectFresh('output create', () => apiA2.post('/api/lan/documents/outputs', { chainId: chain.id, substrates: ['decoded'] }), (doc) => chainsOf(doc)[0].outputs.length === 2)
+    await expectFresh('take append', () => apiA2.post('/api/lan/documents/takes', { outputId: output.id, artifacts: [], metrics: { kind: 'image', name: 'second' } }), (doc) => chainsOf(doc)[0].outputs.find((entry) => entry.id === output.id).takes.length === 2)
+    const takesList = (await apiA2.get(`/api/lan/documents/takes?outputId=${output.id}`)).body
+    const nonCanonicalTakeId = takesList.takes.find((entry) => entry.id !== takesList.canonicalTakeId).id
+    await expectFresh('take supersede', () => apiA2.post('/api/lan/documents/takes/supersede', { outputId: output.id, takeId: nonCanonicalTakeId }), (doc) => chainsOf(doc)[0].outputs.find((entry) => entry.id === output.id).canonicalTakeId === nonCanonicalTakeId)
+
+    let opOne
+    await expectFresh('op add', async () => { opOne = (await apiA2.post('/api/lan/documents/ops', { chainId: chain.id, kind: 'crop', settings: { x: 0, y: 0, w: 10 } })).body.op }, (doc) => chainsOf(doc)[0].ops.length === 1)
+    await expectFresh('op settings update', () => apiA2.post('/api/lan/documents/ops/update', { id: opOne.id, settings: { x: 42 } }), (doc) => chainsOf(doc)[0].ops.find((entry) => entry.id === opOne.id).settings.x === 42)
+    let opTwo
+    await expectFresh('second op add', async () => { opTwo = (await apiA2.post('/api/lan/documents/ops', { chainId: chain.id, kind: 'trim', settings: { start: 0, end: 2 } })).body.op }, (doc) => chainsOf(doc)[0].ops.length === 2)
+    await expectFresh('op reorder', () => apiA2.post('/api/lan/documents/ops/reorder', { chainId: chain.id, orderedIds: [opTwo.id, opOne.id] }), (doc) => chainsOf(doc)[0].ops[0].id === opTwo.id)
+    await expectFresh('op bake', () => apiA2.post('/api/lan/documents/ops/bake', { id: opOne.id }), (doc) => chainsOf(doc)[0].ops.find((entry) => entry.id === opOne.id).bakedAt !== null)
+    await expectFresh('op delete', () => apiA2.post('/api/lan/documents/ops/delete', { id: opTwo.id }), (doc) => chainsOf(doc)[0].ops.length === 1)
+    await expectFresh('identity upsert', () => apiA2.post('/api/lan/documents/identity', { chainId: chain.id, subjectText: 'Mara', strength: 0.5 }), (doc) => chainsOf(doc)[0].identity?.subjectText === 'Mara')
+    await expectFresh('control track add', () => apiA2.post('/api/lan/documents/control-tracks', { chainId: chain.id, kind: 'depth', source: 'extracted', inputRef: 'canvas-blobs/aa/deadbeef', params: { strength: 1 } }), (doc) => chainsOf(doc)[0].controlTracks.length === 1)
+
+    let plan
+    await expectFresh('plan create', async () => { plan = (await apiA2.post('/api/lan/documents/plans', { projectId: project.id, document: { brief: 'first brief', segments: [], gaps: [] } })).body.plan }, (doc) => doc.plans.length === 1 && doc.plans[0].document.brief === 'first brief')
+    const planDocNow = JSON.parse((await fetchDoc()).body)
+    await expectFresh('plan CAS update', () => apiA2.post('/api/lan/documents/plans', { id: plan.id, projectId: project.id, expectedUpdatedAt: planDocNow.plans[0].updatedAt, document: { brief: 'second brief', segments: [], gaps: [] } }), (doc) => doc.plans[0].document.brief === 'second brief')
+
+    const asset = (await apiA2.post('/api/lan/documents/assets', { kind: 'character', fields: { label: 'X' } })).body.asset
+    await expectFresh('asset fork (consented)', () => apiA2.post('/api/lan/documents/assets/fork', { projectId: project.id, assetId: asset.id, consent: true }), (doc) => doc.assetForks.length === 1)
+    await expectFresh('chain tombstone', () => apiA2.post('/api/lan/documents/chains/delete', { id: chain.id }), (doc) => doc.chains.length === 1)
+    await expectFresh('chain restore', () => apiA2.post('/api/lan/documents/chains/restore', { id: chain.id }), (doc) => doc.chains.length === 2)
+    await expectFresh('project tombstone', () => apiA2.post('/api/lan/documents/projects/delete', { id: project.id }), (doc) => doc.project.deletedAt !== null)
+    await expectFresh('project restore', () => apiA2.post('/api/lan/documents/projects/restore', { id: project.id }), (doc) => doc.project.deletedAt === null)
+
+    await expectDroppedOnly('session save (unrelated table)', () => apiA2.post('/api/lan/documents/session', { openProjects: [project.id], activeProject: project.id }))
+    await expectDroppedOnly('blob ingest (blob rows are not document content)', () => apiA2.post('/api/lan/documents/blobs/ingest', { kind: 'image', name: 'stamp.png', data: Buffer.from('stamp-probe').toString('base64') }))
+
+    // Cross-connection invalidation (the data_version half of the stamp): a
+    // SECOND SQLite connection committing a chain row must drop the entry.
+    const externalDb = new Database(path.join(serverA2.home, 'studio.db'))
+    try {
+      const beforeExternal = await fetchDoc()
+      externalDb.prepare('UPDATE canvas_project SET name = ? WHERE id = ?').run('read-cache-external', project.id)
+      const afterExternal = await fetchDoc()
+      check(afterExternal.cache === 'miss', 'an external-connection write drops the cached entry (data_version)')
+      check(JSON.parse(afterExternal.body).project.name === 'read-cache-external', 'the external write is visible immediately (no stale window)')
+      check(afterExternal.body !== beforeExternal.body, 'the external write changed the served document')
+    } finally {
+      externalDb.close()
+    }
+  }
+
   killAllServers()
-  console.log(`PASS: canvas document store — migration 002 (golden fixture N→N+1, divergence hard-error, ${canvasTables.length} canvas tables + jobs extension); §6 legacy import (5 jobs -> 3 takes + 1 failure output, counts + hash spot-checks + marker + clean retry, sources untouched); tombstones/trash round-trips + GC adversarials (fork-edge liveness over a tombstoned source, locked + canonical never evicted, session prune); take append-only + bake immutability trigger-enforced; §7 archive round-trip (zip, hash-verified blobs, global-asset placeholders, unknown-newer refusal); §4 FTS (chain/asset/plan/take/job, injection-safe, kind-filter-before-limit); unknown-newer document refusal names the writer; correctness wave 1 (shared-blob eviction survival + takeId-pinned priors, jobId-idempotent + stray-healing appendTake, torn-copy repair, poisoned-list isolation, locked-staleness gating, plan CAS 409, honest cancel verdicts, remote-output fetch+ingest, latent durability + visible missingBlobs, control-track blob lifecycle, shared-blob import upsert + staged-file rollback). ${assertions} assertions.`)
+  console.log(`PASS: canvas document store — migration 002 (golden fixture N→N+1, divergence hard-error, ${canvasTables.length} canvas tables + jobs extension); §6 legacy import (5 jobs -> 3 takes + 1 failure output, counts + hash spot-checks + marker + clean retry, sources untouched); tombstones/trash round-trips + GC adversarials (fork-edge liveness over a tombstoned source, locked + canonical never evicted, session prune); take append-only + bake immutability trigger-enforced; §7 archive round-trip (zip, hash-verified blobs, global-asset placeholders, unknown-newer refusal); §4 FTS (chain/asset/plan/take/job, injection-safe, kind-filter-before-limit); unknown-newer document refusal names the writer; correctness wave 1 (shared-blob eviction survival + takeId-pinned priors, jobId-idempotent + stray-healing appendTake, torn-copy repair, poisoned-list isolation, locked-staleness gating, plan CAS 409, honest cancel verdicts, remote-output fetch+ingest, latent durability + visible missingBlobs, control-track blob lifecycle, shared-blob import upsert + staged-file rollback); document-read cache + ETag (perf wave 1 — hit/miss/304 + no stale reads across every mutation route, external-connection invalidation). ${assertions} assertions.`)
 }
 
 void main().catch((error) => {

@@ -117,9 +117,27 @@ function SubstrateBase() {
       }, PERSIST_DEBOUNCE_MS)
     }
 
+    // Perf wave 1 (profile rec 3): the cull recompute is O(tiles+edges) per
+    // call — filter + signature join over the whole document — and a pan
+    // drives camera.set up to 6x per frame, so the synchronous path paid up
+    // to 6 recomputes per frame for one usable answer. Coalesced to ONE per
+    // frame on the rAF applier (never a timer): the flush reads the LATEST
+    // camera state and runs before paint, so the mounted set is computed
+    // from the same state the transform applies in the same frame — culling
+    // never lags a frame. The zoom readout + autosave stay on the direct
+    // path (transient DOM write / already debounced).
+    let recomputeFrame = 0
+    const scheduleRecompute = () => {
+      if (recomputeFrame) return
+      recomputeFrame = requestAnimationFrame(() => {
+        recomputeFrame = 0
+        recomputeView(camera.get())
+      })
+    }
+
     const unsubscribe = camera.subscribe((state) => {
       if (readoutRef.current) readoutRef.current.textContent = `${Math.round(state.k * 100)}%`
-      recomputeView(state)
+      scheduleRecompute()
       schedulePersist()
     })
     recomputeView(camera.get())
@@ -127,13 +145,14 @@ function SubstrateBase() {
     const observer = new ResizeObserver(() => {
       const rect = viewport.getBoundingClientRect()
       sizeRef.current = { w: rect.width || 1920, h: rect.height || 1080 }
-      recomputeView(camera.get())
+      scheduleRecompute()
     })
     observer.observe(viewport)
 
     return () => {
       observer.disconnect()
       unsubscribe()
+      if (recomputeFrame) cancelAnimationFrame(recomputeFrame)
       window.clearTimeout(persistTimerRef.current)
       attachment.detach()
       attachmentRef.current = null
