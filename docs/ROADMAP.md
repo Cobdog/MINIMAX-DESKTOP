@@ -1,7 +1,7 @@
 # Roadmap — state of play
 
-> **Derived from Flux (project `r2lnrfw`); refreshed 2026-09-16 late (pre-compaction
-> update by the lead).** Flux is the source of truth; this file is the human-readable
+> **Derived from Flux (project `r2lnrfw`); refreshed 2026-09-17 after the Phase-4
+> landing (lead).** Flux is the source of truth; this file is the human-readable
 > state of play — if it disagrees with the board, the board wins. Task ids are Flux ids.
 
 ## Shipped (verified, CI green at landing)
@@ -26,10 +26,14 @@
   rows, candidate CLI); **AutoContext catalog + temporal-exclusivity guidance**
   (p8oyfy1).
 - **Canvas spec BLESSED** (0rtwaj4, 8378214) after three adversarial audits.
-- **Canvas Phases 0–3 SHIPPED**: document store (oiavqh8, 904825c) → substrate +
+- **Canvas Phases 0–4 SHIPPED**: document store (oiavqh8, 904825c) → substrate +
   launcher + spatial queue (jl4ye8x, 0ee1bcb) → generation on canvas (flyuh6h, 2ae8ce1)
-  → ops/forks/takes + engines-as-ops + first view retirement (j5sj28v, 80f48eb).
-  All behind `?canvas=1`; vision-verified; old shell still default.
+  → ops/forks/takes + engines-as-ops + first view retirement (j5sj28v, 80f48eb) →
+  latent-fork rendering + the retirement wave + LocationStudio→H3 + engines-as-ops
+  completion + libraries/Settings docking (6rymbx3, 44d25df; CI green on both legs,
+  vision 9/9 after two real defect rounds). All behind `?canvas=1`; vision-verified;
+  old shell still default until Phase 5. Engine-side latent handoff deferred to the
+  live-verify follow-up (puy428n — offline seam asserted in-tree).
 - **Experiment program**: tranches 1–3b + E-FC0.5/1 + E-MD1 + E-K1 + the MATLOWAI
   bake-off — every verdict in the research docs as dated addenda. Headlines: AddGuide
   movement director (E-MD1 winner); hybrid wins identity edits (E-ED1); turbo sharpest
@@ -56,15 +60,21 @@
 
 ## Building (in flight)
 
-- **Canvas Phase 4** (6rymbx3) — latent-fork rendering + engine retirement wave
-  (CreateView, JobsView, LibraryView, Ltx25Workspace) + LocationStudio migration +
-  libraries/Settings docking.
 - **H3 LoRA training envelope** (1n3a4mi) — resolution × duration × audio × batch ×
   mixed-data × sec/it matrix on the topgun clip; PIVOTED to base-model DiT-LoRA
   (not controlnet) per the maintainer's correction; rank-16 + DeCFG notes relayed.
+  Interim: max-duration ceiling rung found at 544×320×345f (~60M px·frames — the
+  iso-budget trade: ≈480×832×150f ≈ 768×1344×58f; a motion tool, not a style/identity res).
 
 ## Queued (specced/planning)
 
+- **Canvas Phase 5** — the deletion wave: the 7 greyed views + the old shell + the
+  `View` union die; canvas becomes THE app. Inherits the Director Suite scope call
+  (timeline projection, plan documents, gap menu — land in 5 or queue as 5b) and the
+  Phase-4 cleanup options (LTX character-survey → ContactSheet-only;
+  syncLibraryAssets as the libraries' primary write path).
+- **Latent-fork live-verify** (puy428n) — one engine-side render confirming the
+  LoadLatent handoff + latent retention across restarts; next GPU window.
 - **Dataset manager** (sv14rt0) — mixed-media training browser (import/browse/preview/
   caption/recaption/coverage/export), 5→1000 items, canvas op-stack prep integration.
 - **Drift-envelope suite** (5nfy24y) — how long can chains really go per mitigation
