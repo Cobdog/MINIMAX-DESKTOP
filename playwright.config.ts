@@ -108,7 +108,8 @@ export default defineConfig({
     // deterministic hook-driven interactions + palette-pixel assertions) +
     // the canvas Phase-1 route (task jl4ye8x — launcher/seed/radar/index +
     // the pan/zoom zero-render canary against the production build).
-    { name: 'e2e', testMatch: /(app|poserig|canvas)\.spec\.ts/ },
+    // datasets.spec.ts joined with sv14rt0 (the dataset-manager workbench).
+    { name: 'e2e', testMatch: /(app|poserig|canvas|datasets)\.spec\.ts/ },
     { name: 'vision', testMatch: /vision-capture\.spec\.ts/ },
   ],
   webServer: {

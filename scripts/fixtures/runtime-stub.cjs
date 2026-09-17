@@ -51,6 +51,10 @@ server.listen(port, '127.0.0.1', () => {
   const profileProbe = process.env.MINIMAX_STUDIO_PROFILE_PROBE
   emit({ level: 'info', msg: 'boot', fixture: 'runtime-stub', port: server.address().port, pid: process.pid, ...(profileProbe ? { profileProbe } : {}) })
   process.stdout.write('runtime-stub: raw startup line\r\n')
+  // A prompt-shaped fragment inside an error-looking line: the LAN-facing
+  // log tail must scrub it (security hardening 1), while the local ring/log
+  // keeps it — test-runtime asserts both sides of that boundary.
+  process.stdout.write('error: ValueError while validating NeonCyberQueenPromptToken\r\n')
   emit({ level: 'info', msg: 'ready' })
 })
 

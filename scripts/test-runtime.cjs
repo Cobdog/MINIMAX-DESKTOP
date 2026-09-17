@@ -564,6 +564,11 @@ async function main() {
 
     const started = await api('/api/lan/engine/start', { method: 'POST' })
     ok(started.status === 200 && started.body.state === 'running' && started.body.already === false && started.body.mode === 'managed', 'POST start → running with mode managed')
+    // Security hardening 1: the LAN-facing log tail is scrubbed at the route
+    // boundary — the prompt-shaped fragment the stub prints must NOT cross
+    // the wire (the local ring keeps it; section (c) asserts the raw side).
+    const statusBody = await api('/api/lan/engine/status')
+    ok(statusBody.status === 200 && !JSON.stringify(statusBody.body.logTail).includes('NeonCyberQueen'), `the HTTP log tail scrubs prompt-shaped fragments (got ${JSON.stringify(statusBody.body.logTail).slice(0, 200)})`)
     ok(started.body.url === `http://127.0.0.1:${started.body.port}` && Number.isInteger(started.body.pid), 'status carries url + pid')
 
     const again = await api('/api/lan/engine/start', { method: 'POST' })

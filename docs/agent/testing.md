@@ -23,8 +23,8 @@ Runs the entire verification chain in canonical order — `typecheck` →
 `lint` → `license:audit` → unit suites (`test`, `test:registry`,
 `test:storage`, `test:realtime`, `test:filmstrip`, `test:llm`,
 `test:engine`, `test:runtime`, `test:fetcher`, `test:lora-form`,
-`test:poserig`, `test:camera`) → `build` → `smoke:server` → e2e →
-vision-capture — each in its own process, wall-clock timed,
+`test:poserig`, `test:camera`, `test:datasets`) → `build` → `smoke:server`
+→ e2e → vision-capture — each in its own process, wall-clock timed,
 known-benign output filtered (the filter tally prints so nothing disappears
 silently), one summary table, non-zero exit on any failure. A failed
 `build` skips only its dependents (smoke/e2e/vision). `pnpm test:all` is the
@@ -37,6 +37,13 @@ same chain without the harness niceties. Individual suites run directly
   the fixture IS the contract.
 - `test:lora-form` needs `python3` + `numpy` (skips loudly without python,
   fails loudly with python but no numpy).
+- `test:datasets` (sv14rt0) boots the built server on a scratch home and
+  drives the dataset manager with SYNTHETIC ffmpeg testsrc clips (never
+  committed media); it needs ffmpeg on PATH and exercises ingest/health/
+  layers/captions/bake/gates/exports/curation/FTS/scale end to end, plus
+  pure-model units (grid math, floors, budget goldens vs the envelope
+  table, trigger validation, aspect mirror/hard-stops) loaded straight from
+  dist-server.
 - `test:camera` needs no Python (goldens are committed).
 
 ## VM-harness pitfalls (scripts/test-*.cjs)

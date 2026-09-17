@@ -118,7 +118,16 @@ export function packZip(entries: ZipEntry[]): Buffer {
   return Buffer.concat([...localChunks, centralDirectory, eocd])
 }
 
-/** Parses a ZIP buffer via its central directory (entries only — no zip64). */
+/** Parses a ZIP buffer via its central directory (entries only — no zip64).
+ *  Resource caps (security hardening 1): a crafted archive must not balloon
+ *  memory — the entry count, each entry's DECLARED uncompressed size, and the
+ *  inflated output are all bounded (inflateRawSync enforces maxOutputLength
+ *  even when the header lies), and a lying header (inflated ≠ declared) is
+ *  refused outright. */
+export const MAX_ZIP_ENTRIES = 2_000
+export const MAX_ZIP_ENTRY_BYTES = 512 * 1024 * 1024
+export const MAX_ZIP_TOTAL_BYTES = 2 * MAX_ZIP_ENTRY_BYTES
+
 export function unpackZip(archive: Buffer): Map<string, Buffer> {
   const eocdSignature = 0x06054b50
   let eocd = -1
@@ -130,12 +139,18 @@ export function unpackZip(archive: Buffer): Map<string, Buffer> {
   }
   if (eocd < 0) throw new Error('This is not a readable project archive (no ZIP end record).')
   const entries = archive.readUInt16LE(eocd + 10)
+  if (entries > MAX_ZIP_ENTRIES) throw new Error(`The archive declares too many entries (${entries}); at most ${MAX_ZIP_ENTRIES} are accepted.`)
   let cursor = archive.readUInt32LE(eocd + 16)
   const files = new Map<string, Buffer>()
+  let totalInflated = 0
   for (let index = 0; index < entries; index += 1) {
     if (archive.readUInt32LE(cursor) !== 0x02014b50) throw new Error('The archive central directory is corrupt.')
     const method = archive.readUInt16LE(cursor + 10)
     const compressedSize = archive.readUInt32LE(cursor + 20)
+    const uncompressedSize = archive.readUInt32LE(cursor + 24)
+    if (uncompressedSize > MAX_ZIP_ENTRY_BYTES) throw new Error(`The archive entry at index ${index} declares an oversized payload (${uncompressedSize} bytes).`)
+    totalInflated += uncompressedSize
+    if (totalInflated > MAX_ZIP_TOTAL_BYTES) throw new Error('The archive expands beyond the accepted total size.')
     const nameLength = archive.readUInt16LE(cursor + 28)
     const extraLength = archive.readUInt16LE(cursor + 30)
     const commentLength = archive.readUInt16LE(cursor + 32)
@@ -145,7 +160,13 @@ export function unpackZip(archive: Buffer): Map<string, Buffer> {
     const localExtraLength = archive.readUInt16LE(localOffset + 28)
     const dataStart = localOffset + 30 + localNameLength + localExtraLength
     const payload = archive.subarray(dataStart, dataStart + compressedSize)
-    files.set(name, method === 8 ? inflateRawSync(payload) : Buffer.from(payload))
+    if (method === 8) {
+      const inflated = inflateRawSync(payload, { maxOutputLength: MAX_ZIP_ENTRY_BYTES })
+      if (inflated.length !== uncompressedSize) throw new Error(`The archive entry "${name}" inflated to ${inflated.length} bytes but declared ${uncompressedSize} — the archive is corrupt.`)
+      files.set(name, inflated)
+    } else {
+      files.set(name, Buffer.from(payload))
+    }
     cursor += 46 + nameLength + extraLength + commentLength
   }
   return files
@@ -414,10 +435,28 @@ export function importProjectArchive(store: DocumentStore, archive: Buffer): Arc
         verifiedBlobs += 1
       }
 
+      // Column allowlist (security hardening 1): the archive's JSON key names
+      // used to be interpolated straight into the INSERT statement — a crafted
+      // archive could rewrite it (SQL injection through column names). Keys are
+      // now validated against the live table schema (PRAGMA table_info) and any
+      // unknown key refuses the WHOLE import loudly (a hostile or foreign
+      // archive must never silently lose or smuggle columns).
+      const tableColumns = new Map<string, Set<string>>()
+      const columnsFor = (table: string): Set<string> => {
+        let columns = tableColumns.get(table)
+        if (!columns) {
+          columns = new Set((db.pragma(`table_info(${table})`) as Array<{ name: string }>).map((column) => column.name))
+          tableColumns.set(table, columns)
+        }
+        return columns
+      }
       const insertAll = (table: string, rowsToInsert: Array<Record<string, unknown>>) => {
         if (!rowsToInsert.length) return
+        const known = columnsFor(table)
         for (const row of rowsToInsert) {
           const keys = Object.keys(row)
+          const unknown = keys.filter((key) => !known.has(key))
+          if (unknown.length) throw new Error(`The archive carries unknown ${table} column(s): ${unknown.join(', ')} — refusing the import.`)
           db.prepare(`INSERT INTO ${table} (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(',')})`).run(...keys.map((key) => (row[key] === undefined ? null : row[key])))
         }
       }

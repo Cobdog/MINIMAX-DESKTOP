@@ -9,6 +9,7 @@
 import { dirname, join } from 'node:path'
 import { openStudioDatabase } from './db'
 import { createDocumentStore, type DocumentStore } from './documents'
+import { createDatasetManager, type DatasetManager } from './datasets'
 import { TECHNIQUE_CORPUS, type SavedPromptEntry } from '../src/lib/promptCorpus'
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled'])
@@ -41,8 +42,11 @@ export function ftsMatchExpression(raw: string): string {
 
 /** Opens the database, applies migrations, and returns the repository. Used
  *  by createStudioServer; a thrown error must degrade to 503 routes, never a
- *  crashed server. */
-export function createStudioRepository(dbFile: string) {
+ *  crashed server. `allowedSourceRoots` (security hardening 1) resolves the
+ *  directories whose files may be REGISTERED into the blob tree — the studio
+ *  home is always allowed by the store itself; this adds the live-configured
+ *  output directory. */
+export function createStudioRepository(dbFile: string, options?: { allowedSourceRoots?: () => string[] }) {
   const db = openStudioDatabase(dbFile)
   // Canvas document store (Phase 0) on the SAME handle/migrations: new
   // canvas_* tables beside the old ones — the old surface above is untouched.
@@ -50,7 +54,23 @@ export function createStudioRepository(dbFile: string) {
   // db file. An open failure fails the whole repository (503), matching the
   // append-only-migration discipline: a document store that cannot migrate
   // must never answer stale.
-  const documents: DocumentStore = createDocumentStore(db, { blobRoot: join(dirname(dbFile), 'canvas-blobs') })
+  const documents: DocumentStore = createDocumentStore(db, {
+    blobRoot: join(dirname(dbFile), 'canvas-blobs'),
+    ...(options?.allowedSourceRoots ? { allowedSourceRoots: options.allowedSourceRoots } : {}),
+  })
+  // Dataset manager (sv14rt0) on the same handle/migrations: its own tables
+  // beside the others; app-owned media/trash roots next to the db like
+  // canvas-blobs. The ffmpeg path refreshes from settings per request
+  // (core.ts calls datasets.tools.ffmpegPath = settings.ffmpegPath).
+  const datasetTools: { ffmpegPath: string; logFailure: (stage: string, error: unknown, detail?: Record<string, unknown>) => void; logEvent: (event: { kind: string; [key: string]: unknown }) => void } = { ffmpegPath: 'ffmpeg', logFailure: () => undefined, logEvent: () => undefined }
+  const datasets: DatasetManager = createDatasetManager({
+    db,
+    mediaRoot: join(dirname(dbFile), 'dataset-media'),
+    trashRoot: join(dirname(dbFile), 'dataset-trash'),
+    tools: datasetTools,
+    logEvent: () => undefined,
+    logFailure: () => undefined,
+  })
   const statements = {
     selectJobStatus: db.prepare('SELECT status FROM jobs WHERE id = ?'),
     upsertJob: db.prepare(`
@@ -229,6 +249,18 @@ export function createStudioRepository(dbFile: string) {
     /** The canvas document store (Phase 0) — runs beside the old surface on
      *  the same database handle; see server/documents.ts. */
     documents,
+
+    /** The dataset manager (sv14rt0) — same handle, own tables; the ffmpeg
+     * tool path is refreshed from settings by the routes (core.ts). */
+    datasets,
+
+    /** Refreshes the dataset manager's tool seams from live settings (cheap;
+     * called by the datasets routes per request). */
+    setDatasetTools(next: { ffmpegPath: string; logFailure(stage: string, error: unknown, detail?: Record<string, unknown>): void; logEvent(event: { kind: string; [key: string]: unknown }): void; rifePath?: string | null }): void {
+      datasetTools.ffmpegPath = next.ffmpegPath
+      datasetTools.logFailure = next.logFailure
+      datasetTools.logEvent = next.logEvent
+    },
 
     /** Per-job upsert keyed by id — NEVER a whole-list replace. Two clients
      *  (or tabs) writing overlapping sets each win per job: the newest write
