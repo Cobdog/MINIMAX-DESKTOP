@@ -203,7 +203,7 @@ test('settings round-trips a change through the server API (docked)', async ({ p
   await outputInput.fill(`${original}/e2e-probe`)
   await page.getByRole('button', { name: /save/i }).first().click()
   await page.waitForTimeout(600)
-  const persisted = await (await fetch('http://127.0.0.1:4199/api/lan/settings')).json()
+  const persisted = await (await fetch(`http://127.0.0.1:${process.env.MINIMAX_E2E_PORT ?? '4199'}/api/lan/settings`)).json()
   expect(persisted.settings.outputDirectory).toContain('e2e-probe')
   // Restore so other tests see the clean state.
   await outputInput.fill(original)

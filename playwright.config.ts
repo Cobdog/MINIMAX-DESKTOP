@@ -81,6 +81,12 @@ const systemChromium = detectSystemChromium()
 // every run start). The vision bundles at test-results/vision/<run-id>/ and
 // the per-view shots at test-results/shots/ live OUTSIDE that wipe so a
 // captured bundle survives later Playwright runs until its judge/report step.
+// The e2e/vision webServer port. Fixed 4199 by default (CI), but overridable
+// via MINIMAX_E2E_PORT — REQUIRED on the shared dev box, where concurrent
+// agents each own a port range (agent-resources.md) and a second run against
+// the fixed port fails on the bind instead of retrying.
+const e2ePort = process.env.MINIMAX_E2E_PORT ?? '4199'
+
 export default defineConfig({
   testDir: 'e2e',
   timeout: 60_000,
@@ -90,7 +96,7 @@ export default defineConfig({
   reporter: [['list']],
   outputDir: 'test-results/pw',
   use: {
-    baseURL: 'http://127.0.0.1:4199',
+    baseURL: `http://127.0.0.1:${e2ePort}`,
     // The maintainer's required surface: exactly 1920x1080 @ 1x. Every
     // screenshot (shots/, vision bundles) is comparable pixel-for-pixel.
     viewport: { width: 1920, height: 1080 },
@@ -114,12 +120,12 @@ export default defineConfig({
   ],
   webServer: {
     command: 'node dist-server/server/index.js',
-    url: 'http://127.0.0.1:4199/api/lan/settings',
+    url: `http://127.0.0.1:${e2ePort}/api/lan/settings`,
     reuseExistingServer: false,
     timeout: 30_000,
     env: {
       MINIMAX_STUDIO_HOME: 'test-home',
-      MINIMAX_LAN_PORT: '4199',
+      MINIMAX_LAN_PORT: e2ePort,
       MINIMAX_NO_HTTPS: '1',
     },
   },
