@@ -1,93 +1,99 @@
 # Roadmap — state of play
 
-> **Derived from Flux (project `r2lnrfw`) on 2026-09-16 by hygiene pass 2
-> (zbn31xs).** Flux is the source of truth; this file is the human-readable
-> state of play and is refreshed by hygiene passes / at milestone changes —
-> if it disagrees with the board, the board wins. Task ids are Flux ids.
+> **Derived from Flux (project `r2lnrfw`); refreshed 2026-09-16 late (pre-compaction
+> update by the lead).** Flux is the source of truth; this file is the human-readable
+> state of play — if it disagrees with the board, the board wins. Task ids are Flux ids.
 
 ## Shipped (verified, CI green at landing)
 
-- **Stabilization + web migration** (epics m2yc3vd, 1qv5cg3, yl4tzwb,
-  ph34nd8 — all closed 2026-09-14): P0 data-loss/silent-failure fixes, LAN
-  hardening, App.tsx decomposition, Electron stripped → standalone Node
-  server + SPA (`docs/migration.md` is the record).
-- **Foundation pass** (epic t63llqq, closed 2026-09-14): perf batch, pino
-  logging + error boundaries, SQLite/FTS5 + IndexedDB/OPFS storage substrate,
-  realtime fabric (WS+SSE, binary previews, LLM streaming), zustand state
-  discipline, CSS design tokens + Base UI, EngineProcess sidecar contract,
-  PreviewSource/filmstrips/video pooling.
-- **LLM layer** (1de65kg): llama.cpp router primary + Ollama fallback; 8-layer
-  composer; vision captioning; unload-before-generate choreography.
-- **Graph factory + optimization registry** (ttlqwwi, g07jo24): every
-  turbo/acceleration/upscale/preview method is data; insert-only + inertness
-  golden-proven.
-- **Self-managed runtime increments 1–2** (3ay7wbz, partially landed):
-  RuntimeManager (managed ComfyUI on 8191+, config mirroring, boot reconcile),
-  launch profiles, vendored node packs, consent patch tier, weight-linking
-  invariant. **Remaining ACs on the task = active work** (see Queued).
-- **Local-first fetcher** (hgjbea2) + catalog rows: sha-pinned, consent-gated,
-  user-fetch pattern for restrictive licenses (`docs/architecture.md` §fetcher).
-- **Capabilities shipped along the way**: official prompt contracts, prompt
-  library (Civitai harvest + bundled corpora + style embeddings), multiframe
-  timeline keyframes, latent scene chaining, character sheets in-model,
-  reproducibility manifests, diagnostics suite, Music 3, form-adaptive LoRA
-  node (k271ykk), Identity Edit (t8u00uu), Krea 2 edit families (t8u00uu
-  sibling registry), IK pose rig (r2kxcjh), camera compiler port (ving89w,
-  `src/lib/camera/`).
-- **Canvas UI spec BLESSED** (0rtwaj4 lineage, 8378214) after three
-  adversarial audit passes; **Canvas Phase 1** (jl4ye8x, 0ee1bcb) and
-  **Phase 2** (flyuh6h, 2ae8ce1) landed behind `?canvas=1`, vision-verified
-  7/7.
-- **Experiment ladder complete** (qx1e45p, 7ed5ewa, muwufpp, a80ekav-partial,
-  ma59y73): measured verdicts folded into the research docs — headline: the
-  AddGuide positional-guide movement director is the product path (E-MD1);
-  Ref2VA turbo default = larryvrh v4_step600_ema (fast tier only, per the
-  maintainer's quality steer); MATLOWAI fused-turbo verified at 4-step (blind
-  clear gap) with the Mystic-style-baked-in caveat; adaln-hybrid wins
-  subject-preserving edits (E-ED1); held-seed tiers measured (turbo sharpest;
-  extra steps buy motion/audio only).
+- **Stabilization + web migration** (epics m2yc3vd, 1qv5cg3, yl4tzwb, ph34nd8):
+  P0 data-loss/silent-failure fixes, LAN hardening, App.tsx decomposition, Electron
+  stripped → standalone Node server + SPA.
+- **Foundation pass** (epic t63llq): perf, pino+boundaries, SQLite/FTS5 + OPFS storage,
+  realtime fabric (WS+SSE, binary previews, LLM streaming), zustand state discipline,
+  CSS tokens + Base UI, EngineProcess, PreviewSource/filmstrips/pooling.
+- **LLM layer** (1de65kg): router primary + Ollama fallback; 8-layer composer; vision
+  captioning; unload-before-generate.
+- **Graph factory + optimization registry** (ttlqwwi, g07jo24): every turbo/accel/upscale
+  method as data; inertness-golden-proven.
+- **Self-managed runtime increments 1–2** (3ay7wbz): RuntimeManager, launch profiles,
+  vendored nodes, consent patch tier, link-never-copy.
+- **Local-first fetcher** (hgjbea2) + catalog.
+- **Identity Edit** (t8u00uu, released with E-K1 corrections); **form-adaptive LoRA node**
+  (k271ykk); **IK pose rig** (r2kxcjh, AP-10K unlocked per E-FC1); **camera compiler
+  port** (ving89w); **Krea 2 edit families**; **LTX 2.3 utility family** (068xwy3);
+  **Diagnostics suite**; **benchmark harness v1** (cp96zdm, 7 suites, 41 backfilled
+  rows, candidate CLI); **AutoContext catalog + temporal-exclusivity guidance**
+  (p8oyfy1).
+- **Canvas spec BLESSED** (0rtwaj4, 8378214) after three adversarial audits.
+- **Canvas Phases 0–3 SHIPPED**: document store (oiavqh8, 904825c) → substrate +
+  launcher + spatial queue (jl4ye8x, 0ee1bcb) → generation on canvas (flyuh6h, 2ae8ce1)
+  → ops/forks/takes + engines-as-ops + first view retirement (j5sj28v, 80f48eb).
+  All behind `?canvas=1`; vision-verified; old shell still default.
+- **Experiment program**: tranches 1–3b + E-FC0.5/1 + E-MD1 + E-K1 + the MATLOWAI
+  bake-off — every verdict in the research docs as dated addenda. Headlines: AddGuide
+  movement director (E-MD1 winner); hybrid wins identity edits (E-ED1); turbo sharpest
+  on stills, tiers buy motion/audio only; MATLOWAI 4-step ref2va verified (Mystic style
+  baked in — default-vs-labeled call open); same-seed cross-tier = sibling takes.
+- **DiffSynX control-branch smoke: EXECUTES** (a80ekav closed) — LoRA-on-controlnet
+  trains locally on this box (18.2s/step at 256×448×39f, 9.8 GiB VRAM, disk-streamed
+  int8 DiT); full-controlnet blocked by optimizer-state VRAM. Two stock bugs found,
+  2-site patch documented + upstreamable.
+- **Infrastructure migration** (dgrkp2e): central model home `/home/agent/models/`
+  (86G, git-committed manifest); canonical ComfyUI at `/home/agent/comfyui` (unified
+  nodes, coordination-protocol CLAUDE.md); 118 GiB deduplicated; soak-verified with a
+  real Krea 2 render; quarantine at `/home/agent/model-quarantine-2026-09-16/` (128G)
+  awaiting the maintainer's purge. The studio's vendored install is exempt (ships with
+  the distribution). Batch 4 (keep/kill list) posted for the maintainer.
+- **H3 LoRA training guide** (mfdza7o, 69049d9): per-class configs (style/character/
+  motion), caption format verdict (natural-language, mid-density, H3 vocabulary, trigger
+  token), dataset technicals (curation > quantity, near-dup capping, slow-motion audit),
+  DeCFG requirement for real training runs.
+- **VLM video research** (complete): llama.cpp ≥v0.4.0 supports native `input_video`
+  (ffmpeg server-side); Gemma 4 31B-IT video-capable today; Qwen3-VL only family with
+  temporal frame merging; DeepSeek V4 Flash Vision image-only; GLM 5.3 Flash not yet
+  in llama.cpp (issue #27922).
 
 ## Building (in flight)
 
-- **Benchmark harness v1** (cp96zdm) — committed suites + candidate CLI, the
-  snake-oil detector; `benchmarks/` is its untracked working tree.
-- **AutoContext catalog row follow-on** (p8oyfy1) — fetch-catalog entry +
-  temporal-exclusivity prompt guidance (research landed: lxmtgss).
+- **Canvas Phase 4** (6rymbx3) — latent-fork rendering + engine retirement wave
+  (CreateView, JobsView, LibraryView, Ltx25Workspace) + LocationStudio migration +
+  libraries/Settings docking.
+- **H3 LoRA training envelope** (1n3a4mi) — resolution × duration × audio × batch ×
+  mixed-data × sec/it matrix on the topgun clip; PIVOTED to base-model DiT-LoRA
+  (not controlnet) per the maintainer's correction; rank-16 + DeCFG notes relayed.
 
-## Queued (specced/planning, P0 first)
+## Queued (specced/planning)
 
-- Self-managed ComfyUI runtime completion (3ay7wbz, P0 — remaining ACs).
-- Benchmark harness construction (cq67hpj) and the real-world numbers it
-  enables; camera A/B (v15 prose vs numeric keyframes) rides it.
-- Graph visual verification via Playwright-into-ComfyUI (yq8fnel).
-- Canvas document-model spec (o0xw49r) + drift-envelope suite (5nfy24y) —
-  both feed the canvas build-out; canvas build tasks fan out from the blessed
-  spec (epic vbrstja), including the camera editor + graph integration
-  (y93rk61, split from ving89w).
-- Engine integrations: start-frame factory (xlfl0iv), RefMod factory
-  (y5ipryd), VDN 24GB chain option (9up52mj), FaceRefine during-render
-  (krzunud), Krea 2 stills + Kreatine two-stage (mf3wfq6), spectrum
-  acceleration (u6d8mop), MMH3SplitUpscale tiled preset (3l8h28e),
-  control-input creation tools (r2copa7, Control Surfaces epic 66xhflw).
-- Research backlog: upstream watch items (zxx05jm), deferred candidates
-  (kqgromm).
+- **Dataset manager** (sv14rt0) — mixed-media training browser (import/browse/preview/
+  caption/recaption/coverage/export), 5→1000 items, canvas op-stack prep integration.
+- **Drift-envelope suite** (5nfy24y) — how long can chains really go per mitigation
+  combo; the mitigation recipe + calibrated drift-budget thresholds.
+- **Few-shot LoRA training sidecar** (ehzagoc, promoted from deferred) — the in-app
+  training pipeline the envelope + guide + dataset manager feed into.
+- **Camera editor** (y93rk61, split from ving89w) — canvas-phase component.
+- **Control-input creation tools** (r2copa7, epic 66xhflw).
+- **Engine integrations**: start-frame factory (xlfl0iv), RefMod factory (y5ipryd),
+  VDN chain option (9up52mj), FaceRefine (krzunud), Krea 2 stills (mf3wfq6),
+  spectrum (u6d6mop), SplitUpscale (3l8h28e).
+- **Derive-curve-form utility** — full-width-only model architecture + on-demand
+  curve derivation (the form story completed).
+- Graph visual verification (yq8fnel); licensing final statement (68rnn84).
 
-## Awaiting maintainer / external
+## Awaiting maintainer
 
-- **DiffSynX smoke** (open AC on a80ekav): 10-minute staged script
-  (`test-results/experiments/tranche3b/scripts/diffsynth_smoke.sh`) — last
-  attempt was blocked ~320 MB short on GPU memory by desktop apps; needs a
-  quiet GPU window.
-- **MATLOWAI fused-turbo default-vs-labeled** — verified winner at 4-step but
-  Mystic style is baked in; the maintainer's call whether it becomes a
-  (labeled) default tier.
-- **Licensing final statement** (68rnn84): refresh PROVENANCE.md with the
-  final-diff statement when the canvas rewrite completes.
-- Deferred: few-shot LoRA training sidecar (ehzagoc, P2).
+- **Batch 4 keep/kill list** (dgrkp2e): fl2va-pruned (19.5G), ref2va-pruned, 32B TE
+  variant, GLM-in-tmp relocation — each with size + recommendation.
+- **Quarantine purge** (128G): after soak, single-folder delete.
+- **MATLOWAI default-vs-labeled**: 4-step ref2va winner, Mystic style baked in.
+- **Intern bakeoff soak**: their project's verification round from the new install.
+- **Qwen3.8-Flash-Next abliterated GGUF**: identified (Huihui, Q4_K_XL 111G, fits
+  24+112GB combined); the quality VLM target for the recaption pipeline. Needs
+  llama.cpp qwen4exp architecture verification + the mmproj file question resolved.
 
 ## Explicitly not planned
 
-- Anything GPU/testbed-bound runs only in maintainer-authorized windows
-  (`docs/agent/runbook.md`); the maintainer's 8188 instance is always
-  off-limits to agents.
+- Audio work (V2A, silent-inference toggle vzpyldn) — parked per the maintainer
+  ("I don't care about it right now"); hinges on the envelope's audio A/B results.
+- GPU/testbed work only in maintainer-authorized windows; 8188 off-limits to agents.
 - No network telemetry, no filters/gating (content-neutral by design).
