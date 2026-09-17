@@ -6,7 +6,7 @@ export type UpscaleMode = 'off' | 'ltx' | 'rtx' | 'lbh2d' | 'lbh3d'
 export type ReferencePurpose = 'character' | 'character-angle' | 'hair' | 'wardrobe' | 'accessory' | 'location' | 'continuity' | 'product' | 'style' | 'generic'
 export type PromptPresetCategory = 'camera' | 'shot' | 'angle' | 'lens' | 'lighting' | 'audio' | 'style' | 'movement' | 'transition' | 'character' | 'wardrobe' | 'location' | 'embedding' | 'looseness'
 export type PromptPreset = { id: string; category: PromptPresetCategory; label: string; keywords: string[]; description: string; insertion: string }
-export type MovieReferenceBinding = { file: MediaFile; purpose: ReferencePurpose; label: string; characterId?: string; hairStyleId?: string; wardrobeId?: string; accessoryId?: string; locationId?: string; locationEnvironmentMode?: LocationProject['environmentMode']; source: 'character-studio' | 'hair-studio' | 'wardrobe-studio' | 'accessory-studio' | 'location-studio' | 'movie' | 'shot' | 'continuity' | 'canvas' }
+export type MovieReferenceBinding = { file: MediaFile; purpose: ReferencePurpose; label: string; characterId?: string; hairStyleId?: string; wardrobeId?: string; accessoryId?: string; locationId?: string; locationEnvironmentMode?: LocationProject['environmentMode']; source: 'character-studio' | 'hair-studio' | 'wardrobe-studio' | 'accessory-studio' | 'location-studio' | 'movie' | 'shot' | 'continuity' | 'canvas' | 'asset' }
 export type ResolvedMovieShot = { preferredMode: GenerationMode; effectiveMode: GenerationMode; references: MovieReferenceBinding[]; compiledPrompt: string; routeReason: string; omittedReferences: MovieReferenceBinding[] }
 
 export type GenerationDefaults = {
@@ -516,8 +516,13 @@ export type GenerationOptions = {
   /** Latent chaining (ComfyUI-H3-Motion-Context): every segment saves its
    *  sampler latent as <folder><index>; segment 0 never loads (chain start),
    *  segment N loads clip N-1 and pins its tail as never-denoised
-   *  conditioning, trimming the overlap from the delivered output. */
-  chain?: { index: number; folder: string; contextLength?: '5' | '22' | '39' | '56'; audioContextLength?: number }
+   *  conditioning, trimming the overlap from the delivered output.
+   *
+   *  `loadFrom` (canvas Phase 4, the latent-fork seam): continue from THIS
+   *  saved clip instead of <folder><index-1> — a fork loads its SOURCE's
+   *  latent while saving its own continuation into its own folder. Absent =
+   *  the scene-chain default (previous clip of the same folder). */
+  chain?: { index: number; folder: string; contextLength?: '5' | '22' | '39' | '56'; audioContextLength?: number; loadFrom?: { folder: string; clipIndex: number } }
 }
 
 export type ComfyStatus = {

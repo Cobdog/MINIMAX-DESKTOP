@@ -15,16 +15,19 @@
  * (Benchmark.tsx) — same substrate, synthetic document, measurement protocol.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { AudioDock } from './AudioDock'
 import { BottomBar } from './BottomBar'
 import { CanvasEngineHost } from './EngineHost'
 import { EndpointMenu } from './EndpointMenu'
 import { ForkMenu } from './ForkMenu'
 import { IndexOverlay } from './IndexOverlay'
+import { LibraryOverlay } from './LibraryOverlay'
 import { OpEditor } from './OpEditor'
 import { PoseRigDock } from './PoseRigDock'
 import { PropertiesPanel } from './PropertiesPanel'
 import { Launcher } from './Launcher'
 import { Radar } from './Radar'
+import { SettingsDock } from './SettingsDock'
 import { Substrate } from './Substrate'
 import { useCanvasStore } from './store'
 import { useJobsStore } from '../state/jobsStore'
@@ -76,6 +79,7 @@ export function CanvasApp() {
       if (event.key === 'Escape') {
         const state = useCanvasStore.getState()
         if (state.indexOpen) setIndexOpen(false)
+        else if (state.libraryOpen) state.setLibraryOpen(false)
         else if (state.endpointMenu || state.forkMenu) {
           state.setEndpointMenu(null)
           state.setForkMenu(null)
@@ -86,6 +90,11 @@ export function CanvasApp() {
       const state = useCanvasStore.getState()
       // The modal surfaces own Escape/keys while open.
       if (state.opEditor || state.poseRig) return
+      // §7 V — projection flip: the library projection overlay (Phase 4).
+      if (event.key === 'v') {
+        state.setLibraryOpen(!state.libraryOpen)
+        return
+      }
       if (!state.tiles.length) return
       if (event.key === 'j' || event.key === 'k') {
         const index = state.tiles.findIndex((tile) => tile.id === state.selection.tileIds[0])
@@ -180,19 +189,23 @@ export function CanvasApp() {
       if (file) void handleFile(file)
     }}
   >
-    <CanvasEngineHost />
-    <Radar />
-    <div className="canvas-stage">
-      <Substrate />
-      {phase === 'ready' && emptyCanvas && <Launcher onPickFile={() => fileInputRef.current?.click()} />}
-    </div>
-    <PropertiesPanel />
-    <BottomBar />
-    <EndpointMenu />
-    <ForkMenu />
-    <OpEditor />
-    <PoseRigDock />
-    <IndexOverlay />
+    <CanvasEngineHost>
+      <Radar />
+      <div className="canvas-stage">
+        <Substrate />
+        {phase === 'ready' && emptyCanvas && <Launcher onPickFile={() => fileInputRef.current?.click()} />}
+      </div>
+      <PropertiesPanel />
+      <BottomBar />
+      <EndpointMenu />
+      <ForkMenu />
+      <OpEditor />
+      <PoseRigDock />
+      <AudioDock />
+      <SettingsDock />
+      <IndexOverlay />
+      <LibraryOverlay />
+    </CanvasEngineHost>
     <div className="canvas-toasts" aria-live="polite">
       {toasts.map((toast) => (
         <div key={toast.id} className={`canvas-toast ${toast.tone}`} data-canvas-toast={toast.tone}>

@@ -77,7 +77,7 @@ async function activeDocument(page: Page) {
   return page.evaluate(async (id) => {
     const response = await fetch(`/api/lan/documents/project?id=${encodeURIComponent(id)}`)
     return (await response.json()) as {
-      chains: Array<{ id: string; kind: string; lockState: string; stale: boolean; settings: Record<string, unknown>; inputSpec: Record<string, unknown>; ops: Array<{ id: string; kind: string; ordinal: number; settings: Record<string, unknown>; bakedAt: number | null }>; controlTracks?: Array<{ id: string; kind: string; source: string; inputRef: string }>; outputs: Array<{ id: string; takes: Array<{ id: string; jobId: string | null; artifacts: string[]; supersededBy: string | null }> }>; identity?: { subjectText: string; strength: number } | null }>
+      chains: Array<{ id: string; kind: string; lockState: string; stale: boolean; settings: Record<string, unknown>; inputSpec: Record<string, unknown>; ops: Array<{ id: string; kind: string; ordinal: number; settings: Record<string, unknown>; bakedAt: number | null }>; controlTracks?: Array<{ id: string; kind: string; source: string; inputRef: string }>; outputs: Array<{ id: string; takes: Array<{ id: string; jobId: string | null; artifacts: string[]; latentPath: string | null; supersededBy: string | null; metrics: Record<string, unknown> | null }> }>; identity?: { subjectText: string; strength: number } | null }>
     }
   }, session.activeProject!)
 }
@@ -946,9 +946,8 @@ test('first view retirement smoke: greyed entries, views still directly reachabl
   await expect(page.getByRole('button', { name: /generate video/i })).toBeVisible()
 
   // The sidebar shows the Clip editor GREYED with the retirement marker…
-  const clipNav = page.locator('.nav-button[data-retired="1"]')
+  const clipNav = page.locator('.nav-button[data-retired="1"]', { hasText: 'Clip editor' })
   await expect(clipNav).toBeVisible()
-  await expect(clipNav).toContainText('Clip editor')
   await expect(clipNav).toContainText('retired')
   await expect(clipNav).toHaveClass(/retired-view/)
 
@@ -965,5 +964,247 @@ test('first view retirement smoke: greyed entries, views still directly reachabl
   await expect(page.locator('[data-retired="clip-editor"]')).toHaveClass(/retired-affordance/)
   await expect(page.locator('[data-retired="clip-editor"]')).toContainText('Open clip editor')
   await page.screenshot({ path: 'test-results/shots/21-view-retirement.png' })
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+// ---------------------------------------------------------------------------
+// Canvas Phase 4 (task 6rymbx3) — latent-fork rendering seam, the engine
+// retirement wave's canvas replacements, libraries/Settings docking.
+// ---------------------------------------------------------------------------
+
+test('latent-fork rendering: the Motion-Context graph pins the source clip (probe + real landing)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1&probe=canvas')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+
+  // The offline seam: graph CONSTRUCTION is pure. A latentFrom spec builds
+  // the exact continuation graph — Load pins the SOURCE clip (not index-1 of
+  // the fork's own folder), Context wraps the conditioning, Save writes the
+  // fork's own folder, Trim drops the overlap rows.
+  const plan = page.evaluate.bind(page)
+  const latent = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { graph: { motionContext: { loadLatent: Record<string, unknown> | null; context: boolean; saveLatent: Record<string, unknown> | null; trim: boolean } } } }).__canvasSubmitPlan(spec), { latentFrom: { folder: 'h3_context/src-chain/clip', clipIndex: 2 } })
+  expect(latent.graph.motionContext.loadLatent).toEqual({ latent_path: 'h3_context/src-chain/clip', clip_index: 2 })
+  expect(latent.graph.motionContext.context).toBe(true)
+  expect(latent.graph.motionContext.trim).toBe(true)
+  expect((latent.graph.motionContext.saveLatent as Record<string, unknown>)?.filename_prefix).toBe('h3_context/plan/clip')
+  // Offline (no Motion-Context nodes reported): a plain plan carries NO
+  // Motion-Context nodes — honest availability, never a doomed graph.
+  const plain = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { graph: { motionContext: { loadLatent: unknown; saveLatent: unknown } } } }).__canvasSubmitPlan(spec), {})
+  expect(plain.graph.motionContext.loadLatent).toBeNull()
+  expect(plain.graph.motionContext.saveLatent).toBeNull()
+
+  // The REAL landing path records the saved-clip facts: a media object
+  // provides the stored source, a seed chain carries the linked job, and the
+  // complete-mock-latent scenario drives the exact store transition a
+  // Motion-Context completion makes — the take lands with latentPath +
+  // metrics.motionContext.
+  await dropPng(page, 'latent-source.png')
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+  await page.keyboard.press('Escape')
+  // The canvas is no longer empty — the contextual bar IS the generation
+  // surface (nothing selected): submit the seed chain there.
+  await page.locator('[data-canvas-bar-prompt]').fill('the source chain whose latent we fork')
+  await page.locator('[data-canvas-bar-prompt]').press('Enter')
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(2, { timeout: 10_000 })
+  await page.evaluate(() => (window as unknown as { __canvasScenario(name: string): unknown }).__canvasScenario('seed-mock'))
+  const landed = await page.evaluate(() => (window as unknown as { __canvasScenario(name: string): { ok: boolean; chainId?: string } }).__canvasScenario('complete-mock-latent'))
+  expect(landed.ok).toBe(true)
+  await page.waitForTimeout(600)
+  let document = await activeDocument(page)
+  const seedChain = document.chains.find((chain) => chain.id === landed.chainId)!
+  const landedTake = seedChain.outputs[0]!.takes[0]!
+  expect(landedTake.latentPath).toContain(`${landed.chainId}/clip0.latent`)
+  expect((landedTake.metrics?.motionContext as Record<string, unknown>)?.folder).toContain(`h3_context/${landed.chainId}/clip`)
+
+  // The fork menu on that object now offers the latents substrate (the take
+  // carries one)…
+  await page.keyboard.press('Escape')
+  await page.locator(`[data-canvas-tile="${landed.chainId}"]`).click()
+  await page.keyboard.press('b')
+  const forkMenu = page.locator('[data-canvas-fork-menu]')
+  await expect(forkMenu).toBeVisible()
+  await forkMenu.locator('[data-canvas-fork-substrate="latents"]').click()
+  await expect(page.locator('[data-canvas-toast="success"]').first()).toBeVisible({ timeout: 8_000 })
+
+  // …and the fork chain's submit refuses honestly offline (the nodes are not
+  // installed in the test engine) — the honest validation surfaces in the
+  // fork's own properties panel, never a doomed job.
+  document = await activeDocument(page)
+  const forkChain = document.chains.find((chain) => (chain.inputSpec.outputRef as Record<string, unknown> | undefined)?.substrate === 'latents')!
+  expect(forkChain).toBeTruthy()
+  await expect(page.locator('[data-canvas-validation]')).toContainText('Motion-Context', { timeout: 10_000 })
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('engines-as-ops complete: LTX-2.5 general row + the audio docks (probe seams + honest gating)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1&probe=canvas')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await dropPng(page, 'engine-source.png')
+  const tile = page.locator('[data-canvas-tile]').first()
+  await expect(tile).toBeVisible({ timeout: 10_000 })
+  await page.waitForTimeout(600)
+
+  // The LTX-2.5 GENERAL surface is a typed-hole produce row (image source),
+  // availability-gated offline with the honest reason.
+  await tile.locator('[data-canvas-endpoint="tail"]').click()
+  const menu = page.locator('[data-canvas-endpoint-menu="produce"]')
+  await expect(menu).toBeVisible()
+  const ltxRow = menu.locator('[data-canvas-menu-row="produce:ltx25"]')
+  await expect(ltxRow).toBeVisible()
+  await expect(ltxRow).toBeDisabled()
+  await expect(ltxRow).toContainText('Not ready')
+
+  // The engine-op plan seams: ltx25 + both audio engines build their graphs
+  // offline (construction is pure) while validation refuses honestly.
+  const plan = page.evaluate.bind(page)
+  const ltx = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; validation: string | null; graph: { manualSigmasCount: number; saveVideo: boolean } } }).__canvasSubmitPlan(spec), { engine: 'ltx25' })
+  expect(ltx.mode).toBe('ltx25')
+  expect(ltx.validation).toContain('Start ComfyUI')
+  expect(ltx.graph.manualSigmasCount).toBeGreaterThan(0)
+  expect(ltx.graph.saveVideo).toBe(true)
+
+  const music3 = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; validation: string | null; graph: { textEncode: boolean; saveAudio: boolean } } }).__canvasSubmitPlan(spec), { mediaType: 'audio', audioEngine: 'music3' })
+  expect(music3.mode).toBe('music3')
+  expect(music3.graph.textEncode).toBe(true)
+  expect(music3.graph.saveAudio).toBe(true)
+  const ace = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; graph: { textEncode: boolean; saveAudio: boolean } } }).__canvasSubmitPlan(spec), { mediaType: 'audio', audioEngine: 'acestep' })
+  expect(ace.mode).toBe('acestep')
+  expect(ace.graph.textEncode).toBe(true)
+  expect(ace.graph.saveAudio).toBe(true)
+
+  // The audio dock: the bottom bar's nothing-selected context opens Music 3;
+  // offline the submit button carries the honest refusal.
+  await page.keyboard.press('Escape')
+  await page.locator('[data-canvas-bar-music3]').click()
+  const dock = page.locator('[data-canvas-audio-dock]')
+  await expect(dock).toBeVisible()
+  await expect(dock).toHaveAttribute('data-canvas-audio-engine', 'music3')
+  await dock.locator('[data-canvas-audio-caption]').fill('warm ambient piano with tape hiss')
+  await expect(dock.locator('[data-canvas-audio-validation]')).toContainText('Start ComfyUI')
+  await expect(dock.locator('[data-canvas-audio-submit]')).toBeDisabled()
+  await dock.locator('[data-canvas-audio-close]').click()
+  await expect(dock).toHaveCount(0)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('the library projection (V): outputs across the session, filtered + navigate-to', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await dropPng(page, 'library-object.png')
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+
+  // V summons the projection; every completed output (the dropped media's
+  // take IS one) lists with its kind + owning canvas.
+  await page.keyboard.press('v')
+  const overlay = page.locator('[data-canvas-library]')
+  await expect(overlay).toBeVisible()
+  await expect(overlay.locator('[data-canvas-library-row="image"]')).toHaveCount(1)
+  await overlay.locator('[data-canvas-library-input]').fill('library-object')
+  await expect(overlay.locator('[data-canvas-library-row="image"]')).toHaveCount(1)
+  await overlay.locator('[data-canvas-library-filter="audio"]').click()
+  await expect(overlay.locator('.canvas-index-empty')).toBeVisible()
+  await overlay.locator('[data-canvas-library-filter="all"]').click()
+
+  // Navigate-to: selecting the row flies to the object and closes.
+  await overlay.locator('[data-canvas-library-row="image"]').click()
+  await expect(overlay).toHaveCount(0)
+  await expect(page.locator('[data-canvas-tile]').first()).toBeVisible()
+  await page.screenshot({ path: 'test-results/shots/22-canvas-library-projection.png' })
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('Settings docks as a floating panel reachable from the canvas titlebar', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+
+  // The titlebar button opens the dock; the REAL SettingsView renders inside
+  // (the engine connection section is its first content).
+  await page.locator('[data-canvas-settings-button]').click()
+  const dock = page.locator('[data-canvas-settings-dock]')
+  await expect(dock).toBeVisible()
+  await expect(dock.locator('[data-canvas-settings-body]')).toBeVisible()
+  await expect(dock.getByText(/comfyui/i).first()).toBeVisible()
+  // The canvas stays alive behind it — the dock is a floating thin surface.
+  await expect(page.locator('[data-canvas-viewport]')).toBeVisible()
+  await dock.locator('[data-canvas-settings-close]').click()
+  await expect(dock).toHaveCount(0)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('the global asset store binds through the properties panel (consent-gated)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  // A real global asset with a curated reference set (path existence is a
+  // render-time concern; binding is a document edit).
+  await page.request.post('/api/lan/documents/assets', { data: { id: 'e2e:asset:location', kind: 'location', fields: { name: 'E2E Windmill' }, canonicalReferenceSet: ['/test-home/e2e/windmill-1.png'] } })
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await page.locator('[data-canvas-prompt]').fill('a chain to bind the asset on')
+  await page.locator('[data-canvas-submit]').click()
+  await expect(page.locator('[data-canvas-tile]').first()).toBeVisible({ timeout: 10_000 })
+  await page.waitForTimeout(800)
+
+  // The panel's global-assets select lists it; binding forks into the
+  // project (consent) and adds the reference binding.
+  await expect(page.locator('[data-canvas-ref-asset]')).toBeVisible({ timeout: 10_000 })
+  await page.locator('[data-canvas-ref-asset]').selectOption('e2e:asset:location')
+  await expect(page.locator('[data-canvas-toast]').last()).toContainText(/forked into this project/i, { timeout: 10_000 })
+  await page.waitForTimeout(900)
+  const document = await activeDocument(page)
+  const chain = document.chains[0]!
+  expect((chain.settings.referenceAssetIds as string[]) ?? []).toContain('e2e:asset:location')
+  // The <Picture N> binding surfaces in the panel's reference list.
+  await expect(page.locator('[data-canvas-reference-list]')).toContainText('Location asset: E2E Windmill')
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('Phase-4 retirement smoke: Create / Queue / Library / LTX 2.5 greyed, still directly reachable (§8)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await page.goto('/')
+  await expect(page.getByRole('button', { name: /generate video/i })).toBeVisible()
+
+  // All four newly-retired nav entries carry the greyed marker + pointer.
+  for (const label of ['Create', 'LTX 2.5', 'Queue', 'Library']) {
+    const nav = page.locator('.nav-button[data-retired="1"]', { hasText: label })
+    await expect(nav).toBeVisible()
+    await expect(nav).toContainText('retired')
+    await expect(nav).toHaveClass(/retired-view/)
+  }
+
+  // Each view still LOADS when directly navigated (D-dependencies hold until
+  // Phase 5) and carries its canvas pointer.
+  await page.locator('.nav-button[data-retired="1"]', { hasText: 'Create' }).click()
+  await expect(page.getByRole('heading', { name: /create with minimax h3/i })).toBeVisible()
+  await expect(page.locator('[data-retired="create"]')).toBeVisible()
+
+  await page.locator('.nav-button[data-retired="1"]', { hasText: 'Queue' }).click()
+  await expect(page.getByRole('heading', { name: 'Queue' })).toBeVisible()
+  await expect(page.locator('[data-retired="jobs"]')).toBeVisible()
+
+  await page.locator('.nav-button[data-retired="1"]', { hasText: 'Library' }).click()
+  await expect(page.getByRole('heading', { name: /video library/i })).toBeVisible()
+  await expect(page.locator('[data-retired="library"]')).toBeVisible()
+
+  await page.locator('.nav-button[data-retired="1"]', { hasText: 'LTX 2.5' }).click()
+  await expect(page.getByRole('heading', { name: /create with ltx/i })).toBeVisible()
+  await expect(page.locator('[data-retired="ltx25"]')).toBeVisible()
+  await page.screenshot({ path: 'test-results/shots/23-phase4-retirement.png' })
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('the mobile companion still boots, marked unmaintained (L10)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await page.goto('/?mobile=1')
+  // The route renders its companion shell — kept booting per L10 (out of v1
+  // scope, no canvas capabilities; the unmaintained marker is in the code).
+  await expect(page.locator('main.mobile-app')).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('.mobile-header')).toContainText('MiniMax Studio')
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })

@@ -208,7 +208,9 @@ export function buildMiniMaxWorkflow(
   // tail as never-denoised conditioning rows feeding the guider, so motion
   // and audio continue from real sampled frames instead of a single still.
   if (options.chain && options.chain.index > 0) {
-    prompt['24'] = { class_type: 'MiniMaxH3MotionContextLoadLatent', inputs: { latent_path: options.chain.folder, clip_index: options.chain.index - 1 } }
+    // Phase-4 latent forks pin an explicit source clip (their own folder is a
+    // fresh continuation); scene chains keep the previous-clip default.
+    prompt['24'] = { class_type: 'MiniMaxH3MotionContextLoadLatent', inputs: { latent_path: options.chain.loadFrom?.folder ?? options.chain.folder, clip_index: options.chain.loadFrom?.clipIndex ?? options.chain.index - 1 } }
     prompt['25'] = {
       class_type: 'MiniMaxH3MotionContext',
       inputs: {

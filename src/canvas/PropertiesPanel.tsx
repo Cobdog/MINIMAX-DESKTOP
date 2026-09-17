@@ -10,13 +10,24 @@
  * clothing policy), the identity payload (verbatim subject text + the
  * strength dial with its stiffness↔drift labels), and keyframe guides as
  * chain settings. The generate row validates honestly before submit.
+ *
+ * Phase 4 adds CreateView's remaining unique capabilities so its retirement
+ * is genuine: the prompt library (PromptLibraryBrowser insert — L11's
+ * properties-insert side), the local-LLM prompt tools (enhance / shot
+ * timeline / audio pass with the streaming preview + suggestion flow), and
+ * vision captioning of bound reference pictures — plus the global asset
+ * store in the reference bindings (§2 asset, consent-gated first bind) and
+ * the engine readouts for the audio + LTX-2.5 engine-ops (§5.4).
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Rnd } from 'react-rnd'
-import { Dices, Play, Square, Star, X } from 'lucide-react'
-import { SmartPromptEditor } from '../components/SmartPromptEditor'
+import { Captions, Clock3, Dices, LoaderCircle, Play, Sparkles, Square, Star, Volume2, WandSparkles, X } from 'lucide-react'
+import { SmartPromptEditor, type SmartPromptEditorHandle } from '../components/SmartPromptEditor'
+import { PromptLibraryBrowser } from '../components/PromptLibraryBrowser'
 import { detectOptimizations } from '../lib/graph'
 import { guideFrameWarning } from '../lib/workflow'
+import { buildPromptAssistantContext } from '../lib/promptComposer'
+import { useLlmStream } from '../lib/useLlmStream'
 import { useSessionStore } from '../state/sessionStore'
 import { STATUS_LABEL } from './derive'
 import { effectiveMode, MODE_LABEL, readChainSettings, type CanvasChainSettings } from './generation'
@@ -50,6 +61,8 @@ export function PropertiesPanel() {
   const activeProjectId = useCanvasStore((state) => state.activeProjectId)
   const tiles = useCanvasStore((state) => state.tiles)
   const libraries = useCanvasStore((state) => state.libraries)
+  const assets = useCanvasStore((state) => state.assets)
+  const bindGlobalAsset = useCanvasStore((state) => state.bindGlobalAsset)
   const chainBindings = useCanvasStore((state) => state.chainBindings)
   const setChainSettings = useCanvasStore((state) => state.setChainSettings)
   const setChainIdentity = useCanvasStore((state) => state.setChainIdentity)
@@ -59,6 +72,7 @@ export function PropertiesPanel() {
 
   const models = useSessionStore((state) => state.models)
   const info = useSessionStore((state) => state.info)
+  const ollamaModels = useSessionStore((state) => state.ollamaModels)
 
   const chainId = selection.tileIds.length === 1 ? selection.tileIds[0] : null
   const doc = activeProjectId ? documents[activeProjectId] : null
@@ -69,6 +83,15 @@ export function PropertiesPanel() {
   const [subjectText, setSubjectText] = useState('')
   const [strength, setStrength] = useState(1)
   const [submitting, setSubmitting] = useState(false)
+  // Phase 4: the CreateView capabilities this panel absorbs.
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [promptingTool, setPromptingTool] = useState<'enhance' | 'timeline' | 'audio' | null>(null)
+  const [promptSuggestion, setPromptSuggestion] = useState('')
+  const [captioningIndex, setCaptioningIndex] = useState<number | null>(null)
+  const [captionNotice, setCaptionNotice] = useState<string | null>(null)
+  const promptStreamTarget = useRef<HTMLDivElement>(null)
+  const promptRef = useRef<SmartPromptEditorHandle>(null)
+  const llmStream = useLlmStream()
 
   // The last server state THIS panel adopted or committed. A concurrent
   // document reload (a take landing, another surface editing, an identity
@@ -153,6 +176,63 @@ export function PropertiesPanel() {
     }
   }
 
+  // ---- Phase 4: the local-LLM prompt tools (the CreateView absorption) ----
+  const llmDescriptor = useSessionStore.getState().llm
+  const llmAvailable = llmDescriptor ? llmDescriptor.connected && Boolean(llmDescriptor.model) : ollamaModels.length > 0
+
+  const runPromptTool = async (tool: 'enhance' | 'timeline' | 'audio') => {
+    if (!chainId || !draft || promptingTool) return
+    if (!llmAvailable) {
+      setCaptionNotice(null)
+      useCanvasStore.getState().toast('error', 'No local text model is available. Connect the llama.cpp router or Ollama in Settings.')
+      return
+    }
+    if (!draft.prompt.trim()) {
+      useCanvasStore.getState().toast('error', 'Write a rough prompt first, then ask the local assistant to refine it.')
+      return
+    }
+    const referenceMap = bindings.length
+      ? bindings.map((binding, index) => `<Picture ${index + 1}> = ${binding.label}`)
+      : undefined
+    setPromptingTool(tool)
+    setPromptSuggestion('')
+    try {
+      await new Promise((resolvePaint) => requestAnimationFrame(() => requestAnimationFrame(resolvePaint)))
+      const full = await llmStream.stream({
+        task: tool,
+        targetEngine: 'minimax-h3',
+        length: 'standard',
+        instructions: buildPromptAssistantContext(tool, { duration: draft.duration, mode, referenceMap, noDialogue: draft.noDialogue }),
+        draft: draft.prompt,
+        target: promptStreamTarget.current,
+      })
+      setPromptSuggestion(full.trim())
+    } catch (error) {
+      useCanvasStore.getState().toast('error', error instanceof Error ? error.message : String(error))
+    } finally {
+      setPromptingTool(null)
+    }
+  }
+
+  // Vision captioning of a bound reference picture (the local vision model
+  // describes it; the description inserts as a <Picture N> line).
+  const captionReference = async (index: number) => {
+    const binding = bindings[index]
+    if (!binding || captioningIndex !== null) return
+    setCaptioningIndex(index)
+    setCaptionNotice(null)
+    try {
+      const dataUrl = await window.minimax.fileDataUrl(binding.file.path)
+      const { caption, model } = await window.minimax.llmCaptionImage(dataUrl)
+      promptRef.current?.insert(`<Picture ${index + 1}> ${caption}`)
+      setCaptionNotice(`Described Picture ${index + 1} with ${model} — inserted into the prompt.`)
+    } catch (error) {
+      setCaptionNotice(error instanceof Error ? error.message : String(error))
+    } finally {
+      setCaptioningIndex(null)
+    }
+  }
+
   return <Rnd
     className="canvas-inspector canvas-properties"
     data-canvas-inspector
@@ -173,16 +253,56 @@ export function PropertiesPanel() {
       <section className="canvas-properties-section" data-canvas-section="prompt">
         <label>Prompt <span className="canvas-properties-hint">// presets</span></label>
         <SmartPromptEditor
+          ref={promptRef}
           id={`canvas-prompt-${chain.id}`}
           value={draft.prompt}
           onChange={(prompt) => patch({ prompt })}
           placeholder="Describe the shot… type // for production presets"
           ariaLabel="Chain prompt"
         />
+        {/* Phase 4 (§5.5 + L11): the prompt surfaces CreateView carried — the
+            local-LLM tools and the community prompt library, properties-side. */}
+        <div className="canvas-properties-prompttools" data-canvas-prompt-tools>
+          <button type="button" data-canvas-prompt-tool="enhance" disabled={!llmAvailable || Boolean(promptingTool)} title={!llmAvailable ? 'Connect a local text model (llama.cpp router or Ollama) in Settings — nothing leaves this workstation' : 'Rewrite the prompt for stronger MiniMax video direction'} onClick={() => void runPromptTool('enhance')}>
+            {promptingTool === 'enhance' ? <LoaderCircle size={12} className="spin" /> : <WandSparkles size={12} />} enhance
+          </button>
+          <button type="button" data-canvas-prompt-tool="timeline" disabled={!llmAvailable || Boolean(promptingTool)} title={!llmAvailable ? 'Connect a local text model in Settings' : 'Add a concise sequence of timed shots'} onClick={() => void runPromptTool('timeline')}>
+            {promptingTool === 'timeline' ? <LoaderCircle size={12} className="spin" /> : <Clock3 size={12} />} timeline
+          </button>
+          <button type="button" data-canvas-prompt-tool="audio" disabled={!llmAvailable || Boolean(promptingTool)} title={!llmAvailable ? 'Connect a local text model in Settings' : 'Improve ambience, dialogue, and sound cues'} onClick={() => void runPromptTool('audio')}>
+            {promptingTool === 'audio' ? <LoaderCircle size={12} className="spin" /> : <Volume2 size={12} />} audio pass
+          </button>
+          <button type="button" data-canvas-prompt-library title="Search public Civitai generation metadata for reusable prompts" onClick={() => setLibraryOpen(true)}>
+            <Sparkles size={12} /> library
+          </button>
+        </div>
+        {promptingTool && <div className="canvas-llm-stream" ref={promptStreamTarget} role="status" aria-label="Local assistant streaming" data-canvas-llm-stream />}
+        {promptSuggestion && (
+          <div className="canvas-prompt-suggestion" data-canvas-prompt-suggestion role="status">
+            <span className="canvas-prompt-suggestion-label">Local suggestion</span>
+            <textarea aria-label="Local prompt suggestion" value={promptSuggestion} readOnly rows={3} />
+            <div className="canvas-prompt-suggestion-actions">
+              <button type="button" onClick={() => setPromptSuggestion('')}>dismiss</button>
+              <button type="button" className="primary" onClick={() => { patch({ prompt: promptSuggestion }); setPromptSuggestion('') }}>use suggestion</button>
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="canvas-properties-section" data-canvas-section="engine">
-        <label>Engine — MiniMax H3</label>
+        <label>Engine — {draft.mediaType === 'audio' ? (draft.audio.engine === 'music3' ? 'MiniMax Music 3' : 'ACE-Step XL 1.5') : draft.engine === 'ltx25' ? 'LTX-2.5 general' : 'MiniMax H3'}</label>
+        {draft.mediaType === 'audio' && (
+          <div className="canvas-properties-row">
+            <button type="button" className="canvas-chip" data-canvas-open-audio-dock onClick={() => useCanvasStore.getState().setAudioDock({ engine: draft.audio.engine, chainId: chain.id })}>
+              edit in the audio dock…
+            </button>
+          </div>
+        )}
+        {draft.engine === 'ltx25' && draft.mediaType === 'video' && (
+          <p className="canvas-properties-note" data-canvas-engine-note>
+            This chain renders through the LTX-2.5 general engine (the workspace retired — the engine lives on as this op). Tier selects quality vs turbo; the first frame rides the LTX image conditioning.
+          </p>
+        )}
         <div className="canvas-properties-row">
           <span>tier</span>
           <div className="canvas-properties-tiers" role="radiogroup" aria-label="Speed tier">
@@ -232,10 +352,24 @@ export function PropertiesPanel() {
             <li key={`${binding.file.path}-${index}`} data-canvas-reference={index}>
               <span className="canvas-properties-ref-tag">&lt;Picture {index + 1}&gt;</span>
               <span className="canvas-properties-ref-label">{binding.label}</span>
+              {binding.file.kind === 'image' && (
+                <button
+                  type="button"
+                  className="canvas-properties-ref-caption"
+                  data-canvas-reference-caption={index}
+                  disabled={captioningIndex !== null}
+                  title={captioningIndex === index ? 'Describing with the local vision model…' : 'Describe this picture with the local vision model; the description inserts into the prompt'}
+                  aria-label={`Caption ${binding.label}`}
+                  onClick={() => void captionReference(index)}
+                >
+                  {captioningIndex === index ? <LoaderCircle size={11} className="spin" /> : <Captions size={11} />}
+                </button>
+              )}
             </li>
           ))}
           {!bindings.length && <li className="canvas-properties-empty">No references — the chain renders from its prompt{draft.firstFrameOutputId ? ' + first frame' : ''}.</li>}
         </ol>
+        {captionNotice && <p className="canvas-properties-note" data-canvas-caption-notice role="status">{captionNotice}</p>}
         {draft.referenceOutputIds.length > 0 && (
           <div className="canvas-properties-row">
             <button
@@ -278,6 +412,33 @@ export function PropertiesPanel() {
                 <option key={location.id} value={location.id}>{location.name}{draft.referenceLocationIds.includes(location.id) ? ' ✓' : ''}</option>
               ))}
             </select>
+          </div>
+        )}
+        {/* Phase 4 (§2 asset, F3): the GLOBAL asset store — the first bind of
+            an asset into this project records the consent-gated fork (lineage
+            home), then its curated reference set rides the picture budget. */}
+        {assets.length > 0 && (
+          <div className="canvas-properties-row">
+            <label htmlFor="canvas-ref-asset">global assets</label>
+            <select
+              id="canvas-ref-asset"
+              data-canvas-ref-asset
+              value=""
+              title="Global store (above projects) — binding forks the asset into this project with lineage, once, on first use"
+              onChange={(event) => { const assetId = event.target.value; if (assetId && chainId) void bindGlobalAsset(chainId, assetId) }}
+            >
+              <option value="">bind / unbind…</option>
+              {assets.map((asset) => (
+                <option key={asset.id} value={asset.id}>{asset.kind === 'location' ? 'Location' : 'Character'} · {asset.label}{draft.referenceAssetIds.includes(asset.id) ? ' ✓' : ''}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        {draft.referenceAssetIds.length > 0 && (
+          <div className="canvas-properties-row">
+            <button type="button" className="canvas-chip" data-canvas-clear-assets onClick={() => patch({ referenceAssetIds: [] })}>
+              clear asset refs ({draft.referenceAssetIds.length})
+            </button>
           </div>
         )}
         <div className="canvas-properties-row">
@@ -375,6 +536,7 @@ export function PropertiesPanel() {
       </section>
 
     </div>
+      {libraryOpen && <PromptLibraryBrowser onClose={() => setLibraryOpen(false)} onInsert={(prompt) => { promptRef.current?.insert(prompt) }} />}
       <footer className="canvas-properties-submit">
         <div className="canvas-properties-state">
           <span className="canvas-tile-ring" data-status={tile.status} /> {STATUS_LABEL[tile.status]}

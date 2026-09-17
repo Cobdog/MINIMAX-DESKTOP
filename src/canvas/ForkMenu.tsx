@@ -57,7 +57,7 @@ export function ForkMenu() {
           >
             <span className="canvas-menu-row-label">{SUBSTRATE_LABEL[substrate]}</span>
             <span className="canvas-menu-row-note">
-              {substrate === 'decoded' ? 'A new chain consuming this take’s artifact.' : substrate === 'extracted-frame' ? 'Extract frame 0 server-side; continue from the still.' : 'Continue from the saved latent (renders with Phase-3 latent wiring).'}
+              {substrate === 'decoded' ? 'A new chain consuming this take’s artifact.' : substrate === 'extracted-frame' ? 'Extract frame 0 server-side; continue from the still.' : 'Motion-Context continuation — the saved clip pins never-denoised conditioning, no re-encode.'}
             </span>
           </button>
         ))}

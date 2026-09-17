@@ -336,3 +336,40 @@
 
 /* ---- Phase 3: multi batch chips -------------------------------------------------- */
 .canvas-bar-drift { font-variant-numeric: tabular-nums; }
+
+/* ---- Phase 4: the audio engine dock (§5.4) --------------------------------------- */
+.canvas-audio-dock { z-index: 55; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); box-shadow: 0 18px 48px rgba(0,0,0,.5); overflow: hidden; }
+.canvas-audio-dock .canvas-inspector-header svg { color: var(--accent); flex: none; }
+.canvas-audio-dock .canvas-properties-section textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-2); color: var(--text); font-size: var(--text-sm); resize: vertical; }
+.canvas-audio-instrumental { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: var(--text-sm); }
+
+/* ---- Phase 4: the docked Settings panel (§8) ------------------------------------- */
+.canvas-settings-dock { z-index: 60; display: grid; grid-template-rows: auto minmax(0, 1fr); border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); box-shadow: 0 18px 48px rgba(0,0,0,.5); overflow: hidden; }
+.canvas-settings-dock .canvas-inspector-header svg { color: var(--accent); flex: none; }
+.canvas-settings-body { min-height: 0; overflow: auto; }
+.canvas-settings-body .standard-page { min-height: auto; padding: 14px 16px 22px; }
+
+/* ---- Phase 4: the library projection (§7 V) -------------------------------------- */
+.canvas-library-panel { width: min(720px, 90vw); }
+.canvas-library-filters { display: flex; gap: 4px; }
+.canvas-library-filters .canvas-chip { padding: 3px 9px; font-size: var(--text-2-xs); }
+.canvas-library-footer { display: flex; justify-content: space-between; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--muted-2); font-size: var(--text-2-xs); }
+
+/* ---- Phase 4: the properties panel's absorbed CreateView surfaces (§5.5) -------- */
+.canvas-properties-prompttools { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.canvas-properties-prompttools button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border: 1px solid var(--line-strong); border-radius: 7px; background: transparent; color: var(--muted); font-size: var(--text-2-xs); cursor: pointer; }
+.canvas-properties-prompttools button:hover:not(:disabled) { color: var(--text); border-color: var(--line-strong); background: var(--surface-3); }
+.canvas-properties-prompttools button:disabled { opacity: .4; cursor: default; }
+.canvas-llm-stream { margin-top: 7px; padding: 8px 10px; border: 1px dashed var(--line-strong); border-radius: 8px; color: var(--muted); font-size: var(--text-2-xs); white-space: pre-wrap; max-height: 110px; overflow: auto; }
+.canvas-prompt-suggestion { display: grid; gap: 6px; margin-top: 7px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent); border-radius: 8px; background: var(--accent-soft); }
+.canvas-prompt-suggestion-label { color: var(--accent); font-size: var(--text-2-xs); }
+.canvas-prompt-suggestion textarea { width: 100%; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); color: var(--text); font-size: var(--text-2-xs); resize: vertical; }
+.canvas-prompt-suggestion-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.canvas-prompt-suggestion-actions button { padding: 3px 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: transparent; color: var(--muted); font-size: var(--text-2-xs); cursor: pointer; }
+.canvas-prompt-suggestion-actions button.primary { border-color: color-mix(in srgb, var(--accent) 48%, transparent); color: var(--accent); }
+.canvas-properties-refs .canvas-properties-ref-caption { display: grid; place-items: center; width: 22px; height: 22px; margin-left: auto; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.canvas-properties-refs .canvas-properties-ref-caption:hover:not(:disabled) { color: var(--text); border-color: var(--line-strong); background: var(--surface-3); }
+.canvas-properties-refs .canvas-properties-ref-caption:disabled { opacity: .4; cursor: default; }
+
+/* ---- Phase 4: titlebar library + settings buttons -------------------------------- */
+.canvas-index-button svg { flex: none; }

@@ -9,7 +9,7 @@
  * is here per the spec; Phase 1 renders the chip honestly as not-yet-wired
  * (the canvas consumes no engine — generation is Phase 2).
  */
-import { Activity } from 'lucide-react'
+import { Activity, Library, Settings } from 'lucide-react'
 import { useJobsStore } from '../state/jobsStore'
 import { attention } from './derive'
 import { useCanvasStore } from './store'
@@ -93,6 +93,12 @@ export function Radar() {
     </button>
 
     <div className="canvas-titlebar-spacer" />
+    <button type="button" className="canvas-index-button" data-canvas-library-button onClick={() => useCanvasStore.getState().setLibraryOpen(true)} title="The library projection — every completed output across the session (V)">
+      <Library size={12} /> library <kbd>V</kbd>
+    </button>
+    <button type="button" className="canvas-index-button" data-canvas-settings-button onClick={() => useCanvasStore.getState().setSettingsDock(true)} title="Settings — docked as a floating panel on every surface">
+      <Settings size={12} /> settings
+    </button>
     <button type="button" className="canvas-index-button" data-canvas-index-button onClick={() => setIndexOpen(true)}>
       index <kbd>⌘K</kbd>
     </button>

@@ -27,6 +27,14 @@ export type OptionAvailability = {
   h3Ready: boolean
   /** LTX-2.3 one-graph utilities (label + detection). */
   utilities: UtilityFact[]
+  /** Phase 4: the Motion-Context custom nodes (latent continuation). */
+  motionContextReady: boolean
+  /** Phase 4: the LTX-2.5 GENERAL graph (the workspace greyed out; the
+   *  engine survives as this typed-hole op). */
+  ltx25: { available: boolean; missing: string[] }
+  /** Phase 4: the audio engines (the dock's launcher rows read these). */
+  music3: { available: boolean; missing: string[] }
+  acestep: { available: boolean; missing: string[] }
 }
 
 export type EndpointOption = {
@@ -45,6 +53,8 @@ export type EndpointOption = {
     | { kind: 'fork'; substrate: 'decoded' | 'extracted-frame' | 'latents' }
     /** Phase 3: the pose rig dock (§5.2 control-input family, epic 66xhflw). */
     | { kind: 'pose-rig' }
+    /** Phase 4: the LTX-2.5 general graph (§5.4 engines-as-ops). */
+    | { kind: 'ltx25' }
   available: boolean
   /** Why not (install guidance rides here). */
   reason?: string
@@ -137,11 +147,28 @@ export function endpointOptions(direction: EndpointDirection, sourceKinds: Reado
       hint: 'frame index = seconds × 24 · negative counts from the end',
     })
   }
+  // Phase 4: latent continuation RENDERS — the Motion-Context machinery
+  // loads the saved sampler latent as never-denoised conditioning (no
+  // re-encode). The engine-side nodes gate honestly.
   rows.push({
-    id: 'produce:fork-latents', group: 'fork', label: 'Fork — latents on disk', description: 'Continue from the saved sampler latent (never-denoised conditioning).',
-    action: { kind: 'fork', substrate: 'latents' }, available: false,
-    reason: 'Latent forks render through the Motion-Context chains — the substrate records on the fork today (engine wiring is the Phase-4 seam).',
+    id: 'produce:fork-latents', group: 'fork', label: 'Fork — latents on disk', description: 'Continue from the saved sampler latent — Motion-Context conditioning, no re-encode.',
+    action: { kind: 'fork', substrate: 'latents' }, available: availability.motionContextReady,
+    reason: availability.motionContextReady ? undefined : 'Latent continuation needs the ComfyUI-H3-Motion-Context custom nodes — install them, then refresh the engine.',
+    hint: 'the take’s saved clip pins the context rows · motion + audio continue',
   })
+  // §5.4 Phase 4 (L4 keep-utilities-only): the LTX-2.5 GENERAL i2v graph as
+  // an engine-op over an image source (the workspace greyed out).
+  if (hasImage) {
+    rows.push({
+      id: 'produce:ltx25', group: 'generate', label: 'Generate — LTX 2.5 image → video', description: 'A new chain on the LTX-2.5 general engine (4K/text ceilings; H3 stays the product default).',
+      action: { kind: 'ltx25' },
+      available: availability.ltx25.available,
+      reason: !availability.ltx25.available
+        ? `Not ready — missing ${availability.ltx25.missing.join('; ') || 'components'}.`
+        : undefined,
+      hint: 'engine switch lives in the chain’s properties',
+    })
+  }
   for (const utility of availability.utilities) {
     const wantsVideo = utility.tool !== 'ia2v'
     if (wantsVideo ? !hasVideo : !hasImage) continue

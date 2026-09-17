@@ -31,6 +31,10 @@ export type RenderManifest = {
   models: Record<string, { name: string; bytes?: number } | undefined>
   referenceCounts: { images: number; videos: number; audios: number }
   timelineGuideFrames?: number[]
+  /** Canvas Phase 4 latent chaining: the SAVED clip facts when the graph
+   *  carries Motion-Context save/load nodes (take-landing persists them as
+   *  the take's latent provenance). */
+  motionContext?: { folder: string; clipIndex: number }
   graphVersion: string
   engine: { comfyUrl: string; app: string }
 }

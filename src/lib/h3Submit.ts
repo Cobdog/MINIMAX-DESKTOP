@@ -50,12 +50,21 @@ export type H3RenderRequest = {
   referenceAudios: MediaFile[]
   timelineGuides: Array<{ file: MediaFile; seconds: number }>
   livePreview: { enabled: boolean; mode: 'standard' | 'h3-override' }
+  /** Latent-chaining facts (canvas Phase 4): when present the graph saves its
+   *  sampler latent (and loads + trims a continuation when index > 0) — the
+   *  Motion-Context machinery. The manifest records the SAVED clip so the
+   *  landed take can carry its forkable latent facts. */
+  chain?: { index: number; folder: string; contextLength?: '5' | '22' | '39' | '56'; audioContextLength?: number; loadFrom?: { folder: string; clipIndex: number } }
   /** Extra provenance merged into the persisted manifest (the canvas records
    *  the chain/project a render belongs to so a reload can relink). */
   manifestExtra?: Record<string, unknown>
   filenamePrefix?: string
   movieLink?: GenerationJob['movieLink']
   characterProjectId?: string
+  /** The location a render belongs to (the Phase-4 walkthrough migration —
+   *  jobRecords' automation display keys on it, exactly like the LTX path
+   *  did). */
+  locationProjectId?: string
 }
 
 /** The engine/session facts a submission needs — supplied by whichever
@@ -166,6 +175,7 @@ export async function submitH3Render(
     duration: request.duration,
     movieLink: request.movieLink,
     characterProjectId: request.characterProjectId,
+    locationProjectId: request.locationProjectId,
   }
   io.setJobs((current) => [job, ...current])
   io.onJobCreated?.(localId)
@@ -209,6 +219,7 @@ export async function submitH3Render(
       referenceAudios: request.referenceAudios.map((item) => item.path),
       timelineGuides: guides.length ? guides.map((guide) => ({ frameIndex: frameIndexForSeconds(guide.seconds) })) : undefined,
       turboLoader: request.turboLoader,
+      chain: request.chain,
     }, facts.selection, { first, last, images, videos, audios, guides: guideUploads }, facts.info)
     const manifest = buildRenderManifest({
       mode: request.mode, prompt: request.prompt, width: request.width, height: request.height, duration: request.duration,
@@ -221,6 +232,9 @@ export async function submitH3Render(
       timelineGuides: guides.length ? guides.map((guide) => ({ frameIndex: frameIndexForSeconds(guide.seconds) })) : undefined,
       filenamePrefix,
     }, facts.selection, facts.models, settings.comfyUrl, graph)
+    // The saved-clip facts ride the manifest's motionContext record — the
+    // take-landing path reads them to persist forkable latent provenance.
+    if (request.chain) manifest.motionContext = { folder: request.chain.folder, clipIndex: request.chain.index }
     if (request.manifestExtra) Object.assign(manifest, request.manifestExtra)
     const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, facts.clientId)
     if (io.cancellationRequests.current.has(localId)) {

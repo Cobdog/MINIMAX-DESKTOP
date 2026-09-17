@@ -1,3 +1,14 @@
+/**
+ * ⚠️ UNMAINTAINED (canvas-ui-v1 §8, parked-question L10 DECIDED: mobile
+ * companion OUT of v1 — "keep booting, mark unmaintained; thin-remote
+ * redesign later").
+ *
+ * This route (?mobile=1) still boots and renders, but it receives NO
+ * feature work: the canvas migration (Phases 1–4) never lands here, new
+ * engines/ops/surfaces do not arrive, and it will be DELETED with the old
+ * shell in Phase 5 unless the thin-remote redesign is cut first. Do not add
+ * capabilities to this file — route them through the canvas document model.
+ */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, CircleStop, Download, Film, Image as ImageIcon, Images, LayoutGrid, LoaderCircle, Menu, Music2, Play, Plus, RefreshCw, Smartphone, Sparkles, Users, Video, WandSparkles, X } from 'lucide-react'
 import { ImageCrop } from './components/ImageCrop'

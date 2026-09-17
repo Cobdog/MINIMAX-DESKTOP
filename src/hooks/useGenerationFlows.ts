@@ -4,18 +4,17 @@
 import { useState } from 'react'
 import { createId } from '../lib/createId'
 import { buildMiniMaxWorkflow } from '../lib/workflow'
-import { buildLtx25Workflow } from '../lib/ltx25Workflow'
-import { ACE_STEP_REQUIRED_NODES, buildAceStepWorkflow } from '../lib/aceStepWorkflow'
 import { submitH3Render } from '../lib/h3Submit'
 import { submitLtx23Utility } from '../lib/ltx23UtilitySubmit'
+import { submitLtx25 } from '../lib/ltx25Submit'
+import { submitAceStep } from '../lib/aceStepSubmit'
+import { submitMusic3 } from '../lib/music3Submit'
+import { submitH3DiagnosticPair } from '../lib/h3Diagnostics'
 import type { Ltx23UtilityKind } from '../lib/graph'
 import { prepareImage } from '../lib/imageCrop'
-import { inferSelections } from '../lib/modelSelection'
 import type { ObjectInfo } from '../lib/comfyInfo'
-import { diagnosticPrompt } from '../lib/h3Stack'
 import { composeH3Prompt, resolveRenderReferenceImages } from '../lib/promptPolicies'
 import { resolveMovieShot } from '../lib/promptComposer'
-import { buildMusic3Workflow } from '../lib/music3Workflow'
 import { buildContactSheetWorkflow, inferContactSheetSelection } from '../lib/contactSheet'
 import type { Music3GenerationOptions } from '../lib/music3Workflow'
 import { useWorkspaceStore } from '../state/workspaceStore'
@@ -23,13 +22,6 @@ import type { useStudioSession } from './useStudioSession'
 import type { useGenerationQueue, NoticeTone } from './useGenerationQueue'
 import type { useCreateWorkspace } from './useCreateWorkspace'
 import type { AceStepGenerationOptions, CharacterProject, GenerationJob, Ltx25GenerationOptions, MediaFile, ModelSelection, MovieProject, UpscaleMode } from '../types'
-
-const LTX_NATIVE_REQUIRED_NODES = [
-  'LTXVConditioning', 'LTXVEmptyLatentAudio', 'EmptyLTXVLatentVideo',
-  'LTXVDualCFGGuider', 'LTXVSeparateAVLatent', 'LTXVConcatAVLatent',
-  'LTXVLatentUpsampler', 'LTXVAudioVAEDecode', 'ManualSigmas',
-  'VAEDecodeTiled', 'CLIPTextEncode', 'KSamplerSelect', 'SamplerCustomAdvanced',
-] as const
 
 export function useGenerationFlows(options: {
   session: ReturnType<typeof useStudioSession>
@@ -55,64 +47,28 @@ export function useGenerationFlows(options: {
 
   const generateLtx = async (ltxOptions: Ltx25GenerationOptions, input: MediaFile | null, handoff?: { characterProjectId?: string; locationProjectId?: string }) => {
     if (!settings) return 'Studio settings are still loading.'
-    if (!status.connected) {
-      const message = 'Start ComfyUI and verify the server connection in Settings.'
-      notify('error', message)
-      return message
-    }
-    if (!ltxOptions.prompt) {
-      const message = 'Add an LTX prompt before generating.'
-      notify('error', message)
-      return message
-    }
-    if (ltxOptions.mode === 'image' && !input) {
-      const message = 'Choose a first frame for LTX image-to-video.'
-      notify('error', message)
-      return message
-    }
-    if (!ltxSelection.diffusion || !ltxSelection.textEncoder || !ltxSelection.videoVae || !ltxSelection.audioVae || !ltxSelection.latentUpscaler) {
-      const message = 'The LTX‑2.5 distilled transformer, Gemma encoder, video/audio VAEs, or latent spatial upscaler is missing.'
-      notify('error', message)
-      return message
-    }
-    const missingNodes = LTX_NATIVE_REQUIRED_NODES.filter((node) => !info[node])
-    if (missingNodes.length) {
-      const message = `Update ComfyUI before using LTX‑2.5. Missing core nodes: ${missingNodes.join(', ')}.`
-      notify('error', message)
-      return message
-    }
-
-    const localId = createId()
-    // Wave 2a: read through the store — the App root no longer re-renders on
-    // workspace edits, so the captured facade value could be stale by click time.
-    const job: GenerationJob = { id: localId, provider: 'ltx25', mode: ltxOptions.mode, prompt: ltxOptions.prompt, createdAt: Date.now(), status: 'queued', progress: 2, progressLabel: input ? 'Preparing first frame' : 'Preparing workflow', width: ltxOptions.width, height: ltxOptions.height, duration: ltxOptions.duration, characterProjectId: handoff?.characterProjectId ?? useWorkspaceStore.getState().characterHandoff ?? undefined, locationProjectId: handoff?.locationProjectId }
-    setJobs((current) => [job, ...current])
-    ws.setActiveJobId(localId)
+    // Phase 4: the submission core lives in lib/ltx25Submit.ts — this hook and
+    // the canvas's typed-hole produce row submit through ONE code path (the
+    // h3Submit discipline). The hook keeps its facades (active-job tracking).
     setLtxSubmitting(true)
-    notify('neutral', 'Preparing the official LTX‑2.5 ComfyUI graph…')
     try {
-      const uploaded = input ? await window.minimax.uploadImageData(settings.comfyUrl, await prepareImage(input, ltxOptions.width, ltxOptions.height)) : undefined
-      if (cancellationRequests.current.has(localId)) throw new Error('Generation cancelled before submission.')
-      const graph = buildLtx25Workflow(ltxOptions, ltxSelection, uploaded)
-      const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, clientId)
-      if (cancellationRequests.current.has(localId)) {
-        await window.minimax.cancelPrompt(settings.comfyUrl, response.prompt_id)
-        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'cancelled' } : item))
-        return 'The LTX 2.5 survey was cancelled before it started.'
-      } else {
-        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: 'Waiting for ComfyUI to start' } : item))
-        notify('success', `${ltxOptions.preset === 'quality' ? 'Two-stage quality' : 'Single-stage Turbo'} LTX‑2.5 generation added to ComfyUI.`)
-        if (!handoff) ws.setCharacterHandoff(null)
-        return null
-      }
-    } catch (error) {
-      const cancelled = cancellationRequests.current.has(localId)
-      const message = cancelled ? 'LTX generation cancelled.' : error instanceof Error ? error.message : String(error)
-      setJobs((current) => current.map((item) => item.id === localId ? { ...item, status: cancelled ? 'cancelled' : 'failed', error: cancelled ? undefined : error instanceof Error ? error.message : String(error) } : item))
-      notify(cancelled ? 'success' : 'error', message)
-      return message
+      const result = await submitLtx25(
+        ltxOptions,
+        input,
+        { settings, connected: status.connected, info, selection: ltxSelection, clientId },
+        {
+          notify,
+          setJobs,
+          cancellationRequests,
+          onJobCreated: (jobId) => ws.setActiveJobId(jobId),
+        },
+        // Wave 2a: read through the store — the App root no longer re-renders
+        // on workspace edits, so a captured facade value could be stale.
+        { characterProjectId: handoff?.characterProjectId ?? useWorkspaceStore.getState().characterHandoff ?? undefined, locationProjectId: handoff?.locationProjectId },
+      )
+      if (result.ok && !handoff) ws.setCharacterHandoff(null)
+      return result.ok ? null : result.message
     } finally {
-      cancellationRequests.current.delete(localId)
       setLtxSubmitting(false)
     }
   }
@@ -135,46 +91,12 @@ export function useGenerationFlows(options: {
 
   const generateAceStep = async (aceOptions: AceStepGenerationOptions) => {
     if (!settings) return
-    if (!status.connected) {
-      notify('error', 'Start ComfyUI and verify the server connection in Settings.')
-      return
-    }
-    const selectedModel = aceOptions.model === 'sft' ? aceSelection.sft : aceSelection.base
-    if (!selectedModel || !aceSelection.vae || !aceSelection.textEncoderSmall || !aceSelection.textEncoderLarge) {
-      notify('error', `The ACE-Step ${aceOptions.model.toUpperCase()} model, audio VAE, and both Qwen ACE text encoders are required.`)
-      return
-    }
-    const missingNodes = ACE_STEP_REQUIRED_NODES.filter((node) => !info[node])
-    if (missingNodes.length) {
-      notify('error', `Update ComfyUI before using ACE-Step 1.5. Missing core nodes: ${missingNodes.join(', ')}.`)
-      return
-    }
-    const localId = createId()
-    const job: GenerationJob = {
-      id: localId, provider: 'acestep', mediaType: 'audio', mode: 'text', prompt: aceOptions.tags,
-      createdAt: Date.now(), status: 'queued', progress: 2, progressLabel: 'Preparing ACE-Step workflow',
-      width: 0, height: 0, duration: aceOptions.duration,
-    }
-    setJobs((current) => [job, ...current])
+    // Phase 4: the submission core lives in lib/aceStepSubmit.ts — the old
+    // workspace and the canvas audio dock submit through ONE code path.
     setAceSubmitting(true)
-    notify('neutral', `Preparing the official ACE-Step XL ${aceOptions.model.toUpperCase()} ComfyUI graph…`)
     try {
-      const graph = buildAceStepWorkflow(aceOptions, aceSelection)
-      const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, clientId)
-      if (cancellationRequests.current.has(localId)) {
-        await window.minimax.cancelPrompt(settings.comfyUrl, response.prompt_id)
-        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'cancelled' } : item))
-      } else {
-        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: 'Waiting for ComfyUI to start' } : item))
-        notify('success', `ACE-Step XL ${aceOptions.model.toUpperCase()} music generation added to ComfyUI.`)
-      }
-    } catch (error) {
-      const cancelled = cancellationRequests.current.has(localId)
-      setJobs((current) => current.map((item) => item.id === localId ? { ...item, status: cancelled ? 'cancelled' : 'failed', error: cancelled ? undefined : error instanceof Error ? error.message : String(error) } : item))
-      if (cancelled) notify('success', 'Music generation cancelled.')
-      else notify('error', error instanceof Error ? error.message : String(error))
+      await submitAceStep(aceOptions, { settings, connected: status.connected, info, selection: aceSelection, clientId }, { notify, setJobs, cancellationRequests })
     } finally {
-      cancellationRequests.current.delete(localId)
       setAceSubmitting(false)
     }
   }
@@ -258,38 +180,15 @@ export function useGenerationFlows(options: {
 
   const runH3Diagnostics = async () => {
     if (!settings || diagnosticRunning) return
-    if (!status.connected) return notify('error', 'Connect ComfyUI before running the H3 diagnostic.')
-    const qualityModels = inferSelections(models, 'off')
-    const turboModels = inferSelections(models, '8')
-    if (![qualityModels.fl2va, qualityModels.textEncoder, qualityModels.videoVae, qualityModels.audioVae, turboModels.fl2vLora].every(Boolean)) {
-      return notify('error', 'The FL2VA base stack and official 8-step Turbo LoRA are required for the diagnostic.')
-    }
-    const tests = [
-      { name: 'Native quality', turbo: 'off' as const, selection: qualityModels, filenamePrefix: 'video/MiniMax_DIAGNOSTIC_NATIVE' },
-      { name: 'Official Turbo 8', turbo: '8' as const, selection: turboModels, filenamePrefix: 'video/MiniMax_DIAGNOSTIC_TURBO8' },
-    ]
     setDiagnosticRunning(true)
-    notify('neutral', 'Queuing the fixed-seed Native and Turbo 8 diagnostic pair…')
-    let queuedCount = 0
-    for (const [index, test] of tests.entries()) {
-      const id = createId()
-      const job: GenerationJob = { id, provider: 'minimax', mode: 'text', prompt: `[H3 diagnostic · ${test.name}] ${diagnosticPrompt}`, createdAt: Date.now() + index, status: 'queued', progress: 2, progressLabel: 'Preparing diagnostic workflow', width: 1344, height: 768, duration: 5 }
-      setJobs((current) => [job, ...current])
-      try {
-        const graph = buildMiniMaxWorkflow({ mode: 'text', prompt: diagnosticPrompt, width: 1344, height: 768, duration: 5, seed: 12345, steps: 20, turbo: test.turbo, sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', filenamePrefix: test.filenamePrefix, referenceImages: [], referenceVideos: [], referenceAudios: [] }, test.selection, { images: [], videos: [], audios: [] }, info)
-        const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, clientId)
-        queuedCount += 1
-        setJobs((current) => current.map((item) => item.id === id ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: index === 0 ? 'Native test queued' : 'Turbo 8 test queued behind Native' } : item))
-        if (index === tests.length - 1) ws.setActiveJobId(id)
-      } catch (error) {
-        setJobs((current) => current.map((item) => item.id === id ? { ...item, status: 'failed', error: error instanceof Error ? error.message : String(error) } : item))
-      }
+    try {
+      // Phase 4: the pair lives in the shared core (lib/h3Diagnostics.ts) —
+      // the docked canvas Settings panel runs the same code path.
+      await submitH3DiagnosticPair({ settings, connected: status.connected, models, info, clientId }, { notify, setJobs })
+      onQueued('queue')
+    } finally {
+      setDiagnosticRunning(false)
     }
-    setDiagnosticRunning(false)
-    notify(queuedCount === 2 ? 'success' : 'error', queuedCount === 2
-      ? 'H3 diagnostic pair queued with identical prompt, seed, resolution, duration, and official sampling.'
-      : queuedCount ? 'Only one diagnostic render could be queued. Check the failed Queue entry.' : 'The diagnostic renders could not be queued. Check ComfyUI and try again.')
-    onQueued('queue')
   }
 
   /** Renders a Movie Planner scene as one latent-chained episode (ComfyUI-H3
@@ -360,38 +259,15 @@ export function useGenerationFlows(options: {
 
   const [music3Submitting, setMusic3Submitting] = useState(false)
 
-  /** MiniMax Music 3: complete songs through the official template graph. */
+  /** MiniMax Music 3: complete songs through the official template graph.
+   *  Phase 4: the submission core lives in lib/music3Submit.ts — the old
+   *  workspace and the canvas audio dock submit through ONE code path. */
   const generateMusic3 = async (options: Music3GenerationOptions, models3: { diffusion: string; textEncoder: string; vae: string }) => {
     if (!settings) return
-    if (!status.connected) { notify('error', 'Start ComfyUI and verify the server connection in Settings.'); return }
-    if (!options.caption.trim()) { notify('error', 'Write at least one caption section before generating.'); return }
-    if (!models3.diffusion || !models3.textEncoder || !models3.vae) { notify('error', 'The Music 3 diffusion model, text encoder, and DAV VAE are required. Install them, then rescan in Settings.'); return }
-    const localId = createId()
-    const job: GenerationJob = {
-      id: localId, provider: 'music3', mediaType: 'audio', mode: 'text', prompt: options.caption,
-      createdAt: Date.now(), status: 'queued', progress: 2, progressLabel: 'Preparing Music 3 workflow',
-      width: 0, height: 0, duration: options.duration,
-    }
-    setJobs((current) => [job, ...current])
     setMusic3Submitting(true)
-    notify('neutral', 'Preparing the official MiniMax Music 3 ComfyUI graph…')
     try {
-      const graph = buildMusic3Workflow(options, models3)
-      const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, clientId)
-      if (cancellationRequests.current.has(localId)) {
-        await window.minimax.cancelPrompt(settings.comfyUrl, response.prompt_id)
-        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'cancelled' } : item))
-      } else {
-        setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: 'Composing locally' } : item))
-        notify('success', 'MiniMax Music 3 song generation added to ComfyUI.')
-      }
-    } catch (error) {
-      const cancelled = cancellationRequests.current.has(localId)
-      setJobs((current) => current.map((item) => item.id === localId ? { ...item, status: cancelled ? 'cancelled' : 'failed', error: cancelled ? undefined : error instanceof Error ? error.message : String(error) } : item))
-      if (cancelled) notify('success', 'Music generation cancelled.')
-      else notify('error', error instanceof Error ? error.message : String(error))
+      await submitMusic3(options, { settings, connected: status.connected, info, selection: models3, clientId }, { notify, setJobs, cancellationRequests })
     } finally {
-      cancellationRequests.current.delete(localId)
       setMusic3Submitting(false)
     }
   }

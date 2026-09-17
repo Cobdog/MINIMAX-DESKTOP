@@ -92,7 +92,14 @@ export function Ltx25Workspace({ settings, models, pipelineReady, missingNodes, 
   return <div className="create-page ltx-workspace">
     <div className="page-heading">
       <div><p className="eyebrow">SEPARATE PROVIDER WORKSPACE</p><h1>Create with LTX‑2.5</h1><p>Native LTX text-to-video and image-to-video with synchronized audio.</p></div>
-      <div className="heading-state"><span className={modelReady ? 'ok' : 'warn'}>{modelReady ? <Check size={15} /> : <AlertCircle size={15} />}{modelReady ? 'Verified LTX pipeline' : missingNodes.length ? 'Update ComfyUI nodes' : 'LTX models missing'}</span></div>
+      <div className="heading-state">
+        {/* Phase-4 retirement (canvas §8, L4 keep-utilities-only): the general
+            LTX workspace greys out — the engine survives as a canvas
+            typed-hole op (image → LTX 2.5 video) + the 2.3 utility family.
+            Still directly navigable until Phase 5. */}
+        <a className="secondary-button retired-affordance" data-retired="ltx25" href="/?canvas=1" title="Retired — LTX-2.5 generation now lives on the canvas (?canvas=1) as a typed-hole op; the 2.3 utilities stay in Settings and the canvas menus. This workspace still works.">Open the canvas →</a>
+        <span className={modelReady ? 'ok' : 'warn'}>{modelReady ? <Check size={15} /> : <AlertCircle size={15} />}{modelReady ? 'Verified LTX pipeline' : missingNodes.length ? 'Update ComfyUI nodes' : 'LTX models missing'}</span>
+      </div>
     </div>
     <div className="workspace-grid">
       <section className="composer-panel">

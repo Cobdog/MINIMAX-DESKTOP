@@ -357,6 +357,30 @@ still directly navigable (their D-dependencies hold until Phase 5);
 CreateView stays (the D1 dependency, Phase 4). CreateView/JobsView/Library
 full retirement follows their Phase-4 capability absorbments.
 
+**Phase 4 landed (task 6rymbx3, 2026-09-16):** latent-fork rendering ships
+(the Phase-3 seam closed) — canvas H3 renders save their sampler latents
+through the Motion-Context nodes when installed, takes carry the saved-clip
+facts, and a substrate=latents fork loads the SOURCE clip as
+never-denoised conditioning into its own continuation folder (no
+re-encode); honest refusals when the nodes are absent or the source take
+predates them. The retirement wave: CreateView (prompt library +
+local-LLM tools + reference captioning absorbed into the properties panel
+and launcher first), JobsView (the D3 three-layer synthesis verified
+complete: on-object state + radar + summonable index), LibraryView (the
+library projection — V summons the searchable list with navigate-to), and
+the general Ltx25Workspace (the engine survives as the typed-hole
+image→video op) all grey out with canvas pointers, still directly
+navigable until Phase 5. LocationStudio's walkthrough migrates to H3 Ref2V
+through the shared submit core (the last LTX-only consumer leaves LTX);
+the libraries project into the global asset store (canvas_asset,
+copy-never-destroy) and the properties panel binds global assets with the
+consent-gated fork-into-project flow (F3); Music 3 + ACE-Step arrive as
+canvas audio docks (typed-hole selections whose tracks land as objects);
+Settings docks as a react-rnd panel reachable from the titlebar; the
+mobile companion stays booting, marked unmaintained (L10). Phase 5
+inherits: delete the retired views + the old shell + the View union, the
+Director Suite (timeline projection + plan documents), and final cleanup.
+
 ## 9. Parked-questions ledger — RECONCILED UNION (per audit L1)
 
 **[BLESSED 2026-09-15 — maintainer accepted both bundles wholesale via

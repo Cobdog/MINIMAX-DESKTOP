@@ -119,6 +119,11 @@ export function BottomBar() {
           onChange={(event) => setPrompt(event.target.value)}
           onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }}
         />
+        {/* §5.4 (Phase 4): the audio engines as typed-hole selections from the
+            nothing-selected context (the launcher carries the same rows). */}
+        <button type="button" className="canvas-chip" data-canvas-bar-music3 onClick={() => useCanvasStore.getState().setAudioDock({ engine: 'music3' })}>Music 3</button>
+        <button type="button" className="canvas-chip" data-canvas-bar-acestep onClick={() => useCanvasStore.getState().setAudioDock({ engine: 'acestep' })}>ACE-Step</button>
+        <button type="button" className="canvas-chip" data-canvas-bar-library title="The library projection (V)" onClick={() => useCanvasStore.getState().setLibraryOpen(true)}>library <kbd>V</kbd></button>
         <span className={`canvas-bar-engine ${engine.connected ? (engine.modelReady ? 'online' : 'degraded') : ''}`} data-canvas-bar-engine>
           <span className="status-dot" /> {engine.connected ? (engine.modelReady ? 'H3 ready' : 'models missing') : 'engine offline'}
         </span>

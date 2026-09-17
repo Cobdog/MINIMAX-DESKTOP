@@ -30,6 +30,8 @@ import { MUSIC3_REQUIRED_NODES, inferMusic3Selection } from './lib/music3Workflo
 import { Music3Workspace } from './components/Music3Workspace'
 import { fitWholeCharacter } from './lib/imageCrop'
 import { inferLtx25Selections, inferSelections } from './lib/modelSelection'
+import { submitH3Render } from './lib/h3Submit'
+import { locationWalkthroughRequest } from './lib/locationWalkthrough'
 import { inferContactSheetSelection } from './lib/contactSheet'
 import { findH3PreviewOverrideNode, h3StackReport } from './lib/h3Stack'
 import { migrateLocalData } from './lib/serverStorage'
@@ -446,8 +448,15 @@ function App() {
         </div>
         <nav aria-label="Primary navigation">
           <div className="nav-group"><span className="nav-section-label">Generate</span>
-            <NavButton active={view === 'create'} icon={WandSparkles} label="Create" onClick={() => { setCharacterHandoff(null); setView('create') }} />
-            <NavButton active={view === 'ltx25'} icon={Aperture} label="LTX 2.5" onClick={() => setView('ltx25')} />
+            {/* Phase-4 retirement (canvas §8): generation is fully on canvas —
+                prompt editing, references, the prompt library, and the L4 mode
+                rule all live there. Still directly navigable (D-dependencies
+                hold until Phase 5) — greyed with the canvas pointer. */}
+            <NavButton active={view === 'create'} icon={WandSparkles} label="Create" retired onClick={() => { setCharacterHandoff(null); setView('create') }} />
+            {/* Phase-4 retirement (canvas §8, L4 keep-utilities-only): the
+                general LTX-2.5 workspace greys out — the engine survives as a
+                canvas typed-hole op + the 2.3 utility family. */}
+            <NavButton active={view === 'ltx25'} icon={Aperture} label="LTX 2.5" retired onClick={() => setView('ltx25')} />
             <NavButton active={view === 'music'} icon={Music2} label="Music" onClick={() => setView('music')} />
             <NavButton active={view === 'music3'} icon={AudioLines} label="Music 3" onClick={() => setView('music3')} />
           </div>
@@ -460,8 +469,14 @@ function App() {
             <NavButton active={view === 'locations'} icon={MapPin} label="Locations" itemType="location" onClick={() => setView('locations')} />
           </div>
           <div className="nav-group"><span className="nav-section-label">Review</span>
-            <NavButton active={view === 'queue'} icon={ListVideo} label="Queue" count={pendingJobs.length} onClick={() => setView('queue')} />
-            <NavButton active={view === 'library'} icon={Library} label="Library" onClick={() => setView('library')} />
+            {/* Phase-4 retirement (canvas §8): the three-layer queue synthesis
+                (on-object state + radar + summonable index) is complete — the
+                queue view greys out with the canvas pointer. */}
+            <NavButton active={view === 'queue'} icon={ListVideo} label="Queue" count={pendingJobs.length} retired onClick={() => setView('queue')} />
+            {/* Phase-4 retirement (canvas §8): the library-as-projection —
+                completed outputs are canvas objects; V summons the library
+                projection with search + navigate-to. */}
+            <NavButton active={view === 'library'} icon={Library} label="Library" retired onClick={() => setView('library')} />
             {/* Phase-3 retirement (canvas §8): the op modal + forks absorbed
                 this capability. Still directly navigable (D-dependencies hold
                 until Phase 5) — greyed with the canvas pointer. */}
@@ -574,15 +589,27 @@ function App() {
         {view === 'wardrobes' && <ErrorBoundary label="wardrobes"><Suspense fallback={viewFallback}><WardrobeStudio settings={settings} info={info} connected={status.connected} onNotice={(tone, text) => setNotice({ tone, text })} /></Suspense></ErrorBoundary>}
         {view === 'accessories' && <ErrorBoundary label="accessories"><Suspense fallback={viewFallback}><AccessoryStudio settings={settings} info={info} connected={status.connected} onNotice={(tone, text) => setNotice({ tone, text })} /></Suspense></ErrorBoundary>}
         {view === 'locations' && <ErrorBoundary label="locations"><Suspense fallback={viewFallback}><LocationStudio settings={settings} info={info} connected={status.connected} ollamaAvailable={llmAvailable} automationJob={jobs.find((job) => job.locationProjectId)} onNotice={(tone, text) => setNotice({ tone, text })} onCreateWalkthrough={(project: LocationProject, options?: { duration: number; cameraLanguage: string }) => {
+          // Phase-4 migration (canvas §8 + the LTX-vs-H3 verdict): the
+          // walkthrough renders through MiniMax H3 Ref2V — the approved image
+          // rides <Picture 1> via the shared submit core (lib/h3Submit.ts).
+          // The canvas equivalent is a substrate=decoded fork of the approved
+          // image with the image bound as a reference; the LTX general engine
+          // no longer has this consumer. H3 caps duration at 15s.
           if (!project.baseImage) return Promise.resolve('Approve a location image before rendering the walkthrough.')
-          const firstFrame = { ...project.baseImage }; delete firstFrame.preview
-          const walkthroughDirection = project.environmentMode === 'nature'
-            ? `Comprehensive cinematic natural-landscape survey of ${project.name}. Begin with a wide establishing view, then move slowly through the terrain in one continuous stabilized path. Deliberately reveal landforms, vegetation zones, water features, rock formations, horizon lines, and their spatial relationships. Preserve the exact terrain, ecology, vegetation placement, lighting, weather, and geography from the first frame. Untouched nature only: no buildings, cabins, houses, ruins, roads, streets, bridges, fences, signs, vehicles, power lines, utility poles, constructed paths, or other human-made objects.`
-            : `Comprehensive cinematic location walkthrough reference video of ${project.name}. Begin with a wide establishing view, then move slowly along the perimeter in one continuous stabilized path. Deliberately pan through every important zone and spatial connection, revealing entrances, landmarks, surfaces, fixtures, terrain, and object placement. Preserve exactly the same architecture, dimensions, materials, lighting, weather, and geography from the first frame.`
-          const locationProfile = [project.description, project.atmosphere && `Atmosphere and lighting: ${project.atmosphere}.`, project.timeOfDay && `Time and weather: ${project.timeOfDay}.`, project.continuityAnchors && `Fixed continuity anchors: ${project.continuityAnchors}.`, project.visualStyle && `Visual treatment: ${project.visualStyle}.`].filter(Boolean).join(' ')
-          const cameraLanguage = options?.cameraLanguage ?? 'Use only wide and extra-wide shots with an 18–24mm lens. Begin with a complete establishing view, then move slowly and smoothly to reveal the environment’s spatial relationships. Never use close-ups.'
-          const clarityDirection = 'Maintain crisp, sharp frames with a fast shutter and slow stabilized camera movement. No motion blur, temporal smearing, ghosting, rolling-shutter distortion, speed ramps, whip pans, or rapid camera movement.'
-          return generateLtx({ mode: 'image', prompt: `${walkthroughDirection} Location description: ${locationProfile} Camera language: ${cameraLanguage} Image clarity: ${clarityDirection} No cuts, no teleporting, no layout changes, no duplicated objects, no people as focal subjects, no dialogue, no text, no logos.`, width: 1344, height: 768, duration: Math.max(5, Math.min(20, options?.duration ?? 10)), preset: 'quality', seed: Math.floor(Math.random() * 1_000_000_000), filenamePrefix: 'MiniMax_location_walkthrough' }, firstFrame, { locationProjectId: project.id })
+          if (!settings) return Promise.resolve('Studio settings are still loading.')
+          const approvedImage = { ...project.baseImage }; delete approvedImage.preview
+          return submitH3Render(
+            {
+              ...locationWalkthroughRequest(project, approvedImage, Math.floor(Math.random() * 1_000_000_000), options),
+              locationProjectId: project.id,
+            },
+            { settings, connected: status.connected, modelReady, selection, models, info, clientId: live.clientId, h3PreviewOverrideNode: h3PreviewOverrideNode || undefined },
+            {
+              notify,
+              setJobs: (update) => queue.setJobs(update),
+              cancellationRequests: queue.cancellationRequests,
+            },
+          ).then((result) => result.ok ? null : result.message)
         }} /></Suspense></ErrorBoundary>}
         {view === 'movie' && <ErrorBoundary label="movie"><Suspense fallback={viewFallback}><MoviePlanner settings={settings} ollamaAvailable={llmAvailable} ollamaModel={llmModelLabel || settings.ollamaModel} chainAvailable={chainAvailable} onRenderChain={(project, scene) => { void flows.generateSceneChain(project, scene, useWorkspaceStore.getState().characterProjects, chainAvailable).then((message) => { if (message) setNotice({ tone: 'error', text: message }) }) }} onNotice={(tone, text) => setNotice({ tone, text })} onOpenShot={async (shot: MovieShot, aspectRatio: MovieProject['aspectRatio'], resolved: ResolvedMovieShot, context: { projectId: string; sceneId: string; continuationSource?: string }) => {
           setCharacterHandoff(null)

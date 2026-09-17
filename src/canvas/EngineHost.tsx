@@ -13,18 +13,21 @@
  * canvas keeps its generation state per chain in the document store — the
  * singleton unwind. The old CreateView keeps its own workspace untouched.
  */
-import { useEffect } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { useStudioSession } from '../hooks/useStudioSession'
 import { useGenerationQueue } from '../hooks/useGenerationQueue'
 import { useLivePreview } from '../lib/useLivePreview'
 import { inferSelections } from '../lib/modelSelection'
+import { submitH3DiagnosticPair } from '../lib/h3Diagnostics'
 import { CHARACTER_LIBRARY_EVENT } from '../lib/characterLibrary'
 import { WARDROBE_LIBRARY_EVENT } from '../lib/wardrobeLibrary'
 import { LOCATION_LIBRARY_EVENT } from '../lib/locationLibrary'
 import { useSessionStore } from '../state/sessionStore'
+import { useJobsStore } from '../state/jobsStore'
 import { useCanvasStore, engineBridge } from './store'
+import { CanvasSessionContext } from './sessionContext'
 
-export function CanvasEngineHost() {
+export function CanvasEngineHost({ children }: { children?: ReactNode }) {
   const toast = useCanvasStore((state) => state.toast)
   const notify = (tone: 'error' | 'success' | 'neutral', text: string) => toast(tone, text)
 
@@ -55,9 +58,13 @@ export function CanvasEngineHost() {
   }, [])
 
   // Library events refresh the canvas's reference bindings (the same events
-  // the old workspace facade listens to — one library, both surfaces).
+  // the old workspace facade listens to — one library, both surfaces) and
+  // re-project the global asset store (Phase 4).
   useEffect(() => {
-    const refresh = () => useCanvasStore.getState().refreshLibraries()
+    const refresh = () => {
+      useCanvasStore.getState().refreshLibraries()
+      void useCanvasStore.getState().syncLibraryAssets()
+    }
     window.addEventListener(CHARACTER_LIBRARY_EVENT, refresh)
     window.addEventListener(WARDROBE_LIBRARY_EVENT, refresh)
     window.addEventListener(LOCATION_LIBRARY_EVENT, refresh)
@@ -68,5 +75,19 @@ export function CanvasEngineHost() {
     }
   }, [])
 
-  return null
+  const runDiagnostics = async () => {
+    const state = useSessionStore.getState()
+    if (!state.settings) return 'Studio settings are still loading.'
+    return submitH3DiagnosticPair(
+      { settings: state.settings, connected: state.status.connected, models: state.models, info: state.info, clientId: engineBridge.clientId },
+      {
+        notify: (tone, text) => useCanvasStore.getState().toast(tone, text),
+        setJobs: (update) => useJobsStore.getState().setJobs(update),
+      },
+    )
+  }
+
+  return <CanvasSessionContext.Provider value={{ session, runDiagnostics }}>
+    {children}
+  </CanvasSessionContext.Provider>
 }

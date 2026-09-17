@@ -425,6 +425,11 @@ export function CreateView(props: CreateViewProps) {
       {transientProbeEnabled && <TransientProbe />}
       <div className="page-heading">
         <div><p className="eyebrow">LOCAL VIDEO WORKSPACE</p><h1>Create with MiniMax H3</h1><p>Generate synchronized video and audio through your local ComfyUI engine.</p></div>
+        {/* Phase-4 retirement (canvas §8): generation is fully on canvas — the
+            properties panel carries the prompt field + library + local-LLM
+            tools + reference bindings + captioning; the L4 selection rule
+            replaces the mode tabs. Still directly navigable until Phase 5. */}
+        <div className="heading-state"><a className="secondary-button retired-affordance" data-retired="create" href="/?canvas=1" title="Retired — generation now lives on the canvas (?canvas=1): prompt, references, the prompt library, and every engine. This view still works.">Open the canvas →</a></div>
         <div className="heading-state">{!modelReady
           ? <button type="button" onClick={onOpenSettings} title="Open Settings to fix model paths"><AlertCircle size={15} />Check model paths</button>
           : <span className={h3Validated ? 'ok' : 'warn'}>{h3Validated ? <Check size={15} /> : <AlertCircle size={15} />}{h3Validated ? 'Validated H3 stack' : 'Custom H3 stack'}</span>}</div>

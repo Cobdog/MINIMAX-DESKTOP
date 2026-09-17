@@ -292,12 +292,12 @@ const chainOf = (id, overrides) => ({ id, projectId: 'p1', kind: 'generation', i
 
 console.log('(l) L4 — selection decides the surface (effectiveMode)')
 {
-  eq(generation.effectiveMode({ firstFrameOutputId: null, lastFrameOutputId: null, referenceOutputIds: [], referenceCharacterIds: [], referenceLocationIds: [] }), 'text', 'L4: nothing + prompt = text-to-video')
-  eq(generation.effectiveMode({ firstFrameOutputId: 'o1', lastFrameOutputId: null, referenceOutputIds: [], referenceCharacterIds: [], referenceLocationIds: [] }), 'image', 'L4: a selected image output = image-to-video')
-  eq(generation.effectiveMode({ firstFrameOutputId: 'o1', lastFrameOutputId: 'o2', referenceOutputIds: [], referenceCharacterIds: [], referenceLocationIds: [] }), 'frames', 'L4: first + last = frames')
-  eq(generation.effectiveMode({ firstFrameOutputId: 'o1', lastFrameOutputId: 'o2', referenceOutputIds: ['o3'], referenceCharacterIds: [], referenceLocationIds: [] }), 'reference', 'L4: any reference wins over frames (resolveMovieShot precedence)')
-  eq(generation.effectiveMode({ firstFrameOutputId: null, lastFrameOutputId: null, referenceOutputIds: [], referenceCharacterIds: ['char-1'], referenceLocationIds: [] }), 'reference', 'L4: a library character binding selects reference mode')
-  eq(generation.effectiveMode({ firstFrameOutputId: null, lastFrameOutputId: null, referenceOutputIds: [], referenceCharacterIds: [], referenceLocationIds: ['loc-1'] }), 'reference', 'L4: a location binding selects reference mode')
+  eq(generation.effectiveMode({ firstFrameOutputId: null, lastFrameOutputId: null, referenceOutputIds: [], referenceCharacterIds: [], referenceLocationIds: [], referenceAssetIds: [] }), 'text', 'L4: nothing + prompt = text-to-video')
+  eq(generation.effectiveMode({ firstFrameOutputId: 'o1', lastFrameOutputId: null, referenceOutputIds: [], referenceCharacterIds: [], referenceLocationIds: [], referenceAssetIds: [] }), 'image', 'L4: a selected image output = image-to-video')
+  eq(generation.effectiveMode({ firstFrameOutputId: 'o1', lastFrameOutputId: 'o2', referenceOutputIds: [], referenceCharacterIds: [], referenceLocationIds: [], referenceAssetIds: [] }), 'frames', 'L4: first + last = frames')
+  eq(generation.effectiveMode({ firstFrameOutputId: 'o1', lastFrameOutputId: 'o2', referenceOutputIds: ['o3'], referenceCharacterIds: [], referenceLocationIds: [], referenceAssetIds: [] }), 'reference', 'L4: any reference wins over frames (resolveMovieShot precedence)')
+  eq(generation.effectiveMode({ firstFrameOutputId: null, lastFrameOutputId: null, referenceOutputIds: [], referenceCharacterIds: ['char-1'], referenceLocationIds: [], referenceAssetIds: [] }), 'reference', 'L4: a library character binding selects reference mode')
+  eq(generation.effectiveMode({ firstFrameOutputId: null, lastFrameOutputId: null, referenceOutputIds: [], referenceCharacterIds: [], referenceLocationIds: ['loc-1'], referenceAssetIds: [] }), 'reference', 'L4: a location binding selects reference mode')
   // tolerant settings read: the document is external data
   const read = generation.readChainSettings({ duration: 99, turbo: '8', resolution: '768x1344', referenceOutputIds: ['a', 'b', 3], prompt: 'x' })
   eq(read.duration, 15, 'settings: duration clamps to the 15s ceiling')
@@ -339,7 +339,7 @@ console.log('(m) fork substrates → input refs (§2 outputRef)')
 
 console.log('(n) typed-hole option menus (§3 filtering + hints)')
 {
-  const ready = { connected: true, h3Ready: true, utilities: [{ tool: 'remove-subtitles', label: 'Remove subtitles', available: true, missing: [] }, { tool: 'ia2v', label: 'Image + audio → video', available: false, missing: ['node LTXICLoRALoaderModelOnly'] }] }
+  const ready = { connected: true, h3Ready: true, motionContextReady: true, ltx25: { available: true, missing: [] }, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] }, utilities: [{ tool: 'remove-subtitles', label: 'Remove subtitles', available: true, missing: [] }, { tool: 'ia2v', label: 'Image + audio → video', available: false, missing: ['node LTXICLoRALoaderModelOnly'] }] }
   const produce = options.endpointOptions('produce', ['image'], ready)
   const produceIds = produce.map((row) => row.id)
   ok(produceIds.includes('produce:i2v'), 'produce(image): i2v offered')
@@ -362,13 +362,13 @@ console.log('(n) typed-hole option menus (§3 filtering + hints)')
   ok(missing && !missing.available && missing.reason.includes('node LTXICLoRALoaderModelOnly'), 'produce: install guidance names the missing node')
   ok(!produceVideo.some((row) => row.id === 'produce:utility:ia2v'), 'produce(video): the image+audio utility is filtered out')
 
-  const offline = options.endpointOptions('produce', ['image'], { connected: false, h3Ready: false, utilities: [] })
+  const offline = options.endpointOptions('produce', ['image'], { connected: false, h3Ready: false, utilities: [], motionContextReady: true, ltx25: { available: true, missing: [] }, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] } })
   ok(offline.find((row) => row.id === 'produce:i2v').available, 'produce(offline): chain creation still offered — the refusal surfaces at submit')
   ok(offline.find((row) => row.id === 'produce:fork-decoded').available, 'produce(offline): forking still offered — no engine needed')
-  const offlineVideo = options.endpointOptions('produce', ['video'], { connected: false, h3Ready: false, utilities: [{ tool: 'remove-subtitles', label: 'Remove subtitles', available: true, missing: [] }] })
+  const offlineVideo = options.endpointOptions('produce', ['video'], { connected: false, h3Ready: false, motionContextReady: true, ltx25: { available: true, missing: [] }, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] }, utilities: [{ tool: 'remove-subtitles', label: 'Remove subtitles', available: true, missing: [] }] })
   ok(!offlineVideo.find((row) => row.id === 'produce:utility:remove-subtitles').available, 'produce(offline): utilities stay gated on the engine')
   ok(offlineVideo.find((row) => row.id === 'produce:utility:remove-subtitles').reason.includes('offline'), 'produce(offline): the utility reason says the engine is offline')
-  const offlineConsume = options.endpointOptions('consume', ['image'], { connected: false, h3Ready: false, utilities: [] })
+  const offlineConsume = options.endpointOptions('consume', ['image'], { connected: false, h3Ready: false, utilities: [], motionContextReady: true, ltx25: { available: true, missing: [] }, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] } })
   ok(offlineConsume.find((row) => row.id === 'consume:first-frame').available, 'consume(offline): input roles are pure document edits — always available')
 
   const consume = options.endpointOptions('consume', ['image'], ready)
@@ -544,7 +544,7 @@ console.log('(r) op-stack model — kinds, tolerant settings, live-preview compo
 
 console.log('(s) typed-hole surface — the pose rig row (§5.2) + utility rows')
 {
-  const facts = { connected: false, h3Ready: false, utilities: [] }
+  const facts = { connected: false, h3Ready: false, utilities: [], motionContextReady: true, ltx25: { available: true, missing: [] }, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] } }
   const consume = options.endpointOptions('consume', [], facts)
   const poseRig = consume.find((row) => row.id === 'consume:pose-rig')
   ok(poseRig && poseRig.available, 'options: the pose rig row is offered on the consume side (engine-free)')
@@ -617,6 +617,108 @@ console.log('(u) Z-Image as an op — the still-surface validation ladder + grap
   ok(controlClasses.includes('QwenImageDiffsynthControlnet'), 'plan: the control surface wires the Fun ControlNet Union node')
   ok(controlClasses.includes('Canny'), 'plan: the control surface preprocesses through native Canny')
   ok(controlClasses.includes('ModelPatchLoader'), 'plan: the control surface loads the union patch')
+}
+
+
+// ---------------------------------------------------------------------------
+// Phase 4 — latent continuation (the Motion-Context engine seam), the global
+// asset bindings, the LocationStudio H3-Ref2V migration, and the extracted
+// engine submit cores' ladders.
+// ---------------------------------------------------------------------------
+console.log('(t) latent continuation — chain options + Motion-Context graph shape')
+{
+  const mc = take('take-mc', { metrics: { kind: 'video', motionContext: { folder: 'h3_context/src/clip', clipIndex: 3 } }, latentPath: 'h3_context/src/clip3.latent' })
+  eq(generation.takeMotionContext(mc), { folder: 'h3_context/src/clip', clipIndex: 3 }, 'motion-context: the saved-clip facts read tolerantly from take metrics')
+  eq(generation.takeMotionContext(take('plain')), null, 'motion-context: a take without facts answers null (the honest refusal signal)')
+  eq(generation.takeMotionContext(take('bad', { metrics: { motionContext: { folder: '', clipIndex: -1 } } })), null, 'motion-context: malformed facts refuse, never a guess')
+  eq(generation.substratesForTake(mc, 'video'), ['decoded', 'extracted-frame', 'latents'], 'motion-context: a latent-carrying take offers the latents substrate')
+
+  const save = generation.canvasChainOption('chain-a', null)
+  eq(save, { index: 0, folder: 'h3_context/chain-a/clip' }, 'chain option: a plain render SAVES its latent at index 0 (chain start)')
+  const forkOption = generation.canvasChainOption('chain-b', { folder: 'h3_context/chain-a/clip', clipIndex: 0 })
+  eq(forkOption.index, 1, 'chain option: a latent fork is a continuation (index > 0 loads)')
+  eq(forkOption.loadFrom, { folder: 'h3_context/chain-a/clip', clipIndex: 0 }, 'chain option: the fork pins the SOURCE clip explicitly')
+  ok(forkOption.folder.startsWith('h3_context/chain-b/'), 'chain option: the fork SAVES into its own folder — never a write into the source')
+
+  // The graph itself: the same plan helpers the probe surface reads.
+  const fakeSelection = { fl2va: 'T-fl2va.safetensors', ref2va: 'T-ref2va.safetensors', textEncoder: 'T-te.safetensors', videoVae: 'T-vvae.safetensors', audioVae: 'T-avae.safetensors', previewVae: '', fl2vLora: '', ref2vLora: '' }
+  const request = (chain) => generation.buildCanvasRenderRequest(
+    generation.chainSettingsDefaults(null),
+    { firstFrame: null, lastFrame: null, referenceImages: [], referenceVideos: [], referenceAudios: [] },
+    [],
+    chain,
+  )
+  const classes = (graph) => Object.values(graph).map((node) => node.class_type)
+  const saveGraph = generation.planCanvasGraph(request(save), fakeSelection)
+  ok(classes(saveGraph).includes('MiniMaxH3MotionContextSaveLatent'), 'graph: a plain canvas render saves its sampler latent (segment-0 semantics)')
+  ok(!classes(saveGraph).includes('MiniMaxH3MotionContextLoadLatent'), 'graph: segment 0 never loads')
+  ok(!classes(saveGraph).includes('MiniMaxH3MotionContextTrim'), 'graph: segment 0 does not trim')
+
+  const forkGraph = generation.planCanvasGraph(request(forkOption), fakeSelection)
+  const load = Object.values(forkGraph).find((node) => node.class_type === 'MiniMaxH3MotionContextLoadLatent')
+  ok(Boolean(load), 'graph: the latent fork LOADS the saved clip (no re-encode)')
+  eq(load.inputs.latent_path, 'h3_context/chain-a/clip', 'graph: LoadLatent reads the SOURCE folder via loadFrom')
+  eq(load.inputs.clip_index, 0, 'graph: LoadLatent reads the SOURCE clip index (not index-1 of the fork)')
+  const saveNode = Object.values(forkGraph).find((node) => node.class_type === 'MiniMaxH3MotionContextSaveLatent')
+  eq(saveNode.inputs.filename_prefix, 'h3_context/chain-b/clip', 'graph: SaveLatent writes the fork\'s OWN folder')
+  ok(classes(forkGraph).includes('MiniMaxH3MotionContextTrim'), 'graph: the continuation trims the overlap rows from the delivered output')
+}
+
+console.log('(u) global asset bindings (§2 asset, F3 — consent-gated)')
+{
+  const settings = { ...generation.chainSettingsDefaults(null), referenceAssetIds: ['asset-loc'] }
+  const assets = [
+    { id: 'asset-loc', kind: 'location', label: 'The mill', images: [media('/refs/mill-1.png', 'image'), media('/refs/mill-2.png', 'image')] },
+    { id: 'asset-dead', kind: 'character', label: 'Gone', images: [] },
+  ]
+  const bindings = generation.resolveChainReferences(settings, generation.emptyLibraries, () => null, assets)
+  eq(bindings.length, 2, 'assets: a bound asset contributes its curated set to the ordered bindings')
+  ok(bindings.every((binding) => binding.source === 'asset'), 'assets: the bindings carry the asset source')
+  eq(generation.effectiveMode(settings), 'reference', 'assets: an asset binding selects reference mode (L4)')
+  const cleared = generation.resolveChainReferences({ ...settings, referenceAssetIds: [] }, generation.emptyLibraries, () => null, assets)
+  eq(cleared.length, 0, 'assets: unbinding removes the asset pictures (no zombies)')
+  const withDead = generation.resolveChainReferences({ ...generation.chainSettingsDefaults(null), referenceAssetIds: ['asset-dead', 'missing'] }, generation.emptyLibraries, () => null, assets)
+  eq(withDead.length, 0, 'assets: dropped/tombstoned assets are skipped honestly — never a hole in <Picture N>')
+}
+
+console.log('(v) LocationStudio migration — H3 Ref2V walkthrough (the LTX-only consumer leaves LTX)')
+{
+  const walkthrough = loadTs('src/lib/locationWalkthrough.ts')
+  const project = { name: 'The Mill', description: 'a stone mill by the creek', atmosphere: 'cold morning fog', timeOfDay: 'dawn', continuityAnchors: 'the broken wheel', visualStyle: 'documentary', environmentMode: 'built' }
+  const nature = { ...project, environmentMode: 'nature' }
+  const prompt = walkthrough.locationWalkthroughPrompt(project)
+  ok(prompt.includes('walkthrough reference video of The Mill'), 'walkthrough: the built-mode direction names the location')
+  ok(prompt.includes('cold morning fog') && prompt.includes('the broken wheel'), 'walkthrough: the location profile rides the prompt')
+  ok(walkthrough.locationWalkthroughPrompt(nature).includes('natural-landscape survey'), 'walkthrough: nature mode enforces the structure-exclusion survey')
+  ok(walkthrough.locationWalkthroughPrompt(project, { cameraLanguage: 'Orbit slowly.' }).includes('Camera language: Orbit slowly.'), 'walkthrough: the guided camera preset passes verbatim')
+
+  const request = walkthrough.locationWalkthroughRequest(project, media('/refs/mill-master.png', 'image'), 42, { duration: 20 })
+  eq(request.mode, 'reference', 'walkthrough request: the approved image rides Ref2V (<Picture 1>)')
+  eq(request.referenceImages.length, 1, 'walkthrough request: exactly one reference picture')
+  eq(request.duration, 15, 'walkthrough request: duration clamps to the H3 15s ceiling (LTX allowed 20)')
+  eq(request.seed, 42, 'walkthrough request: the seed is the caller\'s reproducibility seed')
+  const facts = { connected: false, modelReady: false, selection: {}, h3PreviewOverrideNode: undefined }
+  const h3 = loadTs('src/lib/h3Submit.ts')
+  eq(h3.validateH3Render(request, facts), 'Start ComfyUI and verify the server connection in Settings.', 'walkthrough request: validates through the shared H3 ladder (offline refusal)')
+}
+
+console.log('(w) the extracted engine cores — ladders stay verbatim (one code path, both surfaces)')
+{
+  const ltx25 = loadTs('src/lib/ltx25Submit.ts')
+  const option = { mode: 'image', prompt: 'a wide survey', width: 1344, height: 768, duration: 10, seed: 1, preset: 'quality', filenamePrefix: 'video/plan' }
+  eq(ltx25.validateLtx25(option, null, { connected: false, info: {}, selection: {} }), 'Start ComfyUI and verify the server connection in Settings.', 'ltx25 ladder: offline refuses first')
+  eq(ltx25.validateLtx25({ ...option, prompt: '' }, null, { connected: true, info: {}, selection: {} }), 'Add an LTX prompt before generating.', 'ltx25 ladder: empty prompt refuses')
+  eq(ltx25.validateLtx25(option, null, { connected: true, info: {}, selection: {} }), 'Choose a first frame for LTX image-to-video.', 'ltx25 ladder: i2v without a frame refuses')
+  ok(ltx25.LTX25_NATIVE_REQUIRED_NODES.includes('ManualSigmas'), 'ltx25: the node contract ships with the core (the workspace\'s gate, shared)')
+
+  const music3 = loadTs('src/lib/music3Submit.ts')
+  eq(music3.validateMusic3({ caption: '', lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'a' }, { connected: true, selection: {} }), 'Write at least one caption section before generating.', 'music3 ladder: empty caption refuses')
+  eq(music3.validateMusic3({ caption: 'warm jazz', lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'a' }, { connected: true, selection: { diffusion: '', textEncoder: '', vae: '' } }), 'The Music 3 diffusion model, text encoder, and DAV VAE are required. Install them, then rescan in Settings.', 'music3 ladder: missing models refuse with the install hint')
+
+  const ace = loadTs('src/lib/aceStepSubmit.ts')
+  const aceOption = { model: 'base', tags: 'synthwave', lyrics: '', instrumental: false, duration: 60, seed: 1, bpm: 120, filenamePrefix: 'a' }
+  eq(ace.validateAceStep(aceOption, { connected: true, info: { 'TextEncodeAceStepAudio1.5': 1, UNETLoader: 1, DualCLIPLoader: 1, VAELoader: 1, 'EmptyAceStep1.5LatentAudio': 1, ConditioningZeroOut: 1, ModelSamplingAuraFlow: 1, KSampler: 1, VAEDecodeAudio: 1, SaveAudioAdvanced: 1 }, selection: { base: 'ace.safetensors', sft: '', vae: 'v.safetensors', textEncoderSmall: 's.safetensors', textEncoderLarge: 'l.safetensors' } }), null, 'acestep ladder: a ready engine passes clean')
+  eq(ace.validateAceStep(aceOption, { connected: true, info: {}, selection: { base: '', sft: '', vae: '', textEncoderSmall: '', textEncoderLarge: '' } }), 'The ACE-Step BASE model, audio VAE, and both Qwen ACE text encoders are required.', 'acestep ladder: missing models refuse naming the variant')
 }
 
 console.log(`\ntest-canvas: ${passed} assertions passed`)

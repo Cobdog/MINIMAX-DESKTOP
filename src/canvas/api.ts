@@ -31,6 +31,15 @@ export type CanvasSession = { openProjects: string[]; activeProject: string | nu
 
 export type SearchHit = { source_id: string; source_kind: string }
 
+/** One global asset-store row (§2 asset, F3 decided — above projects). */
+export type DocumentAsset = {
+  id: string
+  kind: 'character' | 'location' | 'wardrobe' | 'refmod' | 'prompt'
+  fields: Record<string, unknown>
+  canonicalReferenceSet: string[] | null
+  createdAt: number
+}
+
 export const documentsApi = {
   bootstrap: () => call<{ schemaVersion: number; appVersion: string }>('/api/lan/documents/bootstrap'),
 
@@ -99,10 +108,26 @@ export const documentsApi = {
     return `/api/lan/documents/blobs/file?${query}`
   },
 
-  search: async (query: string, limit = 24): Promise<SearchHit[]> => {
+  search: async (query: string, limit = 24, kind?: string): Promise<SearchHit[]> => {
     if (!query.trim()) return []
-    return (await call<{ results?: SearchHit[] }>(`/api/lan/documents/search?q=${encodeURIComponent(query)}&limit=${limit}`)).results ?? []
+    const kindQuery = kind ? `&kind=${encodeURIComponent(kind)}` : ''
+    return (await call<{ results?: SearchHit[] }>(`/api/lan/documents/search?q=${encodeURIComponent(query)}&limit=${limit}${kindQuery}`)).results ?? []
   },
+
+  // ---- the global asset store (§2 asset, F3; Phase 4 canvas surface) ------
+
+  listAssets: async (kind?: string): Promise<DocumentAsset[]> => {
+    const kindQuery = kind ? `?kind=${encodeURIComponent(kind)}` : ''
+    return (await call<{ assets: DocumentAsset[] }>(`/api/lan/documents/assets${kindQuery}`)).assets ?? []
+  },
+
+  upsertAsset: async (input: { id?: string; kind: DocumentAsset['kind']; fields: Record<string, unknown>; canonicalReferenceSet?: string[] | null }) =>
+    (await post<{ asset: { id: string; kind: string } }>('/api/lan/documents/assets', input)).asset,
+
+  /** Consent-gated fork-into-project (§2 asset_fork): the explicit consent
+   *  record — the panel's bind flow calls this BEFORE the first reference. */
+  forkAsset: (input: { projectId: string; assetId: string; forkedSettings?: Record<string, unknown> }) =>
+    post<{ fork: { projectId: string; assetId: string } }>('/api/lan/documents/assets/fork', { ...input, consent: true }),
 
   getSession: async (): Promise<CanvasSession> => {
     const body = await call<{ session: CanvasSession | null }>('/api/lan/documents/session')

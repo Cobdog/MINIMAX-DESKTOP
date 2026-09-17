@@ -26,8 +26,29 @@ import type { DocumentChain, DocumentTake } from './derive'
 export type CanvasChainSettings = {
   prompt: string
   /** Recorded entry intent (§4 launcher chips). H3 renders video; the image
-   *  generator absorption (Z-Image) is the §5.4/Phase-4 seam. */
-  mediaType: 'video' | 'image'
+   *  generator absorption (Z-Image) is the §5.4/Phase-4 seam. Audio engines
+   *  (Music 3 / ACE-Step) create mediaType 'audio' chains. */
+  mediaType: 'video' | 'image' | 'audio'
+  /** §5.4 engines-as-ops (Phase 4): which engine a video chain renders
+   *  through — H3 (default) or the LTX-2.5 general graph (the typed-hole
+   *  produce row; the workspace greyed out with the nav model). */
+  engine: 'h3' | 'ltx25'
+  /** Audio-engine facts (mediaType 'audio', Phase 4): which engine + its
+   *  request options. The audio dock writes them; submitChain reads them —
+   *  reruns are settings-stable (invariant 1) for audio too. Fields the
+   *  active engine ignores are simply not read. */
+  audio: {
+    engine: 'music3' | 'acestep'
+    /** Music 3: the caption sections. ACE-Step: the tag prompt. */
+    caption: string
+    lyrics: string
+    duration: number
+    seed: number
+    /** ACE-Step extras. */
+    instrumental: boolean
+    model: 'base' | 'sft'
+    bpm: number
+  }
   duration: number
   resolution: string
   turbo: 'off' | '4' | '8'
@@ -51,6 +72,10 @@ export type CanvasChainSettings = {
   /** Character/location library bindings (the promptComposer model). */
   referenceCharacterIds: string[]
   referenceLocationIds: string[]
+  /** GLOBAL asset-store bindings (Phase 4, §2 asset): consent-gated
+   *  fork-into-project first, then their canonical reference sets ride the
+   *  same ordered <Picture N> budget. */
+  referenceAssetIds: string[]
   /** Reference-mode keyframe guides (§2: persist as chain settings). */
   timelineGuides: Array<{ file: MediaFile; seconds: number }>
 }
@@ -65,6 +90,8 @@ export function chainSettingsDefaults(settings?: AppSettings | null): CanvasChai
   return {
     prompt: '',
     mediaType: 'video',
+    engine: 'h3',
+    audio: { engine: 'music3', caption: '', lyrics: '', duration: 60, seed: Math.floor(Math.random() * 1_000_000_000), instrumental: false, model: 'base', bpm: 120 },
     duration: defaults?.duration ?? 6,
     resolution: defaults?.resolution && RESOLUTIONS.includes(defaults.resolution) ? defaults.resolution : '1344x768',
     turbo: defaults?.turbo ?? 'off',
@@ -83,6 +110,7 @@ export function chainSettingsDefaults(settings?: AppSettings | null): CanvasChai
     referenceOutputIds: [],
     referenceCharacterIds: [],
     referenceLocationIds: [],
+    referenceAssetIds: [],
     timelineGuides: [],
   }
 }
@@ -96,6 +124,17 @@ export function readChainSettings(raw: Record<string, unknown>, settings?: AppSe
   const num = (value: unknown, fallback: number) => (typeof value === 'number' && Number.isFinite(value) ? value : fallback)
   const bool = (value: unknown, fallback: boolean) => (typeof value === 'boolean' ? value : fallback)
   const idList = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && Boolean(item)) : [])
+  const audioRaw = (raw.audio && typeof raw.audio === 'object' ? raw.audio : {}) as Record<string, unknown>
+  const audio = {
+    engine: audioRaw.engine === 'acestep' ? 'acestep' as const : 'music3' as const,
+    caption: str(audioRaw.caption, ''),
+    lyrics: str(audioRaw.lyrics, ''),
+    duration: Math.max(5, Math.min(300, num(audioRaw.duration, 60))),
+    seed: Math.max(0, Math.floor(num(audioRaw.seed, base.audio.seed))),
+    instrumental: bool(audioRaw.instrumental, false),
+    model: audioRaw.model === 'sft' ? 'sft' as const : 'base' as const,
+    bpm: Math.max(40, Math.min(240, num(audioRaw.bpm, 120))),
+  }
   const guides = Array.isArray(raw.timelineGuides)
     ? raw.timelineGuides.filter((guide): guide is { file: MediaFile; seconds: number } => {
       if (!guide || typeof guide !== 'object') return false
@@ -109,7 +148,9 @@ export function readChainSettings(raw: Record<string, unknown>, settings?: AppSe
   return {
     ...base,
     prompt: str(raw.prompt, base.prompt),
-    mediaType: raw.mediaType === 'image' ? 'image' : 'video',
+    mediaType: raw.mediaType === 'image' ? 'image' : raw.mediaType === 'audio' ? 'audio' : 'video',
+    engine: raw.engine === 'ltx25' ? 'ltx25' : 'h3',
+    audio,
     duration: Math.max(2, Math.min(15, num(raw.duration, base.duration))),
     resolution: RESOLUTIONS.includes(str(raw.resolution, '')) ? str(raw.resolution, base.resolution) : base.resolution,
     turbo,
@@ -128,6 +169,7 @@ export function readChainSettings(raw: Record<string, unknown>, settings?: AppSe
     referenceOutputIds: idList(raw.referenceOutputIds),
     referenceCharacterIds: idList(raw.referenceCharacterIds),
     referenceLocationIds: idList(raw.referenceLocationIds),
+    referenceAssetIds: idList(raw.referenceAssetIds),
     timelineGuides: guides,
   }
 }
@@ -140,8 +182,8 @@ export function readChainSettings(raw: Record<string, unknown>, settings?: AppSe
  * first-and-last; a first frame alone selects image-to-video; otherwise
  * text-to-video. Mirrors resolveMovieShotGenerationMode's precedence.
  */
-export function effectiveMode(settings: Pick<CanvasChainSettings, 'firstFrameOutputId' | 'lastFrameOutputId' | 'referenceOutputIds' | 'referenceCharacterIds' | 'referenceLocationIds'>): GenerationMode {
-  const hasReferences = settings.referenceOutputIds.length > 0 || settings.referenceCharacterIds.length > 0 || settings.referenceLocationIds.length > 0
+export function effectiveMode(settings: Pick<CanvasChainSettings, 'firstFrameOutputId' | 'lastFrameOutputId' | 'referenceOutputIds' | 'referenceCharacterIds' | 'referenceLocationIds' | 'referenceAssetIds'>): GenerationMode {
+  const hasReferences = settings.referenceOutputIds.length > 0 || settings.referenceCharacterIds.length > 0 || settings.referenceLocationIds.length > 0 || settings.referenceAssetIds.length > 0
   if (hasReferences) return 'reference'
   if (settings.firstFrameOutputId && settings.lastFrameOutputId) return 'frames'
   if (settings.firstFrameOutputId) return 'image'
@@ -212,6 +254,18 @@ export type CanvasLibraries = {
 
 export const emptyLibraries: CanvasLibraries = { characters: [], wardrobes: [], locations: [] }
 
+/** One GLOBAL asset-store entry, resolved to the shape a chain binds (Phase 4,
+ *  §2 asset/F3): kind character/location with its canonical reference set as
+ *  renderable picture files. The store maps canvas_asset rows here; prompt
+ *  assets surface through the SmartPromptEditor library instead. */
+export type CanvasAssetEntry = {
+  id: string
+  kind: 'character' | 'location'
+  label: string
+  /** The curated reference set (L13 recorded-open: curated sets, not takes). */
+  images: MediaFile[]
+}
+
 /**
  * The ordered reference bindings for one chain: library allocation (the exact
  * allocateWorkspaceReferences round-robin — one authoritative picture per
@@ -223,6 +277,7 @@ export function resolveChainReferences(
   settings: CanvasChainSettings,
   libraries: CanvasLibraries,
   resolveMedia: (outputId: string) => { media: MediaFile; take: DocumentTake } | null,
+  assets: CanvasAssetEntry[] = [],
 ): MovieReferenceBinding[] {
   const selectedCharacters = settings.referenceCharacterIds
     .map((id) => libraries.characters.find((character) => character.id === id))
@@ -248,7 +303,23 @@ export function resolveChainReferences(
       source: 'canvas',
     })
   }
-  return [...bindings, ...canvasRefs].slice(0, 9)
+  // Global-asset bindings (Phase 4): each bound asset's curated set joins the
+  // SAME ordered picture budget after library + canvas refs — a dropped or
+  // tombstoned asset is skipped honestly, never a hole in <Picture N>.
+  const assetRefs: MovieReferenceBinding[] = []
+  for (const assetId of settings.referenceAssetIds) {
+    const asset = assets.find((entry) => entry.id === assetId)
+    if (!asset || !asset.images.length) continue
+    for (const image of asset.images) {
+      assetRefs.push({
+        file: image,
+        purpose: 'generic',
+        label: `${asset.kind === 'location' ? 'Location' : 'Character'} asset: ${asset.label}`,
+        source: 'asset',
+      })
+    }
+  }
+  return [...bindings, ...canvasRefs, ...assetRefs].slice(0, 9)
 }
 
 // ---- request + graph construction ----------------------------------------------
@@ -274,6 +345,7 @@ export function buildCanvasRenderRequest(
   settings: CanvasChainSettings,
   sources: CanvasRenderSources,
   bindings: MovieReferenceBinding[],
+  chain?: H3RenderRequest['chain'],
 ): H3RenderRequest {
   const mode = effectiveMode(settings)
   const [width, height] = settings.resolution.split('x').map(Number)
@@ -310,6 +382,7 @@ export function buildCanvasRenderRequest(
     referenceAudios: mode === 'reference' ? sources.referenceAudios ?? [] : [],
     timelineGuides: mode === 'reference' ? settings.timelineGuides : [],
     livePreview: { enabled: false, mode: 'standard' },
+    ...(chain ? { chain } : {}),
     filenamePrefix: `video/Canvas_H3_${Date.now()}`,
   }
 }
@@ -351,6 +424,7 @@ export function planCanvasGraph(request: H3RenderRequest, selection: ModelSelect
     referenceVideos: request.referenceVideos.map((item) => item.path),
     referenceAudios: request.referenceAudios.map((item) => item.path),
     timelineGuides: request.timelineGuides.length ? request.timelineGuides.map((guide) => ({ frameIndex: Math.round(guide.seconds * 24) })) : undefined,
+    ...(request.chain ? { chain: request.chain } : {}),
   }, selection, {
     first: uploads.first ? { name: uploads.first } : undefined,
     last: uploads.last ? { name: uploads.last } : undefined,
@@ -399,4 +473,56 @@ export function forkInputSpec(source: { outputId: string; takeId: string | null;
   if (source.extractedPath) outputRef.extractedPath = source.extractedPath
   if (typeof source.frameIndex === 'number') outputRef.frameIndex = source.frameIndex
   return { outputRef }
+}
+
+// ---- latent continuation (Phase 4: the Motion-Context engine seam) ----------
+
+/** The Motion-Context custom-node classes a latent continuation needs (the
+ *  same availability computation the old shell's scene chains gate on). */
+export const MOTION_CONTEXT_NODES = [
+  'MiniMaxH3MotionContext',
+  'MiniMaxH3MotionContextLoadLatent',
+  'MiniMaxH3MotionContextSaveLatent',
+  'MiniMaxH3MotionContextTrim',
+] as const
+
+/** Where one canvas chain's sampler latents live (engine-side, under the
+ *  ComfyUI output directory — the scene-chain convention). */
+export function motionContextFolder(chainId: string): string {
+  return `h3_context/${chainId}/clip`
+}
+
+/** The saved-clip facts a take carries when its render wrote a latent. */
+export type MotionContextFacts = { folder: string; clipIndex: number }
+
+/** Tolerant read of a take's motion-context provenance (take.metrics is
+ *  external data): returns null for takes that rendered without the
+ *  machinery — the honest signal that latents forks refuse on. */
+export function takeMotionContext(take: DocumentTake | null): MotionContextFacts | null {
+  const record = take?.metrics?.motionContext
+  if (!record || typeof record !== 'object') return null
+  const candidate = record as Record<string, unknown>
+  if (typeof candidate.folder !== 'string' || !candidate.folder) return null
+  if (typeof candidate.clipIndex !== 'number' || !Number.isInteger(candidate.clipIndex) || candidate.clipIndex < 0) return null
+  return { folder: candidate.folder, clipIndex: candidate.clipIndex }
+}
+
+/** The chain option a CANVAS H3 render carries: with the Motion-Context nodes
+ *  installed every render SAVES its sampler latent (index 0 = chain start, no
+ *  load, no trim) so its takes are latent-forkable. `loadFrom` pins an
+ *  explicit source clip — the substrate=latents fork continuation. */
+export function canvasChainOption(chainId: string, continuation: MotionContextFacts | null): NonNullable<H3RenderRequest['chain']> {
+  const folder = motionContextFolder(chainId)
+  if (!continuation) return { index: 0, folder }
+  // The fork continues from the SOURCE's saved clip: it loads that exact clip
+  // as never-denoised conditioning (no re-encode) and saves its own
+  // continuation into its OWN folder — never a write into the source's.
+  return { index: 1, folder, loadFrom: { folder: continuation.folder, clipIndex: continuation.clipIndex } }
+}
+
+/** The latent path a take records for a saved clip (engine-side relative
+ *  identifier; the node resolves <folder><clipIndex> by its own convention —
+ *  the recorded string is the durable, human-readable provenance). */
+export function latentPathFor(facts: MotionContextFacts): string {
+  return `${facts.folder}${facts.clipIndex}.latent`
 }

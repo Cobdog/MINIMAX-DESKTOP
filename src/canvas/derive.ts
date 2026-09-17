@@ -60,6 +60,9 @@ export type DocumentChain = {
 export type CanvasDocument = {
   project: { id: string; name: string; camera: Record<string, unknown>; createdAt: number; lastActiveAt: number }
   chains: DocumentChain[]
+  /** §2 asset_fork rows for this project (the consent records — present once
+   *  a global asset is forked in; absent on older documents, tolerated). */
+  assetForks?: Array<{ projectId: string; assetId: string; forkedSettingsSnapshot: Record<string, unknown>; lineage: Record<string, unknown> | null; consentAt: number }>
 }
 
 /** The job facts the status ring needs — GenerationJob is structural here so

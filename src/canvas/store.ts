@@ -44,33 +44,46 @@ import {
 import {
   buildCanvasRenderRequest,
   buildOutputIndex,
+  canvasChainOption,
   chainSettingsDefaults,
   effectiveMode,
   emptyLibraries,
   forkInputSpec,
+  latentPathFor,
   mediaForOutput,
   MODE_LABEL,
+  MOTION_CONTEXT_NODES,
   planCanvasGraph,
   readChainSettings,
   resolveChainReferences,
+  takeMotionContext,
+  type CanvasAssetEntry,
   type CanvasChainSettings,
   type CanvasLibraries,
   type ForkSubstrate,
+  type MotionContextFacts,
 } from './generation'
 import { DEFAULT_SETTINGS, type OpKind } from './ops'
 import type { EndpointDirection, EndpointOption, OptionAvailability } from './options'
 import { findH3PreviewOverrideNode } from '../lib/h3Stack'
-import { inferSelections } from '../lib/modelSelection'
+import { inferLtx25Selections, inferSelections } from '../lib/modelSelection'
 import { submitH3Render, validateH3Render } from '../lib/h3Submit'
 import { submitLtx23Utility, validateLtx23Utility } from '../lib/ltx23UtilitySubmit'
+import { submitLtx25, validateLtx25, LTX25_NATIVE_REQUIRED_NODES } from '../lib/ltx25Submit'
 import { submitZImage, validateZImage, planZImageGraph } from '../lib/zImageSubmit'
+import { submitMusic3, validateMusic3 } from '../lib/music3Submit'
+import { submitAceStep, validateAceStep } from '../lib/aceStepSubmit'
+import { buildMusic3Workflow, inferMusic3Selection, type Music3GenerationOptions } from '../lib/music3Workflow'
+import { buildAceStepWorkflow, inferAceStepSelections } from '../lib/aceStepWorkflow'
+import { buildLtx25Workflow } from '../lib/ltx25Workflow'
+import { choices } from '../lib/comfyInfo'
 import { buildLtx23UtilityGraph, findLtx23Utility } from '../lib/graph'
-import { loadCharacterProjects } from '../lib/characterLibrary'
-import { loadLocationProjects } from '../lib/locationLibrary'
+import { characterReferences, loadCharacterProjects } from '../lib/characterLibrary'
+import { locationReferences, loadLocationProjects } from '../lib/locationLibrary'
 import { loadWardrobeProjects } from '../lib/wardrobeLibrary'
 import { useJobsStore } from '../state/jobsStore'
 import { useSessionStore } from '../state/sessionStore'
-import type { GenerationJob, MediaFile, ModelSelection } from '../types'
+import type { AceStepGenerationOptions, GenerationJob, MediaFile, ModelSelection } from '../types'
 
 /** The camera singleton for this route — attach in Substrate, never subscribe
  *  per-frame in React. */
@@ -100,6 +113,29 @@ function engineFacts() {
     info: session.info,
     connected: session.status.connected,
   }
+}
+
+/** The approved picture paths of a library entry (the §6 projection's
+ *  canonical reference sets). */
+function characterReferencesOf(character: ReturnType<typeof loadCharacterProjects>[number]): string[] {
+  return characterReferences(character).map((file) => file.path)
+}
+
+function locationReferencesOf(location: ReturnType<typeof loadLocationProjects>[number]): string[] {
+  return locationReferences(location).map((file) => file.path)
+}
+
+/** The LTX-2.5 component selection for the current engine (the upscaler
+ *  choices come from object-info exactly like the old surface computes it). */
+function ltx25SelectionOf() {
+  const { models, info } = engineFacts()
+  return inferLtx25Selections(models, choices(info, 'LatentUpscaleModelLoader', 'model_name'))
+}
+
+/** Motion-Context readiness: all four node classes reported by the engine. */
+function motionContextReady(): boolean {
+  const info = engineFacts().info
+  return MOTION_CONTEXT_NODES.every((node) => Boolean(info?.[node]))
 }
 
 /** H3 readiness for one turbo tier (the App-root computation, per chain). */
@@ -136,6 +172,8 @@ type CanvasState = {
   selection: SelectionState
   /** The libraries chains bind references from (the shared global stores). */
   libraries: CanvasLibraries
+  /** The GLOBAL asset store resolved for binding (§2 asset, Phase 4). */
+  assets: CanvasAssetEntry[]
   /** Mirrored engine facts for honest UI states (EngineHost writes). */
   engine: { connected: boolean; modelReady: boolean }
   chainJobs: Record<string, string>
@@ -151,6 +189,12 @@ type CanvasState = {
   opEditor: { chainId: string } | null
   /** Phase 3 (§5.2): the pose-rig dock's target chain (control-track export). */
   poseRig: { chainId: string } | null
+  /** Phase 4 (§7 V): the library projection overlay (library-as-projection). */
+  libraryOpen: boolean
+  /** Phase 4 (§8): Settings docked as a floating panel (the thin surface). */
+  settingsDock: boolean
+  /** Phase 4 (§5.4): the audio engine dock (Music 3 / ACE-Step as ops). */
+  audioDock: { engine: 'music3' | 'acestep'; chainId?: string } | null
   cameraCommands: CameraCommand[]
   cameraCommandSeq: number
   viewDirty: boolean
@@ -160,6 +204,23 @@ type CanvasActions = {
   boot(): Promise<void>
   refreshProjects(): Promise<void>
   refreshLibraries(): void
+  /** Phase 4: the global asset store — load rows for binding, and project
+   *  the shared libraries into canvas_asset (copy-never-destroy). */
+  refreshAssets(): Promise<void>
+  syncLibraryAssets(): Promise<void>
+  /** Consent-gated global-asset bind (§2 asset_fork): fork-into-project on
+   *  first bind, then the reference rides the ordered picture budget. */
+  bindGlobalAsset(chainId: string, assetId: string): Promise<void>
+  /** Phase 4 overlays: the library projection (V) + the Settings dock. */
+  setLibraryOpen(open: boolean): void
+  setSettingsDock(open: boolean): void
+  setAudioDock(dock: { engine: 'music3' | 'acestep'; chainId?: string } | null): void
+  /** One audio chain submit (Music 3 / ACE-Step as ops): the dock creates
+   *  the chain + settings, submitChain carries it (rerun-stable). */
+  createAudioChain(engine: 'music3' | 'acestep', caption: string): Promise<string | null>
+  /** The dock's pre-submit validation for a NOT-YET-CREATED audio chain —
+   *  the same ladders submitChain runs (honest offline refusals inline). */
+  validateAudioDraft(engine: 'music3' | 'acestep', caption: string): string | null
   openProject(id: string, options?: { restoreCamera?: boolean }): Promise<void>
   closeProject(id: string): Promise<void>
   createCanvas(name?: string): Promise<string | null>
@@ -319,10 +380,19 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
             const output = await documentsApi.createOutput({ chainId, substrates: ['decoded'] })
             outputId = output.id
           }
+          // Phase 4: a render whose graph saved a sampler latent records its
+          // saved-clip facts (manifest.motionContext, written by the submit
+          // core) — the take becomes latent-forkable (substratesForTake).
+          const manifest = job.manifest && typeof job.manifest === 'object' ? (job.manifest as Record<string, unknown>) : null
+          const manifestMotion = manifest && manifest.motionContext && typeof manifest.motionContext === 'object' ? (manifest.motionContext as Record<string, unknown>) : null
+          const motionContext = manifestMotion && typeof manifestMotion.folder === 'string' && typeof manifestMotion.clipIndex === 'number'
+            ? { folder: manifestMotion.folder, clipIndex: manifestMotion.clipIndex }
+            : null
           await documentsApi.appendTake({
             outputId,
             jobId: job.id,
             artifacts: [job.localOutputPath],
+            ...(motionContext ? { latentPath: latentPathFor(motionContext) } : {}),
             metrics: {
               kind: job.mediaType ?? 'video',
               duration: job.duration,
@@ -330,6 +400,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
               height: job.height,
               sourcePath: job.localOutputPath,
               outputUrl: job.outputUrl ?? null,
+              ...(motionContext ? { motionContext } : {}),
             },
           })
           get().toast('success', `The render landed on “${chainPromptOf(chain)}”.`)
@@ -351,7 +422,9 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
   }
 
   /** Everything a chain submit needs, resolved once: settings (tolerant read),
-   *  output index, reference bindings, first/last media. */
+   *  output index, reference bindings (library + canvas + global assets),
+   *  first/last media, and — Phase 4 — the latent-continuation facts when the
+   *  chain is a substrate=latents fork. */
   const chainRenderContext = (chainId: string) => {
     const doc = activeDocument()
     if (!doc) return null
@@ -360,7 +433,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     const settings = readChainSettings(chain.settings, useSessionStore.getState().settings)
     const outputs = buildOutputIndex(doc)
     const resolveMedia = (outputId: string) => mediaForOutput(outputs.get(outputId))
-    const bindings = resolveChainReferences(settings, get().libraries, resolveMedia)
+    const bindings = resolveChainReferences(settings, get().libraries, resolveMedia, get().assets)
     const firstFrame = settings.firstFrameOutputId ? mediaForOutput(outputs.get(settings.firstFrameOutputId))?.media ?? null : null
     const lastFrame = settings.lastFrameOutputId ? mediaForOutput(outputs.get(settings.lastFrameOutputId))?.media ?? null : null
     // Reference media split by kind the way the render slots expect: images
@@ -375,8 +448,24 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     const referenceAudios = settings.referenceOutputIds
       .map((outputId) => mediaForOutput(outputs.get(outputId))?.media ?? null)
       .filter((media): media is NonNullable<typeof media> => Boolean(media) && (media as MediaFile).kind === 'audio') as MediaFile[]
-    return { doc, chain, settings, outputs, bindings, firstFrame, lastFrame, referenceMedia, referenceVideos, referenceAudios }
+    // Phase 4 latent continuation: a substrate=latents fork resolves the
+    // SOURCE take's saved-clip facts (its Motion-Context provenance). Absent
+    // facts = the honest refusal below, never a silent decode-instead.
+    const outputRef = chain.inputSpec && typeof chain.inputSpec.outputRef === 'object' ? (chain.inputSpec.outputRef as Record<string, unknown>) : null
+    const isLatentFork = outputRef?.substrate === 'latents'
+    let latentContinuation: MotionContextFacts | null = null
+    let latentRefusal: string | null = null
+    if (isLatentFork) {
+      const sourceOutputId = typeof outputRef?.outputId === 'string' ? outputRef.outputId : null
+      const sourceTakeId = typeof outputRef?.takeId === 'string' ? outputRef.takeId : null
+      const entry = sourceOutputId ? outputs.get(sourceOutputId) : undefined
+      const sourceTake = entry ? (sourceTakeId ? entry.chain.outputs.flatMap((output) => output.takes).find((take) => take.id === sourceTakeId) ?? null : entry.take) : null
+      latentContinuation = takeMotionContext(sourceTake)
+      if (!latentContinuation) latentRefusal = 'The source take has no saved latent context — it rendered before the Motion-Context nodes were installed. Rerun it (a fresh take saves its latent), or fork the decoded media instead.'
+    }
+    return { doc, chain, settings, outputs, bindings, firstFrame, lastFrame, referenceMedia, referenceVideos, referenceAudios, isLatentFork, latentContinuation, latentRefusal }
   }
+
 
   return {
     phase: 'boot',
@@ -389,6 +478,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     layout: undefined,
     selection: { tileIds: [] },
     libraries: emptyLibraries,
+    assets: [],
     engine: { connected: false, modelReady: false },
     chainJobs: {},
     dismissedFailures: [],
@@ -400,12 +490,17 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     forkMenu: null,
     opEditor: null,
     poseRig: null,
+    libraryOpen: false,
+    settingsDock: false,
+    audioDock: null,
     cameraCommands: [],
     cameraCommandSeq: 0,
     viewDirty: false,
 
     boot: async () => {
       get().refreshLibraries()
+      void get().syncLibraryAssets().then(() => get().refreshAssets()).catch(() => undefined)
+      void get().refreshAssets()
       try {
         const [projects, session] = await Promise.all([documentsApi.listProjects(), documentsApi.getSession()])
         set({ projects, openProjects: session.openProjects, activeProjectId: session.activeProject })
@@ -445,6 +540,144 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
           locations: loadLocationProjects(),
         },
       })
+    },
+
+    refreshAssets: async () => {
+      try {
+        const rows = await documentsApi.listAssets()
+        // Resolve for binding: character/location kinds whose curated
+        // reference set yields renderable picture files (paths → MediaFile).
+        // Prompt/refmod/wardrobe assets surface elsewhere (the prompt library
+        // insert + wardrobe studio flows) — they are not picture bindings.
+        const assets: CanvasAssetEntry[] = []
+        for (const row of rows) {
+          if (row.kind !== 'character' && row.kind !== 'location') continue
+          const label = typeof row.fields.name === 'string' && row.fields.name ? row.fields.name : typeof row.fields.label === 'string' && row.fields.label ? row.fields.label : row.id.slice(0, 12)
+          const images = (row.canonicalReferenceSet ?? [])
+            .filter((path): path is string => typeof path === 'string' && Boolean(path))
+            .map((path) => ({ path, name: path.split('/').pop() ?? path, kind: 'image' as const }))
+          if (!images.length) continue
+          assets.push({ id: row.id, kind: row.kind, label, images })
+        }
+        set({ assets })
+      } catch (error) {
+        // A failed load surfaces honestly (the panel shows no global-asset
+        // rows); the next boot, sync, or library event retries.
+        get().toast('error', `The global asset store could not load: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    },
+
+    syncLibraryAssets: async () => {
+      // The libraries → global asset store projection (§6, copy-never-destroy):
+      // every library location/character entry upserts a canvas_asset row
+      // carrying its approved reference set. The old surface keeps reading its
+      // own stores untouched; the canvas gains the global-store binding (F3).
+      const { libraries } = get()
+      const entries: Array<{ id: string; kind: 'character' | 'location'; fields: Record<string, unknown>; references: string[] }> = []
+      for (const character of libraries.characters) {
+        const references = characterReferencesOf(character)
+        if (references.length) entries.push({ id: `library:character:${character.id}`, kind: 'character', fields: { name: character.name, description: character.description ?? '', libraryId: character.id }, references })
+      }
+      for (const location of libraries.locations) {
+        const references = locationReferencesOf(location)
+        if (references.length) entries.push({ id: `library:location:${location.id}`, kind: 'location', fields: { name: location.name, description: location.description ?? '', environmentMode: location.environmentMode, libraryId: location.id }, references })
+      }
+      if (!entries.length) return
+      try {
+        for (const entry of entries) {
+          await documentsApi.upsertAsset({ id: entry.id, kind: entry.kind, fields: entry.fields, canonicalReferenceSet: entry.references })
+        }
+        await get().refreshAssets()
+      } catch {
+        // A failed projection is ambient (the libraries still bind directly);
+        // the next library event or boot retries the sync.
+      }
+    },
+
+    bindGlobalAsset: async (chainId, assetId) => {
+      const doc = activeDocument()
+      const asset = get().assets.find((entry) => entry.id === assetId)
+      if (!doc || !asset) return
+      const chain = doc.chains.find((entry) => entry.id === chainId)
+      if (!chain) return
+      try {
+        // Consent gate (§2 asset_fork, F3): the FIRST bind of an asset into a
+        // project records the explicit fork — lineage home + consent stamp.
+        const forked = (doc.assetForks ?? []).some((fork) => fork.assetId === assetId)
+        if (!forked) {
+          await documentsApi.forkAsset({ projectId: doc.project.id, assetId, forkedSettings: { label: asset.label, kind: asset.kind } })
+          get().toast('neutral', `“${asset.label}” forked into this project — its reference set is bound with lineage back to the global asset.`)
+        }
+        const settings = readChainSettings(chain.settings, useSessionStore.getState().settings)
+        const binding = !settings.referenceAssetIds.includes(assetId)
+        await get().setChainSettings(chainId, { referenceAssetIds: binding ? [...settings.referenceAssetIds, assetId] : settings.referenceAssetIds.filter((id) => id !== assetId) })
+        // The identity payload carries the asset as a ref (§2: reference set
+        // / assets ride every window) — MERGE on bind, drop on unbind, so a
+        // second asset never erases the first's record.
+        const identityRefs = new Set(chain.identity?.refAssetIds ?? [])
+        if (binding) identityRefs.add(assetId)
+        else identityRefs.delete(assetId)
+        await documentsApi.upsertIdentity({ chainId, refAssetIds: [...identityRefs] })
+        const refreshed = await loadDocument(doc.project.id)
+        if (refreshed) recomputeTiles()
+      } catch (error) {
+        get().toast('error', `The global asset could not be bound: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    },
+
+    setLibraryOpen: (open) => set({ libraryOpen: open }),
+    setSettingsDock: (open) => set({ settingsDock: open }),
+    setAudioDock: (dock) => set({ audioDock: dock }),
+
+    validateAudioDraft: (engine, caption) => {
+      const facts = engineFacts()
+      if (!caption.trim()) return engine === 'music3' ? 'Write at least one caption section before generating.' : 'Describe the track (tags) before generating.'
+      if (engine === 'music3') {
+        return validateMusic3(
+          { caption, lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'audio/plan' },
+          { connected: facts.connected, selection: inferMusic3Selection(facts.models) },
+        )
+      }
+      return validateAceStep(
+        { model: 'base', tags: caption, lyrics: '', instrumental: false, duration: 60, seed: 1, bpm: 120, timeSignature: '4', language: 'en', keyScale: 'C major', generateAudioCodes: false, filenamePrefix: 'audio/plan' },
+        { connected: facts.connected, info: facts.info, selection: inferAceStepSelections(facts.models) },
+      )
+    },
+
+    createAudioChain: async (engine, caption) => {
+      const state = get()
+      let projectId = state.activeProjectId
+      if (!projectId) {
+        const created = await get().createCanvas()
+        if (!created) return null
+        projectId = created
+      }
+      try {
+        const chain = await documentsApi.createChain({
+          projectId,
+          kind: 'generation',
+          settings: {
+            ...chainSettingsDefaults(useSessionStore.getState().settings),
+            prompt: caption,
+            mediaType: 'audio',
+            audio: { engine, caption, lyrics: '', duration: 60, seed: Math.floor(Math.random() * 1_000_000_000), instrumental: false, model: 'base', bpm: 120 },
+          } as unknown as Record<string, unknown>,
+        })
+        if (!chain) return null
+        set({ viewDirty: true })
+        const anchor = { x: 120, y: 96, w: TILE_W }
+        const spawn = avoidOverlap(anchor, get().tiles.map((tile) => ({ x: tile.x, y: tile.y, w: tile.w, h: tile.h })))
+        set((current) => ({ layout: { ...(current.layout ?? {}), [chain.id]: spawn } }))
+        const refreshed = await loadDocument(projectId)
+        if (refreshed) recomputeTiles()
+        set({ selection: { tileIds: [chain.id] } })
+        get().requestCamera({ kind: 'fly', tileId: chain.id })
+        get().persistView()
+        return chain.id
+      } catch (error) {
+        get().toast('error', `The audio object could not be created: ${error instanceof Error ? error.message : String(error)}`)
+        return null
+      }
     },
 
     openProject: async (id, options) => {
@@ -543,6 +776,50 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       const projectId = get().activeProjectId
       if (!context || !projectId) return { ok: false, message: 'The chain is not on an open canvas.' }
       const { settings, bindings, firstFrame, lastFrame, referenceMedia, referenceVideos, referenceAudios } = context
+      // §5.4 engines-as-ops (Phase 4): AUDIO chains submit through their
+      // shared cores — the dock edits the settings blob, this path executes
+      // (reruns are settings-stable for audio too).
+      if (settings.mediaType === 'audio') {
+        const facts = engineFacts()
+        if (!facts.settings) return { ok: false, message: 'Studio settings are still loading.' }
+        const io = {
+          notify: (tone: 'error' | 'success' | 'neutral', text: string) => get().toast(tone === 'neutral' ? 'neutral' : tone, text),
+          setJobs: (update: (current: GenerationJob[]) => GenerationJob[]) => useJobsStore.getState().setJobs(update),
+          cancellationRequests: engineBridge.cancellationRequests ?? { current: new Set<string>() },
+          onJobCreated: (jobId: string) => {
+            set((current) => ({ chainJobs: { ...current.chainJobs, [chainId]: jobId } }))
+            recomputeTiles()
+          },
+        }
+        if (settings.audio.engine === 'acestep') {
+          const options: AceStepGenerationOptions = {
+            model: settings.audio.model,
+            tags: settings.audio.caption,
+            lyrics: settings.audio.lyrics,
+            instrumental: settings.audio.instrumental,
+            duration: Math.max(10, Math.min(360, settings.audio.duration)),
+            seed: settings.audio.seed,
+            bpm: settings.audio.bpm,
+            timeSignature: '4',
+            language: 'en',
+            keyScale: 'C major',
+            generateAudioCodes: false,
+            filenamePrefix: `audio/Canvas_ACEStep_${Date.now()}`,
+          }
+          const result = await submitAceStep(options, { settings: facts.settings, connected: facts.connected, info: facts.info, selection: inferAceStepSelections(facts.models), clientId: engineBridge.clientId }, io)
+          return result.ok ? { ok: true } : { ok: false, message: result.message }
+        }
+        const options: Music3GenerationOptions = {
+          caption: settings.audio.caption,
+          lyrics: settings.audio.lyrics,
+          duration: settings.audio.duration,
+          seed: settings.audio.seed,
+          tiledDecode: true,
+          filenamePrefix: `audio/Canvas_Music3_${Date.now()}`,
+        }
+        const result = await submitMusic3(options, { settings: facts.settings, connected: facts.connected, info: facts.info, selection: inferMusic3Selection(facts.models), clientId: engineBridge.clientId }, io)
+        return result.ok ? { ok: true } : { ok: false, message: result.message }
+      }
       // §5.4 engines-as-ops (Phase 3): image INTENT routes the still surface —
       // nothing-selected = a Z-Image Turbo still; a selected image = the Fun
       // ControlNet Union graph over that image (the zImageControlnet
@@ -580,7 +857,41 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       const selection = selectionFor(settings.turbo, settings.turboFamily)
       const facts = engineFacts()
       if (!facts.settings) return { ok: false, message: 'Studio settings are still loading.' }
-      const request = buildCanvasRenderRequest(settings, { firstFrame, lastFrame, referenceImages: referenceMedia, referenceVideos, referenceAudios }, bindings)
+      // §5.4 (Phase 4): the LTX-2.5 GENERAL graph as an engine-op — the
+      // typed-hole produce row created this chain with engine='ltx25'; the
+      // workspace itself greyed out with the nav model (keep-utilities-only).
+      if (settings.engine === 'ltx25') {
+        const result = await submitLtx25(
+          {
+            mode: 'image', prompt: settings.prompt, width: Number(settings.resolution.split('x')[0]) || 1344,
+            height: Number(settings.resolution.split('x')[1]) || 768, duration: settings.duration,
+            preset: settings.turbo === 'off' ? 'quality' : 'turbo', seed: settings.seed,
+            filenamePrefix: `video/Canvas_LTX25_${Date.now()}`,
+          },
+          firstFrame,
+          { settings: facts.settings, connected: facts.connected, info: facts.info, selection: ltx25SelectionOf(), clientId: engineBridge.clientId },
+          {
+            notify: (tone, text) => get().toast(tone === 'neutral' ? 'neutral' : tone, text),
+            setJobs: (update) => useJobsStore.getState().setJobs(update),
+            cancellationRequests: engineBridge.cancellationRequests ?? { current: new Set<string>() },
+            onJobCreated: (jobId) => {
+              set((current) => ({ chainJobs: { ...current.chainJobs, [chainId]: jobId } }))
+              recomputeTiles()
+            },
+          },
+          { manifestExtra: { canvas: { chainId, projectId } } },
+        )
+        return result.ok ? { ok: true } : { ok: false, message: result.message }
+      }
+      // Phase 4 latent-fork gate: a substrate=latents fork renders through
+      // the Motion-Context machinery — the source take's saved clip loads as
+      // never-denoised conditioning (no re-encode). Honest refusals first.
+      if (context.isLatentFork) {
+        if (!motionContextReady()) return { ok: false, message: 'Latent continuation needs the ComfyUI-H3-Motion-Context custom nodes — install them, then refresh the engine.' }
+        if (context.latentRefusal) return { ok: false, message: context.latentRefusal }
+      }
+      const chainOption = motionContextReady() ? canvasChainOption(chainId, context.isLatentFork ? context.latentContinuation : null) : undefined
+      const request = buildCanvasRenderRequest(settings, { firstFrame, lastFrame, referenceImages: referenceMedia, referenceVideos, referenceAudios }, bindings, chainOption)
       const result = await submitH3Render(
         { ...request, manifestExtra: { canvas: { chainId, projectId } } },
         {
@@ -616,9 +927,22 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       const context = chainRenderContext(chainId)
       if (!context) return 'The chain is not on an open canvas.'
       const { settings, bindings, firstFrame, lastFrame, referenceMedia, referenceVideos, referenceAudios } = context
+      const facts = engineFacts()
+      // Audio engines (§5.4 Phase 4) validate through their own ladders.
+      if (settings.mediaType === 'audio') {
+        if (settings.audio.engine === 'acestep') {
+          return validateAceStep(
+            { model: settings.audio.model, tags: settings.audio.caption, lyrics: settings.audio.lyrics, instrumental: settings.audio.instrumental, duration: settings.audio.duration, seed: settings.audio.seed, bpm: settings.audio.bpm, timeSignature: '4', language: 'en', keyScale: 'C major', generateAudioCodes: false, filenamePrefix: 'audio/plan' },
+            { connected: facts.connected, info: facts.info, selection: inferAceStepSelections(facts.models) },
+          )
+        }
+        return validateMusic3(
+          { caption: settings.audio.caption, lyrics: settings.audio.lyrics, duration: settings.audio.duration, seed: settings.audio.seed, tiledDecode: true, filenamePrefix: 'audio/plan' },
+          { connected: facts.connected, selection: inferMusic3Selection(facts.models) },
+        )
+      }
       // The still surface (§5.4) validates through its own ladder.
       if (settings.mediaType === 'image' && (effectiveMode(settings) === 'text' || effectiveMode(settings) === 'image')) {
-        const facts = engineFacts()
         return validateZImage(
           {
             prompt: settings.prompt, seed: settings.seed, width: 1344, height: 768,
@@ -629,8 +953,20 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
           { connected: facts.connected, info: facts.info },
         )
       }
+      // The LTX-2.5 general surface (§5.4 Phase 4).
+      if (settings.engine === 'ltx25') {
+        return validateLtx25(
+          { mode: 'image', prompt: settings.prompt, width: 1344, height: 768, duration: settings.duration, seed: settings.seed, preset: 'quality', filenamePrefix: 'video/plan' },
+          firstFrame,
+          { connected: facts.connected, info: facts.info, selection: ltx25SelectionOf() },
+        )
+      }
+      // The latent-fork gate (Phase 4): honest refusals before the H3 ladder.
+      if (context.isLatentFork) {
+        if (!motionContextReady()) return 'Latent continuation needs the ComfyUI-H3-Motion-Context custom nodes — install them, then refresh the engine.'
+        if (context.latentRefusal) return context.latentRefusal
+      }
       const selection = selectionFor(settings.turbo, settings.turboFamily)
-      const facts = engineFacts()
       const request = buildCanvasRenderRequest(settings, { firstFrame, lastFrame, referenceImages: referenceMedia, referenceVideos, referenceAudios }, bindings)
       return validateH3Render(request, {
         connected: facts.connected,
@@ -895,6 +1231,44 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         // §5.2 (Phase 3): the pose rig docks as a floating canvas panel; its
         // export lands as this chain's control track.
         set({ endpointMenu: null, poseRig: { chainId } })
+        return
+      }
+      if (action.kind === 'ltx25') {
+        // §5.4 (Phase 4): the LTX-2.5 GENERAL surface as an engine-op — a new
+        // chain consuming this image as its first frame, engine='ltx25'. The
+        // submit + its controls live in the chain's properties panel.
+        try {
+          const sourceChain = doc.chains.find((entry) => entry.id === chainId)
+          const sourceOutput = sourceChain?.outputs[0]?.id ?? null
+          if (!sourceOutput) {
+            get().toast('error', 'That object has no output yet — generate or drop media first.')
+            return
+          }
+          const sourceSettings = readChainSettings(sourceChain?.settings ?? {})
+          const chain = await documentsApi.createChain({
+            projectId: doc.project.id,
+            kind: 'generation',
+            settings: {
+              ...chainSettingsDefaults(useSessionStore.getState().settings),
+              prompt: sourceSettings.prompt,
+              mediaType: 'video',
+              engine: 'ltx25',
+              firstFrameOutputId: sourceOutput,
+            } as unknown as Record<string, unknown>,
+          })
+          set({ viewDirty: true })
+          const sourceTile = get().tiles.find((tile) => tile.id === chainId)
+          const place = sourceTile ? { x: sourceTile.x + TILE_W + 140, y: sourceTile.y + TILE_H_MEDIA + 120, w: TILE_W } : { x: 120, y: 96, w: TILE_W }
+          set((current) => ({ layout: { ...(current.layout ?? {}), [chain.id]: place } }))
+          const refreshed = await loadDocument(doc.project.id)
+          if (refreshed) recomputeTiles()
+          set({ selection: { tileIds: [chain.id] }, inspectorOpen: true })
+          get().requestCamera({ kind: 'fly', tileId: chain.id })
+          get().persistView()
+          get().toast('success', 'LTX-2.5 chain created — its properties carry the engine controls; generate submits through the shared core.')
+        } catch (error) {
+          get().toast('error', `The LTX-2.5 chain could not be created: ${error instanceof Error ? error.message : String(error)}`)
+        }
         return
       }
     },
@@ -1203,10 +1577,31 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         }
       })
       const selection = selectionFor('off', '')
+      // The LTX-2.5 GENERAL graph (§5.4 Phase 4 — the workspace greyed out;
+      // the engine survives as this typed-hole op).
+      const ltx25Selection = ltx25SelectionOf()
+      const ltx25MissingNodes = LTX25_NATIVE_REQUIRED_NODES.filter((node) => !facts.info[node])
+      const ltx25ModelsReady = Boolean(ltx25Selection.diffusion && ltx25Selection.textEncoder && ltx25Selection.videoVae && ltx25Selection.audioVae && ltx25Selection.latentUpscaler)
+      // The audio engines (§5.4 Phase 4): detection over the shared infer*.
+      const music3Selection = inferMusic3Selection(facts.models)
+      const aceSelection = inferAceStepSelections(facts.models)
       return {
         connected: facts.connected,
         h3Ready: modelReadyFor(selection, 'off'),
         utilities,
+        motionContextReady: MOTION_CONTEXT_NODES.every((node) => Boolean(facts.info[node])),
+        ltx25: {
+          available: Boolean(facts.connected && ltx25ModelsReady && !ltx25MissingNodes.length),
+          missing: [...(ltx25ModelsReady ? [] : ['LTX-2.5 models']), ...ltx25MissingNodes.map((node) => `node ${node}`)],
+        },
+        music3: {
+          available: Boolean(facts.connected && music3Selection.diffusion && music3Selection.textEncoder && music3Selection.vae),
+          missing: [music3Selection.diffusion ? '' : 'Music 3 diffusion model', music3Selection.textEncoder ? '' : 'Music 3 text encoder', music3Selection.vae ? '' : 'Music 3 DAV VAE'].filter(Boolean),
+        },
+        acestep: {
+          available: Boolean(facts.connected && (aceSelection.base || aceSelection.sft) && aceSelection.vae && aceSelection.textEncoderSmall && aceSelection.textEncoderLarge),
+          missing: [(aceSelection.base || aceSelection.sft) ? '' : 'ACE-Step XL model', aceSelection.vae ? '' : 'ACE audio VAE', (aceSelection.textEncoderSmall && aceSelection.textEncoderLarge) ? '' : 'Qwen ACE text encoders'].filter(Boolean),
+        },
       }
     },
 
@@ -1271,6 +1666,26 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
         useCanvasStore.getState().recompute()
         return { ok: true, jobId, source: mediaTile.previewPath }
       }
+      if (name === 'complete-mock-latent') {
+        // Phase 4: complete the first linked job the way a Motion-Context
+        // render completes — the manifest carries the saved-clip facts, so
+        // the landed take records latentPath + metrics.motionContext (the
+        // substrate=latents fork's source of truth). Exercises the REAL
+        // landing path; no engine needed.
+        const entry = Object.entries(state.chainJobs)[0]
+        if (!entry) return { ok: false, reason: 'no linked job' }
+        const mediaTile = state.tiles.find((tile) => tile.kind === 'media' && tile.previewPath)
+        if (!mediaTile) return { ok: false, reason: 'no media take to land' }
+        const [chainId, jobId] = entry
+        const sourcePath = mediaTile.previewPath ?? ''
+        if (!sourcePath) return { ok: false, reason: 'no stored source path' }
+        useJobsStore.getState().setJobs((jobs) => jobs.map((job) => job.id === jobId ? {
+          ...job, status: 'completed', progress: 100, localOutputPath: sourcePath,
+          manifest: { canvas: { chainId, projectId: 'mock' }, motionContext: { folder: `h3_context/${chainId}/clip`, clipIndex: 0 } },
+        } : job))
+        useCanvasStore.getState().recompute()
+        return { ok: true, jobId, chainId, folder: `h3_context/${chainId}/clip` }
+      }
       if (name === 'stale-worst') {
         const tile = state.tiles.find((entry) => entry.status === 'stale') ?? state.tiles[0]
         if (!tile) return { ok: false, reason: 'no tile' }
@@ -1285,12 +1700,16 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
    *  the honest validation against the live session (offline → the real
    *  refusal string). This is what the e2e suite asserts per mode. Phase 3:
    *  a `mediaType: 'image'` spec routes through the Z-Image plan (§5.4
-   *  stills) exactly like submitChain does. */
+   *  stills) exactly like submitChain does. Phase 4: `mediaType: 'audio'`
+   *  routes through the audio cores; `engine: 'ltx25'` through the LTX-2.5
+   *  general plan; `latentFrom` builds the Motion-Context latent-fork graph. */
   Object.defineProperty(window, '__canvasSubmitPlan', {
     configurable: true,
     value: (spec: {
       prompt?: string
-      mediaType?: 'video' | 'image'
+      mediaType?: 'video' | 'image' | 'audio'
+      engine?: 'h3' | 'ltx25'
+      audioEngine?: 'music3' | 'acestep'
       firstFrameOutputId?: string | null
       lastFrameOutputId?: string | null
       referenceOutputIds?: string[]
@@ -1298,11 +1717,13 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
       turbo?: 'off' | '4' | '8'
       duration?: number
       resolution?: string
+      latentFrom?: { folder: string; clipIndex: number }
     }) => {
       const settings = {
         ...chainSettingsDefaults(useSessionStore.getState().settings),
         prompt: spec.prompt ?? 'a lone drummer on a night train',
         mediaType: spec.mediaType ?? 'video',
+        engine: spec.engine ?? 'h3',
         firstFrameOutputId: spec.firstFrameOutputId ?? null,
         lastFrameOutputId: spec.lastFrameOutputId ?? null,
         referenceOutputIds: spec.referenceOutputIds ?? [],
@@ -1310,6 +1731,66 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
         turbo: spec.turbo ?? 'off',
         duration: spec.duration ?? 6,
         resolution: spec.resolution ?? '1344x768',
+      }
+      // Audio engines (§5.4 Phase 4): the dock's plan seam.
+      if (settings.mediaType === 'audio') {
+        const facts = engineFacts()
+        const audioEngine = spec.audioEngine ?? 'music3'
+        if (audioEngine === 'music3') {
+          const validation = validateMusic3(
+            { caption: settings.prompt, lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'audio/plan' },
+            { connected: facts.connected, selection: inferMusic3Selection(facts.models) },
+          )
+          const graph = buildMusic3Workflow({ caption: settings.prompt, lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'audio/LTX_plan' }, { diffusion: 'TEST-music3.safetensors', textEncoder: 'TEST-music3-te.safetensors', vae: 'TEST-music3-dav.safetensors' })
+          const nodes = Object.values(graph)
+          return {
+            mode: 'music3',
+            validation,
+            graph: {
+              nodeClasses: nodes.map((node) => node.class_type),
+              saveAudio: nodes.some((node) => node.class_type === 'SaveAudioAdvanced'),
+              textEncode: nodes.some((node) => node.class_type === 'MiniMaxMusic3TextEncode'),
+              total: nodes.length,
+            },
+          }
+        }
+        const validation = validateAceStep(
+          { model: 'base', tags: settings.prompt, lyrics: '', instrumental: false, duration: 60, seed: 1, bpm: 120, timeSignature: '4', language: 'en', keyScale: 'C major', generateAudioCodes: false, filenamePrefix: 'audio/plan' },
+          { connected: facts.connected, info: facts.info, selection: inferAceStepSelections(facts.models) },
+        )
+        const graph = buildAceStepWorkflow(
+          { model: 'base', tags: settings.prompt, lyrics: '', instrumental: false, duration: 60, seed: 1, bpm: 120, timeSignature: '4', language: 'en', keyScale: 'C major', generateAudioCodes: false, filenamePrefix: 'audio/ACE_plan' },
+          { base: 'TEST-ace-base.safetensors', sft: 'TEST-ace-sft.safetensors', vae: 'TEST-ace-vae.safetensors', textEncoderSmall: 'TEST-qwen06b.safetensors', textEncoderLarge: 'TEST-qwen4b.safetensors' },
+        )
+        const nodes = Object.values(graph)
+        return {
+          mode: 'acestep',
+          validation,
+          graph: {
+            nodeClasses: nodes.map((node) => node.class_type),
+            saveAudio: nodes.some((node) => node.class_type === 'SaveAudioAdvanced'),
+            textEncode: nodes.some((node) => node.class_type === 'TextEncodeAceStepAudio1.5'),
+            total: nodes.length,
+          },
+        }
+      }
+      // The LTX-2.5 general engine (§5.4 Phase 4).
+      if (settings.engine === 'ltx25' && settings.mediaType === 'video') {
+        const facts = engineFacts()
+        const request = { mode: 'image' as const, prompt: settings.prompt, width: 1344, height: 768, duration: settings.duration, seed: 1, preset: 'quality' as const, filenamePrefix: 'video/LTX25_plan' }
+        const validation = validateLtx25(request, null, { connected: facts.connected, info: facts.info, selection: ltx25SelectionOf() })
+        const graph = buildLtx25Workflow(request, { diffusion: 'TEST-ltx25.safetensors', textEncoder: 'TEST-gemma.safetensors', videoVae: 'TEST-ltx25-vae.safetensors', audioVae: 'TEST-ltx25-avae.safetensors', latentUpscaler: 'TEST-ltx25-up.safetensors' }, { name: 'plan-first.png' } as never)
+        const nodes = Object.values(graph)
+        return {
+          mode: 'ltx25',
+          validation,
+          graph: {
+            nodeClasses: nodes.map((node) => node.class_type),
+            manualSigmasCount: nodes.filter((node) => node.class_type === 'ManualSigmas').length,
+            saveVideo: nodes.some((node) => node.class_type === 'SaveVideo' || node.class_type === 'SaveAnimatedWEBP'),
+            total: nodes.length,
+          },
+        }
       }
       // The still surface (§5.4): construction through the Z-Image machinery.
       if (settings.mediaType === 'image' && (effectiveMode(settings) === 'text' || effectiveMode(settings) === 'image')) {
@@ -1343,11 +1824,14 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
       const doc = snapshot.activeProjectId ? snapshot.documents[snapshot.activeProjectId] : null
       const outputs = doc ? buildOutputIndex(doc) : new Map()
       const resolveMedia = (outputId: string) => mediaForOutput(outputs.get(outputId))
-      const bindings = resolveChainReferences(settings, snapshot.libraries, resolveMedia)
+      const bindings = resolveChainReferences(settings, snapshot.libraries, resolveMedia, snapshot.assets)
       const firstFrame = settings.firstFrameOutputId ? resolveMedia(settings.firstFrameOutputId)?.media ?? null : null
       const lastFrame = settings.lastFrameOutputId ? resolveMedia(settings.lastFrameOutputId)?.media ?? null : null
       const referenceMedia = settings.referenceOutputIds.map((outputId) => resolveMedia(outputId)?.media ?? null).filter(Boolean)
-      const request = buildCanvasRenderRequest(settings, { firstFrame, lastFrame, referenceImages: referenceMedia as MediaFile[], referenceVideos: [], referenceAudios: [] }, bindings)
+      // Phase 4: the latent-fork chain option (the offline seam asserts the
+      // Motion-Context node shape without an engine).
+      const chainOption = spec.latentFrom ? canvasChainOption('plan', spec.latentFrom) : motionContextReady() ? canvasChainOption('plan', null) : undefined
+      const request = buildCanvasRenderRequest(settings, { firstFrame, lastFrame, referenceImages: referenceMedia as MediaFile[], referenceVideos: [], referenceAudios: [] }, bindings, chainOption)
       const facts = engineFacts()
       const selection = selectionFor(settings.turbo, settings.turboFamily)
       const validation = validateH3Render(request, {
@@ -1368,6 +1852,8 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
         images: request.referenceImages.map((item, index) => item.name || `plan-ref-${index + 1}`),
       })
       const nodes = Object.values(graph)
+      const loadLatent = graph['24'] as { class_type: string; inputs: Record<string, unknown> } | undefined
+      const saveLatent = graph['28'] as { class_type: string; inputs: Record<string, unknown> } | undefined
       return {
         mode: request.mode,
         validation,
@@ -1383,6 +1869,12 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
           loadImageCount: nodes.filter((node) => node.class_type === 'LoadImage').length,
           loadAudioCount: nodes.filter((node) => node.class_type === 'LoadAudio').length,
           loraLoaderCount: nodes.filter((node) => node.class_type.includes('LoraLoader') || node.class_type.includes('TurboLoRA')).length,
+          motionContext: {
+            loadLatent: loadLatent?.class_type === 'MiniMaxH3MotionContextLoadLatent' ? loadLatent.inputs : null,
+            context: nodes.some((node) => node.class_type === 'MiniMaxH3MotionContext'),
+            saveLatent: saveLatent?.class_type === 'MiniMaxH3MotionContextSaveLatent' ? saveLatent.inputs : null,
+            trim: nodes.some((node) => node.class_type === 'MiniMaxH3MotionContextTrim'),
+          },
           total: nodes.length,
         },
       }

@@ -58,6 +58,7 @@ const SHELL_CONTEXT = [
   'Top bar: app name/logo left, GPU/VRAM meters and a red-ish "Engine offline" badge right — the engine being offline in tests is CORRECT, not a defect.',
   'Below it a dismissible amber "Model license" banner that may wrap to two lines (intended).',
   'Left sidebar (~218px) with grouped navigation — GENERATE (Create, LTX 2.5, Music, Music 3), PLAN (Create Image, Characters, Hair, Wardrobe, Accessories, Locations), REVIEW (Queue, Library, Clip editor), ADVANCED TOOLS (Movie, Settings) — plus a "Models incomplete" warning box near its bottom.',
+  'Canvas-migration retirement badges: Create, LTX 2.5, Queue, Library and Clip editor carry small muted "retired" pills (greyed styling) — INTENDED Phase-3/4 markers, not defects; the views still open.',
   'Dimmed/disabled controls and small muted sub-labels are the app\'s intentional dense design language, NOT contrast defects — only flag text that is genuinely unreadable against its immediate background.',
 ].join(' ')
 
@@ -219,7 +220,7 @@ export const SCENARIOS: VisionScenario[] = [
           'Center: a 3D viewport showing a HUMAN STICK FIGURE with arms raised in a V — colored joint spheres (bright saturated dots) connected by darker colored bone sticks, standing on a faint dark floor grid; a "selected:" pill near the top; a keyboard-hints bar along the bottom of the viewport.',
           'Right panel: a square black canvas preview rendering the SAME pose as a DWPose whole-body skeleton on pure black — colored limb sticks (darker, slightly desaturated versions of the joint colors), bright colored joint dots, small blue hand-dot clusters near both wrists with thin rainbow finger lines, a cluster of tiny white dots for the face, colored dots at the feet — this is a colored DWPose figure on black, NOT a photo, wireframe, or 3D mesh.',
           'The 3D figure and the 2D preview must be recognizably the SAME pose (arms up in a V).',
-          'Bottom timeline: "Key (K)" and "Delete" buttons, a "frame N / 55" readout, and a track of a FEW WIDE SEGMENTS (the sparse 17n+5 grid — typically 3-4 stretched cells, NOT dense tick marks) where keyframed cells render as solid accent-green blocks and the current cell carries an accent outline, plus a right-aligned note line reading "…keyframe(s) · grid 17n+5 · … frames @ 24 fps · hold-last beyond keys".',
+          'Bottom timeline: "Key (K)" and "Delete" buttons, a "frame N / 55" readout, and a track of a FEW WIDE SEGMENTS (the sparse 17n+5 grid — typically 3-4 stretched cells, NOT dense tick marks) where keyframed cells render as solid accent-green blocks and the current cell is the bright accent-FILLED cell — the current-frame indication is the fill luminance alone (an additional outline is intentionally absent: accent-on-accent would be invisible; the frame readout names the exact frame), plus a right-aligned note line reading "…keyframe(s) · grid 17n+5 · … frames @ 24 fps · hold-last beyond keys". [Amended 2026-09-17: the earlier "carries an accent outline" clause described a treatment the shipped design never rendered — two judgment rounds disagreed on it; the fill is the documented indicator.]',
           'Blessings: the preview canvas may show slight pixelation (intended image-rendering); the figure in the 3D viewport is intentionally flat-shaded without lighting; small muted sub-labels are the app\'s design language.',
           'Defects to flag: 3D viewport empty or all-black, preview canvas blank, limbs missing or single-colored (the limb palette must be multi-colored), overlapping panel content, text clipped by panels, timeline ticks missing.',
         ].join(' '),
@@ -331,6 +332,70 @@ export const SCENARIOS: VisionScenario[] = [
           'Beneath the list: the selected op\'s edit panel with the three labeled range sliders, and a small muted footer line mentioning ⌘Z undo / drag to reorder / Esc.',
           'Blessings: the canvas behind is dimmed (silhouette-level); the modal may overlap the tile; dense small sub-labels are the design language; dimmed controls are intended; the op-row bake button may sit close to the modal\'s inner right padding (flush-but-present is fine, clipped-half is not).',
           'Defects to flag: modal clipped by the viewport, stack rows overlapping, sliders without labels, the brightness thumb left of center, the preview stage empty or pure black, text cut mid-glyph, NO bright structure anywhere (full void).',
+        ].join(' '),
+      },
+    ],
+  },
+
+  {
+    // Canvas Phase 4 (task 6rymbx3) — the completed canvas surface: a media
+    // object with the properties panel carrying the absorbed CreateView
+    // prompt surfaces, PLUS the audio engine dock (§5.4 engines-as-ops) and
+    // the library projection (§7 V) summoned together — the multi-surface
+    // composition the retirement wave leaves behind.
+    id: 'canvas-phase4',
+    label: 'Canvas Phase 4 — properties panel surfaces + audio dock + library projection',
+    run: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+      await page.goto('/?canvas=1')
+      await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+      // The audio dock FIRST — the empty canvas shows the launcher, whose
+      // Music 3 chip opens the dock (§5.4). It stays floating while the
+      // object + panel arrive (selecting never closes an open dock).
+      await page.locator('[data-canvas-chip="music3"]').click()
+      await expect(page.locator('[data-canvas-audio-dock]')).toBeVisible()
+      await page.locator('[data-canvas-audio-caption]').fill('slow cinematic ambient piano, wide reverb, 60 seconds')
+      // A real, decodable PNG lands as a media object…
+      await page.evaluate(() => {
+        const canvas = document.createElement('canvas')
+        canvas.width = 64
+        canvas.height = 36
+        const context = canvas.getContext('2d')!
+        context.fillStyle = '#2b3a55'
+        context.fillRect(0, 0, 64, 36)
+        context.fillStyle = '#e8b04b'
+        context.fillRect(8, 8, 16, 16)
+        const binary = atob(canvas.toDataURL('image/png').split(',')[1])
+        const bytes = new Uint8Array(binary.length)
+        for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+        const transfer = new DataTransfer()
+        transfer.items.add(new File([bytes], 'vision-phase4.png', { type: 'image/png' })
+        )
+        document.querySelector('[data-canvas-root]')!.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true }))
+      })
+      await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+      await page.waitForTimeout(500)
+      // …and selecting it (a direct dispatch — the tile may sit under the
+      // floating dock) opens the properties panel with the absorbed prompt
+      // surfaces. Both compose: dock left, panel right.
+      await page.evaluate(() => (document.querySelector('[data-canvas-tile]') as HTMLElement | null)?.click())
+      await expect(page.locator('[data-canvas-properties]')).toBeVisible()
+      await page.waitForTimeout(700)
+    },
+    after: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
+    },
+    checkpoints: [
+      {
+        id: 'canvas-phase4-surface-1080p',
+        label: 'Canvas — properties panel prompt surfaces + the Music 3 audio dock floating over the substrate',
+        rubric: [
+          'Context: a dark-theme desktop studio at 1920x1080 on the ?canvas=1 canvas route — slim top titlebar (canvas tab, radar chip reading "calm" or a queue count, "engine offline" chip, then small "library V", "settings", "index ⌘K" buttons at the right — ALL intended Phase-4 additions), a near-black dotted-grid canvas surface below, and a slim contextual bottom bar at the foot.',
+          'ONE media tile visible on the canvas (dark rounded card, 16:9 preview showing a dark blue rectangle with a gold square, head/tail endpoint dots) — it may be partially covered by floating panels; silhouette presence is enough.',
+          'A PROPERTIES panel (floating, right side): header with the object title + a mode pill; a PROMPT section with a textarea placeholder and a row of four small pill buttons beneath it (enhance / timeline / audio pass / library — muted icons + labels, possibly dimmed because no local LLM is connected in tests: dimming is CORRECT); sections below for Engine, References, Identity payload with a strength slider, Guides, Takes.',
+          'A separate AUDIO DOCK panel (floating, left-of-center or left side): header with a music note icon + "Music 3 — complete song"; body with a filled multi-line caption textarea containing visible caption text about ambient piano, a Lyrics textarea (empty placeholder), a "seconds" number input showing 60, and a muted note line about the track landing as its own object; footer with a "generate song" button (may be dimmed — the engine is offline in tests, CORRECT).',
+          'Blessings: floating panels may overlap the tile; dense small sub-labels are the design language; dimmed/disabled buttons are intended offline states; the bottom bar may read "generate" with a prompt input + Music 3 / ACE-Step / library chips.',
+          'Defects to flag: either panel missing entirely, panels overlapping EACH OTHER so their headers cannot both be read, the caption textarea empty or clipped, unreadable text mid-glyph, a pure-white or pure-black dead region, no titlebar buttons at all.',
         ].join(' '),
       },
     ],
