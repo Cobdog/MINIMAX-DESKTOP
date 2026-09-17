@@ -31,7 +31,7 @@ const { createHash } = require('node:crypto')
 const Database = require('better-sqlite3')
 
 const { migrations, migrateDatabase } = require('../dist-server/server/db.js')
-const { packZip, unpackZip } = require('../dist-server/server/documentArchive.js')
+const { packZip, unpackZip, MAX_ZIP_ENTRIES, MAX_ZIP_ENTRY_BYTES } = require('../dist-server/server/documentArchive.js')
 
 /** Picks a port that verifiably has nothing listening. */
 async function freePort() {
@@ -130,8 +130,8 @@ async function main() {
     prompts: fixtureDb.prepare('SELECT * FROM saved_prompts').all(),
     projects: fixtureDb.prepare('SELECT * FROM projects').all(),
   }))
-  const applied = migrateDatabase(fixtureDb) // applies 002 (one-way, append-only)
-  check(applied === 1, `golden fixture migration applies exactly 002 (got ${applied})`)
+  const applied = migrateDatabase(fixtureDb) // applies 002 + 003 (one-way, append-only)
+  check(applied === 2, `golden fixture migration applies exactly 002 + 003 (got ${applied})`)
   const goldenAfter = sha256(JSON.stringify({
     jobs: fixtureDb.prepare('SELECT id, provider, media_type, mode, status, prompt, params_json, created_at, updated_at, error, width, height, duration, output_url FROM jobs').all(),
     workspace: fixtureDb.prepare('SELECT * FROM workspace_state').all(),
