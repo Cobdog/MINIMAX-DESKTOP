@@ -22,7 +22,7 @@ import WebSocket from 'ws'
 import { FILMSTRIP_CELL_WIDTH, FILMSTRIP_FPS, filmstripLayout } from '../src/media/filmstripLayout'
 import type { AppSettings, GpuTelemetry, LanStatus, ModelKind } from '../src/types'
 import { failureRef, logEvent, logFailure } from './logger'
-import { sanitizeErrorMessage } from './logSanitize'
+import { sanitizeEngineLogLine, sanitizeErrorMessage } from './logSanitize'
 import { createStudioRepository, type StudioRepository } from './repo'
 import { CANVAS_SCHEMA_VERSION, CanvasSchemaVersionError } from './documents'
 import { exportProjectArchive, importProjectArchive } from './documentArchive'
@@ -38,6 +38,7 @@ import { FetchManager, transportForEnvironment } from './fetcher'
 import { createLlmService, type LlmService } from './llm'
 import { createRouterProvider } from './llm/providers/router'
 import { familyManifest, inferFamily } from './llm/registry'
+import { evaluateRequestGuard } from './requestGuard'
 
 export type StudioServerPaths = {
   settingsFile: string
@@ -149,6 +150,10 @@ function cleanUrl(url: string) {
 const COMFY_FETCH_TIMEOUT_MS = 60_000
 
 async function comfyFetch(url: string, path: string, init?: RequestInit) {
+  // SSRF guard (security hardening 1): every outbound service fetch goes
+  // through this funnel, so the local-only rule is enforced once here —
+  // settings.comfyUrl is no longer the exempt URL it once was.
+  if (!isLocalServiceUrl(url)) throw new Error('The configured service address is not a local (loopback or private-LAN) address. Set a local engine URL in Settings.')
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), COMFY_FETCH_TIMEOUT_MS)
   try {
@@ -398,6 +403,10 @@ export function createStudioServer(paths: StudioServerPaths) {
   let mobileCharacterLibrary: unknown[] = []
   let lanServer: Server | null = null
   let lanStatus: LanStatus = { running: false }
+  // Origin-guard allowlist mirror (security hardening 1): refreshed whenever
+  // settings load or save so both the HTTP handler and the WS upgrade path
+  // (which must answer synchronously) see the same policy.
+  let currentHostAllowlist: string[] = []
 
   // Studio database (wave 1 storage): better-sqlite3 with FTS5 in the same
   // home as settings.json. An open failure is DEGRADED, not fatal — the
@@ -405,7 +414,11 @@ export function createStudioServer(paths: StudioServerPaths) {
   // else (SPA, settings, engine proxy) keeps working.
   let studioRepo: StudioRepository | null = null
   try {
-    studioRepo = createStudioRepository(join(dirname(paths.settingsFile), 'studio.db'))
+    studioRepo = createStudioRepository(join(dirname(paths.settingsFile), 'studio.db'), {
+      // Blob-registration scoping (security hardening 1): the live output
+      // directory joins the studio home as a legal blob source.
+      allowedSourceRoots: () => [join(loadSettingsCached().outputDirectory)],
+    })
     logEvent({ kind: 'db.ready', file: 'studio.db' })
   } catch (error) {
     logFailure('db/open', error, undefined, 'error')
@@ -438,6 +451,11 @@ export function createStudioServer(paths: StudioServerPaths) {
   let realtimeComfyUrl = ''
   const realtimeHub: RealtimeHub = createRealtimeHub({
     authorize: (presented) => !lanAuthRequired() || tokenMatches(presented, lanToken),
+    allowUpgrade: (request) => evaluateRequestGuard(request, {
+      apiPathPrefix: '/api/lan',
+      extraHostAllowlist: currentHostAllowlist,
+      socketEncrypted: Boolean((request.socket as { encrypted?: boolean }).encrypted),
+    }).allowed,
     comfyUrl: async () => (await loadSettings()).comfyUrl,
     readTelemetry: () => readGpuTelemetrySampled(),
     isLocalServiceUrl,
@@ -447,7 +465,10 @@ export function createStudioServer(paths: StudioServerPaths) {
   // fabric's engine channel, and http readiness probes reuse the SAME
   // local-only SSRF guard the LLM channel enforces (the module default is
   // deny-all until this wiring runs, so probes fail closed, never open).
-  EngineProcess.setEngineSink((event) => realtimeHub.emitEngine(event.name, event.phase, event.detail, event.pid))
+  // Phase detail is sanitized at this seam: engine stderr can echo input
+  // values, and the PII-scrub doctrine (failure path/reason, never prompt
+  // semantics) applies to the fabric exactly as it does to the logs.
+  EngineProcess.setEngineSink((event) => realtimeHub.emitEngine(event.name, event.phase, event.detail ? sanitizeErrorMessage(event.detail) : event.detail, event.pid))
   EngineProcess.setUrlGuard(isLocalServiceUrl)
 
   // LLM layer (v2 wave): provider selection (llama.cpp router primary,
@@ -532,7 +553,34 @@ export function createStudioServer(paths: StudioServerPaths) {
       // network is never touched without a recorded, license-matching
       // consent for a catalog id.
       fetch: { consents: {} },
+      // Origin guard (security hardening 1): extra Host names the LAN server
+      // may answer for (custom hostnames; IP literals, localhost and *.local
+      // are always allowed). Empty by default — nobody needs to opt in to be
+      // rebinding-protected.
+      lanHostAllowlist: [],
     }
+  }
+
+  /** Path-shape rules (security hardening 1): everything the studio SPAWNS
+   *  (ffmpeg, managed-engine python) or WRITES THROUGH (output directory)
+   *  must be absolute when set at all — a relative path resolves against an
+   *  unpredictable cwd, which is both a bug and an attack surface. The bare
+   *  'ffmpeg' default (PATH-resolved) is the one sanctioned non-absolute
+   *  value. Empty means "auto" for python/checkout. Returns a problem
+   *  description per offending field; empty array = shape is fine. */
+  function settingsPathProblems(candidate: Partial<AppSettings>): string[] {
+    const problems: string[] = []
+    const isAbsoluteOrEmpty = (value: string) => !value || isAbsolute(value)
+    if (!isAbsoluteOrEmpty(String(candidate.outputDirectory ?? ''))) problems.push('outputDirectory must be an absolute path.')
+    const ffmpeg = String(candidate.ffmpegPath ?? '')
+    if (ffmpeg && !isAbsolute(ffmpeg) && /[/\\]/.test(ffmpeg)) problems.push('ffmpegPath must be an absolute path (or the bare "ffmpeg" to resolve via PATH).')
+    if (!isAbsoluteOrEmpty(String(candidate.engine?.pythonPath ?? ''))) problems.push('engine.pythonPath must be an absolute path.')
+    if (!isAbsoluteOrEmpty(String(candidate.engine?.checkoutPath ?? ''))) problems.push('engine.checkoutPath must be an absolute path.')
+    if (!isAbsoluteOrEmpty(String(candidate.modelRoot ?? ''))) problems.push('modelRoot must be an absolute path.')
+    for (const kind of modelKinds) {
+      if (!isAbsoluteOrEmpty(String(candidate.paths?.[kind] ?? ''))) problems.push(`paths.${kind} must be an absolute path.`)
+    }
+    return problems
   }
 
   function normalizeSettings(raw: Partial<AppSettings>): AppSettings {
@@ -541,10 +589,28 @@ export function createStudioServer(paths: StudioServerPaths) {
     generationDefaults.steps = Math.max(16, Math.min(30, Number(generationDefaults.steps) || 30))
     if (raw.generationDefaults?.steps === 20) generationDefaults.steps = 30
     const stringField = (value: unknown, fallback: string) => (typeof value === 'string' ? value : fallback)
+    // Path-shape backstop (security hardening 1): a hostile or corrupted
+    // settings.json must not smuggle relative spawn/write paths past the
+    // load path (the WRITE route refuses them loudly; this coerces what is
+    // already on disk, with one log line per drop so it is never silent).
+    const shapeProblems = settingsPathProblems(raw)
+    const sanitized: Partial<AppSettings> = { ...raw }
+    if (shapeProblems.some((problem) => problem.startsWith('outputDirectory'))) sanitized.outputDirectory = defaults.outputDirectory
+    if (shapeProblems.some((problem) => problem.startsWith('ffmpegPath'))) sanitized.ffmpegPath = defaults.ffmpegPath
+    if (shapeProblems.some((problem) => problem.startsWith('engine.pythonPath'))) sanitized.engine = { ...(sanitized.engine ?? defaults.engine), pythonPath: '' }
+    if (shapeProblems.some((problem) => problem.startsWith('engine.checkoutPath'))) sanitized.engine = { ...(sanitized.engine ?? defaults.engine), checkoutPath: '' }
+    if (shapeProblems.some((problem) => problem.startsWith('modelRoot'))) sanitized.modelRoot = defaults.modelRoot
+    if (shapeProblems.some((problem) => problem.includes(`paths.`))) sanitized.paths = { ...defaults.paths, ...raw.paths }
+    if (sanitized.paths) {
+      for (const kind of modelKinds) {
+        if (sanitized.paths[kind] && !isAbsolute(sanitized.paths[kind])) sanitized.paths = { ...sanitized.paths, [kind]: defaults.paths[kind] }
+      }
+    }
+    if (shapeProblems.length) logEvent({ kind: 'settings.path-shape-coerced', problems: shapeProblems.length })
     return {
       ...defaults,
-      ...raw,
-      paths: { ...defaults.paths, ...raw.paths },
+      ...sanitized,
+      paths: { ...defaults.paths, ...sanitized.paths },
       generationDefaults,
       llamaCppUrl: stringField(raw.llamaCppUrl, defaults.llamaCppUrl).trim(),
       llamaCppModel: stringField(raw.llamaCppModel, defaults.llamaCppModel).trim(),
@@ -554,9 +620,9 @@ export function createStudioServer(paths: StudioServerPaths) {
       llmThinkingDefault: raw.llmThinkingDefault === 'on' ? 'on' : 'off',
       promptContentLevel: raw.promptContentLevel === 'nsfw' || raw.promptContentLevel === 'suggestive' ? raw.promptContentLevel : 'sfw',
       engine: {
-        mode: raw.engine?.mode === 'managed' ? 'managed' : 'external',
-        checkoutPath: stringField(raw.engine?.checkoutPath, '').trim(),
-        pythonPath: stringField(raw.engine?.pythonPath, '').trim(),
+        mode: sanitized.engine?.mode === 'managed' ? 'managed' : 'external',
+        checkoutPath: stringField(sanitized.engine?.checkoutPath, '').trim(),
+        pythonPath: stringField(sanitized.engine?.pythonPath, '').trim(),
         portPreference: Number.isInteger(raw.engine?.portPreference) && (raw.engine?.portPreference as number) >= 1024 && (raw.engine?.portPreference as number) <= 65535 ? raw.engine?.portPreference as number : 0,
         autoStart: raw.engine?.autoStart === true,
         // Launch profiles (increment 2): stored profiles overlay the seeds;
@@ -607,6 +673,13 @@ export function createStudioServer(paths: StudioServerPaths) {
           return ledger
         })(),
       },
+      // Origin-guard allowlist (security hardening 1): lowercase, portless,
+      // bounded — the Host check treats these as extra allowed names.
+      lanHostAllowlist: (Array.isArray(raw.lanHostAllowlist) ? raw.lanHostAllowlist : [])
+        .filter((entry): entry is string => typeof entry === 'string')
+        .map((entry) => entry.trim().toLowerCase().slice(0, 253))
+        .filter(Boolean)
+        .slice(0, 32),
     }
   }
 
@@ -617,6 +690,13 @@ export function createStudioServer(paths: StudioServerPaths) {
   // semantics (a concurrent external edit of settings.json is not a supported
   // flow; restart to pick one up).
   let settingsCache: AppSettings | null = null
+
+  /** Synchronous peek for closures that cannot await (the blob-scope
+   *  resolver). Answers the cache when warm, defaults before the first load —
+   *  every API path that registers blobs has already awaited loadSettings. */
+  function loadSettingsCached(): AppSettings {
+    return settingsCache ?? defaultSettings()
+  }
 
   async function loadSettings(): Promise<AppSettings> {
     if (settingsCache) return settingsCache
@@ -630,10 +710,12 @@ export function createStudioServer(paths: StudioServerPaths) {
       logFailure('settings/load', error, undefined, 'debug')
       settingsCache = defaultSettings()
     }
+    currentHostAllowlist = settingsCache.lanHostAllowlist ?? []
     return settingsCache
   }
 
   async function saveSettings(settings: AppSettings) {
+    currentHostAllowlist = settings.lanHostAllowlist ?? []
     await mkdir(dirname(paths.settingsFile), { recursive: true })
     // Write-then-rename so a crash mid-write can never leave settings.json half
     // written — loadSettings treats unparseable content as "reset to defaults",
@@ -722,6 +804,7 @@ export function createStudioServer(paths: StudioServerPaths) {
       const upstream = parsed.searchParams.get('url')
       if (!upstream) throw new Error('The ComfyUI video address is missing.')
       const configured = new URL(cleanUrl((await loadSettings()).comfyUrl))
+      if (!isLocalServiceUrl(configured.origin)) throw new Error('The configured ComfyUI address is not a local service address.')
       const target = new URL(upstream)
       if (target.origin !== configured.origin || target.pathname !== '/view') throw new Error('The video address is outside the configured ComfyUI server.')
       const temporary = join(paths.tempDirectory, `minimax-clip-${randomUUID()}.mp4`)
@@ -762,6 +845,7 @@ export function createStudioServer(paths: StudioServerPaths) {
         const file = spec.comfy as { filename?: unknown; subfolder?: unknown; type?: unknown }
         if (typeof file.filename !== 'string' || !file.filename || file.filename.includes('/') || file.filename.includes('\\')) throw new Error('A valid ComfyUI file reference is required.')
         const settings = await loadSettings()
+        if (!isLocalServiceUrl(settings.comfyUrl)) throw new Error('The configured ComfyUI address is not a local service address.')
         const subfolder = typeof file.subfolder === 'string' && file.subfolder && !file.subfolder.includes('..') ? file.subfolder : ''
         const type = file.type === 'input' || file.type === 'temp' ? file.type : 'output'
         const query = new URLSearchParams({ filename: file.filename, subfolder, type })
@@ -779,6 +863,7 @@ export function createStudioServer(paths: StudioServerPaths) {
    *  reference folder (shared by the IPC bridge and the LAN route). */
   async function saveOutputImage(file: { filename: string; subfolder?: string; type?: string }, outputDirectory: string, comfyUrl: string) {
     if (file.filename.includes('/') || file.filename.includes('\\')) throw new Error('A valid output file reference is required.')
+    if (!isLocalServiceUrl(comfyUrl)) throw new Error('The configured ComfyUI address is not a local service address.')
     const query = new URLSearchParams({ filename: file.filename, subfolder: file.subfolder ?? '', type: file.type ?? 'output' })
     const response = await fetch(`${cleanUrl(comfyUrl)}/view?${query}`)
     if (!response.ok) throw new Error('The generated image is unavailable from ComfyUI.')
@@ -985,6 +1070,7 @@ export function createStudioServer(paths: StudioServerPaths) {
     const requestedSubfolder = search.get('subfolder') ?? ''
     if (requestedSubfolder && (isAbsolute(requestedSubfolder) || requestedSubfolder.split(/[\\/]/).includes('..'))) return sendJson(response, 400, { error: 'Invalid output subfolder.' })
     const settings = await loadSettings()
+    if (!isLocalServiceUrl(settings.comfyUrl)) return sendJson(response, 400, { error: 'The configured ComfyUI address is not a local service address.' })
     const query = new URLSearchParams({ filename, subfolder: search.get('subfolder') ?? '', type: search.get('type') ?? 'output' })
     const upstream = await fetch(`${cleanUrl(settings.comfyUrl)}/view?${query}`, { headers: typeof request.headers.range === 'string' ? { Range: request.headers.range } : undefined })
     if (!upstream.ok || !upstream.body) return sendJson(response, upstream.status, { error: 'The generated video is unavailable.' })
@@ -1004,9 +1090,10 @@ export function createStudioServer(paths: StudioServerPaths) {
     let socket: WebSocket | null = null
     const forward = (data: unknown) => response.write(`data: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`)
     const connect = () => {
+      if (!isLocalServiceUrl(comfyUrl)) { forward({ type: 'error', error: 'The configured ComfyUI address is not a local service address.' }); return }
       const clientId = search.get('clientId') ?? ''
       const target = new URL(cleanUrl(comfyUrl))
-      socket = new WebSocket(`ws://${target.host}/ws${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ''}`)
+      socket = new WebSocket(`${target.origin.replace(/^http/, 'ws')}/ws${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ''}`)
       socket.binaryType = 'nodebuffer'
       socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
         if (isBinary) {
@@ -1084,6 +1171,22 @@ export function createStudioServer(paths: StudioServerPaths) {
     try {
       const url = new URL(request.url ?? '/', 'http://minimax.local')
       route = url.pathname
+      // Origin/Host/content-type gate (security hardening 1) — runs BEFORE
+      // auth and before any route work: a disallowed Host (DNS rebinding) or
+      // a foreign Origin (cross-site request through the maintainer's
+      // browser) never reaches a handler, and state-changing API requests
+      // must carry application/json (no-cors cross-site POSTs can only be
+      // text/plain). Same-origin SPA traffic is unaffected by construction.
+      const guard = evaluateRequestGuard(request, {
+        apiPathPrefix: '/api/lan',
+        extraHostAllowlist: currentHostAllowlist,
+        socketEncrypted: Boolean((request.socket as { encrypted?: boolean }).encrypted),
+      })
+      if (!guard.allowed) {
+        const detail = guard.reason === 'host' ? 'disallowed Host header' : guard.reason === 'origin' ? 'cross-origin request refused' : 'state-changing requests require an application/json content type'
+        logEvent({ kind: 'lan.request-refused', reason: guard.reason, method: request.method ?? '' })
+        return sendJson(response, 403, { error: `Request refused: ${detail}.` })
+      }
       if (url.pathname.startsWith('/api/lan/')) {
         if (lanAuthRequired()) {
           // Header token for fetch-able routes; the query parameter is only
@@ -1985,7 +2088,13 @@ export function createStudioServer(paths: StudioServerPaths) {
         // idempotent (a start while starting/running reports already: true
         // and NEVER double-spawns — the port is probed before any spawn).
         if (url.pathname === '/api/lan/engine/status' && request.method === 'GET') {
-          return sendJson(response, 200, await runtime.status())
+          // Security hardening 1: the log tail is scrubbed AT THIS BOUNDARY —
+          // the manager's ring (and the on-disk log) keep full diagnostic
+          // text for the LOCAL user, while what crosses the LAN answers the
+          // PII-scrub doctrine (failure path/reason, never prompt semantics;
+          // engine tracebacks can echo input values).
+          const status = await runtime.status()
+          return sendJson(response, 200, { ...status, logTail: status.logTail.map(sanitizeEngineLogLine) })
         }
         if (url.pathname === '/api/lan/engine/start' && request.method === 'POST') {
           if (settings.engine.mode !== 'managed') return sendJson(response, 400, { error: 'Switch the engine to managed mode in Settings before launching.' })
@@ -2106,11 +2215,38 @@ export function createStudioServer(paths: StudioServerPaths) {
           const entry = history[promptId] as { status?: { status_str?: string } } | undefined
           return sendJson(response, 200, { finished: Boolean(entry), error: entry?.status?.status_str === 'error' ? 'ComfyUI reported an execution error. Check the desktop console for the failed node.' : undefined, output, history })
         }
+        // Settings read: the editor's own data source. Unlike /bootstrap
+        // (which strips model paths — pure recon), these path fields are
+        // FUNCTIONAL: the SPA round-trips them (the settings editor, the
+        // fetch browser, the studio bridges), so they cannot be redacted
+        // without breaking the write path. The recon audience that mattered
+        // — foreign websites and DNS-rebinding readers — is closed by the
+        // origin/Host gate above; remaining readers are the same-origin SPA
+        // and accepted-posture LAN peers.
         if (url.pathname === '/api/lan/settings' && request.method === 'GET') return sendJson(response, 200, { settings })
         if (url.pathname === '/api/lan/settings' && request.method === 'POST') {
           const body = await readJson(request, 200_000)
           const raw = body.settings && typeof body.settings === 'object' ? body.settings as Partial<AppSettings> : null
           if (!raw || typeof raw.comfyUrl !== 'string' || typeof raw.outputDirectory !== 'string') return sendJson(response, 400, { error: 'A settings object with service URLs is required.' })
+          // Security hardening 1: settings are the crown-jewel write (they
+          // repoint spawned binaries, the output tree, and every outbound
+          // service URL), so shape and SSRF rules are enforced at the write
+          // boundary, loudly.
+          const pathProblems = settingsPathProblems(raw)
+          if (pathProblems.length) return sendJson(response, 400, { error: pathProblems.join(' ') })
+          for (const [name, url] of [['comfyUrl', raw.comfyUrl], ['ollamaUrl', raw.ollamaUrl], ['llamaCppUrl', raw.llamaCppUrl]] as const) {
+            if (url && !isLocalServiceUrl(url)) return sendJson(response, 400, { error: `${name} must be a local (loopback or private-LAN) address.` })
+          }
+          // Warn-not-silent on well-formed but nonexistent paths: the save
+          // succeeds (paths are routinely configured ahead of the software
+          // being installed), but the response names every miss.
+          const warnings: string[] = []
+          const noteMissing = (label: string, value: string) => { if (value && isAbsolute(value) && !existsSync(value)) warnings.push(`${label} does not exist yet: ${value}`) }
+          noteMissing('outputDirectory', raw.outputDirectory)
+          noteMissing('ffmpegPath', raw.ffmpegPath ?? '')
+          noteMissing('engine.pythonPath', raw.engine?.pythonPath ?? '')
+          noteMissing('engine.checkoutPath', raw.engine?.checkoutPath ?? '')
+          if (warnings.length) logEvent({ kind: 'settings.missing-paths', count: warnings.length })
           const saved = await saveSettings(normalizeSettings(raw))
           // Leaving managed mode is an explicit user action: stop the engine
           // the studio started (adopted strays included — stop re-verifies
@@ -2119,7 +2255,7 @@ export function createStudioServer(paths: StudioServerPaths) {
           if (settings.engine.mode === 'managed' && saved.engine.mode !== 'managed') {
             void runtime.stop().catch((stopFailure: unknown) => logFailure('engine/stop-on-mode-flip', stopFailure, undefined, 'warn'))
           }
-          return sendJson(response, 200, { settings: saved })
+          return sendJson(response, 200, { settings: saved, ...(warnings.length ? { warnings } : {}) })
         }
         if (url.pathname === '/api/lan/object-info' && request.method === 'GET') {
           return sendJson(response, 200, await comfyFetch(settings.comfyUrl, '/object_info'))
@@ -2409,6 +2545,10 @@ export function createStudioServer(paths: StudioServerPaths) {
   async function startLanServer() {
     const configuredPort = Number(process.env.MINIMAX_LAN_PORT)
     const port = Number.isInteger(configuredPort) && configuredPort >= 1024 && configuredPort <= 65535 ? configuredPort : 4178
+    // Settings load BEFORE listen: the origin guard's host allowlist (and the
+    // whole settings cache) must be warm when the first request arrives, so a
+    // custom-hostname setup is never refused by a cold cache.
+    await loadSettings()
     lanToken = await loadLanToken()
     const address = lanAddress()
     // HTTPS by default (PWA install, and no cleartext tokens on hostile LANs);
@@ -2489,7 +2629,11 @@ export function createStudioServer(paths: StudioServerPaths) {
       lanToken = randomUUID().replace(/-/g, '')
       await saveLanToken(lanToken)
       if (lanStatus.running) {
-        const origin = `http://${lanAddress()}:${lanStatus.port ?? 4178}`
+        // Scheme follows the actual listener (HTTPS by default): an http://
+        // link under TLS is dead on arrival and teaches users to paste
+        // certificate warnings away.
+        const scheme = lanStatus.secure ? 'https' : 'http'
+        const origin = `${scheme}://${lanAddress()}:${lanStatus.port ?? 4178}`
         lanStatus = { ...lanStatus, url: `${origin}/?mobile=1&token=${lanToken}`, desktopUrl: `${origin}/?desktop=1&token=${lanToken}` }
       }
       return lanStatus
