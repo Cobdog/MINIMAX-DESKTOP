@@ -16,13 +16,35 @@
  * is the live-update contract).
  */
 import { memo } from 'react'
-import { Film, GitFork, Lock, Star } from 'lucide-react'
+import { Database, Film, GitFork, Lock, Star } from 'lucide-react'
 import { FilmstripPoster } from '../components/PooledVideoCard'
 import { useFilmstrip } from '../media/useFilmstrip'
 import { documentsApi } from './api'
 import { opPreviewStyle } from './ops'
 import type { ZoomBand } from './camera'
 import { STATUS_LABEL, type Tile } from './derive'
+import { useCanvasStore } from './store'
+
+/** Canvas bridge, direction 1 (dataset-manager spec §11): send this object's
+ *  canonical take to the dataset manager as a referenced source. Explicit,
+ *  consent-shaped (confirm), and the file stays where it is. */
+function sendToDatasets(tile: Tile) {
+  if (!tile.artifactPath) return
+  const store = useCanvasStore.getState()
+  if (!window.confirm(`Send "${tile.title}" to the dataset manager as a training source?\n\nThe file stays where it is — the dataset manager references it by content hash.`)) return
+  const token = new URLSearchParams(window.location.search).get('token') ?? ''
+  void fetch('/api/lan/datasets/ingest/canvas', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-minimax-token': token },
+    body: JSON.stringify({ path: tile.artifactPath }),
+  }).then(async (response) => {
+    const body = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(body.error ?? `ingest failed (${response.status})`)
+    store.toast(body.deduped ? 'neutral' : 'success', body.deduped ? 'Already in the dataset library (same content hash).' : `Sent to the dataset manager: ${body.source?.probe?.width ?? '?'}×${body.source?.probe?.height ?? '?'} — open ?datasets=1`)
+  }).catch((error: unknown) => {
+    store.toast('error', `Dataset send failed: ${error instanceof Error ? error.message : String(error)}`)
+  })
+}
 
 function TilePreview({ tile, previewUrl }: { tile: Tile; previewUrl?: string }) {
   const filmstrip = useFilmstrip(tile.previewPath, tile.duration)
@@ -161,6 +183,17 @@ function TileBase({ tile, band, selected, previewUrl, onSelect, onDismissFailure
           {tile.canonical
             ? <span className="canvas-take-chip canonical" title="Canonical take — click a prior to switch the pointer"><Star size={10} fill="currentColor" /> {tile.canonical.id.slice(0, 8)}</span>
             : <span className="canvas-take-chip canvas-take-chip-empty">no take yet</span>}
+          {tile.artifactPath && (
+            <button
+              type="button"
+              className="canvas-take-chip prior"
+              data-canvas-take-to-datasets
+              title="Send this take to the dataset manager (training-set prep) — the file stays in place"
+              onClick={(event) => { event.stopPropagation(); sendToDatasets(tile) }}
+            >
+              <Database size={10} /> ds
+            </button>
+          )}
           {priorTakes.slice(0, 3).map((take) => (
             <button
               key={take.id}

@@ -147,8 +147,14 @@ export function createWebApiClient(): DesktopApi {
       return body.history ?? {}
     },
     async cancelPrompt(_url: string, promptId: string) {
-      await postJson('/api/lan/cancel', { promptId })
-      return { cancelled: true, state: 'finished' as const }
+      // The server's honest verdict rides through (M5′): a render that
+      // already finished answers {cancelled:false, state:'finished'} — the
+      // caller must NOT mark the job cancelled (it still lands as a take).
+      const body = await postJson<{ cancelled?: boolean; state?: 'running' | 'pending' | 'finished' | 'unknown' }>('/api/lan/cancel', { promptId })
+      return {
+        cancelled: body.cancelled === true,
+        state: body.state === 'running' || body.state === 'pending' || body.state === 'finished' ? body.state : 'unknown' as const,
+      }
     },
     async uploadInput(_url: string, filePath: string) {
       const input = parseComfyInputReference(filePath)

@@ -16,6 +16,7 @@ import { randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import {
   assertDecodedCount,
+  TRAINING_FPS,
   bakeLengthFor,
   gridTargetFor,
   planFps,
@@ -71,9 +72,15 @@ export function planBake(layer: LayerRow, source: SourceRow, explicitTarget?: nu
   const total = source.decodedFrames ?? Math.max(1, Math.round((source.probe.durationSec ?? 0) * (source.probe.fps ?? 24)))
   const inFrame = layer.trim?.inFrame ?? 0
   const outFrame = layer.trim?.outFrame ?? total
-  const available = Math.max(1, outFrame - inFrame)
+  const sourceFps = source.probe.fps ?? 24
+  const plan = planFps(sourceFps)
+  // The window must be sized in POST-conform frames: retime preserves
+  // duration (frames scale by 24/srcFps), drop/dup downsamples by the same
+  // ratio — a 60-frame 30 fps window yields only 48 frames at 24. The grid
+  // target is chosen against the conformable count (−2 headroom), so a
+  // plan-legal bake can never decode short.
+  const available = Math.max(1, Math.round((outFrame - inFrame) * (TRAINING_FPS / sourceFps)))
   const target = explicitTarget && explicitTarget >= 22 && explicitTarget <= 345 ? explicitTarget : gridTargetFor(Math.max(0, available - 2)) ?? 22
-  const plan = planFps(source.probe.fps ?? 24)
   return {
     gridTarget: target,
     encodeFrames: bakeLengthFor(target),

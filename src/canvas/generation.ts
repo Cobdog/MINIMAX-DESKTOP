@@ -225,23 +225,30 @@ export function takeForOutput(entry: OutputIndexEntry | undefined, takeId?: stri
 
 /**
  * Resolves an output (+ substrate choice) to the MediaFile a render can
- * upload. The engine-visible copy is the take's metrics.sourcePath (every
- * landing path records it); a bare absolute artifact works too. Blob-only
- * artifacts (relPath without a source) are durable but not directly
- * renderable — the honest null the validation ladder turns into a message.
+ * upload. The VERIFIED content-addressed blob wins (m3): its bytes are what
+ * this take actually produced, while metrics.sourcePath is a convenience
+ * copy whose absolute path can be stale or FOREIGN after an archive import —
+ * preferring it risks uploading the wrong file (or failing on a path that
+ * does not exist on this machine). Blob references render + upload through
+ * the server's blob seams (upload-output and the video-frame sources resolve
+ * canvas-blobs/ paths); a bare absolute artifact is the pre-blob fallback.
  */
 export function mediaForOutput(entry: OutputIndexEntry | undefined, takeId?: string | null): { media: MediaFile; take: DocumentTake } | null {
   const take = takeForOutput(entry, takeId)
   if (!entry || !take) return null
   const metrics = take.metrics ?? {}
   const kind = typeof metrics.kind === 'string' && ['image', 'video', 'audio'].includes(metrics.kind) ? metrics.kind as MediaFile['kind'] : null
-  const candidate = typeof metrics.sourcePath === 'string' && metrics.sourcePath ? metrics.sourcePath : take.artifacts.find((artifact) => artifact.startsWith('/')) ?? null
+  const blobArtifact = take.artifacts.find((artifact) => artifact.startsWith('canvas-blobs/')) ?? null
+  const candidate = blobArtifact
+    ?? (typeof metrics.sourcePath === 'string' && metrics.sourcePath ? metrics.sourcePath : null)
+    ?? take.artifacts.find((artifact) => artifact.startsWith('/')) ?? null
   if (!candidate || !kind) return null
   const name = typeof metrics.name === 'string' && metrics.name ? metrics.name : candidate.split('/').pop() ?? candidate
   // A servable URL lets the upload path prepare the image (crop/fit) without
   // a session-picked preview object URL — canvas objects resolve from the
   // document, and prepareImage throws "No preview available" without this.
-  const blobArtifact = take.artifacts.find((artifact) => artifact.startsWith('canvas-blobs/'))
+  // (blobArtifact above — the wrong-file guard's verified artifact — doubles
+  // as the preferred preview source.)
   const preview = blobArtifact
     ? `/api/lan/documents/blobs/file?path=${encodeURIComponent(blobArtifact)}`
     : candidate.startsWith('/')

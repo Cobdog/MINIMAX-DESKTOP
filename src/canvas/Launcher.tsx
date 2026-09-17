@@ -9,7 +9,7 @@
  * launcher comes alive, no mode switch; a refused engine surfaces honestly.
  */
 import { useEffect, useRef, useState } from 'react'
-import { AudioLines, Clapperboard, FileVideo, ImagePlus, MessageSquareOff, Music2, Plus, Sparkles, Upload, Users } from 'lucide-react'
+import { AudioLines, Clapperboard, FileVideo, ImagePlus, Layers, MessageSquareOff, Music2, Plus, Sparkles, Upload, Users } from 'lucide-react'
 import { PromptLibraryBrowser } from '../components/PromptLibraryBrowser'
 import { useCanvasStore } from './store'
 
@@ -128,6 +128,13 @@ export function Launcher({ onPickFile }: { onPickFile(): void }) {
         <button type="button" className="canvas-chip" data-canvas-chip="studios" title="Asset authoring studios — characters, hair, wardrobe, accessories, locations" onClick={() => useCanvasStore.getState().setStudiosDock({ tab: 'characters' })}>
           <Users size={13} /> studios
         </button>
+        {/* Dataset manager workbench (sv14rt0): its own surface at
+            ?datasets=1 — import/crop/caption/curate/export training sets.
+            The bridge is two explicit actions (canvas take → source here;
+            dataset layer → canvas reference there). */}
+        <a className="canvas-chip" data-canvas-chip="datasets" href="?datasets=1" title="Dataset manager — training-set prep workbench">
+          <Layers size={13} /> datasets
+        </a>
         <button type="button" className="canvas-chip" data-canvas-chip="movie" title="The timeline projection — the plan chronology + measured transitions (the Director Suite)" onClick={() => useCanvasStore.getState().setTimelineOpen(true)}>
           <Clapperboard size={13} /> movie plan
         </button>

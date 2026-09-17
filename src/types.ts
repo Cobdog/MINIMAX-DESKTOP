@@ -284,6 +284,10 @@ export type AppSettings = {
   /** Local-first fetcher (task hgjbea2): the consent ledger. The network is
    *  touched only inside fetch routes, only for consented catalog ids. */
   fetch: { consents: Record<string, FetchConsentRecord> }
+  /** Origin guard (security hardening 1): extra Host names the LAN server
+   *  may answer for. IP literals, localhost, and *.local are always allowed;
+   *  this list exists for custom hostnames only. Defaults empty. */
+  lanHostAllowlist?: string[]
 }
 
 export type ClipItem = { id: string; name: string; source: string; createdAt: number; start?: number; end?: number; duration?: number }

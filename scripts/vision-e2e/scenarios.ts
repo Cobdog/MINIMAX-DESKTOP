@@ -35,6 +35,12 @@ export type VisionCheckpoint = {
   label: string
   /** The expected contract the judge applies to this checkpoint's PNG. */
   rubric: string
+  /** Optional per-checkpoint driver (added with the datasets-workbench
+   *  scenario, sv14rt0): runs BEFORE this checkpoint's capture so ONE
+   *  scenario can present several distinct states. Absent on every
+   *  pre-existing scenario — the capture loop screenshots the state run()
+   *  left, exactly as before. */
+  drive?: (page: Page) => Promise<void>
 }
 
 export type VisionScenario = {
@@ -528,6 +534,101 @@ export const SCENARIOS: VisionScenario[] = [
           'Bottom bar (chain context): the selected object title, an accent mode pill, a status chip, "no identity payload" or an identity readout, a drift chip, a takes chip, a fork button, and possibly a "1 source ↑" fork-history note.',
           'Blessings: muted/dimmed disabled controls are intended offline; dense small sub-labels are the design language; tiles may be at slightly different y positions (adjacency stacking).',
           'Defects to flag: no visible edge/arrow between the two tiles, poster area empty or a broken-image icon, properties panel overlapping the tiles so content is unreadable, bottom bar empty, any pure-white/black dead region.',
+        ].join(' '),
+      },
+    ],
+  },
+  {
+    // Dataset manager v1 (sv14rt0): the workbench surface at ?datasets=1 —
+    // the required NEW vision scenario: gallery + crop editor + dashboard at
+    // 1080p, one scenario, three states via per-checkpoint drive().
+    id: 'datasets-workbench',
+    label: 'Dataset manager — workbench surface (gallery, crop editor, dashboard) at 1080p',
+    run: async (page) => {
+      // Seed one synthetic source through the HTTP surface + wait for the
+      // async decode probe, then land on the gallery.
+      const { execFile } = await import('node:child_process')
+      const { promisify } = await import('node:util')
+      const { mkdtempSync } = await import('node:fs')
+      const { tmpdir } = await import('node:os')
+      const { join } = await import('node:path')
+      const exec = promisify(execFile)
+      const dir = mkdtempSync(join(tmpdir(), 'ds-vision-'))
+      const clip = join(dir, 'vision-clip.mp4')
+      // Unique audio (220 Hz vs the e2e suite's 440 Hz): same-bytes fixtures
+      // would dedupe into one source by content hash — the identity contract
+      // working as designed, not a bug.
+      await exec('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=duration=3:size=480x832:rate=24', '-f', 'lavfi', '-i', 'sine=frequency=220:duration=3', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', clip])
+      const response = await page.request.post('/api/lan/datasets/ingest/reference', { data: { path: clip } })
+      const body = await response.json()
+      await expect
+        .poll(async () => {
+          const library = await (await page.request.get('/api/lan/datasets/library')).json()
+          return library.sources.find((source: { id: string }) => source.id === body.source.id)?.probeState
+        }, { timeout: 15_000 })
+        .toBe('done')
+      await page.request.post('/api/lan/datasets/settings', { data: { triggerToken: 'ph0t0r34l', contentClass: 'style' } })
+      await page.goto('/?datasets=1')
+      await expect(page.locator('[data-ds-master]', { hasText: 'vision-clip' }).first()).toBeVisible({ timeout: 10_000 })
+      // Create a layer through the crop editor so the gallery shows children.
+      await page.locator('[data-ds-master]', { hasText: 'vision-clip' }).first().getByRole('button', { name: /layer/ }).first().click()
+      await expect(page.locator('[data-ds-editor]')).toBeVisible()
+      await page.locator('[data-ds-save-layer]').click()
+      await expect(page.locator('[data-ds-editor]')).toHaveCount(0)
+      // Expand the master so the gallery checkpoint shows its children.
+      await page.locator('[data-ds-master]', { hasText: 'vision-clip' }).first().locator('.ds-master-name').click()
+      await expect(page.locator('[data-ds-layer]').first()).toBeVisible({ timeout: 10_000 })
+    },
+    after: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
+    },
+    checkpoints: [
+      {
+        id: 'datasets-workbench-gallery-1080p',
+        label: 'Dataset manager — gallery: master card with layer children, toolbar, titlebar',
+        drive: async () => undefined,
+        rubric: [
+          'Context: a dark-theme desktop studio app at 1920x1080 on the ?datasets=1 route — a DIFFERENT surface from the canvas: a full-screen workbench with its own slim TITLEBAR reading "Dataset manager" with a "← canvas" back link, tab pills (library active, dashboard, export, trash), a small trigger-token readout ("trigger: ph0t0r34l"), and a small interpolator chip reading "minterpolate" (rife-ncnn-vulkan absent in tests — intended, not a defect).',
+          'LEFT TOOLBAR (~240px): an "IMPORT" block with buttons "Upload from LAN", "Reference a file", "From canvas take"; a "SEARCH & FILTER" block with a search input and small filter chips (all / video / image, any caption / missing / stale); a "CURATION" block with "Dedup pass", "Batch VLM (skip hand)", "Batch draft → review queue" buttons; a "SELECTION" block with a count and a green-accented "Export…" button.',
+          'RIGHT GALLERY: at least one MASTER CARD with a colorful test-pattern video poster (multi-color moving bars/squares — a real <video> poster frame, not gray), a small "video" kind badge, the file name "vision-clip.mp4", facts like "480×832 · 72f · 24.000fps", and action buttons "layer", "split scenes", "slow-mo audit".',
+          'The master is EXPANDED showing its LAYER CHILD row(s): a small checkbox, layer name, a bucket badge like "480×832·72f", an "uncaptioned" italic caption line, and "crop/trim" + "caption" action buttons plus a small pin icon — the master/child model visible.',
+          'Blessings: dimmed/muted secondary text and small 10px sub-labels are the intended dense design; the poster may show any frame of the test pattern.',
+          'Defects to flag: empty gallery, no toolbar, unreadable overlapping text, a pure-white or dead-black region, missing titlebar tabs.',
+        ].join(' '),
+      },
+      {
+        id: 'datasets-workbench-crop-editor-1080p',
+        label: 'Dataset manager — the stamp crop editor overlay: aspect spectrum, crop rect, trim',
+        drive: async (page) => {
+          await page.locator('[data-ds-layer]').first().getByRole('button', { name: 'crop/trim' }).click()
+          await expect(page.locator('[data-ds-editor]')).toBeVisible()
+          await page.waitForTimeout(400)
+        },
+        rubric: [
+          'Context: the same ?datasets=1 workbench at 1920x1080 with a full-screen dimmed overlay and a centered EDITOR DIALOG (~1180px wide, rounded, dark) — the stamp crop editor.',
+          'LEFT STAGE: a video frame area (dark background) showing the test-pattern clip; OVER it a GREEN/ACCENT-COLORED CROP RECTANGLE with a dashed or solid 2px border and an outside-area dimming, and a small size label above its top-left corner reading like "416×736" — the crop stamp.',
+          'RIGHT SIDE PANEL (~300px): a "Layer name" input; the ASPECT SPECTRUM as a wrap of small chips — 21:9, 16:9, 4:3, 1:1, 3:4, 9:16 — with ONE highlighted as active (e.g. 16:9 in accent color); a hint line mentioning drag/scroll/shift+scroll/middle-click; a monospace crop readout (x/y/w/h + ratio); a TRIM section with in/out number inputs, a range slider, and a hint that the grid target is chosen at export; a green-accented "Save layer" or "Create layer" button.',
+          'The editor header shows "Edit layer — vision-clip.mp4" with dims/fps facts and a Close button.',
+          'Defects to flag: no visible crop rectangle on the stage, aspect chips missing or overlapping, side panel clipped by the viewport, save button cut off.',
+        ].join(' '),
+      },
+      {
+        id: 'datasets-workbench-dashboard-1080p',
+        label: 'Dataset manager — dashboard: distributions + per-trainer VRAM preflight',
+        drive: async (page) => {
+          const close = page.locator('[data-ds-editor] .ds-btn.ghost', { hasText: 'Close' })
+          if (await close.count()) await close.click().catch(() => undefined)
+          await page.getByRole('button', { name: 'dashboard' }).click()
+          await expect(page.locator('[data-ds-dashboard]')).toBeVisible()
+          await page.waitForTimeout(400)
+        },
+        rubric: [
+          'Context: the same workbench with the DASHBOARD tab active at 1920x1080 — header "Balance & budget" with a refresh button.',
+          'A PREFLIGHT CARD near the top: shows the worst-case item geometry (like "480×832·72f" or similar), TWO trainer projections labeled "DiffSynX" and "musubi" with GB numbers, a "binds: musubi" (or diffsynx) note, and a colored VERDICT word ("fits" green / "near-wall" amber / "over-wall" red); below it an honesty note that no canonical target distribution exists.',
+          'A DISTRIBUTIONS grid of small cards: at least ASPECT (buckets like 9:16 with counts), DURATION, RESOLUTION, CONTENT CLASS, and a "caption coverage" line ("1/1 captioned" or similar with a stale count).',
+          'A GUIDANCE list: bullet lines of shape-based advice (e.g. one aspect dominating, uncaptioned counts, or "no shape outliers").',
+          'Blessings: distribution bars are thin accent-colored strips with 10px labels — dense by design; a single-item dataset legitimately shows one bucket dominating (that is DATA, not a defect; the guidance line about it is the surface working).',
+          'Defects to flag: preflight card missing trainer names or verdict, distribution cards empty when items exist, guidance list absent, overlapping text.',
         ].join(' '),
       },
     ],

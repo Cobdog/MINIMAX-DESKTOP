@@ -47,6 +47,10 @@ export type ZImageFacts = {
 export type ZImageIo = {
   notify(tone: 'error' | 'success' | 'neutral', text: string): void
   setJobs(update: (current: GenerationJob[]) => GenerationJob[]): void
+  /** Cancel-during-upload guard (m1): without it, a cancel that flips the
+   *  job to 'cancelled' while the control image uploads is resurrected to
+   *  'running' by the submit response — a cancelled render proceeds. */
+  cancellationRequests?: { current: Set<string> }
   onJobCreated?(jobId: string): void
 }
 
@@ -129,6 +133,9 @@ export async function submitZImage(
     id: localId, provider: 'zimage', mode: 'text', mediaType: 'image', prompt: request.prompt,
     createdAt: Date.now(), status: 'queued', progress: 2, progressLabel: 'Preparing the Z-Image graph',
     width: request.width, height: request.height, duration: 0,
+    // From creation (M1 discipline): the canvas link must survive a reload
+    // during the upload phase, not just once the prompt is submitted.
+    ...(request.manifestExtra ? { manifest: request.manifestExtra } : {}),
   }
   io.setJobs((current) => [job, ...current])
   io.onJobCreated?.(localId)
@@ -140,13 +147,25 @@ export async function submitZImage(
     }
     const graph = planZImageGraph(request, selection, controlUploadName ? { controlImage: controlUploadName } : {})
     const response = await window.minimax.submitPrompt(settings.comfyUrl, graph)
+    if (io.cancellationRequests?.current.has(localId)) {
+      // Cancelled while the upload/submit was in flight: stop the engine
+      // side too and keep the job cancelled — the response handler must
+      // never resurrect it (the h3Submit checkpoint discipline).
+      await window.minimax.cancelPrompt(settings.comfyUrl, response.prompt_id)
+      io.setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'cancelled', error: undefined } : item))
+      io.notify('success', 'Still generation cancelled.')
+      return { ok: false, message: 'Still generation cancelled.' }
+    }
     io.setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: 'Rendering the still in ComfyUI', ...(request.manifestExtra ? { manifest: request.manifestExtra } : {}) } : item))
     io.notify('success', 'Z-Image still added to the local ComfyUI queue.')
     return { ok: true, jobId: localId }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    io.setJobs((current) => current.map((item) => item.id === localId ? { ...item, status: 'failed', error: message } : item))
-    io.notify('error', message)
+    const cancelled = io.cancellationRequests?.current.has(localId) ?? false
+    const message = cancelled ? 'Still generation cancelled.' : error instanceof Error ? error.message : String(error)
+    io.setJobs((current) => current.map((item) => item.id === localId ? { ...item, status: cancelled ? 'cancelled' : 'failed', error: cancelled ? undefined : message } : item))
+    io.notify(cancelled ? 'success' : 'error', message)
     return { ok: false, message }
+  } finally {
+    io.cancellationRequests?.current.delete(localId)
   }
 }

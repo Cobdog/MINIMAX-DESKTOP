@@ -42,8 +42,11 @@ export function ftsMatchExpression(raw: string): string {
 
 /** Opens the database, applies migrations, and returns the repository. Used
  *  by createStudioServer; a thrown error must degrade to 503 routes, never a
- *  crashed server. */
-export function createStudioRepository(dbFile: string) {
+ *  crashed server. `allowedSourceRoots` (security hardening 1) resolves the
+ *  directories whose files may be REGISTERED into the blob tree — the studio
+ *  home is always allowed by the store itself; this adds the live-configured
+ *  output directory. */
+export function createStudioRepository(dbFile: string, options?: { allowedSourceRoots?: () => string[] }) {
   const db = openStudioDatabase(dbFile)
   // Canvas document store (Phase 0) on the SAME handle/migrations: new
   // canvas_* tables beside the old ones — the old surface above is untouched.
@@ -51,7 +54,10 @@ export function createStudioRepository(dbFile: string) {
   // db file. An open failure fails the whole repository (503), matching the
   // append-only-migration discipline: a document store that cannot migrate
   // must never answer stale.
-  const documents: DocumentStore = createDocumentStore(db, { blobRoot: join(dirname(dbFile), 'canvas-blobs') })
+  const documents: DocumentStore = createDocumentStore(db, {
+    blobRoot: join(dirname(dbFile), 'canvas-blobs'),
+    ...(options?.allowedSourceRoots ? { allowedSourceRoots: options.allowedSourceRoots } : {}),
+  })
   // Dataset manager (sv14rt0) on the same handle/migrations: its own tables
   // beside the others; app-owned media/trash roots next to the db like
   // canvas-blobs. The ffmpeg path refreshes from settings per request

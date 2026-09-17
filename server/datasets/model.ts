@@ -116,18 +116,18 @@ export const VIDEO_FLOOR_WARN = { w: 320, h: 192 }
 export const STILL_FLOOR_WARN = 512 * 512
 export const STILL_FLOOR_HARD = 256 * 256
 
-/** Short-side check (the floors are short-side/area floors, not both-sides). */
+/** The floors are frame floors (spec §2.3): hard refuse below the mechanical
+ * 160×96 (short < 96 or long < 160); warn below the practical 320×192 motion
+ * floor (below ~224 short-side, conditioning rows start dominating —
+ * measured). At-or-above 320×192 passes. */
 export function videoFloorVerdict(width: number, height: number): FloorVerdict {
   const short = Math.min(width, height)
   const long = Math.max(width, height)
-  const shortLimit = Math.round((VIDEO_FLOOR_HARD.h / VIDEO_FLOOR_HARD.w) * long)
-  if (short < Math.min(VIDEO_FLOOR_HARD.h, shortLimit) || (width < VIDEO_FLOOR_HARD.w && height < VIDEO_FLOOR_HARD.h)) {
-    if (short < VIDEO_FLOOR_HARD.h || long < VIDEO_FLOOR_HARD.w) {
-      return { verdict: 'refuse', reason: `Too small for training: ${width}×${height} is below the measured mechanical floor 160×96 (envelope: min viable motion res 320×192 practical). Upscale-on-refuse is deferred; the source is refused honestly.` }
-    }
+  if (short < VIDEO_FLOOR_HARD.h || long < VIDEO_FLOOR_HARD.w) {
+    return { verdict: 'refuse', reason: `Too small for training: ${width}×${height} is below the measured mechanical floor 160×96 (envelope: min viable motion res is 320×192 practical). Upscale-on-refuse is deferred; the source is refused honestly.` }
   }
-  if (short < VIDEO_FLOOR_WARN.h || (height < VIDEO_FLOOR_WARN.h && width < VIDEO_FLOOR_WARN.w) || (short < 224)) {
-    return { verdict: 'warn', reason: `${width}×${height} is below the practical motion floor 320×192 (below ~224 short-side, conditioning rows start dominating the sequence — measured). Training works, balance accordingly.` }
+  if (short < VIDEO_FLOOR_WARN.h || long < VIDEO_FLOOR_WARN.w) {
+    return { verdict: 'warn', reason: `${width}×${height} is below the practical motion floor 320×192 (below ~224 short-side, conditioning rows start dominating the sequence — measured). Training works; balance the set accordingly.` }
   }
   return { verdict: 'ok' }
 }
@@ -254,9 +254,11 @@ export type FpsPlan =
   | { mode: 'interpolate'; from: number; reason: string }
   | { mode: 'passthrough'; from: number; reason: string }
 
-/** ±4.1 % is the retime tolerance (23.976 and 25 land inside it); integer
- * ratios (30, 60) drop/dup; everything else interpolates (LAST resort). */
-export const RETIME_TOLERANCE = 0.041
+/** The retime tolerance: 23.976 (−0.1 %) and 25 (+4.17 %) both land inside
+ * it — the research's near-24 condition (audit M2). Beyond it, faster-than-24
+ * sources drop/dup (speed preserved); slower-than-24 sources are real gaps →
+ * interpolation, LAST resort, tagged. */
+export const RETIME_TOLERANCE = 0.042
 
 export function planFps(sourceFps: number): FpsPlan {
   if (!Number.isFinite(sourceFps) || sourceFps <= 0) return { mode: 'interpolate', from: sourceFps, reason: 'No usable source fps — interpolation is the only path to 24.000.' }
@@ -266,14 +268,14 @@ export function planFps(sourceFps: number): FpsPlan {
       mode: 'retime',
       from: sourceFps,
       factor: sourceFps / TRAINING_FPS,
-      reason: `Source ${sourceFps.toFixed(3)} fps is within ±4.1 % of 24 — speed retime (lossless pixels, no synthetic frames).`,
+      reason: `Source ${sourceFps.toFixed(3)} fps is within ±4.2 % of 24 — speed retime (lossless pixels, no synthetic frames).`,
     }
   }
   const ratio = sourceFps / TRAINING_FPS
-  if (Math.abs(ratio - Math.round(ratio)) < 0.02 && Math.round(ratio) >= 1) {
-    return { mode: 'dropdup', from: sourceFps, reason: `Source ${sourceFps.toFixed(3)} fps is ~${Math.round(ratio)}× 24 — drop/dup downsampling preserves natural speed.` }
+  if (sourceFps > TRAINING_FPS) {
+    return { mode: 'dropdup', from: sourceFps, reason: `Source ${sourceFps.toFixed(3)} fps is ${ratio.toFixed(2)}× 24 — drop/dup downsampling preserves natural speed (30→24 and 60→24 territory).` }
   }
-  return { mode: 'interpolate', from: sourceFps, reason: `Source ${sourceFps.toFixed(3)} fps is a real gap from 24 — motion-compensated interpolation (tagged; retime would warp speed ${ratio.toFixed(2)}×).` }
+  return { mode: 'interpolate', from: sourceFps, reason: `Source ${sourceFps.toFixed(3)} fps is a real gap below 24 — motion-compensated interpolation (tagged; retiming up would slow the motion ${ratio.toFixed(2)}×).` }
 }
 
 // ---------------------------------------------------------------------------

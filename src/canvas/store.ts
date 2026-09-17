@@ -30,7 +30,7 @@ import { create } from 'zustand'
  *  studios — dated decisions live in StudiosDock.tsx; the movie tab retired
  *  with MoviePlanner in Phase 5b: the plan surface is the timeline). */
 export type StudiosDockTab = 'characters' | 'hair' | 'wardrobes' | 'accessories' | 'locations'
-import { documentsApi, type ProjectMeta } from './api'
+import { documentsApi, DocumentsHttpError, type ProjectMeta } from './api'
 import { type CameraState, createCamera, parseViewBlob, type ViewBlob } from './camera'
 import {
   attention,
@@ -439,9 +439,39 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
 
   /** Completed jobs that have not landed a take on their chain yet → append
    *  output + take (canonical auto-pointed, blob registered server-side).
-   *  Idempotent by the take's jobId; re-entrancy-guarded so overlapping jobs
-   *  notifications cannot double-append. Cancelled jobs unlink. */
+   *  Idempotent by the take's jobId (server-enforced at the write boundary);
+   *  re-entrancy-guarded so overlapping jobs notifications cannot
+   *  double-append. Cancelled jobs unlink.
+   *
+   *  Remote-only completions (B2): a job without a local file lands through
+   *  the server-side fetch of the engine's EXACT output descriptor; when
+   *  that is impossible, the failure lands VISIBLY on the object (an
+   *  errored take carrying the reason + the preserved descriptor) — never a
+   *  silent idle tile, never a lost render. Landing retries are bounded
+   *  (m6): after MAX_LANDING_ATTEMPTS the failure parks durably instead of
+   *  retrying + toasting on every tick forever. */
   let landingInFlight = false
+  const landingAttempts = new Map<string, number>()
+  const MAX_LANDING_ATTEMPTS = 3
+  const LANDING_HEARTBEAT = 10
+
+  /** The ComfyUI output descriptor encoded in a job's (translated) media
+   *  URL — filename/subfolder/type survive webMediaUrl's translation, so a
+   *  reloaded job still knows exactly which engine file to fetch. */
+  const engineOutputDescriptorFromUrl = (url: string | null | undefined): { filename: string; subfolder?: string; type?: string } | null => {
+    if (!url || !url.startsWith('/api/lan/media')) return null
+    try {
+      const parsed = new URL(url, 'http://minimax.local')
+      const filename = parsed.searchParams.get('filename')
+      if (!filename) return null
+      const subfolder = parsed.searchParams.get('subfolder') ?? ''
+      const type = parsed.searchParams.get('type') ?? ''
+      return { filename, ...(subfolder ? { subfolder } : {}), ...(type ? { type } : {}) }
+    } catch {
+      return null
+    }
+  }
+
   const landCompletions = async () => {
     if (landingInFlight) return
     const state = get()
@@ -457,46 +487,83 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         set((current) => { const links = { ...current.chainJobs }; delete links[chainId]; return { chainJobs: links } })
         continue
       }
-      if (job.status === 'completed' && !landed.has(jobId) && job.localOutputPath) pending.push({ chainId, job })
+      if (job.status === 'completed' && !landed.has(jobId) && (job.localOutputPath || job.outputUrl)) pending.push({ chainId, job })
     }
     if (!pending.length) return
     landingInFlight = true
     try {
       for (const { chainId, job } of pending) {
         const chain = doc.chains.find((entry) => entry.id === chainId)
-        if (!chain || !job.localOutputPath) continue
+        if (!chain) continue
+        // Phase 4: a render whose graph saved a sampler latent records its
+        // saved-clip facts (manifest.motionContext, written by the submit
+        // core) — the take becomes latent-forkable (substratesForTake).
+        const manifest = job.manifest && typeof job.manifest === 'object' ? (job.manifest as Record<string, unknown>) : null
+        const manifestMotion = manifest && manifest.motionContext && typeof manifest.motionContext === 'object' ? (manifest.motionContext as Record<string, unknown>) : null
+        const motionContext = manifestMotion && typeof manifestMotion.folder === 'string' && typeof manifestMotion.clipIndex === 'number'
+          ? { folder: manifestMotion.folder, clipIndex: manifestMotion.clipIndex }
+          : null
+        const descriptor = engineOutputDescriptorFromUrl(job.outputUrl)
+        let sourcePath: string | null = job.localOutputPath ?? null
+        let remoteFetched = false
+        let failureReason: string | null = sourcePath ? null : 'the render finished without a local output file'
+        if (!sourcePath && descriptor) {
+          try {
+            const ingested = await documentsApi.ingestEngineOutput({ ...descriptor, kind: job.mediaType ?? 'video' })
+            sourcePath = ingested.path
+            remoteFetched = true
+            failureReason = null
+          } catch (error) {
+            failureReason = `the engine output could not be fetched: ${error instanceof Error ? error.message : String(error)}`
+          }
+        }
+        const attempt = (landingAttempts.get(job.id) ?? 0) + 1
+        landingAttempts.set(job.id, attempt)
+        const canRetry = attempt < MAX_LANDING_ATTEMPTS
+        if (failureReason && canRetry) continue // bounded retry (m6): the next jobs tick tries again, silently
         try {
           let outputId = chain.outputs[0]?.id ?? null
           if (!outputId) {
             const output = await documentsApi.createOutput({ chainId, substrates: ['decoded'] })
             outputId = output.id
           }
-          // Phase 4: a render whose graph saved a sampler latent records its
-          // saved-clip facts (manifest.motionContext, written by the submit
-          // core) — the take becomes latent-forkable (substratesForTake).
-          const manifest = job.manifest && typeof job.manifest === 'object' ? (job.manifest as Record<string, unknown>) : null
-          const manifestMotion = manifest && manifest.motionContext && typeof manifest.motionContext === 'object' ? (manifest.motionContext as Record<string, unknown>) : null
-          const motionContext = manifestMotion && typeof manifestMotion.folder === 'string' && typeof manifestMotion.clipIndex === 'number'
-            ? { folder: manifestMotion.folder, clipIndex: manifestMotion.clipIndex }
+          // Latent durability (B1): the engine-side RELATIVE latent resolves
+          // against the output directory at landing — an absolute existing
+          // file the server registers into the content-addressed blob tree
+          // (hashed, evictable, exported) instead of a raw relative string
+          // that dies with the engine's output directory.
+          const settings = useSessionStore.getState().settings
+          const latentPath = motionContext
+            ? (settings?.outputDirectory ? `${settings.outputDirectory.replace(/\/+$/, '')}/${latentPathFor(motionContext)}` : latentPathFor(motionContext))
             : null
+          const metrics: Record<string, unknown> = {
+            kind: job.mediaType ?? 'video',
+            duration: job.duration,
+            width: job.width,
+            height: job.height,
+            sourcePath: sourcePath,
+            outputUrl: job.outputUrl ?? null,
+            ...(remoteFetched && descriptor ? { remoteProvenance: { fetched: true, filename: descriptor.filename, subfolder: descriptor.subfolder ?? null, type: descriptor.type ?? null } } : {}),
+            ...(failureReason ? { landingError: failureReason, outputFile: descriptor } : {}),
+            ...(motionContext ? { motionContext } : {}),
+          }
           await documentsApi.appendTake({
             outputId,
             jobId: job.id,
-            artifacts: [job.localOutputPath],
-            ...(motionContext ? { latentPath: latentPathFor(motionContext) } : {}),
-            metrics: {
-              kind: job.mediaType ?? 'video',
-              duration: job.duration,
-              width: job.width,
-              height: job.height,
-              sourcePath: job.localOutputPath,
-              outputUrl: job.outputUrl ?? null,
-              ...(motionContext ? { motionContext } : {}),
-            },
+            artifacts: sourcePath ? [sourcePath] : [],
+            ...(latentPath ? { latentPath } : {}),
+            metrics,
           })
-          get().toast('success', `The render landed on “${chainPromptOf(chain)}”.`)
+          if (failureReason) get().toast('error', `“${chainPromptOf(chain)}” finished, but ${failureReason}. The failure is recorded on the object — nothing was silently dropped.`)
+          else get().toast('success', `The render landed on “${chainPromptOf(chain)}”.`)
         } catch (error) {
-          get().toast('error', `The finished render could not land on its object: ${error instanceof Error ? error.message : String(error)}`)
+          const message = error instanceof Error ? error.message : String(error)
+          // Transient landing failures (documents server unreachable) retry
+          // silently while attempts remain; beyond that a slow heartbeat
+          // toast keeps the failure visible without spamming every tick.
+          if (attempt === MAX_LANDING_ATTEMPTS || attempt % LANDING_HEARTBEAT === 0) {
+            get().toast('error', `The finished render could not land on “${chainPromptOf(chain)}”: ${message}`)
+          }
         }
       }
       const refreshed = await loadDocument(doc.project.id)
@@ -633,10 +700,16 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       void get().syncLibraryAssets().then(() => get().refreshAssets()).catch(() => undefined)
       void get().refreshAssets()
       try {
-        const [projects, session] = await Promise.all([documentsApi.listProjects(), documentsApi.getSession()])
-        set({ projects, openProjects: session.openProjects, activeProjectId: session.activeProject })
+        const [listing, session] = await Promise.all([documentsApi.listProjects(), documentsApi.getSession()])
+        set({ projects: listing.projects, openProjects: session.openProjects, activeProjectId: session.activeProject })
+        // Version-refusal isolation (M4): a project this build cannot open is
+        // skipped server-side; the boot still happens. One honest note per
+        // boot — never a bricked canvas, never a silent drop.
+        if (listing.skipped.length) {
+          get().toast('neutral', `${listing.skipped.length} canvas${listing.skipped.length === 1 ? '' : 'es'} ${listing.skipped.length === 1 ? 'was' : 'were'} written by a newer MiniMax Studio and ${listing.skipped.length === 1 ? 'is' : 'are'} hidden until the app is upgraded — the other canvases are unaffected.`)
+        }
         const active = session.activeProject
-        if (active && projects.some((project) => project.id === active)) {
+        if (active && listing.projects.some((project) => project.id === active)) {
           const bootDoc = await loadDocument(active)
           if (bootDoc) {
             const view = parseViewBlob(bootDoc.project.camera)
@@ -650,7 +723,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
           }
         } else {
           // An empty or missing session boots to the launcher (§4).
-          set({ activeProjectId: null, openProjects: session.openProjects.filter((id) => projects.some((project) => project.id === id)) })
+          set({ activeProjectId: null, openProjects: session.openProjects.filter((id) => listing.projects.some((project) => project.id === id)) })
         }
       } catch (error) {
         get().toast('error', `The canvas could not reach the document store: ${error instanceof Error ? error.message : String(error)}`)
@@ -661,7 +734,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
 
     refreshProjects: async () => {
       try {
-        set({ projects: await documentsApi.listProjects() })
+        set({ projects: (await documentsApi.listProjects()).projects })
       } catch {
         // Listed resume cards going stale is ambient — the next refresh retries.
       }
@@ -707,6 +780,10 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       // every library location/character entry upserts a canvas_asset row
       // carrying its approved reference set. The old surface keeps reading its
       // own stores untouched; the canvas gains the global-store binding (F3).
+      // Deprojection (m5): the projection tracks its source — an entry
+      // deleted in its studio leaves the bindable surface (tombstone) and one
+      // that returns restores. Only library:* rows are ever touched (the
+      // legacy-import and user assets are not this projection's to manage).
       const { libraries } = get()
       const entries: Array<{ id: string; kind: 'character' | 'location'; fields: Record<string, unknown>; references: string[] }> = []
       for (const character of libraries.characters) {
@@ -717,10 +794,17 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         const references = locationReferencesOf(location)
         if (references.length) entries.push({ id: `library:location:${location.id}`, kind: 'location', fields: { name: location.name, description: location.description ?? '', environmentMode: location.environmentMode, libraryId: location.id }, references })
       }
-      if (!entries.length) return
+      const currentIds = new Set(entries.map((entry) => entry.id))
       try {
         for (const entry of entries) {
           await documentsApi.upsertAsset({ id: entry.id, kind: entry.kind, fields: entry.fields, canonicalReferenceSet: entry.references })
+        }
+        const live = await documentsApi.listAssets()
+        const trashed = await documentsApi.listAssets(undefined, true)
+        for (const row of [...live, ...trashed]) {
+          if (!row.id.startsWith('library:')) continue
+          if (!currentIds.has(row.id) && row.deletedAt === undefined) await documentsApi.deleteAsset(row.id)
+          if (currentIds.has(row.id) && row.deletedAt !== undefined) await documentsApi.restoreAsset(row.id)
         }
         await get().refreshAssets()
       } catch {
@@ -826,11 +910,37 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       const doc = activeDocument()
       const planRow = doc?.plans?.find((plan) => plan.id === planId)
       if (!doc || !planRow) return
+      // Optimistic concurrency (M5): the write carries the version this edit
+      // started from (expectedUpdatedAt). A 409 means a concurrent edit won —
+      // the mutator is RE-APPLIED once to the fresh document (per-field
+      // patches merge cleanly); a second conflict surfaces instead of
+      // silently clobbering the winner.
+      const write = async (row: typeof planRow): Promise<boolean> => {
+        const next = mutate(readPlanDocument(row.document))
+        try {
+          await documentsApi.upsertPlan({ projectId: doc!.project.id, id: planId, document: next as unknown as Record<string, unknown>, expectedUpdatedAt: row.updatedAt })
+          return true
+        } catch (error) {
+          if (error instanceof DocumentsHttpError && error.status === 409) return false
+          throw error
+        }
+      }
       try {
-        const next = mutate(readPlanDocument(planRow.document))
-        await documentsApi.upsertPlan({ projectId: doc.project.id, id: planId, document: next as unknown as Record<string, unknown> })
-        const refreshed = await loadDocument(doc.project.id)
-        if (refreshed) recomputeTiles()
+        if (await write(planRow)) {
+          const refreshed = await loadDocument(doc.project.id)
+          if (refreshed) recomputeTiles()
+          return
+        }
+        const reloaded = await loadDocument(doc.project.id)
+        const freshRow = reloaded?.plans?.find((plan) => plan.id === planId)
+        if (reloaded && freshRow) recomputeTiles()
+        if (!freshRow) return
+        if (await write(freshRow)) {
+          const refreshed = await loadDocument(doc.project.id)
+          if (refreshed) recomputeTiles()
+          return
+        }
+        get().toast('error', 'This plan is being edited faster than it can save — the last change lost the race. Wait a moment and retry it.')
       } catch (error) {
         get().toast('error', `The plan could not be saved: ${error instanceof Error ? error.message : String(error)}`)
       }
@@ -1209,7 +1319,10 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
             generateAudioCodes: false,
             filenamePrefix: `audio/Canvas_ACEStep_${Date.now()}`,
           }
-          const result = await submitAceStep(options, { settings: facts.settings, connected: facts.connected, info: facts.info, selection: inferAceStepSelections(facts.models), clientId: engineBridge.clientId }, io)
+          // The canvas link rides the manifest (M1): without it a reload
+          // mid-render permanently orphans the landing (chainJobs relink
+          // reads manifest.canvas.chainId only).
+          const result = await submitAceStep(options, { settings: facts.settings, connected: facts.connected, info: facts.info, selection: inferAceStepSelections(facts.models), clientId: engineBridge.clientId }, io, { canvas: { chainId, projectId } })
           return result.ok ? { ok: true } : { ok: false, message: result.message }
         }
         const options: Music3GenerationOptions = {
@@ -1220,7 +1333,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
           tiledDecode: true,
           filenamePrefix: `audio/Canvas_Music3_${Date.now()}`,
         }
-        const result = await submitMusic3(options, { settings: facts.settings, connected: facts.connected, info: facts.info, selection: inferMusic3Selection(facts.models), clientId: engineBridge.clientId }, io)
+        const result = await submitMusic3(options, { settings: facts.settings, connected: facts.connected, info: facts.info, selection: inferMusic3Selection(facts.models), clientId: engineBridge.clientId }, io, { canvas: { chainId, projectId } })
         return result.ok ? { ok: true } : { ok: false, message: result.message }
       }
       // §5.4 engines-as-ops (Phase 3): image INTENT routes the still surface —
@@ -1249,6 +1362,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
           {
             notify: (tone, text) => get().toast(tone === 'neutral' ? 'neutral' : tone, text),
             setJobs: (update) => useJobsStore.getState().setJobs(update),
+            cancellationRequests: engineBridge.cancellationRequests ?? { current: new Set<string>() },
             onJobCreated: (jobId) => {
               set((current) => ({ chainJobs: { ...current.chainJobs, [chainId]: jobId } }))
               recomputeTiles()
@@ -1765,7 +1879,27 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         get().toast('neutral', 'Nothing is stale — every chain is current.')
         return
       }
-      for (const tile of stale) await get().submitChain(tile.id)
+      // The 'r' gesture clears what it remediates (M2) — the SAME
+      // clear-on-ok step rerunChain uses, per chain: a submit that goes out
+      // clears the stale flag; a refused (offline) submit leaves the chain
+      // visibly stale. Without this, every rerun landed but the objects
+      // stayed flagged stale forever.
+      for (const tile of stale) {
+        const result = await get().submitChain(tile.id)
+        if (result.ok) {
+          try {
+            await documentsApi.updateChain({ id: tile.id, stale: false })
+          } catch {
+            // The rerun went out; the flag clear is retried on the next
+            // document write (the rerunChain precedent).
+          }
+        }
+      }
+      const doc = activeDocument()
+      if (doc) {
+        const refreshed = await loadDocument(doc.project.id)
+        if (refreshed) recomputeTiles()
+      }
     },
 
     rerunChain: async (chainId) => {
@@ -2068,6 +2202,86 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
         } : job))
         useCanvasStore.getState().recompute()
         return { ok: true, jobId, source: mediaTile.previewPath }
+      }
+      if (name === 'complete-mock-remote') {
+        // B2: complete the first linked job the way an EXTERNAL-engine render
+        // completes — no local output path, only the (translated) media URL
+        // carrying the engine's exact output descriptor. With no engine
+        // reachable, the bounded landing attempts exhaust and the failure
+        // parks VISIBLY on the object (an errored take with the reason and
+        // the preserved descriptor) — never a silent idle tile.
+        const entry = Object.entries(state.chainJobs)[0]
+        if (!entry) return { ok: false, reason: 'no linked job' }
+        const [chainId, jobId] = entry
+        useJobsStore.getState().setJobs((jobs) => jobs.map((job) => job.id === jobId ? {
+          ...job, status: 'completed', progress: 100, localOutputPath: undefined,
+          outputUrl: '/api/lan/media?filename=Canvas_Remote_Mock.mp4&subfolder=video&type=output',
+          manifest: { canvas: { chainId, projectId: 'mock' } },
+        } : job))
+        for (let tick = 0; tick < 12; tick += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 120))
+          useCanvasStore.getState().recompute()
+          const doc = useCanvasStore.getState().documents[useCanvasStore.getState().activeProjectId ?? ''] ?? null
+          const take = doc?.chains.find((chain) => chain.id === chainId)?.outputs[0]?.takes.find((candidate) => candidate.jobId === jobId) ?? null
+          if (take) {
+            const tile = useCanvasStore.getState().tiles.find((candidate) => candidate.id === chainId) ?? null
+            return {
+              ok: true, jobId, chainId,
+              landedError: typeof take.metrics?.landingError === 'string' ? take.metrics.landingError : null,
+              descriptorPreserved: take.metrics?.outputFile && typeof (take.metrics.outputFile as Record<string, unknown>).filename === 'string' ? (take.metrics.outputFile as Record<string, unknown>).filename : null,
+              artifacts: take.artifacts.length,
+              tileStatus: tile?.status ?? null,
+            }
+          }
+        }
+        return { ok: false, reason: 'the errored landing never parked (no take with the job id)' }
+      }
+      if (name === 'seed-audio-mock') {
+        // M1: create an audio chain the way the dock does, then park the
+        // mock queued job WITH the canvas manifest link — exactly the record
+        // the fixed audio submit cores write. A RELOAD must rebuild the
+        // chainJobs link from that manifest, so completing the job after the
+        // reload lands the take on the audio chain (the orphaned-landing
+        // regression: pre-fix audio jobs carried no manifest).
+        const chainId = await state.createAudioChain('music3', 'upbeat courtyard drums')
+        if (!chainId) return { ok: false, reason: 'createAudioChain returned no id' }
+        const projectId = useCanvasStore.getState().activeProjectId
+        if (!projectId) return { ok: false, reason: 'no active project' }
+        const jobId = `${CANVAS_MOCK_JOB_PREFIX}audio:${chainId}`
+        useJobsStore.getState().setJobs((jobs) => [...jobs.filter((job) => job.id !== jobId), {
+          id: jobId, mode: 'text', prompt: 'upbeat courtyard drums', createdAt: Date.now(), status: 'queued', progress: 0,
+          width: 0, height: 0, duration: 60, provider: 'music3', mediaType: 'audio',
+          manifest: { canvas: { chainId, projectId } },
+        }])
+        useCanvasStore.getState().recompute()
+        return { ok: true, chainId, jobId, projectId }
+      }
+      if (name === 'rerun-stale-clears') {
+        // M2: the 'r' gesture must clear the stale flags it remediates. The
+        // submit itself is stubbed ok (the gesture's contract is under test,
+        // not the engine) — exactly the rerunChain clear-on-ok step. The
+        // assertions read the SERVER document (the persisted flag).
+        const target = useCanvasStore.getState().tiles[0]
+        if (!target) return { ok: false, reason: 'no tile' }
+        const projectId = useCanvasStore.getState().activeProjectId
+        if (!projectId) return { ok: false, reason: 'no active project' }
+        await documentsApi.updateChain({ id: target.id, stale: true })
+        const before = await documentsApi.getProject(projectId)
+        if (!before.chains.find((chain) => chain.id === target.id)?.stale) return { ok: false, reason: 'the chain did not mark stale' }
+        // Drop the cached document and reopen — the tiles must re-derive with
+        // the stale flag so rerunStale's sweep sees the chain.
+        useCanvasStore.setState((current) => ({ activeProjectId: null, documents: Object.fromEntries(Object.entries(current.documents).filter(([key]) => key !== projectId)) }))
+        await useCanvasStore.getState().openProject(projectId)
+        const realSubmit = useCanvasStore.getState().submitChain
+        useCanvasStore.setState({ submitChain: async () => ({ ok: true }) })
+        try {
+          await useCanvasStore.getState().rerunStale()
+        } finally {
+          useCanvasStore.setState({ submitChain: realSubmit })
+        }
+        const after = await documentsApi.getProject(projectId)
+        const chainAfter = after.chains.find((chain) => chain.id === target.id)
+        return { ok: true, chainId: target.id, staleCleared: chainAfter ? chainAfter.stale === false : null }
       }
       if (name === 'complete-mock-latent') {
         // Phase 4: complete the first linked job the way a Motion-Context

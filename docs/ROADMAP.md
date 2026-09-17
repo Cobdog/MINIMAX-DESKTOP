@@ -77,10 +77,26 @@
   (ffmpeg server-side); Gemma 4 31B-IT video-capable today; Qwen3-VL only family with
   temporal frame merging; DeepSeek V4 Flash Vision image-only; GLM 5.3 Flash not yet
   in llama.cpp (issue #27922).
+- **Dataset Manager v1 SHIPPED** (sv14rt0, 1ab8176 + ba3ffd1): the blessed spec built
+  end-to-end — dual-path ingest (by-reference hash-tracked + LAN-upload with per-path
+  trash), master/child layers with the stamp-crop editor (managed aspect spectrum,
+  hard stops, middle-click mirror), per-layer captions with stale/authorship/history
+  and the from-scratch llama.cpp VLM client (≤8s chunks, 2fps N-even, dense→condense,
+  four automation modes), two-tier advisory curation + CLIP reference-triage, the
+  per-trainer preflight dashboard (both profiles vs the envelope walls), the nine QA
+  gates, and dual-shape + external-trainer export with recipe cards. Own route
+  `?datasets=1`; canvas bridge both directions. Gate 23/23 (test:datasets 138
+  assertions); vision 12/13 (the one fail pre-existing, flagged to the correctness
+  lane); both CI legs green. Spec: docs/specs/dataset-manager-v1.md (BLESSED).
 
 ## Building (in flight)
 
-(none — Phase 5b landed; next dispatch per the maintainer)
+- **Overnight full audit** (junllxf) — E2E UI driving + real-engine chains + Intern-media
+  demo project + sonnet vision reads; two audits complete (security: 1 CRITICAL + 2 HIGH,
+  fix branch `security/hardening-1`; correctness ×2: 3 blockers incl. GC deleting
+  live-referenced blobs + latent non-durability, fix branch `correctness/fix-wave-1`);
+  dataset-manager security follow-up (kr85qx1) dispatched post-build. Consolidation
+  pending the maintainer.
 
 ## Queued (specced/planning)
 
@@ -97,8 +113,6 @@
   copy-never-destroy); pruning the dead old-shell CSS blocks in styles.css.
 - **Latent-fork live-verify** (puy428n) — one engine-side render confirming the
   LoadLatent handoff + latent retention across restarts; next GPU window.
-- **Dataset manager** (sv14rt0) — mixed-media training browser (import/browse/preview/
-  caption/recaption/coverage/export), 5→1000 items, canvas op-stack prep integration.
 - **Drift-envelope suite** (5nfy24y) — how long can chains really go per mitigation
   combo; the mitigation recipe + calibrated drift-budget thresholds.
 - **Few-shot LoRA training sidecar** (ehzagoc, promoted from deferred) — the in-app

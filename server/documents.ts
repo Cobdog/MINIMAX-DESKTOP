@@ -30,9 +30,10 @@
  *     silently unify on takes.
  */
 import { createHash, randomUUID } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync } from 'node:fs'
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import type Database from 'better-sqlite3'
+import { logEvent } from './logger'
 import { ftsMatchExpression } from './repo'
 
 /** The DOCUMENT schema version (distinct from migration ids): bumped only
@@ -43,6 +44,23 @@ export const CANVAS_SCHEMA_VERSION = 1
 /** The archive format version (§7): the container layout, not the document
  *  schema (which rides inside the manifest and is checked separately). */
 export const CANVAS_ARCHIVE_VERSION = 1
+
+/** Thrown when a plan write loses the optimistic-concurrency race (M5): the
+ *  caller's expected version is stale. Routes map this to 409 with the
+ *  CURRENT document attached so the client can rebase and retry — a clean
+ *  conflict surface, never a silent lost update. */
+export class PlanConflictError extends Error {
+  readonly planId: string
+  readonly currentUpdatedAt: number
+  readonly currentDocument: Record<string, unknown>
+  constructor(planId: string, currentUpdatedAt: number, currentDocument: Record<string, unknown>) {
+    super('This plan changed while it was being edited — the canvas reloaded it; the edit was applied to the fresh copy or can be retried.')
+    this.name = 'PlanConflictError'
+    this.planId = planId
+    this.currentUpdatedAt = currentUpdatedAt
+    this.currentDocument = currentDocument
+  }
+}
 
 /** Thrown when a document (or archive) carries a schema/archive version newer
  *  than this build understands. Routes map this to a loud 400 — never a
@@ -381,11 +399,35 @@ function collectOutputRefs(value: unknown, into: Set<string>): void {
   }
 }
 
+/** Collects every TAKE id pinned by an input spec — the fork-from-early-take
+ *  edge (§2.1 outputRef.takeId). A pinned prior take is part of the live
+ *  fork edge (§3 tier 1): GC must keep it resident exactly like the output's
+ *  canonical take, or a latent fork of a prior take loses its substrate. */
+function collectTakeRefs(value: unknown, into: Set<string>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectTakeRefs(item, into)
+    return
+  }
+  if (!value || typeof value !== 'object') return
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if ((key === 'takeId' || key === 'take_id') && typeof child === 'string' && child) into.add(child)
+    else collectTakeRefs(child, into)
+  }
+}
+
 export type DocumentStoreOptions = {
   /** Content-addressed blob root (media + latents); created on demand. */
   blobRoot: string
   /** Writer app version stamped on documents (§2 refusal names it). */
   appVersion?: string
+  /** Security hardening 1 (blob-read scoping): resolves the directories OUTSIDE
+   *  the blob tree whose files may be REGISTERED into it (engine outputs, the
+   *  output tree's canvas-media uploads, the studio home's app-owned stores).
+   *  Registration copies + serves the file's bytes — an unscoped source would
+   *  be an arbitrary-file-read primitive (`~/.ssh/id_rsa` as a take artifact).
+   *  A resolver (not a static list) so settings changes are honored live.
+   *  Absent = only the studio home (dirname of the blob root) is allowed. */
+  allowedSourceRoots?: () => string[]
 }
 
 export type LegacyImportReport = {
@@ -411,6 +453,19 @@ export type LegacyImportReport = {
 export function createDocumentStore(db: Database.Database, options: DocumentStoreOptions) {
   const blobRoot = resolve(options.blobRoot)
   const appVersion = options.appVersion ?? resolveStudioAppVersion()
+
+  /** Security hardening 1: containment gate for blob REGISTRATION sources.
+   *  Legal sources are the studio home (the app-owned tree the blob root
+   *  lives in) plus the resolver's roots (the configured output directory).
+   *  Same lexical containment shape the media routes use. */
+  function isAllowedBlobSource(path: string): boolean {
+    const candidate = resolve(path)
+    const roots = [dirname(blobRoot), ...(options.allowedSourceRoots?.() ?? []).map((root) => resolve(root))]
+    return roots.some((root) => {
+      const rel = relative(root, candidate)
+      return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+    })
+  }
 
   // ---- statements ----------------------------------------------------------
   const statements = {
@@ -461,6 +516,8 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
       VALUES (@id, @output_id, @job_id, @artifacts_json, @latent_path, @metrics_json, @created_at, NULL, 0, NULL, @content_hash)
     `),
     take: db.prepare('SELECT * FROM canvas_take WHERE id = ?'),
+    takeByJob: db.prepare('SELECT * FROM canvas_take WHERE job_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1'),
+    nonEvictedTakes: db.prepare('SELECT id, artifacts_json, latent_path FROM canvas_take WHERE evicted = 0'),
     takesByOutput: db.prepare('SELECT * FROM canvas_take WHERE output_id = ? ORDER BY created_at DESC, rowid DESC'),
     canonicalTake: db.prepare('SELECT * FROM canvas_take WHERE output_id = ? AND superseded_by IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 1'),
     supersedeTake: db.prepare('UPDATE canvas_take SET superseded_by = ? WHERE id = ? AND superseded_by IS NULL'),
@@ -495,6 +552,7 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
       VALUES (@id, @chain_id, @kind, @source, @input_ref, @mask_ref, @params_json)
     `),
     controlTracksByChain: db.prepare('SELECT * FROM canvas_control_track WHERE chain_id = ?'),
+    trackByRef: db.prepare('SELECT id FROM canvas_control_track WHERE input_ref = ? OR mask_ref = ? LIMIT 1'),
     deleteControlTrack: db.prepare('DELETE FROM canvas_control_track WHERE id = ?'),
 
     insertAsset: db.prepare(`
@@ -549,6 +607,12 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
     ftsInsert: db.prepare('INSERT INTO canvas_fts (text, source_id, source_kind) VALUES (?, ?, ?)'),
     ftsSearch: db.prepare(`
       SELECT source_id, source_kind, rank FROM canvas_fts WHERE canvas_fts MATCH ? ORDER BY rank LIMIT ?
+    `),
+    // kind-filtered variant: the filter belongs INSIDE the query, before the
+    // LIMIT — filtering after would let other kinds fill the limit first and
+    // return empty while matches exist beyond the cut.
+    ftsSearchKind: db.prepare(`
+      SELECT source_id, source_kind, rank FROM canvas_fts WHERE canvas_fts MATCH ? AND source_kind = ? ORDER BY rank LIMIT ?
     `),
     ftsBackfillJobs: db.prepare(`
       INSERT INTO canvas_fts (text, source_id, source_kind)
@@ -651,8 +715,19 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
   /** Registers a file into the content-addressed blob tree: hash, copy (or
    *  dedupe), upsert the row. Returns the registered relative path + hash, or
    *  a missing-marker registration when the file is absent (visible
-   *  degradation — invariant 9 — never a silent skip). */
+   *  degradation — invariant 9 — never a silent skip).
+   *  Torn-copy safety (M6): copies land at a staged name and are renamed
+   *  into place atomically — a crash/ENOSPC mid-copy can never leave a
+   *  truncated file at the canonical hash path. The dedupe-skip path
+   *  re-verifies (size, then hash) instead of trusting the existing target:
+   *  a torn copy from an older run is detected and repaired, never served as
+   *  verified content.
+   *  Security hardening 1: the SOURCE path must sit inside an allowed root —
+   *  registration copies and later serves the bytes, so an unscoped source is
+   *  an arbitrary-file-read primitive. Out-of-scope sources are refused
+   *  LOUDLY (thrown error naming the file), never silently copied. */
   function registerBlobFile(kind: string, path: string): { relPath: string; hash: string | null; size: number | null; present: boolean } {
+    if (!isAllowedBlobSource(path)) throw new Error(`Refusing to register "${path}" as a blob: the file is outside the studio home and the configured output directory.`)
     const hash = sha256File(path)
     if (!hash) {
       // Absent source: register a missing placeholder keyed by a stable
@@ -663,12 +738,37 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
     }
     const relPath = blobRelativePath(hash)
     const absTarget = join(blobRoot, hash.slice(0, 2), hash)
-    if (!existsSync(absTarget)) {
+    const sourceSize = statSync(path).size
+    const copyAtomic = () => {
+      const staged = `${absTarget}.tmp-${randomUUID().slice(0, 8)}`
       mkdirSync(dirname(absTarget), { recursive: true })
-      copyFileSync(path, absTarget)
+      try {
+        copyFileSync(path, staged)
+        renameSync(staged, absTarget)
+      } catch (error) {
+        try {
+          unlinkSync(staged)
+        } catch {
+          // The staged name is never the canonical path — a leftover is
+          // inert (nothing resolves it); the error itself propagates.
+        }
+        throw error
+      }
     }
-    statements.upsertBlob.run({ path: relPath, kind, content_hash: hash, size: statSync(absTarget).size, last_verified_at: now(), missing: 0, relinked_from: null })
-    return { relPath, hash, size: statSync(absTarget).size, present: true }
+    if (existsSync(absTarget)) {
+      let trustworthy = false
+      try {
+        trustworthy = statSync(absTarget).size === sourceSize && sha256File(absTarget) === hash
+      } catch {
+        trustworthy = false
+      }
+      if (!trustworthy) copyAtomic()
+    } else {
+      copyAtomic()
+    }
+    const size = statSync(absTarget).size
+    statements.upsertBlob.run({ path: relPath, kind, content_hash: hash, size, last_verified_at: now(), missing: 0, relinked_from: null })
+    return { relPath, hash, size, present: true }
   }
 
   function hashPathKey(path: string): string {
@@ -774,6 +874,27 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
     }
   }
 
+  /** One listable project + the per-row report for rows this build refuses
+   *  to open (M4) — visible to the caller, invisible to the boot path. */
+  type ProjectListing = {
+    projects: Array<ReturnType<typeof hydrateProject>>
+    skipped: Array<{ id: string; name: string; schemaVersion: number | null; writerAppVersion: string }>
+  }
+
+  function listProjectRows(rows: Array<Record<string, unknown>>): ProjectListing {
+    const projects: ProjectListing['projects'] = []
+    const skipped: ProjectListing['skipped'] = []
+    for (const row of rows) {
+      const found = intOrNull(row.schema_version)
+      if (found === null || found > CANVAS_SCHEMA_VERSION) {
+        skipped.push({ id: str(row.id), name: str(row.name), schemaVersion: found, writerAppVersion: str(row.app_version) })
+        continue
+      }
+      projects.push(hydrateProject(row))
+    }
+    return { projects, skipped }
+  }
+
   function hydrateChain(row: Record<string, unknown>) {
     return {
       id: str(row.id),
@@ -826,17 +947,24 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
    *  Tier 1 = canonical takes of every live chain's outputs, PLUS canonical
    *  takes of every output referenced by a live chain's input spec (the fork
    *  edges — this is what keeps a forked take alive even when its SOURCE
-   *  chain is tombstoned), PLUS every take of a locked chain. Derived by
-   *  walking the actual fork edges — never a reference-counting guess. */
+   *  chain is tombstoned), PLUS takes explicitly pinned by a fork edge's
+   *  takeId (§3 "takes referenced by a live fork edge" — a substrate=latents
+   *  fork of a PRIOR take keeps that prior's latent resident), PLUS every
+   *  take of a locked chain. Derived by walking the actual fork edges —
+   *  never a reference-counting guess. */
   function liveTakeIds(): Set<string> {
     const live = new Set<string>()
     const liveChains = statements.allLiveChains.all() as Array<Record<string, unknown>>
-    // fork edges: every output referenced by a live chain's input spec
+    // fork edges: every output referenced by a live chain's input spec, and
+    // every take a fork edge pins explicitly
     const referencedOutputs = new Set<string>()
     for (const chain of liveChains) {
       const refs = new Set<string>()
       collectOutputRefs(parseJson<unknown>(chain.input_spec_json, {}), refs)
       for (const outputId of refs) referencedOutputs.add(outputId)
+      const takeRefs = new Set<string>()
+      collectTakeRefs(parseJson<unknown>(chain.input_spec_json, {}), takeRefs)
+      for (const takeId of takeRefs) live.add(takeId)
     }
     for (const chain of liveChains) {
       const locked = str(chain.lock_state) === 'locked'
@@ -858,9 +986,25 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
     return live
   }
 
+  /** True when any OTHER non-evicted take or control track still references
+   *  the given blob path. Content-addressed paths are SHARED by content:
+   *  identical bytes (FLF continuation frames of adjacent segments,
+   *  fixed-seed reruns) collapse to one file — evicting one take must never
+   *  delete the file a live canonical take still serves. The same discipline
+   *  emptyTrash's referencedNow walk applies, checked per unlink. */
+  function blobStillReferenced(relPath: string, excludingTakeId: string): boolean {
+    for (const other of statements.nonEvictedTakes.all() as Array<Record<string, unknown>>) {
+      if (str(other.id) === excludingTakeId) continue
+      if (parseJson<string[]>(other.artifacts_json, []).includes(relPath)) return true
+      if (typeof other.latent_path === 'string' && other.latent_path === relPath) return true
+    }
+    return Boolean(statements.trackByRef.get(relPath, relPath))
+  }
+
   /** Evicts one tier-2 take: delete the latent/blob FILE (only inside the
-   *  blob root), keep the row + metadata (restore = re-generate/re-fetch —
-   *  settings persist, rerun-stable by invariant 1). Returns files deleted. */
+   *  blob root, only when no other take/control track still references it),
+   *  keep the row + metadata (restore = re-generate/re-fetch — settings
+   *  persist, rerun-stable by invariant 1). Returns files deleted. */
   function evictTake(takeId: string): number {
     const take = statements.take.get(takeId) as Record<string, unknown> | undefined
     if (!take || Number(take.evicted) === 1) return 0
@@ -871,6 +1015,7 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
       if (!relPath) continue
       const absPath = relPath.startsWith('canvas-blobs') ? blobAbsolutePath(relPath) : resolve(relPath)
       if (isInsideBlobRoot(absPath) && existsSync(absPath)) {
+        if (blobStillReferenced(relPath, takeId)) continue // shared content: the file outlives this take's claim on it
         try {
           unlinkSync(absPath)
           deletedFiles += 1
@@ -981,12 +1126,18 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
       db.prepare('DELETE FROM canvas_asset WHERE id = ?').run(assetId)
     }
 
-    // blob files: delete only what no remaining take references
+    // blob files: delete only what no remaining take OR control track
+    // references (control tracks' registered refs are document content too —
+    // a pose-rig sheet must not lose its media to an unrelated trash-empty)
     let blobFilesDeleted = 0
     const referencedNow = new Set<string>()
     for (const take of db.prepare('SELECT * FROM canvas_take').all() as Array<Record<string, unknown>>) {
       for (const relPath of parseJson<string[]>(take.artifacts_json, [])) referencedNow.add(relPath)
       if (typeof take.latent_path === 'string' && take.latent_path) referencedNow.add(take.latent_path)
+    }
+    for (const track of db.prepare('SELECT input_ref, mask_ref FROM canvas_control_track').all() as Array<Record<string, unknown>>) {
+      if (typeof track.input_ref === 'string' && track.input_ref) referencedNow.add(track.input_ref)
+      if (typeof track.mask_ref === 'string' && track.mask_ref) referencedNow.add(track.mask_ref)
     }
     for (const blob of statements.listBlobs.all() as Array<Record<string, unknown>>) {
       const relPath = str(blob.path)
@@ -1006,13 +1157,17 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
   // ---- staleness propagation (invariant 3 machinery) ---------------------------
   /** Marks every live chain whose input spec references an output of the
    *  given chain stale=1 (persisted derived state; nothing auto-executes).
-   *  Cleared on rerun via setChainStale(id, false). */
+   *  LOCKS GATE PROPAGATION (§7 P, coherent with switchCanonical and the
+   *  unlock toast's contract): a locked chain stays pristine — it is pinned
+   *  and does not go stale from upstream changes while locked. Cleared on
+   *  rerun via setChainStale(id, false). */
   function propagateStaleness(chainId: string): number {
     const outputIds = new Set((statements.outputsByChain.all(chainId) as Array<Record<string, unknown>>).map((row) => str(row.id)))
     if (!outputIds.size) return 0
     let marked = 0
     for (const chain of statements.allLiveChains.all() as Array<Record<string, unknown>>) {
       if (str(chain.id) === chainId) continue
+      if (str(chain.lock_state) === 'locked') continue
       const refs = new Set<string>()
       collectOutputRefs(parseJson<unknown>(chain.input_spec_json, {}), refs)
       for (const ref of refs) {
@@ -1260,8 +1415,13 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
       })
       return hydrateProject(statements.getProject.get(id) as Record<string, unknown>)
     },
-    listProjects: () => (statements.listProjects.all() as Array<Record<string, unknown>>).map(hydrateProject),
-    listTrashedProjects: () => (statements.listTrashedProjects.all() as Array<Record<string, unknown>>).map(hydrateProject),
+    /** List with version-refusal ISOLATION (M4): a row this build cannot
+     *  open (newer schema — e.g. after a downgrade) is skipped and REPORTED
+     *  per row instead of throwing — one newer-schema project must never
+     *  brick the boot by poisoning the whole list. The loud per-document
+     *  refusal stays on getProject/getProjectDocument (§2/F9). */
+    listProjects: () => listProjectRows(statements.listProjects.all() as Array<Record<string, unknown>>),
+    listTrashedProjects: () => listProjectRows(statements.listTrashedProjects.all() as Array<Record<string, unknown>>),
     getProject: (id: string) => {
       const row = guardProject(statements.getProject.get(id) as Record<string, unknown> | undefined)
       return row ? hydrateProject(row) : null
@@ -1446,8 +1606,13 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
 
     /** Takes are APPEND-ONLY: this is the only writer. artifacts/latent paths
      *  that point at real files are registered into the content-addressed
-     *  blob tree (hash on ingest — invariant 9). */
-    appendTake: (input: {
+     *  blob tree (hash on ingest — invariant 9). One transaction: insert +
+     *  supersession land together (a crash can never strand two non-
+     *  superseded takes), ALL strays are superseded (an older build's crash
+     *  window may have left some — the invariant is restored, not assumed),
+     *  and a repeat append for an already-landed jobId is idempotent (two
+     *  tabs / a retry after a transient failure land ONE take, not copies). */
+    appendTake: db.transaction((input: {
       id?: string
       outputId: string
       jobId?: string | null
@@ -1459,6 +1624,10 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
     }) => {
       const output = statements.output.get(input.outputId) as Record<string, unknown> | undefined
       if (!output) throw new Error(`output ${input.outputId} does not exist`)
+      if (input.jobId) {
+        const existing = statements.takeByJob.get(input.jobId) as Record<string, unknown> | undefined
+        if (existing) return hydrateTake(existing)
+      }
       const id = input.id ?? randomUUID()
       let artifacts = input.artifacts ?? []
       let latentPath = input.latentPath ?? null
@@ -1466,20 +1635,33 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
       if (input.registerBlobs !== false) {
         const registered: string[] = []
         for (const artifact of artifacts) {
-          if (isAbsolute(artifact) && existsSync(artifact)) {
+          // Blob registration is scoped (security hardening 1): an in-scope
+          // existing file is hash-registered; anything else — absent, relative,
+          // or OUT OF SCOPE (outside the studio home / output directory) — is
+          // kept as the plain string the caller supplied. A refused copy is
+          // observable (no blob row, no hash on the take) and loud in the
+          // event log, never a silent traversal of someone's home directory.
+          if (isAbsolute(artifact) && existsSync(artifact) && isAllowedBlobSource(artifact)) {
             const result = registerBlobFile(blobKindForPath(artifact, 'video'), artifact)
             if (result.present && result.hash) {
               registered.push(result.relPath)
               contentHash = contentHash ?? result.hash
             } else registered.push(artifact)
-          } else registered.push(artifact)
+          } else {
+            if (isAbsolute(artifact) && existsSync(artifact)) logEvent({ kind: 'documents.blob-registration-refused', scope: 'artifact', present: true })
+            registered.push(artifact)
+          }
         }
         artifacts = registered
         if (latentPath && isAbsolute(latentPath) && existsSync(latentPath)) {
-          const result = registerBlobFile('latent', latentPath)
-          if (result.present && result.hash) {
-            latentPath = result.relPath
-            contentHash = contentHash ?? result.hash
+          if (isAllowedBlobSource(latentPath)) {
+            const result = registerBlobFile('latent', latentPath)
+            if (result.present && result.hash) {
+              latentPath = result.relPath
+              contentHash = contentHash ?? result.hash
+            }
+          } else {
+            logEvent({ kind: 'documents.blob-registration-refused', scope: 'latent', present: true })
           }
         }
       }
@@ -1496,12 +1678,14 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
       // The pointer switch IS the supersession marker (invariant 2): a new
       // result landing makes the previous canonical a prior — nothing is
       // overwritten, at most one non-superseded take exists per output.
-      const previousCanonical = (statements.takesByOutput.all(input.outputId) as Array<Record<string, unknown>>)
-        .find((take) => str(take.id) !== id && take.superseded_by === null)
-      if (previousCanonical) statements.supersedeTake.run(id, str(previousCanonical.id))
+      // Supersede EVERY stray non-superseded take of this output, not just
+      // the first: restoring the invariant beats assuming it.
+      for (const take of statements.takesByOutput.all(input.outputId) as Array<Record<string, unknown>>) {
+        if (str(take.id) !== id && take.superseded_by === null) statements.supersedeTake.run(id, str(take.id))
+      }
       indexTake(statements.take.get(id) as Record<string, unknown>)
       return hydrateTake(statements.take.get(id) as Record<string, unknown>)
-    },
+    }),
     listTakes: (outputId: string) => (statements.takesByOutput.all(outputId) as Array<Record<string, unknown>>).map(hydrateTake),
     canonicalTake: (outputId: string) => {
       const row = statements.canonicalTake.get(outputId) as Record<string, unknown> | undefined
@@ -1605,13 +1789,25 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
       const chain = statements.getChain.get(input.chainId) as Record<string, unknown> | undefined
       if (!chain) throw new Error(`chain ${input.chainId} does not exist`)
       const id = randomUUID()
+      // Blob lifecycle (the appendTake contract, applied to control tracks):
+      // a referenced real file is registered into the content-addressed tree
+      // and the row stores the BLOB reference — the durable, exportable,
+      // GC-protected form. A volatile absolute path (which after an archive
+      // import is the ORIGINAL machine's path) never rides the document.
+      const canonicalRef = (ref: string): string => {
+        if (isAbsolute(ref) && existsSync(ref)) {
+          const result = registerBlobFile(blobKindForPath(ref, 'image'), ref)
+          if (result.present && result.hash) return result.relPath
+        }
+        return ref
+      }
       statements.insertControlTrack.run({
         id,
         chain_id: input.chainId,
         kind: input.kind,
         source: input.source,
-        input_ref: input.inputRef,
-        mask_ref: input.maskRef ?? null,
+        input_ref: canonicalRef(input.inputRef),
+        mask_ref: input.maskRef ? canonicalRef(input.maskRef) : null,
         params_json: input.params === undefined || input.params === null ? null : JSON.stringify(input.params),
       })
       return { id }
@@ -1669,10 +1865,25 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
     assetForks: (projectId: string) => statements.assetForksByProject.all(projectId),
 
     // plans ---------------------------------------------------------------------------
-    upsertPlan: (input: { id?: string; projectId: string; document: Record<string, unknown> }) => {
+    /** Optimistic concurrency (M5): a caller that read the plan at
+     *  expectedUpdatedAt may only write while that version is still current
+     *  — a concurrent edit (rapid segment changes racing a seed write-back)
+     *  produces PlanConflictError (409 + the current document) instead of a
+     *  silent last-write-wins lost update. Absent expectedUpdatedAt keeps
+     *  the legacy unconditional upsert (create flows). */
+    upsertPlan: (input: { id?: string; projectId: string; document: Record<string, unknown>; expectedUpdatedAt?: number }) => {
       const project = guardProject(statements.getProject.get(input.projectId) as Record<string, unknown> | undefined)
       if (!project) throw new Error(`project ${input.projectId} does not exist`)
       const id = input.id ?? randomUUID()
+      if (input.id !== undefined && input.expectedUpdatedAt !== undefined) {
+        const current = statements.plan.get(input.id) as Record<string, unknown> | undefined
+        if (current) {
+          const currentUpdated = intOrNull(current.updated_at)
+          if (currentUpdated !== null && currentUpdated !== Math.trunc(input.expectedUpdatedAt)) {
+            throw new PlanConflictError(input.id, currentUpdated, parseJson<Record<string, unknown>>(current.document_json, {}))
+          }
+        }
+      }
       statements.insertPlan.run({
         id,
         project_id: input.projectId,
@@ -1729,9 +1940,13 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
     search: (query: string, kind?: string, limit = 50) => {
       const match = ftsMatchExpression(query)
       if (!match) return []
+      const capped = Math.max(1, Math.min(200, limit))
       try {
-        const rows = statements.ftsSearch.all(match, Math.max(1, Math.min(200, limit))) as Array<{ source_id: string; source_kind: string }>
-        return rows.filter((row) => !kind || row.source_kind === kind)
+        // The kind filter runs in SQL BEFORE the limit — a kind-filtered
+        // query must never return empty while matches exist past the cut.
+        return (kind
+          ? statements.ftsSearchKind.all(match, kind, capped)
+          : statements.ftsSearch.all(match, capped)) as Array<{ source_id: string; source_kind: string }>
       } catch {
         return [] // a malformed MATCH must never 500 the search route
       }

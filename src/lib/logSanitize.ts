@@ -60,33 +60,45 @@ function keywordPattern(word: string): string {
 // e.g. a file path is not half-eaten by a weaker alternative. The combined
 // pattern is case-SENSITIVE (see KEYWORDS for how vocabulary still matches
 // any casing).
-const KEEP_SOURCES = [
-  // 1. File names with technical extensions (paths ending in a file).
-  /[A-Za-z_][\w./\\-]*\.(?:py|tsx?|jsx?|mjs|cjs|json|safetensors|pt|pth|gguf|onnx|bin|mp4|webm|mov|mkv|flac|wav|mp3|ogg|m4a|opus|png|jpe?g|webp|bmp|gif|txt|log|csv|ya?ml|toml|ini|cfg|conf|exe|dll|so|dylib|pem|crt)\b/.source,
-  // 2. Windows absolute paths (C:\Users\…\video.mp4 without an extension too).
-  /[A-Za-z]:\\(?:[\w.@-]+\\)*[\w.@-]+/.source,
-  // 3. POSIX paths with two or more segments (/api/lan/prompt, /home/u/out).
-  //    Two-plus avoids treating prose like "his/her" as a path.
-  /\/[\w.@-]+(?:\/[\w.@-]+)+/.source,
-  // 4. IPv4 addresses with an optional port.
-  /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d{1,5})?\b/.source,
-  // 5. UUIDs (ComfyUI prompt/job ids).
-  /\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/.source,
-  // 6. Class-name-ish identifiers: a capital … a lowercase … another capital
-  //    (VAEDecodeTiled, KSamplerSelect, MiniMaxH3PreviewOverride, ComfyUI).
-  //    Plain English ("Cannot", "The") has no internal case transition and
-  //    is dropped.
-  /[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*/.source,
-  // 7. snake_case identifiers (load_draft, my_counter).
-  /\b[A-Za-z_][A-Za-z0-9]*_[A-Za-z0-9_]+\b/.source,
-  // 8. Dotted property paths (settings.gpuTier, error.message, node.inputs).
-  /[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)+/.source,
-  // 9. Technical vocabulary (case-insensitive via keywordPattern).
-  '\\b(?:' + KEYWORDS.map(keywordPattern).join('|') + ')\\b',
-  // 10. Bare numbers — node ids ('13', '84'), HTTP statuses ('500'),
-  //     byte positions, timings, exit codes.
-  /\d+(?:\.\d+)?/.source,
-].join('|')
+// The CamelCase rule (6) is parameterized: RELAXED keeps any humped
+// identifier (node CLASS names — the comfy/prompt structural errors need
+// them); STRICT (engine LOG lines) additionally requires a leading 2+
+// uppercase run or an embedded digit, because engine stdout can echo input
+// VALUES, and a prompt fragment like "NeonCyberQueen" is humped prose, not a
+// class name. PII-scrub doctrine: failure path/reason, never prompt
+// semantics.
+const CAMEL_RELAXED = /[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*/.source
+const CAMEL_STRICT = /(?=[A-Za-z0-9]*[a-z][A-Za-z0-9]*[A-Z])(?:(?=[A-Z]{2})|(?=[A-Za-z0-9]*\d))[A-Za-z0-9]+/.source
+
+function keepSources(camelSource: string): string {
+  return [
+    // 1. File names with technical extensions (paths ending in a file).
+    /[A-Za-z_][\w./\\-]*\.(?:py|tsx?|jsx?|mjs|cjs|json|safetensors|pt|pth|gguf|onnx|bin|mp4|webm|mov|mkv|flac|wav|mp3|ogg|m4a|opus|png|jpe?g|webp|bmp|gif|txt|log|csv|ya?ml|toml|ini|cfg|conf|exe|dll|so|dylib|pem|crt)\b/.source,
+    // 2. Windows absolute paths (C:\Users\…\video.mp4 without an extension too).
+    /[A-Za-z]:\\(?:[\w.@-]+\\)*[\w.@-]+/.source,
+    // 3. POSIX paths with two or more segments (/api/lan/prompt, /home/u/out).
+    //    Two-plus avoids treating prose like "his/her" as a path.
+    /\/[\w.@-]+(?:\/[\w.@-]+)+/.source,
+    // 4. IPv4 addresses with an optional port.
+    /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d{1,5})?\b/.source,
+    // 5. UUIDs (ComfyUI prompt/job ids).
+    /\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/.source,
+    // 6. Class-name-ish identifiers (see CAMEL_* above for the two postures).
+    camelSource,
+    // 7. snake_case identifiers (load_draft, my_counter).
+    /\b[A-Za-z_][A-Za-z0-9]*_[A-Za-z0-9_]+\b/.source,
+    // 8. Dotted property paths (settings.gpuTier, error.message, node.inputs).
+    /[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)+/.source,
+    // 9. Technical vocabulary (case-insensitive via keywordPattern).
+    '\\b(?:' + KEYWORDS.map(keywordPattern).join('|') + ')\\b',
+    // 10. Bare numbers — node ids ('13', '84'), HTTP statuses ('500'),
+    //     byte positions, timings, exit codes.
+    /\d+(?:\.\d+)?/.source,
+  ].join('|')
+}
+
+const KEEP_SOURCES = keepSources(CAMEL_RELAXED)
+const KEEP_SOURCES_STRICT = keepSources(CAMEL_STRICT)
 
 /** Reduces an arbitrary error message to failure-path signal: technical
  *  fragments survive, free-form user text collapses to `[redacted]`, and the
@@ -104,6 +116,28 @@ export function sanitizeErrorMessage(message: string): string {
     cursor = match.index + match[0].length
   }
   if (message.slice(cursor).trim().length > 0) parts.push(REDACTED)
+  return parts.join(' ').replace(/\s+/g, ' ').trim().slice(0, MAX_SANITIZED_LENGTH)
+}
+
+/** Engine LOG line scrub (security hardening 1): the managed engine's stdout
+ *  surfaces through /api/lan/engine/status and the fabric engine channel,
+ *  and tracebacks there can echo input values. Same reducer as
+ *  sanitizeErrorMessage but on the STRICT CamelCase posture — a humped token
+ *  survives only with a leading uppercase run (VAEDecodeTiled) or an
+ *  embedded digit (MiniMaxH3), so prompt-word fragments collapse. */
+export function sanitizeEngineLogLine(line: string): string {
+  if (typeof line !== 'string' || line.length === 0) return ''
+  const pattern = new RegExp(KEEP_SOURCES_STRICT, 'g')
+  const parts: string[] = []
+  let cursor = 0
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(line)) !== null) {
+    const gap = line.slice(cursor, match.index)
+    if (gap.trim().length > 0) parts.push(REDACTED)
+    parts.push(match[0])
+    cursor = match.index + match[0].length
+  }
+  if (line.slice(cursor).trim().length > 0) parts.push(REDACTED)
   return parts.join(' ').replace(/\s+/g, ' ').trim().slice(0, MAX_SANITIZED_LENGTH)
 }
 

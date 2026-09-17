@@ -350,6 +350,125 @@ async function main() {
     assert.equal(missing.status, 404, 'a file outside the output directory must 404')
   }
 
+  // ---- (f) origin / Host / content-type guards (security hardening 1) ------
+  {
+    const http = require('node:http')
+    const WebSocket = require('ws')
+    const probe = async (init, pathname = '/api/lan/settings') => {
+      const response = await fetch(`${base}${pathname}`, init)
+      await response.arrayBuffer().catch(() => undefined)
+      return response.status
+    }
+    const rawProbe = (options) => new Promise((resolve, reject) => {
+      const request = http.request({ host: '127.0.0.1', port, ...options }, (response) => {
+        response.resume()
+        response.on('end', () => resolve(response.statusCode))
+      })
+      request.on('error', reject)
+      request.end(options.body ?? null)
+    })
+
+    // Cross-site browser POST (CORS-mode fetch carries Origin): refused.
+    const forged = await probe({ method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://evil.example' }, body: JSON.stringify({ settings: { comfyUrl: 'http://127.0.0.1:8188', outputDirectory: '/tmp' } }) })
+    assert.equal(forged, 403, `a forged cross-origin POST must be refused with 403 (got ${forged})`)
+    // no-cors-style POST (text/plain body, no Origin needed to be hostile):
+    // refused by the content-type rule alone.
+    const textPlain = await probe({ method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ settings: { comfyUrl: 'http://127.0.0.1:8188', outputDirectory: '/tmp' } }) })
+    assert.equal(textPlain, 403, `a text/plain POST body must be refused (got ${textPlain})`)
+    // Cross-origin read (DNS-rebinding-shaped GET with Origin): refused.
+    const foreignGet = await probe({ headers: { origin: 'http://evil.example' } })
+    assert.equal(foreignGet, 403, `a foreign-Origin GET must be refused (got ${foreignGet})`)
+    // Same-origin POST (Origin matching scheme://Host) keeps working.
+    const sameOrigin = await probe({ method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ settings: { comfyUrl: 'http://127.0.0.1:8188', outputDirectory: home, modelRoot: home, ffmpegPath: 'ffmpeg' } }) })
+    assert.equal(sameOrigin, 200, `a same-origin POST with JSON content type must pass (got ${sameOrigin})`)
+    // Bodiless POST with no content type (Node/curl ergonomics): allowed —
+    // it is inert on readJson routes and Origin covers browser CSRF.
+    const bodiless = await rawProbe({ method: 'POST', path: '/api/lan/documents/gc' })
+    assert.equal(bodiless, 200, `a bodiless POST must still be served (got ${bodiless})`)
+
+    // Host gate: a rebound attacker domain is refused; mDNS .local passes.
+    const evilHost = await rawProbe({ method: 'GET', path: '/api/lan/settings', headers: { host: 'evil.example:4178' } })
+    assert.equal(evilHost, 403, `a non-local Host name must be refused (got ${evilHost})`)
+    const mdnsHost = await rawProbe({ method: 'GET', path: '/api/lan/settings', headers: { host: 'studio.local:4178' } })
+    assert.equal(mdnsHost, 200, `an mDNS .local Host must be served (got ${mdnsHost})`)
+    // The settings-exposed allowlist admits a custom hostname…
+    const current = (await (await fetch(`${base}/api/lan/settings`)).json()).settings
+    const savedAllowlist = await probe({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...current, lanHostAllowlist: ['mybox.studio'] } }) })
+    assert.equal(savedAllowlist, 200, 'saving a host allowlist must succeed')
+    const allowedHost = await rawProbe({ method: 'GET', path: '/api/lan/settings', headers: { host: 'mybox.studio' } })
+    assert.equal(allowedHost, 200, `an allowlisted custom Host must be served (got ${allowedHost})`)
+    // …and the allowlist does not open the door for anyone else.
+    const stillEvil = await rawProbe({ method: 'GET', path: '/api/lan/settings', headers: { host: 'other.studio' } })
+    assert.equal(stillEvil, 403, `a non-allowlisted custom Host must be refused (got ${stillEvil})`)
+
+    // Settings write validation (security hardening 1): shape + SSRF + warn.
+    const relativeOutput = await probe({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...current, outputDirectory: 'relative/out' } }) })
+    assert.equal(relativeOutput, 400, `a relative outputDirectory must be refused (got ${relativeOutput})`)
+    const remoteComfy = await probe({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...current, comfyUrl: 'http://example.com:8188' } }) })
+    assert.equal(remoteComfy, 400, `a non-local comfyUrl must be refused at save time (got ${remoteComfy})`)
+    const warned2 = await fetch(`${base}/api/lan/settings`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ settings: { ...current, outputDirectory: path.join(home, 'not-created-yet') } }),
+    })
+    const warnedBody = await warned2.json()
+    assert.equal(warned2.status, 200, 'a well-formed save with a missing directory must succeed')
+    assert.ok(Array.isArray(warnedBody.warnings) && warnedBody.warnings.some((line) => line.includes('not-created-yet')), `a nonexistent absolute path must be warned about, not silently accepted (got ${JSON.stringify(warnedBody.warnings)})`)
+
+    // WS upgrade: a foreign Origin is refused before the handshake; a plain
+    // (browserless) connect still upgrades.
+    const refusedSocket = await new Promise((resolve) => {
+      const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`, { headers: { origin: 'http://evil.example' } })
+      socket.on('error', () => resolve('refused'))
+      socket.on('open', () => { socket.close(); resolve('opened') })
+    })
+    assert.equal(refusedSocket, 'refused', 'a WS upgrade with a foreign Origin must be refused')
+    const cleanSocket = await new Promise((resolve) => {
+      const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+      socket.on('error', () => resolve('refused'))
+      socket.on('open', () => { socket.close(); resolve('opened') })
+    })
+    assert.equal(cleanSocket, 'opened', 'a WS upgrade without a foreign Origin must succeed')
+  }
+
+  // ---- (g) in-process seams: comfyFetch SSRF funnel + rotateToken scheme ---
+  {
+    const { pathToFileURL } = require('node:url')
+    const coreUrl = pathToFileURL(path.resolve('dist-server/server/core.js')).href
+    const { createStudioServer } = await import(coreUrl)
+    const guardHome = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-storage-guard-'))
+    const guardPort = await freePort()
+    const studio = createStudioServer({
+      settingsFile: path.join(guardHome, 'settings.json'),
+      lanTokenFile: path.join(guardHome, 'lan-access-token.txt'),
+      tempDirectory: os.tmpdir(),
+      documentsDirectory: guardHome,
+      staticRoot: path.resolve('dist'),
+    })
+    try {
+      const previousPortEnv = process.env.MINIMAX_LAN_PORT
+      process.env.MINIMAX_LAN_PORT = String(guardPort)
+      try {
+        await studio.startLanServer()
+      } finally {
+        if (previousPortEnv === undefined) delete process.env.MINIMAX_LAN_PORT
+        else process.env.MINIMAX_LAN_PORT = previousPortEnv
+      }
+      const status = studio.status()
+      assert.equal(status.running, true, 'the in-process guard server must boot')
+      // The one outbound funnel every proxy path shares: a non-local service
+      // URL is refused there, not just at settings-save time.
+      await assert.rejects(studio.comfyFetch('http://example.com', '/system_stats'), /local/i, 'comfyFetch must refuse non-local service URLs')
+      // rotateToken builds links with the listener's actual scheme (HTTPS by
+      // default) — the pre-fix http:// link under TLS was dead on arrival.
+      const rotated = await studio.rotateToken()
+      const scheme = rotated.secure ? 'https' : 'http'
+      assert.ok(rotated.url.startsWith(`${scheme}://`), `rotated links must follow the ${scheme} scheme (got ${rotated.url})`)
+    } finally {
+      studio.stopLanServer()
+    }
+  }
+
   child.kill()
   console.log(`PASS: storage substrate — studio.db boots with versioned migrations (${appliedMigrations.length} applied); jobs upsert per-job (graph stripped, manifest kept, events on terminal); FTS5 search is injection-safe and the technique corpus seeds idempotently; workspace/projects round-trip; the localStorage migration copies+verifies without touching the originals; degraded API writes leave no marker. Server: ${base}`)
 }

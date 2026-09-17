@@ -21,6 +21,7 @@
 //       untouched (jobs upsert keeps the new columns)
 // Run after `pnpm build` (the server + modules are loaded from dist-server).
 const { spawn } = require('node:child_process')
+const http = require('node:http')
 const net = require('node:net')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -30,7 +31,7 @@ const { createHash } = require('node:crypto')
 const Database = require('better-sqlite3')
 
 const { migrations, migrateDatabase } = require('../dist-server/server/db.js')
-const { packZip, unpackZip } = require('../dist-server/server/documentArchive.js')
+const { packZip, unpackZip, MAX_ZIP_ENTRIES, MAX_ZIP_ENTRY_BYTES } = require('../dist-server/server/documentArchive.js')
 
 /** Picks a port that verifiably has nothing listening. */
 async function freePort() {
@@ -53,6 +54,20 @@ function makeHome(label) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `minimax-documents-${label}-`))
 }
 
+/** Every server booted this run — the SUCCESS path and every FAILURE path
+ *  kill them all (a spawned child holds its stdio pipes open, so a missed
+ *  kill both orphans the server AND parks the runner in ep_poll forever:
+ *  the merge-verification hang, and the 50-orphan leak on failed runs). */
+const bootedServers = []
+const killAllServers = () => {
+  for (const child of bootedServers) {
+    try {
+      child.kill()
+    } catch { /* already gone — the exit-status kill below stays honest */ }
+  }
+}
+process.on('exit', killAllServers)
+
 async function bootServer(home, label) {
   const output = { text: '', label }
   const port = await freePort()
@@ -60,6 +75,7 @@ async function bootServer(home, label) {
     env: { ...process.env, MINIMAX_STUDIO_HOME: home, MINIMAX_LAN_PORT: String(port), MINIMAX_NO_HTTPS: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
+  bootedServers.push(child)
   child.stdout.on('data', (chunk) => { output.text += String(chunk) })
   child.stderr.on('data', (chunk) => { output.text += String(chunk) })
   const deadline = Date.now() + 15_000
@@ -130,9 +146,6 @@ async function main() {
     projects: fixtureDb.prepare('SELECT * FROM projects').all(),
   }))
   const applied = migrateDatabase(fixtureDb) // applies 002 + 003 (one-way, append-only)
-  // 003 (dataset manager, sv14rt0) is additive-only: it creates its OWN
-  // tables and never touches a legacy or canvas column — the golden rows
-  // below stay byte-identical through it.
   check(applied === 2, `golden fixture migration applies exactly 002 + 003 (got ${applied})`)
   const goldenAfter = sha256(JSON.stringify({
     jobs: fixtureDb.prepare('SELECT id, provider, media_type, mode, status, prompt, params_json, created_at, updated_at, error, width, height, duration, output_url FROM jobs').all(),
@@ -536,7 +549,8 @@ async function main() {
   const manifest = JSON.parse(unpackZip(archive).get('manifest.json'))
   check(manifest.format === 'minimax-canvas-archive' && manifest.schemaVersion >= 1, 'manifest carries format + schemaVersion')
   check(manifest.counts.takes === 2 && manifest.counts.chains === 2, 'manifest counts the exported document')
-  check(manifest.blobs.length === 1 && manifest.missingBlobs.length === 1, `present + evicted blobs both ride in the manifest (got ${manifest.blobs.length} + ${manifest.missingBlobs.length})`)
+  check(manifest.blobs.length === 1 && manifest.missingBlobs.length === 2, `present + evicted + unregistered-ref blobs all ride in the manifest (got ${manifest.blobs.length} + ${manifest.missingBlobs.length})`)
+  check(manifest.missingBlobs.some((blob) => blob.path === 'canvas-blobs/aa/deadbeef' && blob.hash === 'unregistered'), 'a referenced-but-unregistered path (legacy control ref / pre-blob latent) is VISIBLE in missingBlobs — never a silent omission')
   check(manifest.globalAssets.some((asset) => asset.id === assetCreated.body.asset.id), 'global assets ride by id + hash manifest (not as rows)')
 
   const homeB = makeHome('b')
@@ -570,6 +584,425 @@ async function main() {
   check(collision.status === 400 && /already exists/.test(collision.body.error ?? ''), 'importing onto a taken project id refuses loudly (documented seam: no silent re-id)')
 
   // =====================================================================
+  // (j) correctness wave 1 — the audit-fix regressions (junllxf)
+  // =====================================================================
+
+  // --- B1′: a shared content hash must survive the eviction of ONE take ---
+  const sharedProject = await api.post('/api/lan/documents/projects', { name: 'Shared content' })
+  const sharedProjectId = sharedProject.body.project.id
+  const sharedBytes = Buffer.from(`shared-flf-continuation-frame-${Math.random()}`)
+  const sharedFile = path.join(outDir, 'shared-frame.png')
+  fs.writeFileSync(sharedFile, sharedBytes)
+  const mkSharedChain = async (prompt) => {
+    const chain = await api.post('/api/lan/documents/chains', { projectId: sharedProjectId, inputSpec: { fresh: { prompt } } })
+    const output = await api.post('/api/lan/documents/outputs', { chainId: chain.body.chain.id })
+    return { chainId: chain.body.chain.id, outputId: output.body.output.id }
+  }
+  const chainA1 = await mkSharedChain('segment A (canonical keeps the shared frame)')
+  const chainB1 = await mkSharedChain('segment B (its prior gets evicted)')
+  // BOTH outputs register the SAME bytes → the same canvas-blobs path.
+  await api.post('/api/lan/documents/takes', { outputId: chainA1.outputId, artifacts: [sharedFile] })
+  const sharedPriorTake = await api.post('/api/lan/documents/takes', { outputId: chainB1.outputId, artifacts: [sharedFile] })
+  // supersede B's first take with a DIFFERENT second take, then sweep: the
+  // prior is evictable, but the shared blob file is NOT — A's canonical
+  // still serves it.
+  const bSecondFile = path.join(outDir, 'b-second.png')
+  fs.writeFileSync(bSecondFile, Buffer.from(`b-own-bytes-${Math.random()}`))
+  await api.post('/api/lan/documents/takes', { outputId: chainB1.outputId, artifacts: [bSecondFile] })
+  const sharedBlobRel = sharedPriorTake.body.take.artifacts[0]
+  const sharedBlobAbs = path.join(homeA, sharedBlobRel)
+  const sharedSweep = await api.post('/api/lan/documents/gc', {})
+  check(sharedSweep.status === 200, 'shared-content sweep answers')
+  check(fs.existsSync(sharedBlobAbs), 'SHARED blob file survives the eviction of one referencing take (B1′: FLF frames, fixed-seed reruns)')
+  const sharedServe = await api.getRaw(`/api/lan/documents/blobs/file?path=${encodeURIComponent(sharedBlobRel)}`)
+  check(sharedServe.status === 200 && sharedServe.buffer.equals(sharedBytes), 'the LIVE canonical take still serves the shared blob bytes')
+  const sharedRow = (() => {
+    const db = new Database(dbFileA)
+    const row = db.prepare('SELECT missing FROM canvas_blob WHERE path = ?').get(sharedBlobRel)
+    db.close()
+    return row
+  })()
+  check(sharedRow && sharedRow.missing === 0, 'the shared blob row stays PRESENT (an eviction of one take never marks shared content missing)')
+
+  // --- B1′: a fork edge pinning a PRIOR take by takeId keeps it resident ---
+  const pinnedProject = await api.post('/api/lan/documents/projects', { name: 'Pinned prior' })
+  const pinnedProjectId = pinnedProject.body.project.id
+  const pinnedSource = await api.post('/api/lan/documents/chains', { projectId: pinnedProjectId, inputSpec: { fresh: { prompt: 'pinned source' } } })
+  const pinnedOutput = (await api.post('/api/lan/documents/outputs', { chainId: pinnedSource.body.chain.id })).body.output
+  const pinnedPrior = await api.post('/api/lan/documents/takes', { outputId: pinnedOutput.id, artifacts: [mkFile('pinned-prior.latent')] })
+  await api.post('/api/lan/documents/takes', { outputId: pinnedOutput.id, artifacts: [mkFile('pinned-canonical.latent')] })
+  // the fork edge pins the PRIOR take explicitly (fork-from-early-take)
+  await api.post('/api/lan/documents/chains', {
+    projectId: pinnedProjectId,
+    inputSpec: { outputRef: { outputId: pinnedOutput.id, takeId: pinnedPrior.body.take.id, substrate: 'latents' } },
+  })
+  const pinnedSweep = await api.post('/api/lan/documents/gc', {})
+  check(pinnedSweep.status === 200 && pinnedSweep.body.gc.evicted === 0, `a takeId-pinned prior is tier 1 — sweep evicts nothing (got ${pinnedSweep.body.gc?.evicted})`)
+  check(fs.existsSync(path.join(homeA, pinnedPrior.body.take.artifacts[0])), 'the pinned prior take\'s latent stays resident (§3 live fork edge)')
+
+  // --- M1′: appendTake is idempotent by jobId (two tabs / retry) ---
+  const idemOutput = (await api.post('/api/lan/documents/outputs', { chainId: pinnedSource.body.chain.id })).body.output
+  const idemFirst = await api.post('/api/lan/documents/takes', { outputId: idemOutput.id, jobId: 'job-idem-1', artifacts: [mkFile('idem.latent')] })
+  const idemSecond = await api.post('/api/lan/documents/takes', { outputId: idemOutput.id, jobId: 'job-idem-1', artifacts: [mkFile('idem-2.latent')] })
+  check(idemFirst.body.take.id === idemSecond.body.take.id, 'a repeat append for the same jobId returns the EXISTING take (idempotent write boundary)')
+  const idemCount = (() => {
+    const db = new Database(dbFileA)
+    const row = db.prepare('SELECT COUNT(*) AS n FROM canvas_take WHERE job_id = ?').get('job-idem-1')
+    db.close()
+    return row.n
+  })()
+  check(idemCount === 1, `one take row per jobId — no duplicates, no duplicate FTS rows (got ${idemCount})`)
+
+  // --- M2′: appendTake restores the one-canonical invariant (supersede ALL
+  // strays, not just the first) inside one transaction ---
+  const strayProject = await api.post('/api/lan/documents/projects', { name: 'Strays' })
+  const strayChain = await api.post('/api/lan/documents/chains', { projectId: strayProject.body.project.id, inputSpec: { fresh: { prompt: 'stray source' } } })
+  const strayOutput = (await api.post('/api/lan/documents/outputs', { chainId: strayChain.body.chain.id })).body.output
+  {
+    // simulate an older build's crash window: two takes, neither superseded
+    const db = new Database(dbFileA)
+    const insert = db.prepare('INSERT INTO canvas_take (id, output_id, job_id, artifacts_json, latent_path, metrics_json, created_at, superseded_by, evicted, evicted_at, content_hash) VALUES (?, ?, NULL, ?, NULL, NULL, ?, NULL, 0, NULL, NULL)')
+    insert.run('stray-take-1', strayOutput.id, '[]', 1000)
+    insert.run('stray-take-2', strayOutput.id, '[]', 1001)
+    db.close()
+  }
+  const healingTake = await api.post('/api/lan/documents/takes', { outputId: strayOutput.id, artifacts: [mkFile('healing.latent')] })
+  const strayCounts = (() => {
+    const db = new Database(dbFileA)
+    const rows = db.prepare('SELECT id, superseded_by FROM canvas_take WHERE output_id = ?').all(strayOutput.id)
+    db.close()
+    return rows
+  })()
+  check(strayCounts.filter((row) => row.superseded_by === null).length === 1 && strayCounts.find((row) => row.id === healingTake.body.take.id).superseded_by === null, 'a new append supersedes EVERY stray — exactly one non-superseded take remains (invariant 2 restored, not assumed)')
+
+  // --- M6: a torn copy at the canonical hash path is detected and repaired,
+  // never served as verified content ---
+  {
+    const tornFile = path.join(outDir, 'torn-video.mp4')
+    fs.writeFileSync(tornFile, Buffer.from(`torn-content-${Math.random()}`))
+    const tornTake = await api.post('/api/lan/documents/takes', { outputId: strayOutput.id, artifacts: [tornFile] })
+    const tornRel = tornTake.body.take.artifacts[0]
+    const tornAbs = path.join(homeA, tornRel)
+    // simulate the crash/ENOSPC torn copy: truncate the canonical file
+    fs.writeFileSync(tornAbs, fs.readFileSync(tornAbs).subarray(0, 5))
+    const repairTake = await api.post('/api/lan/documents/takes', { outputId: strayOutput.id, artifacts: [tornFile] })
+    check(repairTake.status === 200, 're-registering content over a torn dedupe target answers')
+    check(sha256File(tornAbs) === tornTake.body.take.contentHash, 'the dedupe-skip path RE-VERIFIED and repaired the torn canonical file (size+hash, not trust)')
+    // and the staged-copy discipline never leaves tmp files behind
+    const tmpLeftovers = (() => {
+      const found = []
+      const walk = (dir) => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name)
+          if (entry.isDirectory()) walk(full)
+          else if (entry.name.includes('.tmp-') || entry.name.includes('.importing-')) found.push(full)
+        }
+      }
+      walk(path.join(homeA, 'canvas-blobs'))
+      return found
+    })()
+    check(tmpLeftovers.length === 0, `no staged tmp/importing files survive in the blob tree (got ${tmpLeftovers.length})`)
+  }
+
+  // --- M4: one newer-schema project must not poison the project list ---
+  const poisonedListing = await api.get('/api/lan/documents/projects')
+  check(poisonedListing.status === 200, `the project list stays healthy with a poisoned row present (${poisonedListing.status})`)
+  check(poisonedListing.body.projects.some((project) => project.id === projectId), 'the OLD projects still list (boot un-bricked)')
+  check(poisonedListing.body.skipped?.some((entry) => entry.id === 'legacy:project' && entry.schemaVersion === 999), 'the newer-schema project is skipped AND reported per row')
+
+  // --- M4′: locks gate staleness propagation (coherent with switchCanonical) ---
+  {
+    const lockProject = await api.post('/api/lan/documents/projects', { name: 'Lock propagation' })
+    const lockProjectId = lockProject.body.project.id
+    const upstream = await api.post('/api/lan/documents/chains', { projectId: lockProjectId, inputSpec: { fresh: { prompt: 'upstream' } } })
+    const upstreamOutput = (await api.post('/api/lan/documents/outputs', { chainId: upstream.body.chain.id })).body.output
+    const lockedDownstream = await api.post('/api/lan/documents/chains', { projectId: lockProjectId, lockState: 'locked', inputSpec: { outputRef: { outputId: upstreamOutput.id, substrate: 'decoded' } } })
+    const plainDownstream = await api.post('/api/lan/documents/chains', { projectId: lockProjectId, inputSpec: { outputRef: { outputId: upstreamOutput.id, substrate: 'decoded' } } })
+    await api.post('/api/lan/documents/chains/update', { id: upstream.body.chain.id, settings: { prompt: 'changed upstream settings' } })
+    const lockDoc = await api.get(`/api/lan/documents/project?id=${lockProjectId}`)
+    const lockedChain = lockDoc.body.chains.find((chain) => chain.id === lockedDownstream.body.chain.id)
+    const plainChain = lockDoc.body.chains.find((chain) => chain.id === plainDownstream.body.chain.id)
+    check(lockedChain.stale === false, 'a LOCKED downstream chain stays pristine (locks gate propagation)')
+    check(plainChain.stale === true, 'an unlocked downstream chain goes stale on the same upstream change')
+  }
+
+  // --- M5: plan writes are compare-and-swap (lost-update window closed) ---
+  {
+    const planCreated = await api.post('/api/lan/documents/plans', { projectId, document: { brief: 'cas plan', segments: [], gaps: [] } })
+    check(planCreated.status === 200, 'plan create answers')
+    const planId = planCreated.body.plan.id
+    const staleWrite = await api.post('/api/lan/documents/plans', { projectId, id: planId, document: { brief: 'written against v0', segments: [], gaps: [] }, expectedUpdatedAt: 1 })
+    check(staleWrite.status === 409 && staleWrite.body.conflict?.currentDocument?.brief === 'cas plan', `a stale expectedUpdatedAt answers 409 with the current document (got ${staleWrite.status})`)
+    const freshDoc = await api.get(`/api/lan/documents/project?id=${projectId}`)
+    const freshUpdatedAt = freshDoc.body.plans.find((plan) => plan.id === planId).updatedAt
+    const freshWrite = await api.post('/api/lan/documents/plans', { projectId, id: planId, document: { brief: 'written against the real version', segments: [], gaps: [] }, expectedUpdatedAt: freshUpdatedAt })
+    check(freshWrite.status === 200, 'the current expectedUpdatedAt writes cleanly')
+  }
+
+  // --- m2: the FTS kind filter applies BEFORE the limit ---
+  {
+    const ftsProject = await api.post('/api/lan/documents/projects', { name: 'Kind filter' })
+    const ftsChain = await api.post('/api/lan/documents/chains', { projectId: ftsProject.body.project.id, inputSpec: { fresh: { prompt: 'needle-in-a-haystack unique chain prompt zqx' } } })
+    for (let index = 0; index < 30; index += 1) {
+      await api.post('/api/lan/jobs', { jobs: [{ id: `fts-noise-${index}`, provider: 'minimax', mode: 'text', status: 'completed', prompt: 'needle', createdAt: Date.now() + index, width: 64, height: 64, duration: 1 }] })
+    }
+    // limit 1: pre-fix, the single slot goes to a short noise job and the
+    // kind filter empties the result — the chain exists beyond the cut.
+    const chainHits = await api.get(`/api/lan/documents/search?${new URLSearchParams({ q: 'needle', kind: 'chain', limit: '1' })}`)
+    check(chainHits.status === 200 && chainHits.body.results.length === 1 && chainHits.body.results[0].source_id === ftsChain.body.chain.id, `kind-filtered search finds the chain past 30 noisier job rows at limit 1 (got ${JSON.stringify(chainHits.body.results)})`)
+  }
+
+  // --- M5′ + B2: the cancel contract is honest; remote outputs fetch-and-
+  // ingest server-side (a tiny mock engine stands in for ComfyUI) ---
+  {
+    const mockEngine = http.createServer((request, response) => {
+      const url = new URL(request.url ?? '/', 'http://mock.engine')
+      if (request.method === 'GET' && url.pathname === '/queue') {
+        // cancelPromptAt reads item[1] as the prompt id
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.end(JSON.stringify(mockEngineState.pending.length
+          ? { queue_running: [], queue_pending: [[0, mockEngineState.pending[0]]] }
+          : { queue_running: [], queue_pending: [] }))
+        return
+      }
+      if (request.method === 'POST' && url.pathname === '/queue') {
+        mockEngineState.pending = []
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.end('{}')
+        return
+      }
+      if (request.method === 'POST' && url.pathname === '/interrupt') {
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.end('{}')
+        return
+      }
+      if (request.method === 'GET' && url.pathname.startsWith('/history/')) {
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.end('{}')
+        return
+      }
+      if (request.method === 'GET' && url.pathname === '/view') {
+        response.writeHead(200, { 'content-type': 'application/octet-stream' })
+        response.end(mockEngineState.viewBytes)
+        return
+      }
+      response.writeHead(404)
+      response.end('{}')
+    })
+    const mockEngineState = { pending: [], viewBytes: Buffer.from(`remote-engine-output-${Math.random()}`) }
+    const mockPort = await freePort()
+    await new Promise((resolve) => mockEngine.listen(mockPort, '127.0.0.1', resolve))
+    const settingsRead = await api.get('/api/lan/settings')
+    const originalSettings = settingsRead.body.settings
+    const redirected = await api.post('/api/lan/settings', { settings: { ...originalSettings, comfyUrl: `http://127.0.0.1:${mockPort}`, outputDirectory: outDir } })
+    check(redirected.status === 200, 'settings redirect to the mock engine answers')
+
+    // cancel of a prompt the engine never heard of: cancelled FALSE (M5′)
+    const cancelUnknown = await api.post('/api/lan/cancel', { promptId: 'never-submitted' })
+    check(cancelUnknown.status === 200 && cancelUnknown.body.cancelled === false && cancelUnknown.body.state === 'unknown', `an unknown prompt cancels honestly (got ${JSON.stringify(cancelUnknown.body)})`)
+    // cancel of a queued prompt: cancelled TRUE + the queue state
+    mockEngineState.pending = ['queued-prompt-1']
+    const cancelPending = await api.post('/api/lan/cancel', { promptId: 'queued-prompt-1' })
+    check(cancelPending.body.cancelled === true && cancelPending.body.state === 'pending', `a queued prompt cancels truthfully (got ${JSON.stringify(cancelPending.body)})`)
+
+    // B2: fetch-and-ingest of a remote engine output
+    const remoteIngest = await api.post('/api/lan/documents/blobs/ingest-output', { filename: 'Canvas_Remote_123.mp4', subfolder: 'video', type: 'output', kind: 'video' })
+    check(remoteIngest.status === 200, `remote output ingest answers (${remoteIngest.status} ${JSON.stringify(remoteIngest.body).slice(0, 140)})`)
+    check(remoteIngest.body.blob?.hash === sha256(mockEngineState.viewBytes) && remoteIngest.body.blob.present === true, 'the fetched output is hash-verified + registered present')
+    check(fs.existsSync(remoteIngest.body.path) && remoteIngest.body.path.startsWith(outDir), 'the fetched output landed as an output-dir copy (durable, engine-visible)')
+    const remoteBad = await api.post('/api/lan/documents/blobs/ingest-output', { filename: '../escape.mp4', kind: 'video' })
+    check(remoteBad.status === 400, 'ingest-output refuses traversal filenames (the proxy validation)')
+
+    await api.post('/api/lan/settings', { settings: originalSettings })
+    mockEngine.close()
+  }
+
+  // --- B1: latents register durably + ride exports; unregistered ones are
+  // visible in missingBlobs (never silently omitted) ---
+  {
+    const latentProject = await api.post('/api/lan/documents/projects', { name: 'Latent durability' })
+    const latentProjectId = latentProject.body.project.id
+    const latentChain = await api.post('/api/lan/documents/chains', { projectId: latentProjectId, inputSpec: { fresh: { prompt: 'latent chain' } } })
+    const latentOutput = (await api.post('/api/lan/documents/outputs', { chainId: latentChain.body.chain.id })).body.output
+    // the engine-side latent: an ABSOLUTE file under the output dir — the
+    // landing path's resolved form
+    const latentFile = path.join(outDir, 'h3_context', 'clip0.latent')
+    fs.mkdirSync(path.dirname(latentFile), { recursive: true })
+    fs.writeFileSync(latentFile, Buffer.from(`latent-substrate-${Math.random()}`))
+    const latentTake = await api.post('/api/lan/documents/takes', { outputId: latentOutput.id, artifacts: [mkFile('latent-media.mp4')], latentPath: latentFile })
+    check(latentTake.body.take.latentPath?.startsWith('canvas-blobs/'), `an absolute existing latent registers into the blob tree (got ${latentTake.body.take.latentPath})`)
+    const latentHash = sha256File(latentFile)
+    const latentExport = await api.getRaw(`/api/lan/documents/export?id=${latentProjectId}`)
+    const latentFilesInZip = unpackZip(latentExport.buffer)
+    const latentManifest = JSON.parse(latentFilesInZip.get('manifest.json'))
+    check(latentFilesInZip.has(`blobs/${latentHash}`) && latentManifest.blobs.some((blob) => blob.hash === latentHash && blob.kind === 'latent'), 'the latent substrate rides the archive export (bytes, not just metrics)')
+    // a RELATIVE latent (the pre-fix form, still present on old rows) is at
+    // least VISIBLE as missing on export
+    const relativeLatentProject = await api.post('/api/lan/documents/projects', { name: 'Relative latent' })
+    const relativeChain = await api.post('/api/lan/documents/chains', { projectId: relativeLatentProject.body.project.id, inputSpec: { fresh: { prompt: 'relative latent chain' } } })
+    const relativeOutput = (await api.post('/api/lan/documents/outputs', { chainId: relativeChain.body.chain.id })).body.output
+    const relativeTake = await api.post('/api/lan/documents/takes', { outputId: relativeOutput.id, artifacts: [mkFile('relative-media.mp4')], latentPath: 'h3_context/some-chain/clip0.latent' })
+    check(relativeTake.body.take.latentPath === 'h3_context/some-chain/clip0.latent', 'a relative latent that does not resolve stays the raw string (honest, no fabricated blob)')
+    const relativeExport = await api.getRaw(`/api/lan/documents/export?id=${relativeLatentProject.body.project.id}`)
+    const relativeManifest = JSON.parse(unpackZip(relativeExport.buffer).get('manifest.json'))
+    check(relativeManifest.missingBlobs.some((blob) => blob.path === 'h3_context/some-chain/clip0.latent' && blob.kind === 'latent'), 'an unresolvable latent is RECORDED in missingBlobs on export (visible, never silently dropped)')
+  }
+
+  // --- M3′: control tracks register their media; exports carry it; trash
+  // emptying never deletes a live track's blob ---
+  {
+    const trackProject = await api.post('/api/lan/documents/projects', { name: 'Control tracks' })
+    const trackProjectId = trackProject.body.project.id
+    const trackChain = await api.post('/api/lan/documents/chains', { projectId: trackProjectId, inputSpec: { fresh: { prompt: 'posed shot' } } })
+    const sheetFile = path.join(outDir, 'pose-sheet.png')
+    fs.writeFileSync(sheetFile, Buffer.from(`pose-sheet-pixels-${Math.random()}`))
+    const track = await api.post('/api/lan/documents/control-tracks', { chainId: trackChain.body.chain.id, kind: 'pose', source: 'pose-rig', inputRef: sheetFile })
+    check(track.status === 200 && track.body.controlTrack.id, 'control track create answers')
+    const trackDoc = await api.get(`/api/lan/documents/project?id=${trackProjectId}`)
+    const trackRow = trackDoc.body.chains[0].controlTracks[0]
+    check(trackRow.inputRef.startsWith('canvas-blobs/'), `the control track stores the REGISTERED blob reference (got ${trackRow.inputRef})`)
+    const trackBlobAbs = path.join(homeA, trackRow.inputRef)
+    check(fs.existsSync(trackBlobAbs) && sha256File(trackBlobAbs) === sha256File(sheetFile), 'the control-track blob is content-addressed on disk')
+    const trackExport = await api.getRaw(`/api/lan/documents/export?id=${trackProjectId}`)
+    const trackFiles = unpackZip(trackExport.buffer)
+    const trackManifest = JSON.parse(trackFiles.get('manifest.json'))
+    check(trackManifest.blobs.some((blob) => blob.path === trackRow.inputRef), 'the control-track media rides the archive export (M3′: pose-rig sheets keep their bytes)')
+    // emptying the trash of unrelated content must not delete the track's blob
+    const trashAsset = await api.post('/api/lan/documents/assets', { id: 'track:trash:asset', kind: 'prompt', fields: { label: 'trashme' } })
+    await api.post('/api/lan/documents/assets/delete', { id: trashAsset.body.asset.id })
+    const trashEmptied = await api.post('/api/lan/documents/trash/empty', { confirm: 'empty-trash' })
+    check(trashEmptied.status === 200, 'trash empty answers')
+    check(fs.existsSync(trackBlobAbs), 'the live control track\'s blob survives an unrelated trash-empty (referencedNow includes tracks)')
+  }
+
+  // --- M3: shared-blob archive import upserts; a failed import leaves
+  // NOTHING behind (rows rolled back, no staged files, no orphan blobs) ---
+  {
+    const homeC = makeHome('c')
+    const serverC = await bootServer(homeC, 'C')
+    const apiC = client(serverC.port)
+    await apiC.get('/api/lan/documents/bootstrap')
+    // studio C ALREADY has the archive's blob content registered (the same
+    // bytes ingested by an unrelated project) — the import must upsert over
+    // the existing canvas_blob row instead of aborting on the path PK.
+    const cProject = await apiC.post('/api/lan/documents/projects', { name: 'C local' })
+    const cChain = await apiC.post('/api/lan/documents/chains', { projectId: cProject.body.project.id, inputSpec: { fresh: { prompt: 'c chain' } } })
+    const cOutput = (await apiC.post('/api/lan/documents/outputs', { chainId: cChain.body.chain.id })).body.output
+    const sharedAgain = path.join(homeC, 'same-bytes.latent')
+    fs.writeFileSync(sharedAgain, fs.readFileSync(latentFiles[1]))
+    await apiC.post('/api/lan/documents/takes', { outputId: cOutput.id, artifacts: [sharedAgain] })
+    const sharedImport = await apiC.post('/api/lan/documents/import', { archiveBase64: archive.toString('base64') })
+    check(sharedImport.status === 200, `importing an archive whose blob rows already exist UPSERTS instead of PK-aborting (${sharedImport.status} ${JSON.stringify(sharedImport.body).slice(0, 160)})`)
+    const cBlobCount = (() => {
+      const db = new Database(path.join(homeC, 'studio.db'))
+      const rows = db.prepare('SELECT path, missing FROM canvas_blob').all()
+      db.close()
+      return rows
+    })()
+    check(cBlobCount.filter((row) => row.path === manifest.blobs[0].path).length === 1 && cBlobCount.find((row) => row.path === manifest.blobs[0].path).missing === 0, 'the shared blob row is single and PRESENT after import')
+
+    // failed import after blob staging: rows roll back AND no staged file
+    // survives ("a failure leaves nothing behind")
+    const failFiles = unpackZip(archive)
+    const failDocument = JSON.parse(failFiles.get('document.json'))
+    failDocument.project.id = 'rollback:project'
+    for (const chain of failDocument.chains) chain.project_id = 'nonexistent-project' // FK abort AFTER blob staging
+    failFiles.set('document.json', Buffer.from(JSON.stringify(failDocument)))
+    const failManifest = JSON.parse(failFiles.get('manifest.json'))
+    failManifest.projectId = 'rollback:project'
+    failFiles.set('manifest.json', Buffer.from(JSON.stringify(failManifest)))
+    const failArchive = packZip([...failFiles.entries()].map(([name, data]) => ({ name, data })))
+    const failedImport = await apiC.post('/api/lan/documents/import', { archiveBase64: failArchive.toString('base64') })
+    check(failedImport.status === 400, `the doomed import fails loudly (${failedImport.status})`)
+    const stagedLeftovers = (() => {
+      const found = []
+      const walk = (dir) => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name)
+          if (entry.isDirectory()) walk(full)
+          else if (entry.name.includes('.importing-')) found.push(full)
+        }
+      }
+      walk(path.join(homeC, 'canvas-blobs'))
+      return found
+    })()
+    check(stagedLeftovers.length === 0, `a failed import un-stages its blob payloads (got ${stagedLeftovers.length} leftovers)`)
+    const rollbackProject = await apiC.get('/api/lan/documents/project?id=rollback:project')
+    check(rollbackProject.status === 404, 'the rolled-back project left no rows behind')
+    serverC.child.kill()
+  }
+
+
+  // =====================================================================
+  // (g2) security hardening 1: archive column allowlist + zip resource caps
+  // =====================================================================
+  // SQL injection through column names: a crafted take key rewrites the
+  // INSERT into an attacker-shaped statement. Pre-fix this import SUCCEEDED
+  // (the injected row landed); the allowlist must refuse the whole import.
+  // Runs against a FRESH studio (server D) so the id-collision refusal
+  // cannot mask the column verdict.
+  {
+    const homeD = makeHome('d')
+    const serverD = await bootServer(homeD, 'D')
+    const apiD = client(serverD.port)
+    await apiD.get('/api/lan/documents/bootstrap')
+    const craftTakeInjection = () => {
+      const files = unpackZip(archive)
+      const document = JSON.parse(files.get('document.json'))
+      const realOutputId = document.takes[0].output_id
+      document.takes = [{
+        [`id, output_id, artifacts_json, created_at) VALUES(?, '${realOutputId}', '["injected"]', 1750000000000) -- `]: 'injected-take-id',
+      }]
+      files.set('document.json', Buffer.from(JSON.stringify(document)))
+      return packZip([...files.entries()].map(([name, data]) => ({ name, data })))
+    }
+    const injected = await apiD.post('/api/lan/documents/import', { archiveBase64: craftTakeInjection().toString('base64') })
+    check(injected.status === 400 && /unknown canvas_take column/i.test(injected.body.error ?? ''), `a column-name injection in the archive is refused loudly (${JSON.stringify(injected.body).slice(0, 160)})`)
+    const injectedDoc = await apiD.get(`/api/lan/documents/project?id=${projectId}`)
+    check(injectedDoc.status === 404, 'the refused import left nothing behind (transaction rollback)')
+    // A benign-but-unknown key is equally refused (no silent column drops).
+    const benignUnknown = (() => {
+      const files = unpackZip(archive)
+      const document = JSON.parse(files.get('document.json'))
+      document.takes[0].not_a_real_column = 1
+      files.set('document.json', Buffer.from(JSON.stringify(document)))
+      return packZip([...files.entries()].map(([name, data]) => ({ name, data })))
+    })()
+    const refusedUnknown = await apiD.post('/api/lan/documents/import', { archiveBase64: benignUnknown.toString('base64') })
+    check(refusedUnknown.status === 400 && /not_a_real_column/.test(refusedUnknown.body.error ?? ''), 'an unknown archive column refuses the import naming the column')
+
+    // Zip resource caps: entry count, declared size, and lying headers.
+    const eocdOf = (buffer) => {
+      for (let index = buffer.length - 22; index >= Math.max(0, buffer.length - 22 - 65_536); index -= 1) {
+        if (buffer.readUInt32LE(index) === 0x06054b50) return index
+      }
+      throw new Error('no EOCD')
+    }
+    assert.throws(() => {
+      const buffer = Buffer.from(packZip([{ name: 'manifest.json', data: Buffer.from('{}') }]))
+      buffer.writeUInt16LE(MAX_ZIP_ENTRIES + 1, eocdOf(buffer) + 10) // EOCD total-entries field
+      unpackZip(buffer)
+    }, /too many entries/, 'an over-cap entry count is refused')
+    assertions += 1
+    assert.throws(() => {
+      const buffer = Buffer.from(packZip([{ name: 'manifest.json', data: Buffer.from('{}') }]))
+      const central = buffer.readUInt32LE(eocdOf(buffer) + 16)
+      buffer.writeUInt32LE(MAX_ZIP_ENTRY_BYTES + 1, central + 24)
+      unpackZip(buffer)
+    }, /oversized payload/, 'an over-cap declared entry size is refused before inflation')
+    assertions += 1
+    assert.throws(() => {
+      const zeros = Buffer.alloc(4096)
+      const buffer = Buffer.from(packZip([{ name: 'bomb.json', data: zeros }]))
+      const central = buffer.readUInt32LE(eocdOf(buffer) + 16)
+      buffer.writeUInt32LE(10, central + 24) // header lies: declares 10 bytes
+      unpackZip(buffer)
+    }, /inflated to/, 'a lying uncompressed-size header is refused after bounded inflation')
+    assertions += 1
+    serverD.child.kill()
+  }
+
+  // =====================================================================
   // restart = migrations no-op + document stability
   // =====================================================================
   serverA.child.kill()
@@ -583,12 +1016,53 @@ async function main() {
   const importStatusAfterRestart = await apiA2.get('/api/lan/documents/bootstrap')
   check(importStatusAfterRestart.body.legacyImport.imported === true, 'the legacy-import marker survives restart (never re-imports)')
 
-  serverA2.child.kill()
-  serverB.child.kill()
-  console.log(`PASS: canvas document store — migration 002 (golden fixture N→N+1, divergence hard-error, ${canvasTables.length} canvas tables + jobs extension); §6 legacy import (5 jobs -> 3 takes + 1 failure output, counts + hash spot-checks + marker + clean retry, sources untouched); tombstones/trash round-trips + GC adversarials (fork-edge liveness over a tombstoned source, locked + canonical never evicted, session prune); take append-only + bake immutability trigger-enforced; §7 archive round-trip (zip, hash-verified blobs, global-asset placeholders, unknown-newer refusal); §4 FTS (chain/asset/plan/take/job, injection-safe); unknown-newer document refusal names the writer. ${assertions} assertions.`)
+  // =====================================================================
+  // (g3) security hardening 1: blob-registration source scoping
+  // =====================================================================
+  {
+    // Route-level proof that uploads (output-contained) still register.
+    const scopedOutput = path.join(homeA, 'scoped-output')
+    fs.mkdirSync(scopedOutput, { recursive: true })
+    const currentSettings = (await apiA2.get('/api/lan/settings')).body.settings
+    const scopedSettings = await apiA2.post('/api/lan/settings', { settings: { ...currentSettings, outputDirectory: scopedOutput } })
+    check(scopedSettings.status === 200, 'pointing the output directory at a scratch dir succeeds')
+    const onePixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+    const ingested = await apiA2.post('/api/lan/documents/blobs/ingest', { kind: 'image', name: 'probe.png', data: onePixel.toString('base64') })
+    check(ingested.status === 200 && ingested.body.blob?.present === true, 'an output-contained upload still registers as a blob')
+
+    // The arbitrary-file-read primitive: an out-of-scope source (outside the
+    // studio home AND the output directory) must NOT be copied into the
+    // content-addressed tree and must NOT become servable. The take keeps
+    // the plain string; the would-be blob path 404s.
+    const outsideHome = makeHome('outside')
+    const secretFile = path.join(outsideHome, 'secret.txt')
+    const secretBytes = Buffer.from(`secret-bytes-${Math.random()}`)
+    fs.writeFileSync(secretFile, secretBytes)
+    const scopeProject = (await apiA2.post('/api/lan/documents/projects', { name: 'Scope test' })).body.project
+    const scopeChain = (await apiA2.post('/api/lan/documents/chains', { projectId: scopeProject.id, inputSpec: { fresh: { prompt: 'scope shot' } } })).body.chain
+    const scopeOutput = (await apiA2.post('/api/lan/documents/outputs', { chainId: scopeChain.id })).body.output
+    const refusedTake = await apiA2.post('/api/lan/documents/takes', { outputId: scopeOutput.id, artifacts: [secretFile] })
+    check(refusedTake.status === 200, 'appending a take with an out-of-scope artifact still succeeds (the STRING is kept)')
+    check(refusedTake.body.take.artifacts[0] === secretFile, `the out-of-scope artifact is stored as the plain string, never registered (got ${JSON.stringify(refusedTake.body.take.artifacts[0])})`)
+    const wouldBeRelPath = path.join('canvas-blobs', sha256(secretBytes).slice(0, 2), sha256(secretBytes))
+    const refusedBlob = await apiA2.getRaw(`/api/lan/documents/blobs/file?path=${encodeURIComponent(wouldBeRelPath)}`)
+    check(refusedBlob.status === 404, `the would-be blob path must NOT serve the secret bytes (got ${refusedBlob.status})`)
+
+    // In-scope control: a studio-home file still registers.
+    const inHomeFile = path.join(outDir, 'scope-control.latent')
+    fs.writeFileSync(inHomeFile, Buffer.from(`scope-control-${Math.random()}`))
+    const controlTake = await apiA2.post('/api/lan/documents/takes', { outputId: scopeOutput.id, artifacts: [inHomeFile] })
+    check(controlTake.status === 200 && controlTake.body.take.artifacts[0].startsWith(`canvas-blobs${path.sep}`), `an in-scope artifact still registers into the blob tree (got ${JSON.stringify(controlTake.body.take.artifacts[0])})`)
+    const controlBlob = await apiA2.getRaw(`/api/lan/documents/blobs/file?path=${encodeURIComponent(controlTake.body.take.artifacts[0])}`)
+    check(controlBlob.status === 200, 'the registered in-scope blob serves')
+  }
+
+  killAllServers()
+  console.log(`PASS: canvas document store — migration 002 (golden fixture N→N+1, divergence hard-error, ${canvasTables.length} canvas tables + jobs extension); §6 legacy import (5 jobs -> 3 takes + 1 failure output, counts + hash spot-checks + marker + clean retry, sources untouched); tombstones/trash round-trips + GC adversarials (fork-edge liveness over a tombstoned source, locked + canonical never evicted, session prune); take append-only + bake immutability trigger-enforced; §7 archive round-trip (zip, hash-verified blobs, global-asset placeholders, unknown-newer refusal); §4 FTS (chain/asset/plan/take/job, injection-safe, kind-filter-before-limit); unknown-newer document refusal names the writer; correctness wave 1 (shared-blob eviction survival + takeId-pinned priors, jobId-idempotent + stray-healing appendTake, torn-copy repair, poisoned-list isolation, locked-staleness gating, plan CAS 409, honest cancel verdicts, remote-output fetch+ingest, latent durability + visible missingBlobs, control-track blob lifecycle, shared-blob import upsert + staged-file rollback). ${assertions} assertions.`)
 }
 
 void main().catch((error) => {
+  killAllServers()
   console.error(`FAIL: ${error instanceof Error ? error.stack : String(error)}`)
   process.exit(1)
 })
