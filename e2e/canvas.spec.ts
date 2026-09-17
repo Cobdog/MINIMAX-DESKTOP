@@ -81,6 +81,7 @@ async function activeDocument(page: Page) {
     const response = await fetch(`/api/lan/documents/project?id=${encodeURIComponent(id)}`)
     return (await response.json()) as {
       chains: Array<{ id: string; kind: string; lockState: string; stale: boolean; settings: Record<string, unknown>; inputSpec: Record<string, unknown>; ops: Array<{ id: string; kind: string; ordinal: number; settings: Record<string, unknown>; bakedAt: number | null }>; controlTracks?: Array<{ id: string; kind: string; source: string; inputRef: string }>; outputs: Array<{ id: string; takes: Array<{ id: string; jobId: string | null; artifacts: string[]; latentPath: string | null; supersededBy: string | null; metrics: Record<string, unknown> | null }> }>; identity?: { subjectText: string; strength: number } | null }>
+      plans?: Array<{ id: string; document: { segments: Array<{ prompt: string }> } }>
     }
   }, session.activeProject!)
 }
@@ -1024,7 +1025,7 @@ test('latent-fork rendering: the Motion-Context graph pins the source clip (prob
   // output directory when the render completes — the landing path resolves
   // the engine-relative path against it and registers the substrate into
   // the content-addressed blob tree (hashed, evictable, exported).
-  const latentFile = path.join(os.homedir(), 'Documents', 'ComfyUI', 'output', 'h3_context', seeded.chainId!, 'clip0.latent')
+  const latentFile = path.join(os.homedir(), 'Documents', 'ComfyUI', 'output', 'h3_context', seeded.chainId!, 'clip_00001.safetensors')
   fs.mkdirSync(path.dirname(latentFile), { recursive: true })
   fs.writeFileSync(latentFile, `e2e-latent-substrate-${seeded.chainId}`)
   const landed = await page.evaluate(() => (window as unknown as { __canvasScenario(name: string): { ok: boolean; chainId?: string } }).__canvasScenario('complete-mock-latent'))
@@ -1210,6 +1211,138 @@ test('the library projection (V): outputs across the session, filtered + navigat
   await expect(overlay).toHaveCount(0)
   await expect(page.locator('[data-canvas-tile]').first()).toBeVisible()
   await page.screenshot({ path: 'test-results/shots/22-canvas-library-projection.png' })
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('the plan editor survives a late stale document response (the gap-menu seeding race)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  // The race (the standing timeline-gap-menu vision FAIL): the scenario's
+  // rapid seeding (new plan + two adds + two prompt fills) fires overlapping
+  // document reloads; an OUT-OF-ORDER stale response used to be applied
+  // last-write-wins, regressing the store to an older document — the editor
+  // repainted from it and the prompt textareas went empty while the
+  // persisted document was correct. This test DELIVERS the stale response
+  // deterministically: the first project GET whose plan holds exactly ONE
+  // segment is held back until the very end, then released.
+  let held: { fulfill: () => Promise<void> } | null = null
+  await page.route(/\/api\/lan\/documents\/project\?/, async (route) => {
+    const response = await route.fetch()
+    if (!held) {
+      try {
+        const body = JSON.parse(await response.text()) as { plans?: Array<{ document?: { segments?: unknown[] } }> }
+        if (body.plans?.some((plan) => plan.document?.segments?.length === 1)) {
+          let release: () => void = () => undefined
+          const released = new Promise<void>((resolve) => { release = resolve })
+          held = {
+            fulfill: async () => {
+              release()
+              await route.fulfill({ response, body: JSON.stringify(body) })
+            },
+          }
+          await released
+          return
+        }
+        await route.fulfill({ response, body: JSON.stringify(body) })
+        return
+      } catch {
+        // fall through to the plain passthrough below
+      }
+    }
+    await route.fulfill({ response })
+  })
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await page.keyboard.press('v')
+  const overlay = page.locator('[data-canvas-timeline]')
+  await expect(overlay).toBeVisible()
+  await overlay.locator('[data-canvas-timeline-new-plan]').click()
+  await expect(overlay.locator('[data-canvas-plan-brief]')).toBeVisible({ timeout: 10_000 })
+  await overlay.locator('[data-canvas-plan-add-segment]').click()
+  await overlay.locator('[data-canvas-plan-add-segment]').click()
+  await expect(overlay.locator('[data-canvas-segment]')).toHaveCount(2)
+  await overlay.locator('[data-canvas-segment-prompt]').nth(0).fill('the drummer steps off the night train into the rain')
+  await overlay.locator('[data-canvas-segment-prompt]').nth(0).blur()
+  await overlay.locator('[data-canvas-segment-prompt]').nth(1).fill('the corridor lights stutter as she passes')
+  await overlay.locator('[data-canvas-segment-prompt]').nth(1).blur()
+  await page.waitForTimeout(500)
+  await overlay.locator('[data-canvas-gap]').first().click()
+  await expect(overlay.locator('[data-canvas-gap-menu]')).toBeVisible()
+
+  // The stale one-segment response arrives LAST (the contended-machine
+  // condition). The sequenced store must refuse it: two segments stay, and
+  // the editor fields repaint from the PERSISTED truth, not the regression.
+  expect(held).toBeTruthy()
+  await held!.fulfill()
+  await page.waitForTimeout(400)
+  await expect(overlay.locator('[data-canvas-segment]')).toHaveCount(2)
+  await expect(overlay.locator('.canvas-timeline-title')).toContainText('2 segments')
+  await expect(overlay.locator('[data-canvas-segment-prompt]').nth(0)).toHaveValue('the drummer steps off the night train into the rain')
+  await expect(overlay.locator('[data-canvas-segment-prompt]').nth(1)).toHaveValue('the corridor lights stutter as she passes')
+  // And the persisted document agrees (the DOM never diverges from it).
+  const document = await activeDocument(page)
+  const prompts = document.plans![0]!.document.segments.map((segment) => segment.prompt)
+  expect(prompts).toEqual(['the drummer steps off the night train into the rain', 'the corridor lights stutter as she passes'])
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('context menus clamp inside the viewport when opened near the bottom (F8)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await dropPng(page, 'clamp-source.png')
+  const mediaTile = page.locator('[data-canvas-tile]').first()
+  await expect(mediaTile).toBeVisible({ timeout: 10_000 })
+  await page.waitForTimeout(900) // fly-to settle before seeding
+
+  // The menu positions itself by the tile's WORLD coordinates on a
+  // viewport-fixed backdrop (derive.ts grid: y = 96 + row*376, 4 rows per
+  // column) — panning the camera never moves it, so the F8 defect needs a
+  // tile whose WORLD y is deep, not a panned camera. Spawn seeds through
+  // the bar until a grid row-2+ tile exists (world y ≥ 848): its produce
+  // menu opens at y ≥ 872 — past the 1080 fold pre-clamp at ANY realistic
+  // menu height, the judge-confirmed-twice defect.
+  const deepestTile = async (): Promise<{ id: string; top: number } | null> => page.evaluate(() => {
+    let best: { id: string; top: number } | null = null
+    document.querySelectorAll('[data-canvas-tile]').forEach((node) => {
+      const id = (node as HTMLElement).getAttribute('data-canvas-tile') ?? ''
+      const top = Number.parseFloat((node as HTMLElement).style.top) || 0
+      if (!best || top > best.top) best = { id, top }
+    })
+    return best
+  })
+  for (let seed = 0; seed < 10 && ((await deepestTile())?.top ?? 0) < 1000; seed += 1) {
+    await page.keyboard.press('Escape') // deselect — the contextual bar is the spawn surface
+    await page.locator('[data-canvas-bar-prompt]').fill(`clamp probe seed ${seed}`)
+    await page.locator('[data-canvas-bar-prompt]').press('Enter')
+    await page.waitForTimeout(700) // spawn + fly settle
+  }
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(400)
+  const lowestId = await deepestTile()
+  expect(lowestId?.id, 'a deep grid tile must exist').toBeTruthy()
+  // Row-3 depth: the menu's natural top (world y + 24) is past the 1080 fold
+  // by itself — pre-clamp this menu was UNREACHABLE at any height.
+  expect(lowestId!.top).toBeGreaterThan(1000)
+  const lowestTail = page.locator(`[data-canvas-tile="${lowestId!.id}"] [data-canvas-endpoint="tail"]`)
+  await lowestTail.click({ timeout: 20_000 })
+  const menu = page.locator('[data-canvas-endpoint-menu="produce"]')
+  await expect(menu).toBeVisible()
+  const menuBox = (await menu.boundingBox())!
+  // The whole menu sits inside the viewport — the footer included (its
+  // reachability was the defect), with a small margin for shadows.
+  expect(menuBox.y).toBeGreaterThanOrEqual(0)
+  expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(1080 - 4)
+  await expect(menu.locator('footer')).toBeVisible()
+  const footerBox = (await menu.locator('footer').boundingBox())!
+  expect(footerBox.y + footerBox.height).toBeLessThanOrEqual(1080 - 4)
+  // Rows remain reachable: at least the menu's LAST row is inside the box.
+  const rowCount = await menu.locator('[data-canvas-menu-row]').count()
+  expect(rowCount).toBeGreaterThan(0)
+  const lastRow = menu.locator('[data-canvas-menu-row]').nth(rowCount - 1)
+  const lastRowBox = (await lastRow.boundingBox())!
+  expect(lastRowBox.y + lastRowBox.height).toBeLessThanOrEqual(1080 - 4)
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 

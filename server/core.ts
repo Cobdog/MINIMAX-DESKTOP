@@ -24,7 +24,7 @@ import type { AppSettings, GpuTelemetry, LanStatus, ModelKind } from '../src/typ
 import { failureRef, logEvent, logFailure } from './logger'
 import { sanitizeEngineLogLine, sanitizeErrorMessage } from './logSanitize'
 import { createStudioRepository, type StudioRepository } from './repo'
-import { CANVAS_SCHEMA_VERSION, CanvasSchemaVersionError, PlanConflictError } from './documents'
+import { CANVAS_SCHEMA_VERSION, CanvasSchemaVersionError, DocumentsRuleError, PlanConflictError } from './documents'
 import { exportProjectArchive, importProjectArchive } from './documentArchive'
 import { createRealtimeHub, type RealtimeHub } from './realtime'
 import { EngineProcess } from './engineProcess'
@@ -212,6 +212,15 @@ function sendJson(response: ServerResponse, status: number, value: unknown) {
   response.end(JSON.stringify(value))
 }
 
+/** A request body that is not valid JSON (audit minor, cleanup wave): the
+ *  answer is a 400 naming the problem — never an opaque structural 500. */
+class MalformedJsonBodyError extends Error {
+  constructor() {
+    super('The request body is not valid JSON.')
+    this.name = 'MalformedJsonBodyError'
+  }
+}
+
 async function readJson(request: IncomingMessage, maximumBytes = 36_000_000) {
   const chunks: Buffer[] = []
   let total = 0
@@ -221,7 +230,12 @@ async function readJson(request: IncomingMessage, maximumBytes = 36_000_000) {
     if (total > maximumBytes) throw new Error('Request is too large.')
     chunks.push(buffer)
   }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as Record<string, unknown>
+  const text = Buffer.concat(chunks).toString('utf8') || '{}'
+  try {
+    return JSON.parse(text) as Record<string, unknown>
+  } catch {
+    throw new MalformedJsonBodyError()
+  }
 }
 
 /** Shape-first validation for persisted job records (wave 1 storage): the
@@ -1463,6 +1477,12 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
                 error: error.message,
                 conflict: { planId: error.planId, currentUpdatedAt: error.currentUpdatedAt, currentDocument: error.currentDocument },
               })
+            }
+            // Business-rule refusals (audit minor, cleanup wave): a missing
+            // target answers 404, a state refusal answers 400 — both with
+            // the reason, never an opaque 500.
+            if (error instanceof DocumentsRuleError) {
+              return sendJson(response, error.status, { error: error.message })
             }
             return null
           }
@@ -2903,8 +2923,18 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
         if (url.pathname === '/api/lan/doctor' && request.method === 'GET') return sendJson(response, 200, await runSetupDoctor(settings))
         if (url.pathname === '/api/lan/free' && request.method === 'POST') {
           // Queue-hygiene soft reset: unload models and return VRAM to the pool.
-          await comfyFetch(settings.comfyUrl, '/free', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ unload_models: true, free_memory: true }) }).catch((error: unknown) => { logFailure('comfy/free', error, undefined, 'debug') })
-          return sendJson(response, 200, { freed: true })
+          // Honest verdict (audit minor): an upstream failure must NEVER
+          // surface as {freed:true} — the auto-retry path would re-submit
+          // believing VRAM was freed. Failure answers 502 + {freed:false}
+          // with the reason; the bridge throws on non-2xx, so the retry's
+          // catch skips the resubmit and the original error surfaces.
+          try {
+            await comfyFetch(settings.comfyUrl, '/free', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ unload_models: true, free_memory: true }) })
+            return sendJson(response, 200, { freed: true })
+          } catch (error) {
+            logFailure('comfy/free', error, undefined, 'debug')
+            return sendJson(response, 502, { freed: false, error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)) })
+          }
         }
         if (url.pathname === '/api/lan/prompt-library' && request.method === 'GET') {
           // Pinned-host proxy to Civitai's public images API (withMeta=true).
@@ -3154,6 +3184,16 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
       response.writeHead(200, headers)
       createReadStream(servedPath).pipe(response)
     } catch (error) {
+      // Malformed request bodies are the CLIENT's error, not a structural
+      // failure: 400 with the reason, no correlation-ref ceremony.
+      if (error instanceof MalformedJsonBodyError) {
+        logFailure(route, error, { method: request.method ?? '' }, 'debug')
+        if (response.headersSent) {
+          response.destroy()
+          return
+        }
+        return sendJson(response, 400, { error: error.message, stage: route })
+      }
       // Last-resort handler: the client gets a STRUCTURAL body (fixed
       // message + route + ref) — raw internals never cross the wire. The
       // sanitized failure path/reason lands server-side, keyed by the same

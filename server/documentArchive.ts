@@ -26,7 +26,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { deflateRawSync, inflateRawSync } from 'node:zlib'
-import { CANVAS_ARCHIVE_VERSION, CANVAS_SCHEMA_VERSION, CanvasSchemaVersionError, type DocumentStore } from './documents'
+import { CANVAS_ARCHIVE_VERSION, CANVAS_SCHEMA_VERSION, CanvasSchemaVersionError, DocumentsRuleError, type DocumentStore } from './documents'
 
 // ---------------------------------------------------------------------------
 // ZIP (spec-conformant subset: local file headers + central directory + EOCD,
@@ -245,8 +245,11 @@ export function exportProjectArchive(store: DocumentStore, projectId: string): {
       // Referenced but never registered (a pre-blob latent recorded as a
       // relative engine path, a legacy control ref): VISIBLE in the
       // manifest's missing list — never a silent omission while the counts
-      // claim full blob coverage.
-      missingBlobs.push({ path: relPath, kind: relPath.endsWith('.latent') ? 'latent' : 'media', hash: 'unregistered' })
+      // claim full blob coverage. Latent classification matches the store's
+      // blobKindForPath extension set — the Motion-Context pack's real slots
+      // are .safetensors (clip_%05d.safetensors), not .latent.
+      const extension = relPath.slice(relPath.lastIndexOf('.')).toLowerCase()
+      missingBlobs.push({ path: relPath, kind: ['.latent', '.safetensors', '.pt', '.bin'].includes(extension) ? 'latent' : 'media', hash: 'unregistered' })
       continue
     }
     blobRows.set(relPath, row)
@@ -524,6 +527,28 @@ export function importProjectArchive(store: DocumentStore, archive: Buffer): Arc
       db.prepare('DELETE FROM canvas_fts WHERE source_kind = ? AND source_id = ?').run('plan', String(plan.id))
       db.prepare('INSERT INTO canvas_fts (text, source_id, source_kind) VALUES (?, ?, ?)').run(typeof brief === 'string' ? brief : '', String(plan.id), 'plan')
     }
+    // Takes and assets ride the reindex too (audit m4): imported takes were
+    // unsearchable — the index is a projection, and a complete one. Take text
+    // mirrors indexTake (metrics/artifacts/hash; the job prompt stays empty
+    // when the exporting studio's jobs did not ride the archive). Assets:
+    // only the PLACEHOLDERS this import inserted — a locally-present asset
+    // keeps its richer existing FTS row.
+    for (const take of rows.takes) {
+      db.prepare('DELETE FROM canvas_fts WHERE source_kind = ? AND source_id = ?').run('take', String(take.id))
+      db.prepare('INSERT INTO canvas_fts (text, source_id, source_kind) VALUES (?, ?, ?)').run(
+        [take.metrics_json, take.artifacts_json, take.content_hash].map((part) => (typeof part === 'string' ? part : '')).filter(Boolean).join(' '),
+        String(take.id),
+        'take',
+      )
+    }
+    for (const asset of missingGlobalAssets) {
+      db.prepare('DELETE FROM canvas_fts WHERE source_kind = ? AND source_id = ?').run('asset', String(asset.id))
+      db.prepare('INSERT INTO canvas_fts (text, source_id, source_kind) VALUES (?, ?, ?)').run(
+        [asset.kind, asset.fieldsHash].filter(Boolean).join(' '),
+        String(asset.id),
+        'asset',
+      )
+    }
 
     return {
       projectId,
@@ -547,6 +572,12 @@ export function importProjectArchive(store: DocumentStore, archive: Buffer): Arc
       try {
         unlinkSync(stagedPath)
       } catch { /* already gone — nothing to unstage */ }
+    }
+    // A store-invariant violation (migration 004's one-canonical-take partial
+    // unique index, a hostile archive's shape) is a REFUSAL with the reason —
+    // never an opaque constraint 500.
+    if (error && typeof error === 'object' && 'code' in error && String((error as { code: unknown }).code).startsWith('SQLITE_CONSTRAINT')) {
+      throw new DocumentsRuleError(`The archive violates a store invariant (${(error as { message?: unknown }).message ?? 'constraint failed'}) — nothing was imported.`, 400)
     }
     throw error
   }

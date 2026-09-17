@@ -148,8 +148,8 @@ async function main() {
     prompts: fixtureDb.prepare('SELECT * FROM saved_prompts').all(),
     projects: fixtureDb.prepare('SELECT * FROM projects').all(),
   }))
-  const applied = migrateDatabase(fixtureDb) // applies 002 + 003 (one-way, append-only)
-  check(applied === 2, `golden fixture migration applies exactly 002 + 003 (got ${applied})`)
+  const applied = migrateDatabase(fixtureDb) // applies 002 + 003 + 004 (one-way, append-only)
+  check(applied === 3, `golden fixture migration applies exactly 002 + 003 + 004 (got ${applied})`)
   const goldenAfter = sha256(JSON.stringify({
     jobs: fixtureDb.prepare('SELECT id, provider, media_type, mode, status, prompt, params_json, created_at, updated_at, error, width, height, duration, output_url FROM jobs').all(),
     workspace: fixtureDb.prepare('SELECT * FROM workspace_state').all(),
@@ -164,6 +164,44 @@ async function main() {
   const fixtureColumns = fixtureDb.prepare('PRAGMA table_info(jobs)').all().map((column) => column.name)
   for (const column of ['gpu_queue_state', 'plan_ref', 'failure_json']) check(fixtureColumns.includes(column), `jobs extension adds ${column}`)
   check(migrateDatabase(fixtureDb) === 0, 're-running migrations is a no-op (idempotent, one-way)')
+
+  // --- migration 004: one-canonical-take partial unique index + healing ---
+  // A pre-004 database can carry strays (the crash window the single-process
+  // transaction could not close). The migration HEALS them (newest wins,
+  // marker-only — nothing deleted) and then enforces the invariant at the
+  // statement boundary.
+  {
+    const strayDb = new Database(path.join(makeHome('strays'), 'studio.db'))
+    migrations.find((migration) => migration.id === 1).up(strayDb)
+    migrations.find((migration) => migration.id === 2).up(strayDb)
+    strayDb.exec('CREATE TABLE IF NOT EXISTS schema_migrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL)')
+    strayDb.prepare("INSERT INTO schema_migrations (id, name, applied_at) VALUES (1, '001-foundation', 0)").run()
+    strayDb.prepare("INSERT INTO schema_migrations (id, name, applied_at) VALUES (2, '002-canvas-documents', 0)").run()
+    strayDb.prepare("INSERT INTO canvas_project (id, name, schema_version, camera_json, settings_defaults_json, app_version, created_at, last_active_at) VALUES ('p1', 'Strays', 1, '{}', '{}', 'test', 1, 1)").run()
+    strayDb.prepare("INSERT INTO canvas_chain (id, project_id, kind, input_spec_json, settings_json, lock_state, hop_count, created_at) VALUES ('c1', 'p1', 'media', '{}', '{}', 'unlocked', 0, 1)").run()
+    strayDb.prepare("INSERT INTO canvas_output (id, chain_id, substrates_available_json, created_at) VALUES ('o1', 'c1', '[]', 1)").run()
+    strayDb.prepare("INSERT INTO canvas_output (id, chain_id, substrates_available_json, created_at) VALUES ('o2', 'c1', '[]', 1)").run()
+    // o1: TWO strays (the crash window) + one already-superseded prior;
+    // o2: a clean single canonical (must be untouched).
+    strayDb.prepare("INSERT INTO canvas_take (id, output_id, artifacts_json, created_at) VALUES ('t-old', 'o1', '[]', 100)").run()
+    strayDb.prepare("INSERT INTO canvas_take (id, output_id, artifacts_json, created_at, superseded_by) VALUES ('t-prior', 'o1', '[]', 200, 't-old')").run()
+    strayDb.prepare("INSERT INTO canvas_take (id, output_id, artifacts_json, created_at) VALUES ('t-mid', 'o1', '[]', 300)").run()
+    strayDb.prepare("INSERT INTO canvas_take (id, output_id, artifacts_json, created_at) VALUES ('t-new', 'o1', '[]', 400)").run()
+    strayDb.prepare("INSERT INTO canvas_take (id, output_id, artifacts_json, created_at) VALUES ('t-clean', 'o2', '[]', 500)").run()
+    const strayApplied = migrateDatabase(strayDb)
+    check(strayApplied === 2, `the stray fixture applies exactly 003 + 004 (got ${strayApplied})`)
+    const canonicalOf = (outputId) => strayDb.prepare('SELECT id FROM canvas_take WHERE output_id = ? AND superseded_by IS NULL').all(outputId).map((row) => row.id)
+    check(JSON.stringify(canonicalOf('o1')) === JSON.stringify(['t-new']), `migration 004 heals strays to the newest take (got ${JSON.stringify(canonicalOf('o1'))})`)
+    check(strayDb.prepare("SELECT superseded_by FROM canvas_take WHERE id = 't-mid'").get().superseded_by === 't-new', 'the healed stray is superseded BY the winner (marker semantics match appendTake)')
+    check(strayDb.prepare("SELECT superseded_by FROM canvas_take WHERE id = 't-prior'").get().superseded_by === 't-old', 'an existing supersession marker is never rewritten')
+    check(JSON.stringify(canonicalOf('o2')) === JSON.stringify(['t-clean']), 'a clean output is untouched by the heal')
+    const indexInfo = strayDb.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'canvas_take_one_canonical'").get()
+    check(Boolean(indexInfo), 'migration 004 creates the partial unique index')
+    assert.throws(() => strayDb.prepare("INSERT INTO canvas_take (id, output_id, artifacts_json, created_at) VALUES ('t-invader', 'o1', '[]', 600)").run(), /UNIQUE/, 'a second non-superseded take per output is refused AT THE STATEMENT LEVEL (the index enforces the invariant)')
+    assertions += 1
+    strayDb.close()
+  }
+
   const divergent = new Database(path.join(makeHome('diverge'), 'studio.db'))
   divergent.exec('CREATE TABLE schema_migrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL)')
   divergent.prepare("INSERT INTO schema_migrations (id, name, applied_at) VALUES (999, 'bogus', 0)").run()
@@ -342,7 +380,7 @@ async function main() {
   const bakedUpdate = await api.post('/api/lan/documents/ops/update', { id: opOne.body.op.id, settings: { x: 999 } })
   check(bakedUpdate.status === 500, 'baked op settings are frozen (schema-enforced, surfaces as a structural 500)')
   const bakedDelete = await api.post('/api/lan/documents/ops/delete', { id: opOne.body.op.id })
-  check(bakedDelete.status === 500, 'baked ops cannot be deleted (bake is irreversible)')
+  check(bakedDelete.status === 400 && /irreversible/i.test(bakedDelete.body.error ?? ''), 'baked ops cannot be deleted — a business-rule refusal answers 400 WITH the reason (cleanup wave: no opaque 500s)')
   const opDb = new Database(dbFileA)
   assert.throws(() => opDb.prepare('UPDATE canvas_op SET settings_json = ? WHERE id = ?').run('{}', opOne.body.op.id), /immutable/, 'bake immutability is trigger-enforced')
   assertions += 1
@@ -570,6 +608,10 @@ async function main() {
   check(imported.body.import.counts.placeholderAssets === 1, 'the referenced-but-absent global asset becomes a VISIBLE placeholder (never silent)')
   const importedFts = await apiB.get(`/api/lan/documents/search?${new URLSearchParams({ q: 'lighthouse' })}`)
   check(importedFts.body.results.some((result) => result.source_id === chainId), 'imported chains reindex into FTS')
+  // m4 (cleanup wave): imported TAKES reindex too — they were silently
+  // unsearchable before (the reindex covered chains + plans only).
+  const importedTakeFts = await apiB.get(`/api/lan/documents/search?${new URLSearchParams({ q: 'canvas-blobs', kind: 'take' })}`)
+  check(importedTakeFts.body.results.length >= 1, `imported takes reindex into FTS (got ${importedTakeFts.body.results.length} take hits — pre-reindex-fix this was 0)`)
 
   // unknown-newer archive/document versions refuse loudly
   const tamperedManifestArchive = (patch) => {
@@ -662,12 +704,23 @@ async function main() {
   const strayChain = await api.post('/api/lan/documents/chains', { projectId: strayProject.body.project.id, inputSpec: { fresh: { prompt: 'stray source' } } })
   const strayOutput = (await api.post('/api/lan/documents/outputs', { chainId: strayChain.body.chain.id })).body.output
   {
-    // simulate an older build's crash window: two takes, neither superseded
+    // Migration 004's partial unique index makes the crash-window stray
+    // state UNREPRESENTABLE: a direct second non-superseded insert is
+    // refused at the statement level (pre-index, this block created the
+    // two-stray state to prove appendTake's healing — the healing itself
+    // is now proven by the migration-004 fixture above; the ONE legacy
+    // stray below still exercises appendTake's supersede-before-insert).
     const db = new Database(dbFileA)
     const insert = db.prepare('INSERT INTO canvas_take (id, output_id, job_id, artifacts_json, latent_path, metrics_json, created_at, superseded_by, evicted, evicted_at, content_hash) VALUES (?, ?, NULL, ?, NULL, NULL, ?, NULL, 0, NULL, NULL)')
     insert.run('stray-take-1', strayOutput.id, '[]', 1000)
-    insert.run('stray-take-2', strayOutput.id, '[]', 1001)
+    let refused = false
+    try {
+      insert.run('stray-take-2', strayOutput.id, '[]', 1001)
+    } catch (error) {
+      refused = /UNIQUE/.test(String(error))
+    }
     db.close()
+    check(refused, 'a second non-superseded take per output is refused by the partial unique index (the crash window is closed at the schema level)')
   }
   const healingTake = await api.post('/api/lan/documents/takes', { outputId: strayOutput.id, artifacts: [mkFile('healing.latent')] })
   const strayCounts = (() => {
@@ -828,27 +881,36 @@ async function main() {
     const latentChain = await api.post('/api/lan/documents/chains', { projectId: latentProjectId, inputSpec: { fresh: { prompt: 'latent chain' } } })
     const latentOutput = (await api.post('/api/lan/documents/outputs', { chainId: latentChain.body.chain.id })).body.output
     // the engine-side latent: an ABSOLUTE file under the output dir — the
-    // landing path's resolved form
-    const latentFile = path.join(outDir, 'h3_context', 'clip0.latent')
+    // landing path's resolved form, in the Motion-Context pack's REAL slot
+    // shape (SaveLatent clip_index>0 → <prefix>_%05d.safetensors, 1-based)
+    const latentFile = path.join(outDir, 'h3_context', 'chain-7f3a', 'clip_00001.safetensors')
     fs.mkdirSync(path.dirname(latentFile), { recursive: true })
     fs.writeFileSync(latentFile, Buffer.from(`latent-substrate-${Math.random()}`))
     const latentTake = await api.post('/api/lan/documents/takes', { outputId: latentOutput.id, artifacts: [mkFile('latent-media.mp4')], latentPath: latentFile })
-    check(latentTake.body.take.latentPath?.startsWith('canvas-blobs/'), `an absolute existing latent registers into the blob tree (got ${latentTake.body.take.latentPath})`)
+    check(latentTake.body.take.latentPath?.startsWith('canvas-blobs/'), `an absolute existing real-format latent (clip_%05d.safetensors) registers into the blob tree (got ${latentTake.body.take.latentPath})`)
     const latentHash = sha256File(latentFile)
     const latentExport = await api.getRaw(`/api/lan/documents/export?id=${latentProjectId}`)
     const latentFilesInZip = unpackZip(latentExport.buffer)
     const latentManifest = JSON.parse(latentFilesInZip.get('manifest.json'))
     check(latentFilesInZip.has(`blobs/${latentHash}`) && latentManifest.blobs.some((blob) => blob.hash === latentHash && blob.kind === 'latent'), 'the latent substrate rides the archive export (bytes, not just metrics)')
+    // the registered latent blob EVICTS with its superseded take: a newer
+    // take makes the latent take a plain prior, the sweep frees the blob
+    const latentBlobAbs = path.join(homeA, latentTake.body.take.latentPath)
+    check(fs.existsSync(latentBlobAbs), 'the registered latent blob is resident in canvas-blobs before sweep')
+    await api.post('/api/lan/documents/takes', { outputId: latentOutput.id, artifacts: [mkFile('latent-newer.mp4')] })
+    const latentSweep = await api.post('/api/lan/documents/gc', {})
+    check(latentSweep.status === 200 && latentSweep.body.gc.evicted >= 1, `the sweep runs after supersession (got ${latentSweep.body.gc.evicted} evictions)`)
+    check(!fs.existsSync(latentBlobAbs), 'the superseded take’s real-format latent blob is evicted (durability composes with GC, not around it)')
     // a RELATIVE latent (the pre-fix form, still present on old rows) is at
     // least VISIBLE as missing on export
     const relativeLatentProject = await api.post('/api/lan/documents/projects', { name: 'Relative latent' })
     const relativeChain = await api.post('/api/lan/documents/chains', { projectId: relativeLatentProject.body.project.id, inputSpec: { fresh: { prompt: 'relative latent chain' } } })
     const relativeOutput = (await api.post('/api/lan/documents/outputs', { chainId: relativeChain.body.chain.id })).body.output
-    const relativeTake = await api.post('/api/lan/documents/takes', { outputId: relativeOutput.id, artifacts: [mkFile('relative-media.mp4')], latentPath: 'h3_context/some-chain/clip0.latent' })
-    check(relativeTake.body.take.latentPath === 'h3_context/some-chain/clip0.latent', 'a relative latent that does not resolve stays the raw string (honest, no fabricated blob)')
+    const relativeTake = await api.post('/api/lan/documents/takes', { outputId: relativeOutput.id, artifacts: [mkFile('relative-media.mp4')], latentPath: 'h3_context/some-chain/clip_00001.safetensors' })
+    check(relativeTake.body.take.latentPath === 'h3_context/some-chain/clip_00001.safetensors', 'a relative latent that does not resolve stays the raw string (honest, no fabricated blob)')
     const relativeExport = await api.getRaw(`/api/lan/documents/export?id=${relativeLatentProject.body.project.id}`)
     const relativeManifest = JSON.parse(unpackZip(relativeExport.buffer).get('manifest.json'))
-    check(relativeManifest.missingBlobs.some((blob) => blob.path === 'h3_context/some-chain/clip0.latent' && blob.kind === 'latent'), 'an unresolvable latent is RECORDED in missingBlobs on export (visible, never silently dropped)')
+    check(relativeManifest.missingBlobs.some((blob) => blob.path === 'h3_context/some-chain/clip_00001.safetensors' && blob.kind === 'latent'), 'an unresolvable .safetensors latent is RECORDED as kind=latent in missingBlobs (the pack’s real extension, visible, never silently dropped)')
   }
 
   // --- M3′: control tracks register their media; exports carry it; trash
@@ -973,6 +1035,31 @@ async function main() {
     })()
     const refusedUnknown = await apiD.post('/api/lan/documents/import', { archiveBase64: benignUnknown.toString('base64') })
     check(refusedUnknown.status === 400 && /not_a_real_column/.test(refusedUnknown.body.error ?? ''), 'an unknown archive column refuses the import naming the column')
+
+    // One-canonical-take invariant (migration 004): an archive carrying TWO
+    // non-superseded takes for one output is a store-invariant violation —
+    // the partial unique index refuses it at the statement level and the
+    // import answers 400 WITH THE REASON (pre-index this imported
+    // "successfully", stranding two canonical takes).
+    const twoCanonical = (() => {
+      const files = unpackZip(archive)
+      const document = JSON.parse(files.get('document.json'))
+      const original = document.takes[0]
+      document.takes = [original, { ...original, id: `${original.id}-second-canonical` }].map((take) => ({ ...take, superseded_by: null }))
+      files.set('document.json', Buffer.from(JSON.stringify(document)))
+      return packZip([...files.entries()].map(([name, data]) => ({ name, data })))
+    })()
+    const refusedCanonical = await apiD.post('/api/lan/documents/import', { archiveBase64: twoCanonical.toString('base64') })
+    check(refusedCanonical.status === 400 && /store invariant/i.test(refusedCanonical.body.error ?? ''), `a two-canonical-take archive is refused with the reason (got ${refusedCanonical.status} ${JSON.stringify(refusedCanonical.body).slice(0, 140)})`)
+    const refusedDoc = await apiD.get(`/api/lan/documents/project?id=${projectId}`)
+    check(refusedDoc.status === 404, 'the invariant-refused import left nothing behind')
+
+    // Business-rule refusals answer 400/404 with the reason (cleanup wave):
+    // never an opaque 500.
+    const bogusTake = await apiD.post('/api/lan/documents/takes', { outputId: 'no-such-output', artifacts: [] })
+    check(bogusTake.status === 404 && /no-such-output/i.test(bogusTake.body.error ?? ''), `a take append on a missing output answers 404 with the reason (got ${bogusTake.status} ${JSON.stringify(bogusTake.body).slice(0, 120)})`)
+    const malformed = await fetch(`http://127.0.0.1:${serverD.port}/api/lan/documents/projects`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{not-json' })
+    check(malformed.status === 400 && /not valid JSON/i.test(String((await malformed.json()).error)), `a malformed JSON body answers 400 (got ${malformed.status})`)
 
     // Zip resource caps: entry count, declared size, and lying headers.
     const eocdOf = (buffer) => {

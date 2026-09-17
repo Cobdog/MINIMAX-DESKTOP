@@ -350,6 +350,24 @@ async function main() {
     assert.equal(missing.status, 404, 'a file outside the output directory must 404')
   }
 
+  // (g2) Honest /free (audit minor, cleanup wave twmpu4m): an upstream engine
+  // failure must NEVER surface as {freed:true} — the auto-retry path
+  // re-submits believing VRAM was freed. The engine is pointed at a
+  // guaranteed-dead port in this suite's OWN range (never a real engine),
+  // so /free must answer 502 + {freed:false} with the reason.
+  {
+    const current3 = (await get('/api/lan/settings')).body.settings
+    const originalComfy = current3.comfyUrl
+    const saved3 = await post('/api/lan/settings', { settings: { ...current3, comfyUrl: 'http://127.0.0.1:5599' } })
+    assert.equal(saved3.status, 200, 'settings PATCH for the /free probe must save')
+    const freed = await post('/api/lan/free', {})
+    assert.equal(freed.status, 502, `/free against a dead engine must fail honestly (got ${freed.status} ${JSON.stringify(freed.body).slice(0, 120)})`)
+    assert.equal(freed.body.freed, false, 'the body must carry freed:false — never silent success')
+    assert.ok(typeof freed.body.error === 'string' && freed.body.error.length > 0, 'the refusal must carry the reason')
+    const restored3 = await post('/api/lan/settings', { settings: { ...(await get('/api/lan/settings')).body.settings, comfyUrl: originalComfy } })
+    assert.equal(restored3.status, 200, 'settings restore after the /free probe must save')
+  }
+
   // ---- (f) origin / Host / content-type guards (security hardening 1) ------
   {
     const http = require('node:http')
