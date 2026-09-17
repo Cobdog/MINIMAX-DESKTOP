@@ -102,7 +102,12 @@
 
 ## Building (in flight)
 
-(none — the overnight audit program landed; next dispatch per the maintainer)
+- **Post-audit cleanup wave** (twmpu4m) — latent-path naming alignment, menu clamping,
+  the seeding race, the unique-index backstop, honest /free + 400/404 refusals, VDN
+  consolidation, and the four design-decision option papers. PR train.
+- **Performance wave 1** (pq7d48a) — hydration cache/ETag (p99 400ms → <100ms target),
+  overlay virtualization, cull coalescing; before/after via scripts/perf-profile/.
+- **Nits logged for a future polish pass** (5vu57ue) — deliberately deferred, not lost.
 
 ## Queued (specced/planning)
 
