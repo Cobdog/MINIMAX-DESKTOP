@@ -549,11 +549,13 @@ export const SCENARIOS: VisionScenario[] = [
       // async decode probe, then land on the gallery.
       const { execFile } = await import('node:child_process')
       const { promisify } = await import('node:util')
-      const { mkdtempSync } = await import('node:fs')
-      const { tmpdir } = await import('node:os')
+      const { mkdirSync, mkdtempSync } = await import('node:fs')
       const { join } = await import('node:path')
       const exec = promisify(execFile)
-      const dir = mkdtempSync(join(tmpdir(), 'ds-vision-'))
+      // Inside the server's studio home (test-home): by-reference ingest is
+      // scope-gated (security wave 2) — /tmp fixtures are refused.
+      mkdirSync(join(process.cwd(), 'test-home'), { recursive: true })
+      const dir = mkdtempSync(join(process.cwd(), 'test-home', 'ds-vision-'))
       const clip = join(dir, 'vision-clip.mp4')
       // Unique audio (220 Hz vs the e2e suite's 440 Hz): same-bytes fixtures
       // would dedupe into one source by content hash — the identity contract

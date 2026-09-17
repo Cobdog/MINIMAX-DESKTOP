@@ -40,6 +40,7 @@ import { createRouterProvider } from './llm/providers/router'
 import { familyManifest, inferFamily } from './llm/registry'
 import { evaluateRequestGuard } from './requestGuard'
 import { planVlmPass } from './datasets/vlm'
+import { CLIP_CONSENT_ID, CLIP_LICENSE_SPDX, CLIP_MODEL_ID } from './datasets/curation'
 
 export type StudioServerPaths = {
   settingsFile: string
@@ -656,12 +657,16 @@ export function createStudioServer(paths: StudioServerPaths) {
       // Fetcher consent ledger (task hgjbea2): only well-formed records for
       // KNOWN catalog ids survive, and each records the license it
       // acknowledged — a catalog license change invalidates the consent.
+      // (Security wave 2: the dataset CLIP embedder records its consent in
+      // the same ledger under its own stable id — its download is performed
+      // by transformers.js itself, not the fetch engine, so it is not a
+      // catalog entry; the license-match rule applies to it identically.)
       fetch: {
         consents: (() => {
           const ledger: NonNullable<AppSettings['fetch']['consents']> = {}
           const rawLedger = (raw.fetch?.consents && typeof raw.fetch.consents === 'object' ? raw.fetch.consents : {}) as Record<string, unknown>
           for (const id of Object.keys(rawLedger)) {
-            if (!FETCH_ENTRY_IDS.has(id)) continue
+            if (!FETCH_ENTRY_IDS.has(id) && id !== CLIP_CONSENT_ID) continue
             const record = rawLedger[id] as { consented?: unknown; at?: unknown; licenseSpdx?: unknown } | null
             if (record && typeof record === 'object' && typeof record.licenseSpdx === 'string' && record.licenseSpdx) {
               ledger[id] = {
@@ -1187,17 +1192,24 @@ export function createStudioServer(paths: StudioServerPaths) {
     })
   }
 
-  /** Dataset bake/export destination containment: RELATIVE paths resolve under
- *  the user's output directory (never the repo or cwd by accident); absolute
- *  paths are honored as explicit user intent but must resolve (no null bytes,
- *  no unresolved traversal). Same posture as the rest of the server's
- *  user-supplied-path surfaces. */
+  /** Dataset bake/export destination containment (security wave 2, MEDIUM-1):
+ *  every destination — relative or absolute — must land INSIDE the user's
+ *  output directory, asserted post-normalization (the relative() discipline:
+ *  a "../.." body or an absolute path elsewhere used to walk anywhere, and
+ *  the export writes caption-controlled .txt/.jsonl rows and config files
+ *  that overwrite on collision). Relative bodies resolve under the output
+ *  directory; absolute paths are accepted only when they contain inside it
+ *  too. Refusals are loud and name the resolved escape. */
 function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: string): string {
   const trimmed = raw.slice(0, 4000)
   if (trimmed.includes('\0')) throw new Error('The destination path contains a null byte.')
-  if (!trimmed) return join(settings.outputDirectory, defaultName)
-  if (isAbsolute(trimmed)) return resolve(trimmed)
-  return resolve(join(settings.outputDirectory, trimmed))
+  const root = resolve(settings.outputDirectory)
+  const resolved = trimmed && isAbsolute(trimmed) ? resolve(trimmed) : resolve(join(root, trimmed || defaultName))
+  const rel = relative(root, resolved)
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(`Refusing the export destination "${trimmed}": it resolves to "${resolved}", which escapes the studio output directory (${root}). Destinations must stay inside it.`)
+  }
+  return resolved
 }
 
 /** Provenance fields from an ingest body (fields only, no ceremony — §2.2). */
@@ -2140,7 +2152,21 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
         if (url.pathname.startsWith('/api/lan/datasets')) {
           if (!studioRepo) return sendJson(response, 503, { error: 'The studio database is unavailable; the dataset manager cannot be accessed.' })
           const manager = studioRepo.datasets
-          studioRepo.setDatasetTools({ ffmpegPath: settings.ffmpegPath || 'ffmpeg', logFailure, logEvent })
+          // CLIP-consent state (LOW-2): the curation pass may download the
+          // CLIP weights only behind a recorded, license-matching consent in
+          // the fetch-consent ledger — same rule shape the fetcher enforces.
+          const clipConsentRecord = settings.fetch.consents[CLIP_CONSENT_ID]
+          const clipConsented = clipConsentRecord?.consented === true && clipConsentRecord.licenseSpdx === CLIP_LICENSE_SPDX
+          studioRepo.setDatasetTools({ ffmpegPath: settings.ffmpegPath || 'ffmpeg', logFailure, logEvent, clipConsentGranted: clipConsented })
+          const clipConsentInfo = () => ({
+            consented: clipConsented,
+            id: CLIP_CONSENT_ID,
+            model: CLIP_MODEL_ID,
+            licenseSpdx: CLIP_LICENSE_SPDX,
+            note: clipConsented
+              ? 'CLIP embeddings are enabled (consent recorded).'
+              : 'CLIP embeddings are consent-gated off — the perceptual fallback ran instead. The first CLIP load downloads model weights from huggingface.co, so it happens only behind a recorded consent (POST /api/lan/datasets/clip/consent).',
+          })
           // rife-ncnn-vulkan availability (A1-final: shipped-default minterpolate; RIFE preferred when present).
           const rifePath: string | null = await rifeBinary()
           const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -2247,12 +2273,15 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
           }
           // Source media serving for the workbench (video streaming w/ Range,
           // image bytes) — the crop editor previews the ORIGINAL and applies
-          // crop/trim visually; the bake applies them for real.
+          // crop/trim visually; the bake applies them for real. Trashed
+          // sources stop serving (audit HIGH-1 sub-oracle: the trash view
+          // must be the only surface that sees them).
           if (url.pathname === '/api/lan/datasets/media' && (request.method === 'GET' || request.method === 'HEAD')) {
             const sourceId = idParam('source')
             if (!sourceId) return sendJson(response, 400, { error: 'A source id is required.' })
             const source = manager.store.getSource(sourceId)
             if (!source) return sendJson(response, 404, { error: 'No source with that id.' })
+            if (source.trashedAt) return sendJson(response, 410, { error: 'The source is in the trash — restore it to serve its media.' })
             if (source.health === 'missing') return sendJson(response, 410, { error: 'The source file is MISSING — re-link it by content hash.' })
             return serveLocalMediaHttp(request, response, source.absPath)
           }
@@ -2374,7 +2403,10 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
             try { return sendJson(response, 200, { aspects: manager.store.deleteAspect(id) }) } catch (error) { return fail(error, 400) }
           }
           if (url.pathname === '/api/lan/datasets/dedup' && request.method === 'POST') {
-            try { return sendJson(response, 200, await manager.runDedupPass()) } catch (error) { return fail(error) }
+            try {
+              const result = await manager.runDedupPass()
+              return sendJson(response, 200, { ...result, clipConsent: clipConsentInfo() })
+            } catch (error) { return fail(error) }
           }
           if (url.pathname === '/api/lan/datasets/triage' && request.method === 'POST') {
             const body = await readJson(request, 40_000_000)
@@ -2383,7 +2415,23 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
             let bytes: Buffer
             try { bytes = Buffer.from(data.replace(/^data:[^;]+;base64,/, ''), 'base64') } catch { return sendJson(response, 400, { error: 'The reference bytes are not valid base64.' }) }
             if (!bytes.length) return sendJson(response, 400, { error: 'The reference image decoded to zero bytes.' })
-            try { return sendJson(response, 200, await manager.referenceTriage(bytes, Number(body.limit) || 50)) } catch (error) { return fail(error) }
+            try {
+              const result = await manager.referenceTriage(bytes, Number(body.limit) || 50)
+              return sendJson(response, 200, { ...result, clipConsent: clipConsentInfo() })
+            } catch (error) { return fail(error) }
+          }
+          // CLIP consent record (LOW-2): records or withdraws the user's
+          // acknowledgement for the curation pass's CLIP weight download
+          // (Apache-2.0, huggingface.co) in the settings fetch-consent ledger.
+          if (url.pathname === '/api/lan/datasets/clip/consent' && request.method === 'POST') {
+            const body = await readJson(request, 10_000).catch(() => ({}) as Record<string, unknown>)
+            const consented = body.consented === true
+            const consents = { ...settings.fetch.consents }
+            if (consented) consents[CLIP_CONSENT_ID] = { consented: true, licenseSpdx: CLIP_LICENSE_SPDX, at: Date.now() }
+            else delete consents[CLIP_CONSENT_ID]
+            await saveSettings({ ...settings, fetch: { consents } })
+            logEvent({ kind: 'datasets.clip-consent', entry: CLIP_CONSENT_ID, consented, license: CLIP_LICENSE_SPDX, model: CLIP_MODEL_ID })
+            return sendJson(response, 200, { consented, model: CLIP_MODEL_ID, licenseSpdx: CLIP_LICENSE_SPDX })
           }
           if (url.pathname === '/api/lan/datasets/similar' && request.method === 'GET') {
             const layerId = idParam('layerId')
@@ -2460,8 +2508,8 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
             const body = await readJson(request, 100_000)
             const layerId = typeof body.layerId === 'string' ? body.layerId : ''
             if (!layerId) return sendJson(response, 400, { error: 'A layerId is required.' })
-            const folder = resolveDatasetFolder(typeof body.folder === 'string' ? body.folder.trim() : '', settings, 'dataset-bakes')
             try {
+              const folder = resolveDatasetFolder(typeof body.folder === 'string' ? body.folder.trim() : '', settings, 'dataset-bakes')
               const outcome = await manager.bakeLayer(layerId, {
                 outputFolder: folder,
                 gridTarget: Number.isFinite(Number(body.gridTarget)) ? Number(body.gridTarget) : null,
@@ -2474,11 +2522,11 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
             const body = await readJson(request, 200_000)
             const shape = body.shape === 'musubi' || body.shape === 'diffsynx' || body.shape === 'external' ? body.shape : null
             const trainer = body.trainer === 'musubi' ? 'musubi' : 'diffsynx'
-            const folder = resolveDatasetFolder(typeof body.folder === 'string' ? body.folder.trim() : '', settings, 'dataset-exports')
             const layerIds = Array.isArray(body.layerIds) ? body.layerIds.filter((id: unknown) => typeof id === 'string') : []
             if (!shape) return sendJson(response, 400, { error: 'An export shape (musubi / diffsynx / external) is required.' })
             if (!layerIds.length) return sendJson(response, 400, { error: 'Select at least one layer to export.' })
             try {
+              const folder = resolveDatasetFolder(typeof body.folder === 'string' ? body.folder.trim() : '', settings, 'dataset-exports')
               const result = await manager.exportDataset({ shape, trainer, folder, layerIds, gridTarget: Number.isFinite(Number(body.gridTarget)) ? Number(body.gridTarget) : null, acceptWarnings: body.acceptWarnings === true })
               logEvent({ kind: 'datasets.export', shape, items: result.written.length, refused: result.refused.length })
               return sendJson(response, 200, result)

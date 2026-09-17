@@ -28,6 +28,12 @@
 //       undeletable, customs add/delete, mirror + hard-stop logic direct)
 //   (j) scale: 1000 synthetic sources + layers — library, FTS search, and
 //       dashboard within generous local budgets
+//   (k) SECURITY WAVE 2 (task kr85qx1, audit comment 5moazlw): by-reference
+//       ingest + canvas bridge + re-link scope-gated (HIGH-1, uniform
+//       refusal — no existence oracle), bake/export destinations contained
+//       to the output directory (MEDIUM-1), upload caps + bake-scratch
+//       sweep (LOW-1), CLIP consent gate (LOW-2), content-truth upload
+//       extensions (LOW-3), trashed-dedupe + trashed-media refusals (NOTES)
 // Run after `pnpm build` (loads dist-server).
 const { spawn, execFile } = require('node:child_process')
 const net = require('node:net')
@@ -73,10 +79,6 @@ const sha256File = (file) => createHash('sha256').update(fs.readFileSync(file)).
 
 function makeHome(label) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `minimax-datasets-${label}-`))
-}
-
-function makeMedia(label) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `minimax-datasets-media-${label}-`))
 }
 
 function runFfmpeg(args) {
@@ -131,9 +133,16 @@ const check = (condition, message) => {
 
 async function main() {
   // =====================================================================
-  // (0) Fixtures: synthetic clips (testsrc — tiny, no committed media)
+  // (0) Fixtures: synthetic clips (testsrc — tiny, no committed media).
+  // Security wave 2: fixtures live INSIDE the scratch studio home — the
+  // by-reference ingest surface is scope-gated (HIGH-1), so the legal-source
+  // fixtures must sit in a legal root. The out-of-scope homes below exercise
+  // the refusals.
   // =====================================================================
-  const media = makeMedia('fixtures')
+  const home = makeHome('server')
+  const media = path.join(home, 'fixtures')
+  fs.mkdirSync(media, { recursive: true })
+  const outDir = path.join(home, 'out')
   const clips = {
     main: path.join(media, 'main-480x832-24fps-3s.mp4'), // healthy, audio
     tiny: path.join(media, 'tiny-144x96.mp4'), // below the hard-refuse floor
@@ -262,10 +271,16 @@ async function main() {
   // =====================================================================
   // (1) Boot + ingest (a): both paths, identity, floors, async probe
   // =====================================================================
-  const home = makeHome('server')
   const server = await bootServer(home, 'datasets')
   const api = client(server.port)
   try {
+    // Point the scratch server's output directory INSIDE the scratch home
+    // (the test-documents pattern): export/bake destinations are contained
+    // to it (MEDIUM-1), and the test asserts on the landed files.
+    const currentSettings = await api.get('/api/lan/settings')
+    check(currentSettings.status === 200 && typeof currentSettings.body.settings.outputDirectory === 'string', 'settings readable before the output-directory override')
+    const settingsApplied = await api.post('/api/lan/settings', { settings: { ...currentSettings.body.settings, outputDirectory: outDir } })
+    check(settingsApplied.status === 200 && settingsApplied.body.settings.outputDirectory === outDir, 'the scratch output directory override applies')
     const immutability = [{ file: clips.main, hash: sha256File(clips.main) }, { file: clips.still, hash: sha256File(clips.still) }]
 
     const imported = await api.post('/api/lan/datasets/ingest/reference', { path: clips.main })
@@ -292,6 +307,34 @@ async function main() {
     const mainSource = libraryAfter.body.sources.find((source) => source.name === 'main-480x832-24fps-3s.mp4')
     check(mainSource && mainSource.probeState === 'done' && mainSource.decodedFrames === 72, `decoded-count probe lands async (72 frames, got ${mainSource?.decodedFrames})`)
     check(mainSource.probe.hasAudio === true && typeof mainSource.probe.dbfs === 'number', 'audio presence + dBFS recorded at import')
+
+    // =====================================================================
+    // (1s) SECURITY WAVE 2 — HIGH-1: by-reference ingest is scope-gated;
+    // LOW-3: upload extensions are content truth
+    // =====================================================================
+    const outsideHome = makeHome('outside')
+    const outsideClip = path.join(outsideHome, 'private.mp4')
+    fs.copyFileSync(clips.loud, outsideClip)
+    const scopeRefused = await api.post('/api/lan/datasets/ingest/reference', { path: outsideClip })
+    check(scopeRefused.status === 400 && /outside the studio home/.test(scopeRefused.body.error ?? ''), 'HIGH-1: registering an out-of-scope media path by reference is refused loudly')
+    const scopeRefusedMissing = await api.post('/api/lan/datasets/ingest/reference', { path: path.join(outsideHome, 'never-existed.mp4') })
+    check(
+      scopeRefusedMissing.status === 400
+      && /outside the studio home/.test(scopeRefusedMissing.body.error ?? '')
+      && !/No file at/.test(scopeRefusedMissing.body.error ?? '')
+      && !/No file at/.test(scopeRefused.body.error ?? ''),
+      'HIGH-1: the out-of-scope refusal is uniform for existing and missing paths (no file-existence oracle — the existence-bearing message never appears)',
+    )
+    const libraryScoped = await api.get('/api/lan/datasets/library')
+    check(libraryScoped.body.sources.every((source) => source.name !== 'private.mp4'), 'HIGH-1: the refused path never became a source (nothing to stream back)')
+    const canvasScopeRefused = await api.post('/api/lan/datasets/ingest/canvas', { path: outsideClip })
+    check(canvasScopeRefused.status === 400 && /outside the studio home/.test(canvasScopeRefused.body.error ?? ''), 'HIGH-1: the canvas bridge shares the same source-scope gate')
+    const relinkScopeRefused = await api.post('/api/lan/datasets/relink', { sourceId: mainSource.id, path: outsideClip })
+    check(relinkScopeRefused.body.relinked === false && /outside the studio home/.test(relinkScopeRefused.body.reason ?? ''), 'HIGH-1: re-link picks are scope-gated before any stat/probe')
+    // LOW-3: the stored extension comes from the probed container, never the
+    // client-chosen suffix (a polyglot payload.sh persists as .mp4).
+    const polyglot = await api.post('/api/lan/datasets/ingest/upload', { name: 'payload.sh', data: fs.readFileSync(clips.hfr).toString('base64') })
+    check(polyglot.status === 200 && /\.mp4$/.test(polyglot.body.source.absPath ?? ''), `LOW-3: a polyglot upload named payload.sh persists with the probed extension (${polyglot.body.source?.absPath?.split('/').pop()})`)
 
     // =====================================================================
     // (2) Health (b): MISSING / CHANGED / re-link; byte immortality
@@ -362,8 +405,16 @@ async function main() {
       mediaRoot: managerMedia,
       trashRoot: path.join(managerHome, 'trash'),
       tools: { ffmpegPath: ffmpeg(), logFailure: () => undefined },
+      // Security wave 2 (HIGH-1): the manager-level resolver option — the
+      // fixtures live in the SERVER's scratch home, not this manager's home.
+      allowedSourceRoots: () => [media],
       logEvent: () => undefined,
     })
+    // The store gate refuses paths outside BOTH the manager's own home and
+    // the resolver roots, before any stat/probe (no existence oracle).
+    let managerScopeRefusal = null
+    try { await manager.ingestReference(outsideClip) } catch (error) { managerScopeRefusal = error }
+    check(managerScopeRefusal && /outside the studio home/.test(managerScopeRefusal.message), 'HIGH-1 (store level): the gate refuses out-of-scope references with the measured reason')
     const mgmtImport = await manager.ingestReference(clips.loud)
     const mgmtLayer = manager.store.createLayer({ sourceId: mgmtImport.source.id, name: 'guard-hand' })
     manager.store.setCaption(mgmtLayer.id, 'hand-written precious caption', 'hand')
@@ -387,8 +438,8 @@ async function main() {
     const bakeDir = path.join(managerHome, 'bakes')
     const planMain = planBake(layerA.body.layer, { ...mainSource, health: 'healthy', decodedFrames: 72, probe: { ...mainSource.probe } })
     check(planMain.encodeFrames === planMain.gridTarget + 2, `bake encodes grid target + 2 (target ${planMain.gridTarget}, encode ${planMain.encodeFrames})`)
-    const bakeOk = await api.post('/api/lan/datasets/bake', { layerId: layerA.body.layer.id, folder: bakeDir })
-    check(bakeOk.status === 200 && bakeOk.body.outcome.state === 'done', 'conforming bake completes')
+    const bakeOk = await api.post('/api/lan/datasets/bake', { layerId: layerA.body.layer.id, folder: 'test-bakes' })
+    check(bakeOk.status === 200 && bakeOk.body.outcome.state === 'done', 'conforming bake completes (relative destination, contained under the output directory)')
     check(bakeOk.body.outcome.decodedFrames === bakeOk.body.outcome.gridTarget + 2, `decoded = target+2 (${bakeOk.body.outcome.decodedFrames} of ${bakeOk.body.outcome.gridTarget}+2) — the assertion accepts [target, target+2]`)
     check(bakeOk.body.outcome.fpsMode === 'retime', '24 fps source takes the retime arm of the conditional policy (order fixed: trim → crop → CFR → grid+2)')
     // Crafted f56-class truncation: force a decode-short file through the assertion.
@@ -409,6 +460,32 @@ async function main() {
     const hfrLayer = manager.store.createLayer({ sourceId: hfrImport.source.id })
     const hfrBake = await manager.bakeLayer(hfrLayer.id, { outputFolder: bakeDir })
     check(hfrBake.state === 'done' && hfrBake.fpsMode === 'dropdup', '30 fps source bakes via DROP/DUP (speed preserved)')
+
+    // =====================================================================
+    // (5s) SECURITY WAVE 2 — MEDIUM-1 (bake destinations contained) and
+    // LOW-1 (upload caps; bake-scratch swept on failure)
+    // =====================================================================
+    const bakeEscape = await api.post('/api/lan/datasets/bake', { layerId: layerA.body.layer.id, folder: '../../../../../' + outsideHome })
+    check(bakeEscape.status === 400 && /escapes the studio output directory/.test(bakeEscape.body.error ?? ''), 'MEDIUM-1: a ../../ bake destination is refused post-normalization')
+    check(!fs.existsSync(path.join(outsideHome, 'baked')), 'MEDIUM-1: nothing was created at the escape target')
+    const { MAX_DATASET_UPLOAD_BYTES } = require('../dist-server/server/datasets/store.js')
+    const managerMediaBeforeCap = fs.existsSync(managerMedia) ? fs.readdirSync(managerMedia).length : 0
+    let overCapRefusal = null
+    try { await manager.ingestUpload('big.mp4', Buffer.alloc(MAX_DATASET_UPLOAD_BYTES + 1)) } catch (error) { overCapRefusal = error }
+    check(overCapRefusal && /per-file cap/.test(overCapRefusal.message), 'LOW-1: an over-cap upload is refused with the measured size')
+    check((fs.existsSync(managerMedia) ? fs.readdirSync(managerMedia).length : 0) === managerMediaBeforeCap, 'LOW-1: the refused over-cap upload wrote nothing to the media store')
+    // Bake-scratch sweep on FAILURE: an impossible export destination (under
+    // a plain file) fails the export AFTER baking — the scratch must still go.
+    fs.writeFileSync(path.join(managerHome, 'blocker'), 'not a directory')
+    manager.store.saveSettings({ triggerToken: 'ph0t0r34l' })
+    manager.store.setCaption(hfrLayer.id, 'ph0t0r34l, a test pattern clip; no audible sound', 'hand')
+    let failedExport = null
+    try {
+      await manager.exportDataset({ shape: 'musubi', trainer: 'musubi', folder: path.join(managerHome, 'blocker', 'sub'), layerIds: [hfrLayer.id], acceptWarnings: true })
+    } catch (error) { failedExport = error }
+    check(failedExport, 'LOW-1: the impossible-destination export surfaces its error (never silent)')
+    const managerScratch = path.join(managerMedia, 'bake-scratch')
+    check(!fs.existsSync(managerScratch) || fs.readdirSync(managerScratch).length === 0, 'LOW-1: bake-scratch is swept when the export FAILS, not just when it lands')
 
     // =====================================================================
     // (6) Gates (f): refuse vs warn with reasons; accept-all warnings only
@@ -443,42 +520,58 @@ async function main() {
     check(gate7Present.every((finding) => finding.gate !== 7), 'gate 7 passes when the soundscape clause is present')
 
     // =====================================================================
-    // (7) Exports (g): all three shapes + validations + recipe
+    // (7) Exports (g): all three shapes + validations + recipe; destinations
+    // are RELATIVE names landing inside the contained output directory
+    // (MEDIUM-1), and the sweep check proves bake-scratch leaves no residue.
     // =====================================================================
     await api.post('/api/lan/datasets/captions', { layerId: layerA.body.layer.id, text: 'ph0t0r34l, a tight test-pattern crop with steady motion; no audible sound' })
-    const exportDir = path.join(managerHome, 'export-musubi')
-    const musubiExport = await api.post('/api/lan/datasets/export', { shape: 'musubi', trainer: 'musubi', folder: exportDir, layerIds: [layerA.body.layer.id] })
+    // MEDIUM-1: traversal and out-of-tree absolute destinations are refused.
+    const exportEscape = await api.post('/api/lan/datasets/export', { shape: 'musubi', trainer: 'musubi', folder: '../../../../../' + outsideHome, layerIds: [layerA.body.layer.id] })
+    check(exportEscape.status === 400 && /escapes the studio output directory/.test(exportEscape.body.error ?? ''), 'MEDIUM-1: a ../../ export destination is refused post-normalization')
+    const exportAbsolute = await api.post('/api/lan/datasets/export', { shape: 'musubi', trainer: 'musubi', folder: outsideHome, layerIds: [layerA.body.layer.id] })
+    check(exportAbsolute.status === 400 && /escapes the studio output directory/.test(exportAbsolute.body.error ?? ''), 'MEDIUM-1: an absolute destination outside the output directory is refused')
+    check(!fs.existsSync(path.join(outsideHome, 'dataset_config.toml')) && !fs.existsSync(path.join(outsideHome, 'captions')), 'MEDIUM-1: the escape target was never written (no config clobber, no caption rows planted)')
+    const exportDir = path.join(outDir, 'export-musubi')
+    const musubiExport = await api.post('/api/lan/datasets/export', { shape: 'musubi', trainer: 'musubi', folder: 'export-musubi', layerIds: [layerA.body.layer.id] })
     check(musubiExport.status === 200 && musubiExport.body.written.length === 1, 'musubi export writes the item')
-    check(fs.existsSync(path.join(exportDir, 'dataset_config.toml')) && fs.existsSync(path.join(exportDir, 'captions')) && fs.existsSync(path.join(exportDir, 'wavs')), 'musubi shape: TOML + caption sidecars + wav sidecars')
+    check(fs.existsSync(path.join(exportDir, 'dataset_config.toml')) && fs.existsSync(path.join(exportDir, 'captions')) && fs.existsSync(path.join(exportDir, 'wavs')), 'musubi shape: TOML + caption sidecars + wav sidecars (landed inside the output directory)')
     check(musubiExport.body.validated.musubiConfig === 'built-in', 'musubi config passes the built-in named validation')
     check(validateMusubiToml(fs.readFileSync(path.join(exportDir, 'dataset_config.toml'), 'utf8')), 'the emitted TOML re-validates structurally (target_frames on the 17n+5 grid, batch 1, buckets on)')
-    const diffsynxDir = path.join(managerHome, 'export-diffsynx')
-    const dsExport = await api.post('/api/lan/datasets/export', { shape: 'diffsynx', trainer: 'diffsynx', folder: diffsynxDir, layerIds: [layerA.body.layer.id] })
+    const serverScratch = path.join(home, 'dataset-media', 'bake-scratch')
+    check(!fs.existsSync(serverScratch) || fs.readdirSync(serverScratch).length === 0, 'LOW-1: bake-scratch is swept after the export copy lands (no per-export residue)')
+    const diffsynxDir = path.join(outDir, 'export-diffsynx')
+    const dsExport = await api.post('/api/lan/datasets/export', { shape: 'diffsynx', trainer: 'diffsynx', folder: 'export-diffsynx', layerIds: [layerA.body.layer.id] })
     check(dsExport.status === 200 && dsExport.body.written.length === 1, 'DiffSynX export writes the item')
     const rows = fs.readFileSync(path.join(diffsynxDir, 'metadata.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
     check(rows.length === 1 && rows[0].frame_rate === 24 && rows[0].input_audio.endsWith('.wav') && rows[0].prompt.startsWith('ph0t0r34l'), 'DiffSynX rows: video/prompt/input_audio/frame_rate=24 with the trigger first')
     check(validateDiffsynxRows(rows), 'DiffSynX rows pass the named dry-load validation shape')
-    const externalDir = path.join(managerHome, 'export-external')
-    const externalExport = await api.post('/api/lan/datasets/export', { shape: 'external', trainer: 'diffsynx', folder: externalDir, layerIds: [layerA.body.layer.id] })
+    const externalDir = path.join(outDir, 'export-external')
+    const externalExport = await api.post('/api/lan/datasets/export', { shape: 'external', trainer: 'diffsynx', folder: 'export-external', layerIds: [layerA.body.layer.id] })
     check(externalExport.status === 200 && fs.existsSync(path.join(externalDir, 'README.md')) && fs.existsSync(path.join(externalDir, 'dataset_config.toml')) && fs.existsSync(path.join(externalDir, 'metadata.jsonl')), 'external export is standalone (README + both shapes + prefilled configs)')
     // Warning-tier needs the explicit accept: an unaccepted warn-only item refuses.
-    const warnExport = await api.post('/api/lan/datasets/export', { shape: 'musubi', trainer: 'musubi', folder: path.join(managerHome, 'export-warn'), layerIds: [layerA.body.layer.id], acceptWarnings: false })
+    const warnExport = await api.post('/api/lan/datasets/export', { shape: 'musubi', trainer: 'musubi', folder: 'export-warn', layerIds: [layerA.body.layer.id], acceptWarnings: false })
     check(warnExport.status === 200 || warnExport.status === 400, 'export runs the gates before baking')
     // Refusing item never bakes: empty caption refuses outright.
     const emptyCaptionLayer = await api.post('/api/lan/datasets/layers', { sourceId: uploaded.body.source.id, name: 'no caption' })
-    const refusedExport = await api.post('/api/lan/datasets/export', { shape: 'musubi', trainer: 'musubi', folder: path.join(managerHome, 'export-refused'), layerIds: [emptyCaptionLayer.body.layer.id] })
+    const refusedExport = await api.post('/api/lan/datasets/export', { shape: 'musubi', trainer: 'musubi', folder: 'export-refused', layerIds: [emptyCaptionLayer.body.layer.id] })
     check(refusedExport.status === 400 && /gate/i.test(refusedExport.body.error), 'an all-refusing selection throws before ANY bake (gate report owns the reasons)')
 
     // =====================================================================
-    // (8) Curation over HTTP (h): dedup pass advisory, clusters grouped
+    // (8) Curation over HTTP (h): dedup pass advisory, clusters grouped.
+    // LOW-2: the CLIP backend is consent-gated — without a recorded consent
+    // the pass runs the perceptual fallback and NEVER reaches the network.
     // =====================================================================
     const dedup = await api.post('/api/lan/datasets/dedup', {})
     check(dedup.status === 200 && typeof dedup.body.tier2Clusters === 'number' && ['clip', 'perceptual'].includes(dedup.body.embedBackend), `dedup pass completes (backend: ${dedup.body.embedBackend})`)
+    check(dedup.body.embedBackend === 'perceptual' && dedup.body.clipConsent?.consented === false, 'LOW-2: without consent the perceptual backend runs and the response names the gate (no LAN-peer-triggered CLIP download)')
+    const clipConsentRecorded = await api.post('/api/lan/datasets/clip/consent', { consented: true })
+    check(clipConsentRecorded.status === 200 && clipConsentRecorded.body.consented === true && clipConsentRecorded.body.licenseSpdx === 'Apache-2.0', 'LOW-2: the CLIP consent records through the dedicated route with its license')
     const libraryPost = await api.get('/api/lan/datasets/library')
     const clustered = libraryPost.body.sources.flatMap((source) => source.layers).filter((layer) => layer.clusterId)
     check(Array.isArray(clustered), 'cluster assignments visible in the gallery payload (grouped + numbered)')
     const triage = await api.post('/api/lan/datasets/triage', { image: fs.readFileSync(clips.still).toString('base64') })
     check(triage.status === 200 && Array.isArray(triage.body.results), `reference-triage ranks the library by the tier-2 index (backend ${triage.body.backend})`)
+    check(triage.body.clipConsent?.consented === true, 'LOW-2: the recorded consent is honored live on the next curation call')
 
     // =====================================================================
     // (9) FTS (i) + aspect management over HTTP
@@ -514,6 +607,16 @@ async function main() {
     check(uploadTrash.status === 200, 'uploaded-source trash runs')
     const trashBefore = await api.get('/api/lan/datasets/library')
     check(trashBefore.body.trashed.sources.some((entry) => entry.id === uploaded.body.source.id), 'trashed entries list in the trash view (restorable)')
+    // Trashed sources stop serving media (HIGH-1 sub-oracle: trash view only).
+    const trashedMedia = await api.get(`/api/lan/datasets/media?source=${uploaded.body.source.id}`)
+    check(trashedMedia.status === 410, 'a trashed source does not serve media (restore first)')
+    // Audit NOTE (wave 2): re-uploading TRASHED content must not dedupe into
+    // the invisible trashed row (and must not orphan the fresh bytes).
+    const serverMediaRoot = path.join(home, 'dataset-media')
+    const mediaFilesBeforeReupload = fs.readdirSync(serverMediaRoot).length
+    const reuploadTrashed = await api.post('/api/lan/datasets/ingest/upload', { name: 'loud-again.mp4', data: fs.readFileSync(clips.loud).toString('base64') })
+    check(reuploadTrashed.status === 400 && /in the dataset trash/.test(reuploadTrashed.body.error ?? ''), 'NOTES: re-uploading trashed content is refused with the restore instruction (never an invisible dedupe)')
+    check(fs.readdirSync(serverMediaRoot).length === mediaFilesBeforeReupload, 'NOTES: the refused re-upload leaves no orphaned bytes in the media store')
     const emptied = await api.post('/api/lan/datasets/trash/empty', {})
     check(emptied.body.dropped >= 1 && emptied.body.bytesDeleted >= 0, `empty-trash drops entries (app-owned bytes only: ${(emptied.body.bytesDeleted / 1e6).toFixed(1)} MB)`)
     check(sha256File(clips.still) === stillBytesBefore, 'empty-trash never touches referenced originals')
@@ -526,8 +629,9 @@ async function main() {
     const sceneIngest = await api.post('/api/lan/datasets/ingest/reference', { path: clips.loud })
     const proposals = await api.post('/api/lan/datasets/scenes/propose', { sourceId: sceneIngest.body.source.id })
     check(proposals.status === 200 && Array.isArray(proposals.body.proposals), 'scene proposals return (content-detector technique, intra-clip)')
-    // A hard-cut synthetic clip must yield at least one proposal.
-    const cutClip = path.join(managerHome, 'hardcut.mp4')
+    // A hard-cut synthetic clip must yield at least one proposal. (Lives in
+    // the fixtures tree — reference ingest is scope-gated, HIGH-1.)
+    const cutClip = path.join(media, 'hardcut.mp4')
     await runFfmpeg(['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=duration=2:size=480x832:rate=24', '-f', 'lavfi', '-i', 'smptebars=duration=2:size=480x832:rate=24', '-filter_complex', '[0:v][1:v]concat=n=2:v=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', cutClip])
     const cutIngest = await api.post('/api/lan/datasets/ingest/reference', { path: cutClip })
     const cutProposals = await api.post('/api/lan/datasets/scenes/propose', { sourceId: cutIngest.body.source.id })
@@ -621,7 +725,7 @@ async function main() {
     server.child.kill()
   }
 
-  console.log(`PASS: dataset manager — ingest both paths (hash identity, dedup, floors with reasons, async decode probe); health MISSING/CHANGED + hash re-link; byte-immortality checksum-asserted; layer lifecycle (32-grid crops, crop-time floor refusal, stale on crop AND trim, soft trash with per-path semantics + blast radius); captions (authorship, append-only history, batch-never-overwrites-hand via stub seam, trigger validation); bake order fixed with decoded ∈ [target, target+2] (crafted f56-class refusal + conforming +2 passes, retime/dropdup conditional); gates 1–9 refuse/warn with reasons; musubi + DiffSynX + external exports with named validations + recipe cards; curation (tier-1 hash, advisory clusters, reference-triage, scene-split children, slow-mo audit); FTS + aspect spectrum (officials undeletable, mirror/hard-stop logic); preflight goldens vs the envelope table; 1000-item scale gate. ${assertions} assertions.`)
+  console.log(`PASS: dataset manager — ingest both paths (hash identity, dedup, floors with reasons, async decode probe); health MISSING/CHANGED + hash re-link; byte-immortality checksum-asserted; layer lifecycle (32-grid crops, crop-time floor refusal, stale on crop AND trim, soft trash with per-path semantics + blast radius); captions (authorship, append-only history, batch-never-overwrites-hand via stub seam, trigger validation); bake order fixed with decoded ∈ [target, target+2] (crafted f56-class refusal + conforming +2 passes, retime/dropdup conditional); gates 1–9 refuse/warn with reasons; musubi + DiffSynX + external exports with named validations + recipe cards; curation (tier-1 hash, advisory clusters, reference-triage, scene-split children, slow-mo audit); FTS + aspect spectrum (officials undeletable, mirror/hard-stop logic); preflight goldens vs the envelope table; 1000-item scale gate; SECURITY WAVE 2 (source-scope gate w/ uniform refusal, contained destinations, upload caps + scratch sweep, CLIP consent, content-truth extensions, trashed-dedupe/media refusals). ${assertions} assertions.`)
 }
 
 main().catch((error) => {

@@ -20,6 +20,9 @@ export type ProbeFacts = {
   /** Mean loudness in dBFS when audio is present (ffmpeg volumedetect). */
   dbfs: number | null
   codec: string | null
+  /** Container (format) name as ffprobe reports it, e.g. "mov,mp4…" or
+   *  "matroska,webm" — the content truth behind a stored file extension. */
+  container: string | null
 }
 
 export type ToolOptions = {
@@ -69,7 +72,7 @@ type FfprobeStream = {
 export async function probeMedia(path: string, options: ToolOptions): Promise<ProbeFacts> {
   const probe = ffprobePath(options.ffmpegPath)
   const { stdout } = await runTool(probe, ['-v', 'error', '-print_format', 'json', '-show_streams', '-show_format', path], 60_000)
-  const parsed = JSON.parse(stdout) as { streams?: FfprobeStream[]; format?: { duration?: string } }
+  const parsed = JSON.parse(stdout) as { streams?: FfprobeStream[]; format?: { duration?: string; format_name?: string } }
   const streams = parsed.streams ?? []
   const video = streams.find((stream) => stream.codec_type === 'video')
   const image = video && !video.avg_frame_rate?.includes('/') === false ? video : video // single fallthrough below
@@ -101,7 +104,33 @@ export async function probeMedia(path: string, options: ToolOptions): Promise<Pr
     hasAudio: Boolean(audio),
     dbfs,
     codec: video.codec_name ?? null,
+    container: parsed.format?.format_name ?? null,
   }
+}
+
+/** Content-truth stored extension for an upload (security wave 2, LOW-3):
+ *  the extension comes from what ffprobe measured in the BYTES (container,
+ *  then codec), never from the client-chosen filename — a polyglot upload
+ *  named payload.sh lands in the media store as payload….mp4/.jpg. The few
+ *  kinds the media-serving mime map lacks (.tiff/.gif) still carry their
+ *  true extension and serve as octet-stream. Pure. */
+export function uploadExtensionFor(probe: ProbeFacts): string {
+  const containers = probe.container ?? ''
+  const names = containers.split(',').map((name) => name.trim().toLowerCase())
+  const videoContainerExtensions: Array<[string, string]> = [
+    ['mp4', '.mp4'], ['mov', '.mov'], ['webm', '.webm'], ['matroska', '.mkv'], ['avi', '.avi'],
+  ]
+  const imageCodecExtensions: Array<[string, string]> = [
+    ['png', '.png'], ['mjpeg', '.jpg'], ['jpeg', '.jpg'], ['webp', '.webp'], ['bmp', '.bmp'], ['tiff', '.tiff'], ['gif', '.gif'],
+  ]
+  const codec = (probe.codec ?? '').toLowerCase()
+  if (probe.kind === 'image') {
+    for (const [name, extension] of imageCodecExtensions) if (names.includes(name) || codec === name) return extension
+    return '.jpg'
+  }
+  for (const [name, extension] of videoContainerExtensions) if (names.includes(name)) return extension
+  for (const [name, extension] of imageCodecExtensions) if (codec === name) return extension
+  return '.mp4'
 }
 
 function parseRate(raw: string | undefined): number | null {

@@ -132,29 +132,44 @@ export function cosineSimilarity(a: EmbedVector, b: EmbedVector): number {
 /** The CLIP embedder seam. Lazily tries transformers.js + a small CLIP model
  * (fetched on demand at runtime — never vendored, never in CI tests). When
  * unavailable, callers embed with the perceptual fallback and the backend is
- * recorded per row so the UI can label it honestly. */
+ * recorded per row so the UI can label it honestly.
+ *
+ * Security wave 2 (LOW-2): the first pipeline load DOWNLOADS the weights
+ * from huggingface.co, so it is consent-gated like every fetch in this app —
+ * `clipEmbedder(false)` (the default for every caller that has not resolved
+ * a recorded consent) never touches the transformers import, the network,
+ * or the cache. A LAN peer must not be able to trigger an unconsented
+ * download by POSTing /dedup. */
 export type ClipEmbedder = {
   backend: 'clip'
   model: string
   embedImage(bytes: Buffer): Promise<EmbedVector>
 }
 
+/** Stable identity of the CLIP weights the curation pass loads (Apache-2.0
+ *  model card on huggingface.co). The consent record lives in the app
+ *  settings fetch-consent ledger under CLIP_CONSENT_ID. */
+export const CLIP_MODEL_ID = 'Xenova/clip-vit-base-patch32'
+export const CLIP_CONSENT_ID = 'dataset-clip-embedder'
+export const CLIP_LICENSE_SPDX = 'Apache-2.0'
+
 let clipEmbedderPromise: Promise<ClipEmbedder | null> | null = null
 
-export function clipEmbedder(): Promise<ClipEmbedder | null> {
+export function clipEmbedder(consentGranted = false): Promise<ClipEmbedder | null> {
+  if (!consentGranted) return Promise.resolve(null)
   clipEmbedderPromise ??= (async () => {
     try {
       const transformers = await import('@huggingface/transformers').catch(() => null)
       if (!transformers) return null
       // v4 image-feature-extraction: CLIP returns image_embeds directly (a
       // single 512-d vector per image); we normalize ourselves.
-      const pipe = await transformers.pipeline('image-feature-extraction', 'Xenova/clip-vit-base-patch32', { dtype: 'q8' })
+      const pipe = await transformers.pipeline('image-feature-extraction', CLIP_MODEL_ID, { dtype: 'q8' })
       const embedImage = async (bytes: Buffer): Promise<EmbedVector> => {
         const dataUrl = `data:image/jpeg;base64,${bytes.toString('base64')}`
         const output = (await pipe(dataUrl)) as { data: Float32Array | number[]; dims: number[] }
         return normalize(new Float32Array(Array.from(output.data)))
       }
-      return { backend: 'clip', model: 'Xenova/clip-vit-base-patch32', embedImage }
+      return { backend: 'clip', model: CLIP_MODEL_ID, embedImage }
     } catch {
       return null
     }

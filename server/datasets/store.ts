@@ -9,8 +9,8 @@
  * uploaded source MOVES its bytes into the trash store (restorable) — the one
  * real delete in the tool (empty-trash) only ever touches app-owned storage.
  */
-import { mkdir, copyFile, rename, stat, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { mkdir, copyFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
 import {
@@ -23,9 +23,19 @@ import {
   type ContentClass,
   type CropRect,
 } from './model'
-import { probeMedia, decodedFrameCount, type ProbeFacts, type ToolOptions } from './probe'
+import { probeMedia, decodedFrameCount, uploadExtensionFor, type ProbeFacts, type ToolOptions } from './probe'
 
 export const DATASET_SCHEMA_VERSION = 1
+
+/** Per-upload byte cap (security wave 2, LOW-1). The HTTP transport already
+ *  bounds a request body (~200 MB of base64); this makes the store-level
+ *  contract explicit for every caller and is checked BEFORE any disk write. */
+export const MAX_DATASET_UPLOAD_BYTES = 128 * 1024 * 1024
+
+/** Aggregate budget for the app-owned media store (security wave 2, LOW-1):
+ *  generous for a training-set media library, and crossed only loudly — the
+ *  LAN upload surface must never fill the studio's disk in silence. */
+export const DATASET_MEDIA_BUDGET_BYTES = 20 * 1024 ** 3
 
 // ---------------------------------------------------------------------------
 // Migration 003 (append-only; applied by db.ts)
@@ -275,6 +285,15 @@ export type DatasetStoreOptions = {
   mediaRoot: string
   trashRoot: string
   tools: ToolOptions
+  /** Security wave 2 (HIGH-1, the documents.ts allowedSourceRoots pattern):
+   *  resolves the directories OUTSIDE the studio home whose files may be
+   *  REGISTERED as by-reference sources (the configured output directory —
+   *  engine outputs and the app's media-extraction sinks live there). A
+   *  referenced source is streamed back by the media route, so an unscoped
+   *  registration would be an arbitrary-file-read primitive. A resolver (not
+   *  a static list) so settings changes are honored live. Absent = only the
+   *  studio home (dirname of the media root) is allowed. */
+  allowedSourceRoots?: () => string[]
   logEvent(event: { kind: string; [key: string]: unknown }): void
 }
 
@@ -360,7 +379,7 @@ export function createDatasetStore(db: Database.Database, options: DatasetStoreO
       sizeBytes: Number(row.size_bytes),
       mtimeMs: Number(row.mtime_ms),
       kind: row.kind === 'image' ? 'image' : 'video',
-      probe: parseJson<ProbeFacts>(row.probe_json, { kind: 'video', width: 0, height: 0, fps: null, durationSec: null, hasAudio: false, dbfs: null, codec: null }),
+      probe: parseJson<ProbeFacts>(row.probe_json, { kind: 'video', width: 0, height: 0, fps: null, durationSec: null, hasAudio: false, dbfs: null, codec: null, container: null }),
       decodedFrames: row.decoded_frames === null || row.decoded_frames === undefined ? null : Number(row.decoded_frames),
       probeState: (row.probe_state as SourceRow['probeState']) ?? 'pending',
       probeError: row.probe_error ? String(row.probe_error) : null,
@@ -451,19 +470,65 @@ export function createDatasetStore(db: Database.Database, options: DatasetStoreO
     if (row) st.ftsDelete.run(row.rid)
   }
 
+  /** Security wave 2 (HIGH-1): containment gate for by-reference sources —
+   *  the datasets twin of the document store's isAllowedBlobSource. Legal
+   *  source roots are the studio home (dirname of the media root — the
+   *  app-owned trees: dataset-media, dataset-trash, canvas-blobs) plus the
+   *  resolver's roots (the live-configured output directory: engine outputs
+   *  and the app's media-extraction sinks). Same lexical containment shape
+   *  the media routes use. Checked BEFORE any stat/probe so the refusal is
+   *  identical for existing and missing paths (the ingest surface must not
+   *  double as a file-existence oracle for arbitrary paths). */
+  function isAllowedReferenceSource(path: string): boolean {
+    const candidate = resolve(path)
+    const roots = [dirname(resolve(options.mediaRoot)), ...(options.allowedSourceRoots?.() ?? []).map((root) => resolve(root))]
+    return roots.some((root) => {
+      const rel = relative(root, candidate)
+      return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+    })
+  }
+
+  function refusalForOutOfScopeSource(path: string): Error {
+    const roots = [dirname(resolve(options.mediaRoot)), ...(options.allowedSourceRoots?.() ?? []).map((root) => resolve(root))]
+    return new Error(`Refusing to register "${path}" as a dataset source: it is outside the studio home and the configured output directory (${roots.join(', ')}). By-reference ingest reads files in place — send the bytes through the LAN upload instead.`)
+  }
+
+  /** Recursive byte usage of a directory (LOW-1: the media-store budget
+   *  check). Missing directory = 0. */
+  async function directoryUsage(root: string): Promise<number> {
+    let total = 0
+    const entries = await (await import('node:fs/promises')).readdir(root, { withFileTypes: true }).catch(() => null)
+    if (!entries) return 0
+    for (const entry of entries) {
+      const child = join(root, entry.name)
+      if (entry.isDirectory()) total += await directoryUsage(child)
+      else if (entry.isFile()) total += (await stat(child).catch(() => null))?.size ?? 0
+    }
+    return total
+  }
+
   // -- ingest (§2.1: both paths, one identity contract) ----------------------
 
-  /** Shared file-ingest core (both paths): probe → hash → dedupe-or-insert.
-   * Containment: the media probe runs BEFORE any hashing, so a probed path
-   * that is not consumable media fails without producing a content digest
-   * (no arbitrary-file fingerprinting through the ingest surface). */
-  async function ingestFileAt(resolved: string, ingestPath: 'reference' | 'upload', provenance?: ProvenanceInput): Promise<IngestResult> {
+  /** Shared file-ingest core (both paths): scope (reference only) → probe →
+   * hash → dedupe-or-insert. Containment: the media probe runs BEFORE any
+   * hashing, so a probed path that is not consumable media fails without
+   * producing a content digest (no arbitrary-file fingerprinting through the
+   * ingest surface). */
+  async function ingestFileAt(resolved: string, ingestPath: 'reference' | 'upload', provenance?: ProvenanceInput, preProbe?: ProbeFacts): Promise<IngestResult> {
     if (resolved.includes('\0')) throw new Error('The path contains a null byte.')
+    if (ingestPath === 'reference' && !isAllowedReferenceSource(resolved)) throw refusalForOutOfScopeSource(resolved)
     const info = await stat(resolved).catch(() => null)
     if (!info?.isFile()) throw new Error(`No file at ${resolved} — ingest needs an existing file.`)
-    const probe = await probeMedia(resolved, options.tools)
+    const probe = preProbe ?? await probeMedia(resolved, options.tools)
     const hash = await contentHashOfFile(resolved)
     const existing = hydrateSource(st.sourceByHash.get(hash) as Record<string, unknown>)
+    if (existing?.trashedAt) {
+      // Identity is the hash and the hash index is UNIQUE: a hit against a
+      // TRASHED row must not adopt it (the re-upload would dedupe into an
+      // invisible source and orphan the fresh bytes) — restore from the
+      // trash view instead (audit NOTE, wave 2: silent-drop class).
+      throw new Error('This exact content is in the dataset trash — restore it from the trash view first; re-ingesting trashed material is refused.')
+    }
     if (existing) {
       // Identity is the hash: a re-import or re-upload of the same content
       // resolves to the SAME source. If the recorded path differs and the old
@@ -509,18 +574,37 @@ export function createDatasetStore(db: Database.Database, options: DatasetStoreO
   }
 
   /** Ingest path B — LAN upload (§2.1, blessing amendment). The bytes land in
-   * the app's media store; the upload IS the import. Same identity contract. */
+   * the app's media store; the upload IS the import. Same identity contract.
+   * Security wave 2: per-upload and media-store budget caps refuse BEFORE any
+   * disk write (LOW-1), and the stored extension is CONTENT truth — probed
+   * from the bytes, never the client-chosen suffix (LOW-3: a polyglot named
+   * payload.sh persists as payload….mp4). */
   async function ingestUpload(fileName: string, bytes: Buffer, provenance?: ProvenanceInput): Promise<IngestResult> {
     if (!bytes.length) throw new Error('The upload carried no bytes.')
+    if (bytes.length > MAX_DATASET_UPLOAD_BYTES) {
+      throw new Error(`The upload is ${(bytes.length / 1024 ** 2).toFixed(1)} MB — over the ${(MAX_DATASET_UPLOAD_BYTES / 1024 ** 2).toFixed(0)} MB per-file cap for dataset uploads. Split or transcode the file first.`)
+    }
     await mkdir(options.mediaRoot, { recursive: true })
-    const safeName = fileName.replace(/[^a-z0-9._-]+/gi, '_').slice(-80) || 'upload.mp4'
-    const dest = join(options.mediaRoot, `${randomUUID().slice(0, 8)}-${safeName}`)
-    await writeFile(dest, bytes)
+    const usage = await directoryUsage(options.mediaRoot)
+    if (usage + bytes.length > DATASET_MEDIA_BUDGET_BYTES) {
+      throw new Error(`The dataset media store already holds ${(usage / 1024 ** 3).toFixed(1)} GB of its ${(DATASET_MEDIA_BUDGET_BYTES / 1024 ** 3).toFixed(0)} GB budget — this upload would cross it. Empty the dataset trash or remove unused uploads first.`)
+    }
+    // Stage under a provisional name, probe the BYTES, then persist under a
+    // content-truth name (the probe is already the content authority for
+    // kind/codec/container — the client's suffix is not trusted).
+    const staged = join(options.mediaRoot, `${randomUUID().slice(0, 8)}.upload-staging`)
+    let dest = staged
     try {
-      return await ingestFileAt(dest, 'upload', provenance)
+      await writeFile(staged, bytes)
+      const probe = await probeMedia(staged, options.tools)
+      const stem = fileName.replace(/\.[a-z0-9]+$/i, '').replace(/[^a-z0-9._-]+/gi, '_').replace(/^\.+/, '').slice(-60) || 'upload'
+      dest = join(options.mediaRoot, `${randomUUID().slice(0, 8)}-${stem}${uploadExtensionFor(probe)}`)
+      await rename(staged, dest)
+      return await ingestFileAt(dest, 'upload', provenance, probe)
     } catch (error) {
-      // Never leave orphaned upload bytes behind a failed ingest.
-      await import('node:fs').then((fs) => fs.promises.unlink(dest)).catch(() => undefined)
+      // Never leave orphaned upload bytes behind a failed ingest (staged or
+      // renamed — whichever this run reached).
+      await unlink(dest).catch(() => undefined)
       throw error
     }
   }
@@ -593,6 +677,10 @@ export function createDatasetStore(db: Database.Database, options: DatasetStoreO
     const source = hydrateSource(st.sourceById.get(sourceId))
     if (!source) throw new Error(`No source ${sourceId}.`)
     if (newPath.includes('\0')) return { relinked: false, reason: 'The path contains a null byte.' }
+    // Security wave 2 (HIGH-1): the re-link pick is a path registration too —
+    // same allowed-roots gate as ingest, checked before any stat so the
+    // refusal carries no existence signal for out-of-scope paths.
+    if (!isAllowedReferenceSource(newPath)) return { relinked: false, reason: refusalForOutOfScopeSource(newPath).message }
     const info = await stat(newPath).catch(() => null)
     if (!info?.isFile()) return { relinked: false, reason: `No file at ${newPath}.` }
     // Containment: the pick must probe as consumable media before it is
@@ -668,6 +756,11 @@ export function createDatasetStore(db: Database.Database, options: DatasetStoreO
       }
       db.prepare('DELETE FROM dataset_captions WHERE layer_id IN (SELECT id FROM dataset_layers WHERE source_id = ?)').run(source.id)
       db.prepare('DELETE FROM dataset_caption_history WHERE layer_id IN (SELECT id FROM dataset_layers WHERE source_id = ?)').run(source.id)
+      // Tier-2 embeddings reference layers (FK ON): drop them with the
+      // layers they describe. Latent until wave 2 — the perceptual backend
+      // (now the consent-gated default) actually persists embeds on every
+      // box, and empty-trash 500'd on the first embed-carrying trash.
+      db.prepare('DELETE FROM dataset_embeds WHERE layer_id IN (SELECT id FROM dataset_layers WHERE source_id = ?)').run(source.id)
       db.prepare('DELETE FROM dataset_layers WHERE source_id = ?').run(source.id)
       db.prepare('DELETE FROM dataset_scene_cuts WHERE source_id = ?').run(source.id)
       db.prepare('DELETE FROM dataset_sources WHERE id = ?').run(source.id)
