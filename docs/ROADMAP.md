@@ -53,6 +53,14 @@
   motion), caption format verdict (natural-language, mid-density, H3 vocabulary, trigger
   token), dataset technicals (curation > quantity, near-dup capping, slow-motion audit),
   DeCFG requirement for real training runs.
+- **H3 LoRA training envelope MEASURED** (1n3a4mi, 3aaf0b4): the practitioner's map —
+  345f trains up to 544×320 (23.4G ceiling); 124f @ 480×832; native 768×1344×39f at
+  14.7G (DiT-LoRA halves the controlnet arm's VRAM); budget rule VRAM ≈ 5.1G fixed +
+  ~2.6G/Mtok(px×frames); mixed buckets FREE (peak = max of buckets, never the sum;
+  image+video mixing proven); musubi = trainer pick (1.6× faster at long rungs, no
+  host pinning), DiffSynX keeps sub-5s durations + the control branch; rank 16 free;
+  DeCFG required for 500+ steps. Guide §8 reconciled; runbook training-run conventions
+  folded. Training weights consolidated into the central model home (manifest b1347e9).
 - **VLM video research** (complete): llama.cpp ≥v0.4.0 supports native `input_video`
   (ffmpeg server-side); Gemma 4 31B-IT video-capable today; Qwen3-VL only family with
   temporal frame merging; DeepSeek V4 Flash Vision image-only; GLM 5.3 Flash not yet
@@ -60,19 +68,12 @@
 
 ## Building (in flight)
 
-- **H3 LoRA training envelope** (1n3a4mi) — resolution × duration × audio × batch ×
-  mixed-data × sec/it matrix on the topgun clip; PIVOTED to base-model DiT-LoRA
-  (not controlnet) per the maintainer's correction; rank-16 + DeCFG notes relayed.
-  Interim: max-duration ceiling rung found at 544×320×345f (~60M px·frames — the
-  iso-budget trade: ≈480×832×150f ≈ 768×1344×58f; a motion tool, not a style/identity res).
+- **Canvas Phase 5** (7mcp11b) — the deletion wave: 7 greyed views + old shell +
+  `View` union die; canvas becomes THE app. Dispatched 2026-09-17 per the standing
+  sequential-development directive.
 
 ## Queued (specced/planning)
 
-- **Canvas Phase 5** — the deletion wave: the 7 greyed views + the old shell + the
-  `View` union die; canvas becomes THE app. Inherits the Director Suite scope call
-  (timeline projection, plan documents, gap menu — land in 5 or queue as 5b) and the
-  Phase-4 cleanup options (LTX character-survey → ContactSheet-only;
-  syncLibraryAssets as the libraries' primary write path).
 - **Latent-fork live-verify** (puy428n) — one engine-side render confirming the
   LoadLatent handoff + latent retention across restarts; next GPU window.
 - **Dataset manager** (sv14rt0) — mixed-media training browser (import/browse/preview/
