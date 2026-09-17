@@ -79,6 +79,36 @@ If the maintainer needs the GPU mid-run, bring the testbed down immediately.
 - Turbo LoRAs run MERGE mode on the quantized base (the 24 GB tranche rule);
   judge candidates on the shipping path.
 - Artifacts under `test-results/experiments/<tranche>/` (scripts, JSONs,
-  media) — committed.
+  media). NOTE (2026-09-16, envelope): `test-results/` is GITIGNORED (`.gitignore`
+  line 11) — artifacts there persist on disk only, not in git. Findings that must
+  survive go in the `docs/research/*.md` dated doc (raw tables in the task
+  comments); force-adding test-results is a maintainer decision, not an agent
+  default.
 - Testbed-only shims (t1/t2/t3a) are gitignored by design; describe them in
   the task comment so they're reproducible.
+
+## Training-run conventions (H3 LoRA envelope, task 1n3a4mi, 2026-09-16)
+
+- **Grid trim +2 rule**: every training clip is cut to grid_target+2 frames.
+  mp4 containers store duration TRUNCATED (56/24 = 2.333333 s); the loader's
+  floor(duration×24) drops a frame and its 17n+5 clamp then walks DOWN to the
+  next grid point — a 56 f clip silently trains as 39 f. ffprobe says the file
+  is perfect; only the latent geometry exposes it.
+- **Stage-1 host-RAM ceiling (DiffSynX)**: the TE+VAE cache pass pins
+  ~104–108 GB host RAM during load — it dies by kernel SIGKILL if the box has
+  less than ~105 GB available (tmpfs counts: ~10 GB of /tmp artifacts closed
+  the window on 2026-09-16). Check `free -g` BEFORE launching stage-1; musubi's
+  cache path (VAE-only + streamed TE) is the fallback that fits a busy box.
+- **Dynamic-resolution batch economy**: run stage-1 WITHOUT --height/--width so
+  one model load caches the whole dataset at each item's own geometry
+  (~12 min load amortized; per-item cost identical to fixed-H/W — verified
+  byte-identical). Fixed-H/W stage-1 is only for single-geometry datasets.
+- **Gradient-checkpointing flags are cache-baked**: in cache mode the stage-2
+  CLI `--use_gradient_checkpointing(_offload)` are IGNORED (flags live in the
+  cached item from stage-1). Flip them in the cache, not the CLI.
+- **`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` always** for training:
+  it rescued an entire VRAM tier lost to allocator fragmentation (3.84 GB
+  reserved-unallocated at the wall) with no observed downside.
+- Kill drivers by process group or explicit PIDs — killing a shell driver
+  orphans its accelerate children (proven: two stage-1 loads then overlapped
+  and host-OOM'd each other).

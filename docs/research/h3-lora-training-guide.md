@@ -237,3 +237,66 @@ The official contract (mirrored in `docs/library/minimax-h3-prompt-guide-base.md
 16. `docs/research/ap10k-control-lora-training.md` (VideoX-Fun trainer verbatim, 10% caption drop for CFG, dataset assembly pipeline, licensing) and `docs/research/ap10k-trainer-survey.md` (trainer landscape, DiffSynX two-stage machinery, musubi port verdict, Inline Studio precedent numbers)
 17. `docs/research/h3-lora-form-compatibility.md` (full↔pruned adaln forms, LoRA conversion machinery) and `docs/research/speed-quality-and-imagegen-paths.md` §1.3 (turbo-LoRA registry — separate LoRA class, distillation not personalization)
 18. Envelope manifest schema on disk (`/home/agent/tmp-gpu/envelope/data/a1_256.json`: `video`/`prompt`/`input_audio`/`frame_rate`) and smoke `training_args.json` — the exact DiffSynX field contract our dataset manager must export
+
+---
+
+## 8. Addendum 2026-09-16 — envelope results: §6 reconciled (task 1n3a4mi)
+
+The envelope test completed (60+ rungs, two targets — base-model DiT-LoRA primary
+after the mid-run pivot, controlnet-LoRA kept as the comparison column; full tables
+in [h3-lora-training-envelope.md](h3-lora-training-envelope.md)). Point-by-point
+against §6's checklist:
+
+1. **Rank axis — cross-checked [envelope].** r16 = 23.5 s/step / 7,962 MiB vs
+   r32 = 24.0 / 8,100 at 480×832×39 f (same data, same steps): 138 MiB lighter,
+   0.5 s faster, r64/r128 cost VRAM only (9,346 / 11,010 MiB). Consistent with the
+   community verdict; **§1's rank-16 default stands with measured backing.** The
+   predicted ~155 MB r16 adapter was not separately recorded (adapter size scales
+   with rank as expected; r32 DiT adapter = 310 MB).
+2. **Step-time economics — in-family, confirmed.** 24 s/it @ 480×832×39 f held;
+   124 f = 55.5 s/it (DiffSynX) / 34 s/it (musubi). The cache-once lever is now
+   measured precisely: stage-1 ≈ 10–12 min model-load + 13 s/clip, and
+   dynamic-resolution batching amortizes the load across the WHOLE dataset at
+   per-item-identical cost (the 9-item ladder cached in one 4:39 pass).
+3. **Duration wall — CORRECTED (class of claim).** The "124 f OOM" datum was the
+   CONTROLNET arm. On the DiT-LoRA arm 480×832×124 f fits STOCK at 17.3 GB
+   (55.5 s/it); 243 f OOMs every tried config (musubi full-r32/full-r16/pruned-r16;
+   DiffSynX extrapolates ~26.6 GB). And the released maximum is reachable:
+   **345 f trains up to 544×320 (23.4 GB, 60 s/it)** — style datasets can include
+   5 s clips at 480×832, and motion can take 345 f at 544×320. Iso-budget at the
+   wall: 544×320×345 f ≈ 480×832×~150 f ≈ 768×1344×~58 f — motion buys duration,
+   style/identity keep resolution.
+4. **De-distillation gap — stands, now with the fork named.** The envelope stayed
+   memory-scope (zero measured memory cost for any de-distill option); the
+   guidance-loss step-time cost (~+50 % ungated) and the DeCFG-needs-BF16-DiT
+   constraint remain the open config fork for the first real run.
+5. **Batch axis — settled.** Both trainers hard batch-1; grad-accum 4/8 measured
+   VRAM-flat, wall-linear. No physical batch exists to test.
+6. **Audio — settled.** Real vs silence: byte-identical cost (identical latent
+   shapes; token count is a pure function of duration). No droppable audio budget
+   exists at either trainer's pin (required positional + baked positions).
+   musubi caches REAL audio natively (sidecar wav) — the fal "keep the audio"
+   verdict is compatible with both trainers. The generation-side sanity check
+   (silence-trained LoRA + audio-conditioned inference) remains open — needs a
+   real adapter + gens.
+7. **Mixed buckets — validated beyond the ask.** Peak VRAM = MAX of buckets, never
+   the sum (allocator rebuilds per step; expandable_segments kills residue).
+   Image+video mixing works (musubi `--one_frame`; "untested" upstream — now
+   tested). Zero bucket-transition penalty across a 17-bucket 140-sample dense run
+   (aspect flips, 22–345 f, stills at three aspect ratios, 37.3 s/it average).
+   **The maintainer's dataset design — high-res stills + short high-res clips for
+   acuity, long low-res clips for motion, one dataset — is validated as a
+   MECHANISM; QUALITY per mix ratio is unmeasured (judged A/B open).**
+8. **TE-cache reuse — confirmed** by timing signature (flat steady steps, one
+   cold load per invocation) and byte-identical cost reproduction across runs.
+   The caption-edit ⇒ text-cache-only revalidation rule is musubi-native
+   (`--skip_existing` fingerprints); DiffSynX has no such fingerprinting — a
+   caption edit needs a stage-1 re-cache of that item [DOC].
+
+Also folded forward: the 17n+5 container-truncation trap (trim to grid_target+2 —
+one rounded frame silently costs 17; runbook), the musubi attribution correction
+(the "~20.5 GB peak" figure is Inline Studio's musubi-lineage stack, not musubi's
+own docs — §2 of the survey; musubi's own 480×832×124 f peak measured here at
+20,074 MiB, which likely explains the conflation), and musubi's released 5–15 s
+duration gate vs DiffSynX's any-grid acceptance (sub-5 s rungs are outside the
+released training range — sidecar warning).
