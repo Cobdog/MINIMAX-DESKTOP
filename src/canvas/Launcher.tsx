@@ -135,6 +135,14 @@ export function Launcher({ onPickFile }: { onPickFile(): void }) {
         <a className="canvas-chip" data-canvas-chip="datasets" href="?datasets=1" title="Dataset manager — training-set prep workbench">
           <Layers size={13} /> datasets
         </a>
+        {/* H3 Image Workbench (k9vu6t0): its own surface at ?images=1 —
+            compose/edit/refine images on H3, then hand them to video as
+            start frames. The canvas bridge is two explicit actions (canvas
+            take → reference slot here; picked frame → pinned media object
+            / seeded video chain there). */}
+        <a className="canvas-chip" data-canvas-chip="images" href="?images=1" title="H3 Image Workbench — compose, edit, refine; start frames for video">
+          <ImagePlus size={13} /> images
+        </a>
         <button type="button" className="canvas-chip" data-canvas-chip="movie" title="The timeline projection — the plan chronology + measured transitions (the Director Suite)" onClick={() => useCanvasStore.getState().setTimelineOpen(true)}>
           <Clapperboard size={13} /> movie plan
         </button>

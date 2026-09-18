@@ -47,6 +47,9 @@ const SUITES = [
   { name: 'license:audit', command: 'pnpm run license:audit', timeoutMs: 2 * MINUTE },
   { name: 'test', command: 'pnpm run test', timeoutMs: 20 * MINUTE },
   { name: 'test:registry', command: 'pnpm run test:registry', timeoutMs: 20 * MINUTE },
+  // H3 image workbench families (k9vu6t0): golden snapshots, recipe
+  // pins, the Mamad8 factory guard, scorer/fuse/staging, session model.
+  { name: 'test:h3img', command: 'pnpm run test:h3img', timeoutMs: 10 * MINUTE },
   { name: 'test:storage', command: 'pnpm run test:storage', timeoutMs: 20 * MINUTE },
   // Canvas document store (Phase 0, task oiavqh8): migration 002 golden
   // fixture, §6 legacy import, tombstone/GC adversarials, §7 archive

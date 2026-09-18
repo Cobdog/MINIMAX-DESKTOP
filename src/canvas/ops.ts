@@ -17,7 +17,7 @@ import type { UpscaleMode } from '../types'
 
 // ---- op kinds ------------------------------------------------------------------
 
-export type OpKind = 'crop' | 'rotate' | 'mask' | 'adjust' | 'trim' | 'upscale' | 'stabilize' | 'color-grade'
+export type OpKind = 'crop' | 'rotate' | 'mask' | 'adjust' | 'trim' | 'upscale' | 'stabilize' | 'color-grade' | 'h3img.tone-lock'
 
 export type OpAppliesTo = 'image' | 'video' | 'both'
 
@@ -40,6 +40,11 @@ export const OP_META: OpMeta[] = [
   { kind: 'upscale', label: 'upscale', applies: 'both', note: 'Dual-mode: stack op or fork (chain settings carry the mode at render).' },
   { kind: 'stabilize', label: 'stabilize', applies: 'video', note: 'Research-stack stabilization; strength dial.' },
   { kind: 'color-grade', label: 'color grade', applies: 'both', note: 'Temperature / tint grade (research stack).' },
+  // The workbench's app-side frequency blend (k9vu6t0, spec §8): the source
+  // stays authoritative for tone/dimensions, the refiner contributes detail.
+  // Executes at render/export (the DSP lives in lib/h3imageOps); the tile
+  // preview shows the op chip — frequency separation has no honest CSS proxy.
+  { kind: 'h3img.tone-lock', label: 'tone-lock', applies: 'image', note: 'Frequency-separated blend: the source keeps low frequencies (tone lock), the refine output supplies detail. Radius/strength dials; runs at export.' },
 ]
 
 export function opMetaFor(kind: string): OpMeta | null {
@@ -76,7 +81,12 @@ export type StabilizeSettings = { strength: number }
 
 export type ColorGradeSettings = { temperature: number; tint: number }
 
-export type OpSettings = CropSettings | RotateSettings | MaskSettings | AdjustSettings | TrimSettings | UpscaleSettings | StabilizeSettings | ColorGradeSettings
+/** Tone-lock dials (the research-pinned defaults: tone_lock 0.85,
+ * refinement_strength 0.55, detail_radius 32 — astropuzzo's Detail Tone
+ * Lock recipe values). */
+export type ToneLockSettings = { lockStrength: number; detailStrength: number; radius: number }
+
+export type OpSettings = CropSettings | RotateSettings | MaskSettings | AdjustSettings | TrimSettings | UpscaleSettings | StabilizeSettings | ColorGradeSettings | ToneLockSettings
 
 export const DEFAULT_SETTINGS: Record<OpKind, () => OpSettings> = {
   crop: () => ({ x: 0.5, y: 0.5, zoom: 1, fit: 'crop' }),
@@ -87,6 +97,7 @@ export const DEFAULT_SETTINGS: Record<OpKind, () => OpSettings> = {
   upscale: () => ({ mode: 'ltx' }),
   stabilize: () => ({ strength: 0.5 }),
   'color-grade': () => ({ temperature: 0, tint: 0 }),
+  'h3img.tone-lock': () => ({ lockStrength: 0.85, detailStrength: 0.55, radius: 32 }),
 }
 
 const num = (value: unknown, fallback: number, min: number, max: number) =>
@@ -133,6 +144,8 @@ export function readOpSettings(kind: string, raw: Record<string, unknown> | null
       return { strength: num(record.strength, 0.5, 0, 1) }
     case 'color-grade':
       return { temperature: num(record.temperature, 0, -1, 1), tint: num(record.tint, 0, -1, 1) }
+    case 'h3img.tone-lock':
+      return { lockStrength: num(record.lockStrength, 0.85, 0, 1), detailStrength: num(record.detailStrength, 0.55, 0, 2), radius: Math.round(num(record.radius, 32, 1, 256)) }
     default:
       return {} as OpSettings
   }
@@ -225,6 +238,7 @@ export function opSummary(kind: string, raw: Record<string, unknown> | null | un
   if (settings && 'mode' in settings) return settings.mode === 'off' ? 'off' : settings.mode
   if (settings && 'strength' in settings) return settings.strength.toFixed(2)
   if (settings && 'temperature' in settings) return settings.temperature === 0 && settings.tint === 0 ? 'neutral' : 'graded'
+  if (settings && 'lockStrength' in settings) return `lock ${settings.lockStrength.toFixed(2)} · r${settings.radius}`
   return kind
 }
 

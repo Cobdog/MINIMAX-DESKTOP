@@ -12,6 +12,9 @@
  *                refine-masked / outpaint / two-ref) + recipe audit
  * - ltx23.ts   — LTX-2.3 one-graph video utilities (template-faithful
  *                ports of the six official template_ltx2_3_* tools)
+ * - h3image.ts — H3 image workbench families (generate packet/T=1/directed,
+ *                compose, six edit families, refine engines, burst lane,
+ *                exit) + the Mamad8 never-in-video-graphs factory guard
  *
  * See docs/architecture.md → "Optimization registry" for how to add an entry. */
 export type { ComfyNode, ComfyPrompt, DetectionResult, EngineId, GraphContext, Link, OptimizationEntry, TransformOptions, TurboLoaderChoice, TurboPlan, WrapPoint } from './types'
@@ -46,3 +49,18 @@ export {
   ltx23TopologyAudit, resolveLtx23Selection,
 } from './ltx23'
 export type { Ltx23Detection, Ltx23RemovePreset, Ltx23Utility, Ltx23UtilityKind, Ltx23UtilityRequest } from './ltx23'
+// H3 image workbench families (task k9vu6t0, docs/specs/image-workbench-v1.md):
+// the image surface's family registry — generate (packet/T=1/directed),
+// compose, the six edit families, refine engines, the burst lane, the exit —
+// plus the Mamad8 never-in-video-graphs factory guard.
+export {
+  FORM_ADAPTER_NODE, H3IMG, H3IMG_FAMILIES, H3IMG_FORBIDDEN_VIDEO_NODES, H3IMG_RECIPE_PINS,
+  HYBRID_LOADER_NODE, STAGE_ENGINE_OF_FAMILY, T1_IMAGE_VAE_PATTERN, TRANSPORT_FOR_ROLE,
+  assertNoT1ImageVaeInVideoGraph, buildH3ImageGraph, buildKleinRefineGraph, detectH3ImgFamilies,
+  findH3ImgFamily, framePublishIds, h3imgGraphAudit, inferH3ImgSelection, kleinResolved,
+  seedvr2BatchCount,
+} from './h3image'
+export type {
+  H3ImgDetection, H3ImgDial, H3ImgFamily, H3ImgFamilyKind, H3ImgLoraSlot, H3ImgModelSelection,
+  H3ImgPathProfile, H3ImgRefRole, H3ImgRefSlot, H3ImgRequest, H3ImgTransport, StageEngine,
+} from './h3image'

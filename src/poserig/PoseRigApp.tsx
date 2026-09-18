@@ -299,6 +299,45 @@ export default function PoseRigApp({ dock }: { dock?: PoseRigDock } = {}) {
     setStatus(`exported ${timeline.totalFrames} rendered frames as a contact sheet`)
   }, [renderSheetDataUrl, timeline])
 
+  // H3 Image Workbench handoff (k9vu6t0 spec §1: poserig renders as pose
+  // references). Only when the rig was opened through the workbench's
+  // "from pose rig" link (?poserig=1&send=iw): the CURRENT pose renders as
+  // a single palette-exact frame, lands in the app's blob store, and the
+  // workbench picks it up from its handoff inbox as a pose-role slot.
+  const sendToWorkbench = useCallback(() => {
+    const dataUrl = renderSheetDataUrl()
+    if (!dataUrl) return
+    // Single-frame crop of the sheet's first tile (the current pose).
+    const tile = document.createElement('canvas')
+    tile.width = timeline.canvas.width
+    tile.height = timeline.canvas.height
+    const ctx = tile.getContext('2d')
+    if (!ctx) return
+    const source = new Image()
+    source.onload = () => {
+      ctx.drawImage(source, 0, 0, timeline.canvas.width, timeline.canvas.height, 0, 0, timeline.canvas.width, timeline.canvas.height)
+      const frameUrl = tile.toDataURL('image/png')
+      const blob = dataUrlToBlob(frameUrl)
+      void blob.arrayBuffer().then((buffer) => {
+        let binary = ''
+        const bytes = new Uint8Array(buffer)
+        const chunk = 0x8000
+        for (let index = 0; index < bytes.length; index += chunk) binary += String.fromCharCode(...bytes.subarray(index, index + chunk))
+        void fetch('/api/lan/documents/blobs/ingest', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-minimax-token': new URLSearchParams(window.location.search).get('token') ?? '' },
+          body: JSON.stringify({ data: btoa(binary), name: `poserig-pose-${timeline.canvas.width}x${timeline.canvas.height}.png`, kind: 'image' }),
+        }).then((response) => response.json()).then((body: { path?: string }) => {
+          if (typeof body.path !== 'string' || !body.path) throw new Error('the blob ingest returned no path')
+          window.localStorage.setItem('h3img-poserig-handoff', JSON.stringify({ path: body.path, name: `poserig-pose-${timeline.canvas.width}x${timeline.canvas.height}.png` }))
+          setStatus('sent to the H3 Image Workbench — opening it now')
+          window.location.href = `?images=1${new URLSearchParams(window.location.search).get('token') ? `&token=${encodeURIComponent(new URLSearchParams(window.location.search).get('token') ?? '')}` : ''}`
+        }).catch(() => setStatus('the handoff failed — export the PNG and add it in the workbench instead'))
+      })
+    }
+    source.src = dataUrl
+  }, [renderSheetDataUrl, timeline])
+
   // ---- e2e test hook (deterministic, versioned) -----------------------------
   useEffect(() => {
     const hook = {
@@ -427,6 +466,11 @@ export default function PoseRigApp({ dock }: { dock?: PoseRigDock } = {}) {
               <button type="button" data-poserig-export-png onClick={exportPng}>
                 <ImageIcon size={14} /><span>PNG frames</span>
               </button>
+              {new URLSearchParams(window.location.search).get('send') === 'iw' && (
+                <button type="button" data-poserig-send-workbench onClick={sendToWorkbench} title="Send the current pose to the H3 Image Workbench as a pose reference">
+                  <ImageIcon size={14} /><span>Send to image workbench</span>
+                </button>
+              )}
               <button type="button" data-poserig-export-server disabled title={`version-pinned OFF (E-FC0.5): __value__ is undocumented engine API — verified against ${SERVER_RENDER_BRIDGE.verifiedAgainst}; client render is the default`}>
                 <Camera size={14} /><span>Server render</span>
               </button>

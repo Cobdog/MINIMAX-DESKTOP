@@ -244,6 +244,15 @@ function TileBase({ tile, band, selected, previewUrl, onSelect, onDismissFailure
           {tile.canonical
             ? <span className="canvas-take-chip canonical" title="Canonical take — click a prior to switch the pointer"><Star size={10} fill="currentColor" /> {tile.canonical.id.slice(0, 8)}</span>
             : <span className="canvas-take-chip canvas-take-chip-empty">no take yet</span>}
+          {(() => {
+            // The workbench packet take (k9vu6t0): its artifacts are the N
+            // frame outputs — the chip says so and opens the pick surface.
+            const h3img = tile.canonical?.metrics?.h3img
+            if (!h3img || typeof h3img !== 'object') return null
+            const frames = (h3img as { frames?: unknown }).frames
+            if (typeof frames !== 'number' || !frames) return null
+            return <a className="canvas-take-chip prior" data-canvas-take-to-workbench href="?images=1" title="Open the H3 Image Workbench — this take's frames line up on the pick surface">{frames} frames · pick</a>
+          })()}
           {tile.artifactPath && (
             <button
               type="button"

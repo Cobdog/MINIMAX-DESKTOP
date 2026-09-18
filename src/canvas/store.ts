@@ -31,6 +31,7 @@ import { create } from 'zustand'
  *  with MoviePlanner in Phase 5b: the plan surface is the timeline). */
 export type StudiosDockTab = 'characters' | 'hair' | 'wardrobes' | 'accessories' | 'locations'
 import { documentsApi, DocumentsHttpError, type ProjectMeta } from './api'
+import { isWorkbenchJob, landWorkbenchTake } from '../images/landing'
 import { type CameraState, createCamera, parseViewBlob, type ViewBlob } from './camera'
 import {
   attention,
@@ -290,6 +291,10 @@ type CanvasActions = {
    *  the same ladders submitChain runs (honest offline refusals inline). */
   validateAudioDraft(engine: 'music3' | 'acestep', caption: string): string | null
   openProject(id: string, options?: { restoreCamera?: boolean }): Promise<void>
+  /** Re-reads the ACTIVE project document + rederives (surfaces that
+   *  write through documentsApi directly — the image workbench — refresh
+   *  through this instead of reaching into store internals). */
+  reloadActiveDocument(): Promise<void>
   closeProject(id: string): Promise<void>
   createCanvas(name?: string): Promise<string | null>
   /** The launcher's prompt submit: spawn the seed chain, then REAL submit. */
@@ -508,6 +513,31 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       for (const { chainId, job } of pending) {
         const chain = doc.chains.find((entry) => entry.id === chainId)
         if (!chain) continue
+        // H3 image workbench (k9vu6t0): a workbench job lands as ONE packet
+        // take whose artifacts are the N frame outputs (all of them, scored
+        // by the first-party scorer) — the packet-aware branch, never the
+        // one-artifact video path.
+        if (isWorkbenchJob(job)) {
+          const attempt = (landingAttempts.get(job.id) ?? 0) + 1
+          landingAttempts.set(job.id, attempt)
+          try {
+            const result = await landWorkbenchTake({
+              chain,
+              job,
+              settings: useSessionStore.getState().settings,
+              comfyUrl: useSessionStore.getState().settings?.comfyUrl ?? '',
+              ensureOutput: async (targetChainId) => (await documentsApi.createOutput({ chainId: targetChainId, substrates: ['decoded'] })).id,
+            })
+            if (result.landed) get().toast('success', 'The image packet landed — the take strip holds its frames; the scorer\'s pick is marked.')
+            else if (result.error) get().toast('error', `The workbench render could not land: ${result.error}`)
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            if (attempt === MAX_LANDING_ATTEMPTS || attempt % LANDING_HEARTBEAT === 0) {
+              get().toast('error', `The finished workbench render could not land: ${message}`)
+            }
+          }
+          continue
+        }
         // Phase 4: a render whose graph saved a sampler latent records its
         // saved-clip facts (manifest.motionContext, written by the submit
         // core) — the take becomes latent-forkable (substratesForTake).
@@ -1179,6 +1209,16 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       recomputeTiles()
       get().requestCamera(options?.restoreCamera === false ? { kind: 'fit' } : { kind: 'jump', camera: view.camera })
       void saveSession(openProjects, id)
+    },
+
+    reloadActiveDocument: async () => {
+      const activeId = get().activeProjectId
+      if (!activeId) return
+      const refreshed = await loadDocument(activeId)
+      if (refreshed) {
+        recomputeTiles()
+        void landCompletions()
+      }
       void get().refreshProjects()
     },
 

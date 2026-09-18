@@ -521,8 +521,9 @@ console.log('(q) graph construction per selection (engine-free, L4)')
 console.log('(r) op-stack model — kinds, tolerant settings, live-preview composition')
 {
   // Type-directed kind offering (§3 discipline).
-  eq(ops.opKindsFor('image').length, 6, 'kinds: the image surface offers six v1 op kinds (stabilize is video-only)')
+  eq(ops.opKindsFor('image').length, 7, 'kinds: the image surface offers seven v1 op kinds (stabilize is video-only; the workbench tone-lock joined k9vu6t0)')
   ok(ops.opKindsFor('image').includes('crop'), 'kinds: image offers crop')
+  ok(ops.opKindsFor('image').includes('h3img.tone-lock'), 'kinds: image offers the workbench tone-lock (frequency-separated blend)')
   ok(!ops.opKindsFor('image').includes('trim'), 'kinds: image does NOT offer trim (video op)')
   ok(ops.opKindsFor('video').includes('trim'), 'kinds: video offers trim')
   ok(!ops.opKindsFor('video').includes('crop'), 'kinds: video does NOT offer crop (ImageCrop is the image data model)')

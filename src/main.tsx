@@ -31,6 +31,12 @@ const PoseRigApp = lazy(() => import('./poserig/PoseRigApp'))
 // (build decision 2026-09-17); the canvas keeps its wheel-zoom untouched.
 const DatasetsApp = lazy(() => import('./datasets/DatasetsApp').then((m) => ({ default: m.DatasetsApp })))
 
+// H3 Image Workbench (k9vu6t0, spec §2: the ?datasets=1 precedent): own
+// lazy chunk on ?images=1 — compose/edit/refine images on H3, then hand
+// them to video as start frames. The session is a canvas chain of kind
+// 'h3img' in the active project; the canvas handoffs are explicit actions.
+const WorkbenchApp = lazy(() => import('./images/WorkbenchApp').then((m) => ({ default: m.WorkbenchApp })))
+
 // Canvas Phase 5 (task 7mcp11b, docs/specs/canvas-ui-v1.md §8) — the canvas
 // IS the app: the default route. The old shell (App.tsx + the View union +
 // its nav model) is deleted; ?canvas=1 remains as a HARMLESS ALIAS (existing
@@ -48,6 +54,7 @@ const proto = params.get('proto')
 const protoRoute = proto === 'bench' || proto === 'stage' || proto === 'score'
 const poserigRoute = params.get('poserig') === '1'
 const datasetsRoute = params.get('datasets') === '1'
+const imagesRoute = params.get('images') === '1'
 // NOTE: ?canvas=1 is intentionally NOT read — the canvas being the default
 // route makes the param a no-op alias (bookmarks/e2e/bench keep working).
 document.documentElement.classList.toggle('mobile-route', mobile)
@@ -69,7 +76,9 @@ createRoot(document.getElementById('root')!, { onCaughtError }).render(
     <ErrorBoundary label="root">
       {datasetsRoute
         ? <Suspense fallback={viewFallback}><DatasetsApp /></Suspense>
-        : poserigRoute
+        : imagesRoute
+          ? <Suspense fallback={viewFallback}><WorkbenchApp /></Suspense>
+          : poserigRoute
           ? <Suspense fallback={viewFallback}><PoseRigApp /></Suspense>
           : protoRoute
           ? <Suspense fallback={viewFallback}><PrototypeShell /></Suspense>
