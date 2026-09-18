@@ -553,3 +553,80 @@ test('settings-GET Option B: token mode gates the read, the SPA editor path keep
     await new Promise<void>((resolve) => { if (child.exitCode !== null) resolve(); else child.on('exit', () => resolve()) })
   }
 })
+
+// ---------------------------------------------------------------------------
+// QOL wave (rrxlw2r) — registry-driven surface navigation + first-run
+// guidance. The switcher is shared chrome (src/surfaces/): surfaces
+// self-register (canvas + datasets today); the images workbench appears
+// ONLY when its entry lands.
+// ---------------------------------------------------------------------------
+
+test('surface switcher: registry entries in the canvas titlebar, canvas active', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  const switcher = page.locator('[data-surface-switcher]')
+  await expect(switcher).toBeVisible()
+  // Exactly the REGISTERED surfaces — unregistered routes never appear.
+  await expect(switcher.locator('[data-surface]')).toHaveCount(2)
+  await expect(switcher.locator('[data-surface="canvas"]')).toHaveAttribute('aria-current', 'page')
+  await expect(switcher.locator('[data-surface="datasets"]')).toHaveAttribute('href', '/?datasets=1')
+  await expect(switcher.locator('[data-surface="images"]')).toHaveCount(0)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('surface switcher: navigates canvas → datasets → canvas', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await page.locator('[data-surface-switcher] [data-surface="datasets"]').click()
+  await expect(page.locator('[data-ds-root]')).toBeVisible()
+  const switcher = page.locator('[data-surface-switcher]')
+  await expect(switcher.locator('[data-surface="datasets"]')).toHaveAttribute('aria-current', 'page')
+  await switcher.locator('[data-surface="canvas"]').click()
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await expect(page.locator('[data-surface-switcher] [data-surface="canvas"]')).toHaveAttribute('aria-current', 'page')
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('surface switcher: Alt+2 jumps to datasets, Alt+1 back — never fights the canvas keys', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await page.keyboard.press('Alt+2')
+  await expect(page.locator('[data-ds-root]')).toBeVisible()
+  await page.keyboard.press('Alt+1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('first-run guidance: empty model roots show dismissible onboarding, never a dead app', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  // The e2e home has empty model roots (nothing scanned) — the first-run
+  // condition by construction. The notice waits for the scan to settle.
+  await page.goto('/')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  const notice = page.locator('[data-canvas-first-run]')
+  await expect(notice).toBeVisible({ timeout: 20_000 })
+  await expect(notice).toContainText('No models found')
+  // Path one: straight into Settings (the model-locations config).
+  await notice.getByRole('button', { name: 'Open settings — model locations' }).click()
+  await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible()
+  await page.locator('[data-canvas-settings-close]').click()
+  await expect(page.locator('[data-canvas-settings-dock]')).toHaveCount(0)
+  // Path two: the fetcher browser is one click away too.
+  await notice.getByRole('button', { name: 'Browse fetchable items' }).click()
+  await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible()
+  await page.locator('[data-canvas-settings-close]').click()
+  // Dismiss is durable (per-browser latch — non-nagging by design).
+  await notice.getByRole('button', { name: 'Dismiss setup guidance' }).click()
+  await expect(page.locator('[data-canvas-first-run]')).toHaveCount(0)
+  await page.reload()
+  await expect(page.locator('[data-canvas-launcher]')).toBeVisible()
+  await expect(page.locator('[data-canvas-first-run]')).toHaveCount(0)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})

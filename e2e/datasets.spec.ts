@@ -69,9 +69,11 @@ test('the workbench boots at ?datasets=1 with the seeded master in the gallery',
   const master = page.locator(`[data-ds-master][data-health="healthy"]`, { hasText: 'e2e-clip' }).first()
   await expect(master).toBeVisible({ timeout: 10_000 })
   await expect(master.locator('.ds-master-facts')).toContainText('480×832')
-  // The empty state is gone and the entry chip back to the canvas exists.
+  // The empty state is gone and the shared surface switcher is present with
+  // the canvas reachable (QOL wave rrxlw2r — the registry-driven switcher
+  // replaced the old one-way "← canvas" chip).
   await expect(page.locator('[data-ds-empty]')).toHaveCount(0)
-  await expect(page.locator('.ds-back')).toHaveText(/canvas/)
+  await expect(page.locator('[data-surface-switcher] [data-surface="canvas"]')).toBeVisible()
   // No renderer errors beyond the known environmental set.
   await expect(problems.filter((entry) => !environmental(entry))).toEqual([])
   void sourceId
@@ -159,8 +161,12 @@ test('the dashboard renders both trainer preflight profiles; export refuses hone
   await expect(page.locator('[data-ds-error]')).toContainText(/No layers selected/i)
 })
 
-test('the launcher carries the datasets entry chip from the canvas', async ({ page }) => {
+test('the surface switcher carries the datasets entry from the canvas (QOL wave rrxlw2r)', async ({ page }) => {
   await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
   await page.goto('/')
-  await expect(page.locator('[data-canvas-chip="datasets"]')).toBeVisible()
+  // The old launcher chip was RETIRED when the registry-driven titlebar
+  // switcher landed (2026-09-18) — one entry point per surface, in the
+  // shared chrome every surface carries.
+  await expect(page.locator('[data-canvas-chip="datasets"]')).toHaveCount(0)
+  await expect(page.locator('[data-surface-switcher] [data-surface="datasets"]')).toBeVisible()
 })

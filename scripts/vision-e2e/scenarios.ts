@@ -74,15 +74,71 @@ export type VisionScenario = {
  *  V" projection button BEFORE "library V" (the §7 V-flip family grew — V now
  *  cycles timeline → library); and the Studios dock lost its Movie tab
  *  (MoviePlanner retired — plan documents + the timeline projection are the
- *  planning surface). */
+ *  planning surface).
+ *
+ *  Rubric amendment (2026-09-18, QOL wave rrxlw2r): the titlebar now LEADS
+ *  with the shared surface switcher — a compact bordered pill group ("canvas"
+ *  and "datasets" today; more surfaces appear as they register) with the
+ *  ACTIVE surface highlighted; it sits BEFORE the canvas tabs. The empty-
+ *  canvas launcher may additionally carry a first-run onboarding notice (see
+ *  the canvas-default-boot rubric). */
 const SHELL_CONTEXT = [
   'Context for every clause: a dark-theme desktop studio app at 1920x1080 whose ONLY surface is a video canvas — a slim top titlebar over a near-black dotted-grid infinite canvas. There is NO left sidebar and NO grouped navigation: the old shell was deleted (Phase 5); do not flag its absence.',
-  'Top titlebar (slim): canvas tabs (a named tab like "Canvas <date>" with an × affordance), a pill-shaped radar button (reading "calm" or a queue count), a muted "engine offline" chip — the engine being offline in tests is CORRECT, not a defect — then small "timeline V", "library V", "studios", "diagnostics", "settings", "index ⌘K" buttons at the right.',
+  'Top titlebar (slim): FIRST a compact surface-switcher pill group — small linked pills reading "canvas" and "datasets" with the active surface highlighted inside a thin rounded border (QOL wave 2026-09-18) — then canvas tabs (a named tab like "Canvas <date>" with an × affordance), a pill-shaped radar button (reading "calm" or a queue count), a muted "engine offline" chip — the engine being offline in tests is CORRECT, not a defect — then small "timeline V", "library V", "studios", "diagnostics", "settings", "index ⌘K" buttons at the right.',
   'A slim contextual bottom bar spans the canvas foot; a small object counter may sit bottom-right.',
   'Dimmed/disabled controls and small muted sub-labels are the app\'s intentional dense design language, NOT contrast defects — only flag text that is genuinely unreadable against its immediate background.',
 ].join(' ')
 
 export const SCENARIOS: VisionScenario[] = [
+  {
+    // QOL wave (rrxlw2r) — the shared surface switcher: registry-driven nav
+    // chrome in BOTH titlebars. DOM truth asserted before each capture: the
+    // registered surfaces (canvas + datasets today), the active one marked.
+    id: 'surface-switcher',
+    label: 'Surface switcher — registry-driven nav in both titlebars (QOL wave)',
+    run: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+      await page.goto('/')
+      await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+      const switcher = page.locator('[data-surface-switcher]')
+      await expect(switcher).toBeVisible()
+      await expect(switcher.locator('[data-surface]')).toHaveCount(2)
+      await expect(switcher.locator('[data-surface="canvas"]')).toHaveAttribute('aria-current', 'page')
+      await page.waitForTimeout(400)
+    },
+    checkpoints: [
+      {
+        id: 'surface-switcher-canvas-1080p',
+        label: 'Canvas titlebar — the surface switcher leads (canvas active)',
+        rubric: [
+          SHELL_CONTEXT,
+          'The titlebar\'s LEFT EDGE carries the surface switcher: a compact rounded-border pill group with two linked pills — "canvas" (with a small frame icon, highlighted as the active surface: brighter text on a raised background with a thin inner outline) and "datasets" (with a small database icon, muted). It sits BEFORE the canvas tabs and must not overlap them.',
+          'The switcher reads as one coherent control: same pill height, consistent 12px-scale labels, hover affordance is fine. Muted-but-readable labels are the app\'s dense design language — not a contrast defect.',
+          'Defects to flag: pills of visibly different heights or misaligned baselines, the group overlapping the canvas tabs or radar, a pill clipped by the viewport edge, an ACTIVE state that is indistinguishable from the inactive one at a glance.',
+        ].join(' '),
+        drive: async (page) => {
+          await page.locator('[data-surface-switcher] [data-surface="datasets"]').click()
+          await expect(page.locator('[data-ds-root]')).toBeVisible()
+          const switcher = page.locator('[data-surface-switcher]')
+          await expect(switcher.locator('[data-surface="datasets"]')).toHaveAttribute('aria-current', 'page')
+          await page.waitForTimeout(400)
+        },
+      },
+      {
+        id: 'surface-switcher-datasets-1080p',
+        label: 'Datasets titlebar — the same switcher, datasets active (no one-way back link)',
+        rubric: [
+          'Context: a dark-theme desktop studio app at 1920x1080 on the datasets surface — a full-screen workbench, NOT the canvas: no dotted-grid infinite canvas, no canvas tabs.',
+          'The titlebar leads with "Dataset manager" brand text (database icon), immediately followed by the SAME surface-switcher pill group seen on the canvas titlebar — here "datasets" is the highlighted/active pill and "canvas" is the muted link that returns to the canvas. There is NO "← canvas" text link anymore (replaced by the switcher — its absence is the design, not a regression).',
+          'Tab pills (library active, dashboard, export, trash) sit to the right of the switcher without overlap.',
+          'Defects to flag: the switcher missing from this titlebar, both pills looking active or both muted, overlap between the switcher and the brand text or tab pills.',
+        ].join(' '),
+      },
+    ],
+    after: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
+    },
+  },
   {
     // Canvas Phase 5 (task 7mcp11b) — the required NEW scenario: the app's
     // DEFAULT boot (no ?canvas param) is the canvas. The empty canvas IS the
@@ -104,7 +160,7 @@ export const SCENARIOS: VisionScenario[] = [
         label: 'Canvas — default-boot launcher fully visible at 1920x1080 (no old shell anywhere)',
         rubric: [
           SHELL_CONTEXT,
-          'Center of the canvas: a centered launcher block with a large heading "A blank canvas", a one-line subtitle mentioning describing a shot or dropping anything, and below it the PROMPT BAR — a wide dark rounded textarea (placeholder mentioning "/" to focus and Enter to spawn) with a submit button at its right reading "Spawn video seed" with a small video icon.',
+          'Center of the canvas: a centered launcher block. Its TOP may carry the first-run onboarding notice (QOL wave 2026-09-18): a dashed-blue-bordered card titled "No models found — one setup step before the first render." with two small buttons ("Open settings — model locations", "Browse fetchable items") and an × dismiss — INTENDED guidance on the models-empty test home, never a defect. Below it a large heading "A blank canvas", a one-line subtitle mentioning describing a shot or dropping anything, and below it the PROMPT BAR — a wide dark rounded textarea (placeholder mentioning "/" to focus and Enter to spawn) with a submit button at its right reading "Spawn video seed" with a small video icon.',
           'Below the prompt bar, a CHIP ROW of small rounded pill buttons, at minimum: "image prompt", "video prompt" (one of these highlighted as the active media type), "noDialogue handoff", "drop / pick media", "Music 3", "ACE-Step", "prompt library", "studios", and "movie plan" — each with a small icon. All chips must sit fully inside the viewport with readable labels.',
           'A "Resume" section below the chips: a header row with the word "Resume" and a "new canvas" button, then either recent-canvas cards (name + date, any count) or the muted line "No other canvases yet — the first prompt creates one." — either state is correct.',
           'NO left sidebar, NO grouped navigation (Create / Queue / Library / Clip editor), NO "retired" pills anywhere — the old shell is deleted by design; any of those appearing is a REGRESSION, flag it.',
@@ -614,7 +670,7 @@ export const SCENARIOS: VisionScenario[] = [
         label: 'Dataset manager — gallery: master card with layer children, toolbar, titlebar',
         drive: async () => undefined,
         rubric: [
-          'Context: a dark-theme desktop studio app at 1920x1080 on the ?datasets=1 route — a DIFFERENT surface from the canvas: a full-screen workbench with its own slim TITLEBAR reading "Dataset manager" with a "← canvas" back link, tab pills (library active, dashboard, export, trash), a small trigger-token readout ("trigger: ph0t0r34l"), and a small interpolator chip reading "minterpolate" (rife-ncnn-vulkan absent in tests — intended, not a defect).',
+          'Context: a dark-theme desktop studio app at 1920x1080 on the ?datasets=1 route — a DIFFERENT surface from the canvas: a full-screen workbench with its own slim TITLEBAR reading "Dataset manager" followed by the shared surface-switcher pill group ("canvas" and "datasets", datasets highlighted — the QOL-wave 2026-09-18 replacement for the old one-way "← canvas" link), tab pills (library active, dashboard, export, trash), a small trigger-token readout ("trigger: ph0t0r34l"), and a small interpolator chip reading "minterpolate" (rife-ncnn-vulkan absent in tests — intended, not a defect).',
           'LEFT TOOLBAR (~240px): an "IMPORT" block with buttons "Upload from LAN", "Reference a file", "From canvas take"; a "SEARCH & FILTER" block with a search input and small filter chips (all / video / image, any caption / missing / stale); a "CURATION" block with "Dedup pass", "Batch VLM (skip hand)", "Batch draft → review queue" buttons; a "SELECTION" block with a count and a green-accented "Export…" button.',
           'RIGHT GALLERY: at least one MASTER CARD with a colorful test-pattern video poster (multi-color moving bars/squares — a real <video> poster frame, not gray), a small "video" kind badge, the file name "vision-clip.mp4", facts like "480×832 · 72f · 24.000fps", and action buttons "layer", "split scenes", "slow-mo audit".',
           'The master is EXPANDED showing its LAYER CHILD row(s): a small checkbox, layer name, a bucket badge like "480×832·72f", an "uncaptioned" italic caption line, and "crop/trim" + "caption" action buttons plus a small pin icon — the master/child model visible.',

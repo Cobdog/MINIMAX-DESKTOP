@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Camera, Database, Download, FolderOpen, Layers, LoaderCircle, Pin, Plus, RefreshCw, Search, Sparkles, Trash2, Upload, Video } from 'lucide-react'
 import { datasetsApi, mediaUrlFor, type AspectEntry, type DashboardPayload, type DatasetSettings, type ExportResultPayload, type LibraryLayer, type LibrarySource } from './api'
+import { SurfaceSwitcher } from '../surfaces/SurfaceSwitcher'
 import { CropEditor } from './CropEditor'
 import { CaptionPanel } from './CaptionPanel'
 import './datasets.css'
@@ -272,7 +273,11 @@ export function DatasetsApp() {
 
   return <div className="ds-app" data-ds-root>
     <header className="ds-titlebar">
-      <div className="ds-brand"><Database size={16} /> Dataset manager <a className="ds-back" href="/">← canvas</a></div>
+      <div className="ds-brand"><Database size={16} /> Dataset manager</div>
+      {/* QOL wave (rrxlw2r, 2026-09-18): the shared registry-driven surface
+          switcher replaces the one-way "← canvas" link — every registered
+          surface is reachable from every surface's titlebar. */}
+      <SurfaceSwitcher />
       <nav className="ds-tabs">
         {(['library', 'dashboard', 'export', 'trash'] as Tab[]).map((entry) => (
           <button key={entry} type="button" className={`ds-tab ${tab === entry ? 'active' : ''}`} onClick={() => setTab(entry)}>{entry}</button>

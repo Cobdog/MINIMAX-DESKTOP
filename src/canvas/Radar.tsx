@@ -11,6 +11,7 @@
  */
 import { Activity, Briefcase, LayoutList, Library, Settings, Stethoscope } from 'lucide-react'
 import { useJobsStore } from '../state/jobsStore'
+import { SurfaceSwitcher } from '../surfaces/SurfaceSwitcher'
 import { attention } from './derive'
 import { useCanvasStore } from './store'
 
@@ -57,6 +58,10 @@ export function Radar() {
   const tabs = openProjects.map((id) => documents[id]?.project ?? projects.find((project) => project.id === id)).filter((project): project is NonNullable<typeof project> => Boolean(project))
 
   return <header className="canvas-titlebar" data-canvas-titlebar>
+    {/* QOL wave (rrxlw2r, 2026-09-18): the shared surface switcher leads the
+        titlebar — registry-driven (src/surfaces/registry.ts), so a surface
+        that registers appears here without canvas-side edits. */}
+    <SurfaceSwitcher />
     <div className="canvas-tabs" data-canvas-tabs>
       {tabs.map((project) => (
         <span key={project.id} className={`canvas-tab ${project.id === activeProjectId ? 'active' : ''}`} data-canvas-tab={project.id}>

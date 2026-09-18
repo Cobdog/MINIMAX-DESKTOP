@@ -5,6 +5,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { installWebApiClient } from './lib/apiClient'
 import { sanitizeError } from './lib/logSanitize'
 import { observeLongAnimationFrames } from './lib/loafObserver'
+import { resolveSurface } from './surfaces/registry'
 import './styles.css'
 import './guided-studio.css'
 
@@ -25,18 +26,15 @@ const PrototypeShell = lazy(() => import('./prototypes/PrototypeShell'))
 // Wired into the canvas at §5.2 integration time.
 const PoseRigApp = lazy(() => import('./poserig/PoseRigApp'))
 
-// Dataset manager workbench (sv14rt0, spec §11): own lazy chunk on
-// ?datasets=1 — the poserig precedent. The crop editor needs viewport-scale
-// wheel semantics scoped inside it, so it is a dedicated surface, not a dock
-// (build decision 2026-09-17); the canvas keeps its wheel-zoom untouched.
-const DatasetsApp = lazy(() => import('./datasets/DatasetsApp').then((m) => ({ default: m.DatasetsApp })))
-
-// Canvas Phase 5 (task 7mcp11b, docs/specs/canvas-ui-v1.md §8) — the canvas
-// IS the app: the default route. The old shell (App.tsx + the View union +
-// its nav model) is deleted; ?canvas=1 remains as a HARMLESS ALIAS (existing
-// bookmarks, e2e, and the bench harness keep working — it selects the same
-// default surface and is never required again).
-const CanvasApp = lazy(() => import('./canvas/CanvasApp').then((m) => ({ default: m.CanvasApp })))
+// Top-level SURFACES (canvas default, datasets, …) live in the surface
+// registry (QOL wave rrxlw2r, 2026-09-18): each surface self-registers ONE
+// entry there and both the route resolution below and the shared titlebar
+// switcher pick it up — surfaces land independently without nav conflicts.
+// Canvas Phase 5 (task 7mcp11b) made the canvas the default route; ?canvas=1
+// remains a HARMLESS ALIAS (bookmarks/e2e/bench keep working).
+//
+// Non-surface routes stay here: ?mobile=1, ?proto=, ?poserig=1 are companion
+// and dev surfaces, never titlebar-switchable.
 
 // The renderer always runs in a browser against the app's own web server
 // (server/index.ts); the HTTP client is the only bridge.
@@ -47,9 +45,12 @@ const mobile = params.get('mobile') === '1'
 const proto = params.get('proto')
 const protoRoute = proto === 'bench' || proto === 'stage' || proto === 'score'
 const poserigRoute = params.get('poserig') === '1'
-const datasetsRoute = params.get('datasets') === '1'
-// NOTE: ?canvas=1 is intentionally NOT read — the canvas being the default
-// route makes the param a no-op alias (bookmarks/e2e/bench keep working).
+// Surface resolution (registry-driven): an explicit surface match (?datasets=1,
+// …) wins; otherwise the companion/dev routes; otherwise the registry default
+// (canvas). NOTE: ?canvas=1 is intentionally NOT read — the canvas being the
+// default route makes the param a no-op alias (bookmarks/e2e/bench keep
+// working).
+const surface = resolveSurface(params)
 document.documentElement.classList.toggle('mobile-route', mobile)
 
 const viewFallback = <div className="boot"><LoaderCircle className="spin" /><span>Loading…</span></div>
@@ -67,15 +68,15 @@ const onCaughtError = (error: unknown) => {
 createRoot(document.getElementById('root')!, { onCaughtError }).render(
   <StrictMode>
     <ErrorBoundary label="root">
-      {datasetsRoute
-        ? <Suspense fallback={viewFallback}><DatasetsApp /></Suspense>
+      {!surface.default
+        ? <Suspense fallback={viewFallback}><surface.component /></Suspense>
         : poserigRoute
           ? <Suspense fallback={viewFallback}><PoseRigApp /></Suspense>
           : protoRoute
           ? <Suspense fallback={viewFallback}><PrototypeShell /></Suspense>
           : mobile
             ? <Suspense fallback={viewFallback}><MobileApp /></Suspense>
-            : <Suspense fallback={viewFallback}><CanvasApp /></Suspense>}
+            : <Suspense fallback={viewFallback}><surface.component /></Suspense>}
     </ErrorBoundary>
   </StrictMode>,
 )
