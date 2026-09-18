@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { WebSocketServer } from 'ws'
+import { composeStructuredPrompt, parseStructuredPrompt } from '../src/lib/structuredPrompt'
 
 // Canvas Phase 2 (task flyuh6h) — the ?canvas=1 route against the production
 // build, ENGINE-INDEPENDENT by design: submission paths assert the honest
@@ -289,6 +290,153 @@ test('the properties panel edits per-chain settings and the identity payload', a
   expect(chain.settings.duration).toBe(9)
   expect(chain.identity?.subjectText).toBe('the drummer, black coat, case in left hand')
   expect(Math.abs((chain.identity?.strength ?? 0) - 0.7)).toBeLessThan(0.06)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+// ---------------------------------------------------------------------------
+// The structured H3 prompt editor (fh94g76): the toggle's no-loss round-trip,
+// the concat contract (settings.prompt IS composeStructuredPrompt's output),
+// flow-row warnings, the <d> helper, and the compose preview.
+test('the structured/freeform toggle round-trips without losing text; box edits compose the submitted string', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  // ADVERSARIAL spawn text: unicode, a stray shot marker, a <d> span with a
+  // speaker phrase — the deterministic parse must keep every word.
+  const hostile = '风筝 drift over 京都市 — café walls, [Shot 7] a stray marker, and Maya (S1) says: <d>[English] First batch!</d> then the bell rings'
+  await page.locator('[data-canvas-prompt]').fill(hostile)
+  await page.locator('[data-canvas-submit]').click()
+  const tile = page.locator('[data-canvas-tile]').first()
+  await expect(tile).toBeVisible({ timeout: 10_000 })
+  const panel = page.locator('[data-canvas-properties]')
+  await expect(panel).toBeVisible()
+  await expect(panel.locator('[data-canvas-prompt-mode]')).toHaveAttribute('data-canvas-prompt-mode', 'freeform')
+
+  // Toggle to structured: the boxes parse from the hostile string — dialogue
+  // lifts with its speaker phrase, the stray marker becomes a flow beat.
+  await panel.locator('[data-canvas-prompt-mode-toggle="structured"]').click()
+  await expect(panel.locator('[data-canvas-prompt-mode]')).toHaveAttribute('data-canvas-prompt-mode', 'structured')
+  const editor = panel.locator('[data-structured-editor]')
+  await expect(editor).toBeVisible()
+  await expect(editor.locator('[data-structured-box="concept"]')).toBeVisible()
+  await expect(editor.locator('[data-structured-box="flow"]')).toBeVisible()
+  await expect(editor.locator('[data-structured-input="audio-dialogue"]')).toHaveValue(/<d>\[English\] First batch!<\/d>/)
+  const boxesText = await editor.evaluate((root) => Array.from(root.querySelectorAll('textarea, input')).map((field) => field.value).join('\n'))
+  for (const token of ['风筝', '京都市', 'café', 'stray marker', 'then the bell rings']) {
+    expect(boxesText, `no-loss: "${token}" survives the parse into a box`).toContain(token)
+  }
+
+  // Toggle back with NO box edits: switching back YIELDS THE CONCAT (spec
+  // §4) — the deterministic parse's own composition, byte-verified with the
+  // app's composer. Every word of the hostile string survives.
+  await panel.locator('[data-canvas-prompt-mode-toggle="freeform"]').click()
+  await expect(panel.locator('[data-canvas-prompt-mode]')).toHaveAttribute('data-canvas-prompt-mode', 'freeform')
+  const concat = composeStructuredPrompt(parseStructuredPrompt(hostile), { duration: Number(await panel.locator('[data-canvas-duration]').inputValue()) })
+  await expect(panel.locator('[data-canvas-section="prompt"] textarea').first()).toHaveValue(concat)
+  for (const token of ['风筝', '京都市', 'café', 'stray marker', 'First batch!', 'then the bell rings']) {
+    expect(concat, `no-loss: "${token}" survives the toggle round-trip`).toContain(token)
+  }
+
+  // Back to structured and EDIT: the concat contract — the persisted
+  // settings.prompt is byte-identical to composeStructuredPrompt(draft).
+  await panel.locator('[data-canvas-prompt-mode-toggle="structured"]').click()
+  await expect(editor).toBeVisible()
+  await editor.locator('[data-structured-input="style"]').fill('Cinematic')
+  await editor.locator('[data-structured-input="setting"]').fill('a lighthouse on a black reef at dusk')
+  await editor.locator('[data-structured-input="lighting"]').fill('Warm lantern light against deep blue dusk')
+  await editor.locator('[data-structured-input="camera"]').fill('The camera pushes in with small amplitude at slow speed')
+  await editor.locator('[data-structured-flow-add]').click()
+  await editor.locator('[data-structured-flow-text]').last().fill('the keeper climbs the spiral stairs')
+  await editor.locator('[data-structured-flow-add]').click()
+  await editor.locator('[data-structured-flow-from]').last().fill('3')
+  await editor.locator('[data-structured-flow-text]').last().fill('she lights the lamp and the beam sweeps the sea')
+  await editor.locator('[data-structured-input="audio-soundscape"]').fill('Wind hums around the lantern room; the mechanism ticks.')
+  await editor.locator('[data-structured-input="audio-music"]').fill('Sparse piano at a slow tempo.')
+  // The <d> formatting helper appends a wrapped line.
+  await editor.locator('[data-structured-dialogue-line]').fill('Almost dawn.')
+  await editor.locator('[data-structured-dialogue-add]').click()
+  await expect(editor.locator('[data-structured-input="audio-dialogue"]')).toHaveValue(/<d>\[English\] Almost dawn\.<\/d>$/)
+
+  // Flow warnings ride along: an out-of-range beat (start past the job
+  // duration) warns per-row — and the guide's strictly-increasing rule warns
+  // on the two zero-second beats the parse produced. The duration comes from
+  // the chain (generation defaults persist across runs — never hardcode 6).
+  const jobDuration = Number(await panel.locator('[data-canvas-duration]').inputValue())
+  await editor.locator('[data-structured-flow-add]').click()
+  await editor.locator('[data-structured-flow-from]').last().fill(String(jobDuration + 3))
+  await editor.locator('[data-structured-flow-text]').last().fill('a beat beyond the clip')
+  await expect(editor.locator('[data-structured-flow-warning]').filter({ hasText: `outside the ${jobDuration}s clip` })).toBeVisible()
+  await expect(editor.locator('[data-structured-flow-warning]').filter({ hasText: 'strictly increase' })).toBeVisible()
+
+  await page.waitForTimeout(1_100) // the debounced settings commit lands
+  const document = await activeDocument(page)
+  const chain = document.chains.find((entry) => entry.kind === 'generation')!
+  expect(chain.settings.promptMode).toBe('structured')
+  const persisted = chain.settings.structured as { concept: string; style: string; setting: string; flow: Array<{ from: number; text: string }>; audio: { soundscape: string; music: string; dialogue: string } }
+  expect(persisted.style).toBe('Cinematic')
+  expect(persisted.setting).toBe('a lighthouse on a black reef at dusk')
+  expect(persisted.concept).toContain('风筝') // the parse residue survives in Concept
+  expect(persisted.flow.length).toBe(4)
+  expect(persisted.audio.music).toBe('Sparse piano at a slow tempo.')
+  // The concat contract, byte-verified with the app's own composer: the
+  // submitted string IS the composed draft (the engine path applies the same
+  // downstream policies it would to a hand-typed freeform prompt).
+  const expected = composeStructuredPrompt(
+    {
+      concept: persisted.concept, subjects: [], setting: persisted.setting, lighting: 'Warm lantern light against deep blue dusk',
+      style: persisted.style, camera: 'The camera pushes in with small amplitude at slow speed',
+      flow: persisted.flow.map((row) => ({ ...row, to: row.from })),
+      audio: persisted.audio,
+    },
+    { duration: chain.settings.duration as number },
+  )
+  expect(chain.settings.prompt).toBe(expected)
+  // The compose preview shows exactly that string.
+  await panel.locator('[data-structured-preview] summary').click()
+  await expect(panel.locator('[data-structured-preview] pre')).toHaveText(expected)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+// The prompt library loads entries as BOX-SETS in structured mode (AC 5):
+// the same best-effort parse the round-trip uses, append-merged.
+test('the prompt library inserts a technique as a box-set in structured mode', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await page.locator('[data-canvas-prompt]').fill('library box-set probe')
+  await page.locator('[data-canvas-submit]').click()
+  const tile = page.locator('[data-canvas-tile]').first()
+  await expect(tile).toBeVisible({ timeout: 10_000 })
+  const panel = page.locator('[data-canvas-properties]')
+  await expect(panel).toBeVisible()
+  await panel.locator('[data-canvas-prompt-mode-toggle="structured"]').click()
+  const editor = panel.locator('[data-structured-editor]')
+  await expect(editor).toBeVisible()
+  await expect(editor.locator('[data-structured-input="concept"]')).toHaveValue('library box-set probe')
+
+  // The Saved tab lists the seeded technique starters; inserting one parses
+  // it into the boxes (append — the existing concept stays).
+  await panel.locator('[data-canvas-prompt-library]').click()
+  const library = page.locator('.prompt-library-modal')
+  await expect(library).toBeVisible()
+  await library.getByRole('tab').filter({ hasText: 'Saved' }).click()
+  const techniqueInsert = library.locator('[data-technique="true"] .prompt-library-item-actions button', { hasText: 'Insert prompt' }).first()
+  await expect(techniqueInsert).toBeVisible({ timeout: 10_000 })
+  await techniqueInsert.click()
+  await library.locator('[aria-label="Close prompt library"]').click()
+  await expect(library).not.toBeVisible({ timeout: 5_000 })
+  // The timed-beats technique parses as a box-set: its [Shot 1] grammar
+  // lands as a flow beat; the existing concept stays (append, never replace).
+  await expect(editor.locator('[data-structured-input="concept"]')).toHaveValue('library box-set probe')
+  await expect(editor.locator('[data-structured-flow-text]').first()).toHaveValue(/style and opening composition/)
+  await page.waitForTimeout(1_100)
+  const document = await activeDocument(page)
+  const chain = document.chains.find((entry) => entry.kind === 'generation')!
+  expect(chain.settings.promptMode).toBe('structured')
+  expect(chain.settings.prompt).toContain('library box-set probe')
+  expect(chain.settings.prompt).toContain('action beat')
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
@@ -1754,6 +1902,224 @@ test('F6 live progress: targeted engine events + preview frames surface on the g
     await page.request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
     await resetSession(page).catch(() => undefined)
     await new Promise<void>((resolve) => wss.close(() => resolve()))
+    await new Promise<void>((resolve) => engine.close(() => resolve()))
+  }
+})
+
+// ---------------------------------------------------------------------------
+// AC 4 — the timeline tool RETIRED into the Flow box (2026-09-18): it fills
+// the structured editor's Flow list with parsed timed rows, never appending
+// prompt text again. The LLM is stubbed through the provider fallback route
+// (models descriptor connected; the streaming prepare route fails so the
+// non-streaming generate route delivers the canned plan).
+test('the retired timeline tool fills the Flow box (LLM stubbed, provider route)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  const cannedPlan = '[Shot 1] A baker opens her street bakery before sunrise, humming.\n[Shot 2] At 00:03.000, she sets the first loaves on the counter as steam rises.\n[Shot 3] At 00:05.000, the doorbell rings and a first customer enters.'
+  await page.route('**/api/lan/llm/models', async (route) => {
+    await route.fulfill({ json: { provider: 'router', endpoint: 'http://127.0.0.1:9', model: 'stub-model', connected: true, latencyMs: 1, models: [{ id: 'stub-model', family: 'qwen', familyLabel: 'Qwen', vision: false, status: 'ok', active: true }] } })
+  })
+  await page.route('**/api/lan/llm/prepare', async (route) => {
+    await route.fulfill({ status: 502, json: { error: 'no streaming provider in tests' } })
+  })
+  await page.route('**/api/lan/llm/generate', async (route) => {
+    await route.fulfill({ json: { response: cannedPlan, model: 'stub-model', provider: 'router' } })
+  })
+  await resetSession(page)
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await page.locator('[data-canvas-prompt]').fill('retired timeline probe: a bakery morning')
+  await page.locator('[data-canvas-submit]').click()
+  const tile = page.locator('[data-canvas-tile]').first()
+  await expect(tile).toBeVisible({ timeout: 10_000 })
+  const panel = page.locator('[data-canvas-properties]')
+  await expect(panel).toBeVisible()
+  // The retired tool still works from FREEFORM mode — it flips the chain to
+  // structured (the no-loss parse) and streams against the current prompt.
+  await expect(panel.locator('[data-canvas-prompt-tool="timeline"]')).toBeVisible()
+  await panel.locator('[data-canvas-prompt-tool="timeline"]').click()
+  await expect(panel.locator('[data-canvas-prompt-mode]')).toHaveAttribute('data-canvas-prompt-mode', 'structured')
+  const editor = panel.locator('[data-structured-editor]')
+  await expect(editor).toBeVisible()
+  // The suggestion lands with the FLOW action (not "use suggestion" — the
+  // old text-append behavior is retired).
+  const suggestion = panel.locator('[data-canvas-prompt-suggestion]')
+  await expect(suggestion).toBeVisible({ timeout: 15_000 })
+  await expect(suggestion.locator('textarea')).toHaveValue(/At 00:03\.000/)
+  await suggestion.locator('[data-canvas-prompt-suggestion-flow]').click()
+  await expect(suggestion).toHaveCount(0)
+  // The Flow box now carries the three parsed beats with their cut times;
+  // the compose folds them into the prompt as ordered timed shots.
+  await expect(editor.locator('[data-structured-flow-row]')).toHaveCount(3)
+  await expect(editor.locator('[data-structured-flow-from]').nth(1)).toHaveValue('3')
+  await expect(editor.locator('[data-structured-flow-from]').nth(2)).toHaveValue('5')
+  await expect(editor.locator('[data-structured-flow-text]').first()).toHaveValue(/A baker opens her street bakery/)
+  await page.waitForTimeout(1_100)
+  const document = await activeDocument(page)
+  const chain = document.chains.find((entry) => entry.kind === 'generation')!
+  expect(chain.settings.promptMode).toBe('structured')
+  const persisted = chain.settings.structured as { flow: Array<{ from: number; text: string }> }
+  expect(persisted.flow.length).toBe(3)
+  expect(persisted.flow[1].from).toBe(3)
+  expect(chain.settings.prompt).toContain('[Shot 2] At 00:03.000,')
+  expect(chain.settings.prompt).toContain('[Shot 3] At 00:05.000,')
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+// ---------------------------------------------------------------------------
+// The concat contract END TO END: a structured submit drives the REAL
+// generation ladder through a fake engine speaking the real contract (the
+// images.spec precedent) — the graph the engine receives carries the exact
+// composed bytes. Dummy model files make availability resolve; the fake
+// engine accepts the submission and the job parks running on the chain.
+test('a structured submit lands a real job whose engine prompt is the composed bytes (fake engine)', async ({ page, request }) => {
+  const problems = await trackErrors(page)
+  const fsModule = await import('node:fs')
+  const pathModule = await import('node:path')
+  const http = await import('node:http')
+
+  // Dummy model files (scanner tags degrade to "no tag" on dummy bytes) —
+  // the shared H3 set the quality t2v ladder resolves.
+  const modelRoot = pathModule.join(process.cwd(), 'test-home', 'sp-models')
+  for (const [kind, files] of Object.entries({
+    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
+    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
+    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
+    loras: ['minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors'],
+  })) {
+    fsModule.mkdirSync(pathModule.join(modelRoot, kind), { recursive: true })
+    for (const file of files as string[]) fsModule.writeFileSync(pathModule.join(modelRoot, kind, file), 'x')
+  }
+
+  const submittedGraphs: string[] = []
+  const engine = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://engine.local')
+    if (url.pathname === '/system_stats') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ system: {}, devices: [] }))
+      return
+    }
+    if (url.pathname === '/object_info') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ MiniMaxH3HybridLoader: {}, KSamplerSelect: {}, BasicScheduler: {}, VAELoader: {} }))
+      return
+    }
+    if (url.pathname === '/prompt' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (chunk) => { body += chunk })
+      req.on('end', () => {
+        submittedGraphs.push(body)
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ prompt_id: 'sp-e2e-1', number: 1, node_errors: {} }))
+      })
+      return
+    }
+    if (url.pathname === '/history/sp-e2e-1') {
+      // Still running — the job parks running on the chain (the honest state).
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ 'sp-e2e-1': { prompt: [], outputs: {}, status: { completed: false } } }))
+      return
+    }
+    if (url.pathname === '/interrupt' && req.method === 'POST') {
+      // The stop button's target — cancelling the launcher's auto-submitted
+      // job must actually take (the real contract).
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ cancelled: true, state: 'canceled' }))
+      return
+    }
+    if (url.pathname === '/queue' && req.method === 'GET') {
+      // The server's cancel verdict consults the queue FIRST — report the
+      // probe prompt as running so /interrupt is the path taken.
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ queue_running: [['entry', 'sp-e2e-1']], queue_pending: [] }))
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  const enginePort = await new Promise<number>((resolve) => engine.listen(0, '127.0.0.1', () => resolve((engine.address() as { port: number }).port)))
+
+  const originalSettings = ((await (await request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
+  try {
+    const listed = await (await request.get('/api/lan/jobs')).json() as { jobs?: Array<Record<string, unknown>> }
+    const stale = (listed.jobs ?? []).filter((job) => job.status === 'queued' || job.status === 'running').map((job) => ({ ...job, status: 'cancelled' }))
+    if (stale.length) await request.post('/api/lan/jobs', { data: { jobs: stale } })
+    await request.post('/api/lan/settings', { data: { settings: {
+      ...originalSettings,
+      comfyUrl: `http://127.0.0.1:${enginePort}`,
+      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: pathModule.join(modelRoot, 'diffusion_models'), text_encoders: pathModule.join(modelRoot, 'text_encoders'), vae: pathModule.join(modelRoot, 'vae'), loras: pathModule.join(modelRoot, 'loras') },
+    } } })
+    await resetSession(page)
+    await page.goto('/?canvas=1')
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    await page.locator('[data-canvas-prompt]').fill('structured submit probe')
+    await page.locator('[data-canvas-submit]').click()
+    const tile = page.locator('[data-canvas-tile]').first()
+    await expect(tile).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('[data-canvas-engine]')).toHaveAttribute('data-engine-connected', 'true', { timeout: 15_000 })
+    const panel = page.locator('[data-canvas-properties]')
+    await expect(panel).toBeVisible()
+    // The launcher REALLY submits when an engine answers — cancel that first
+    // (freeform) job so the STRUCTURED submit is the one under test.
+    const stop = panel.locator('[data-canvas-cancel]')
+    if (await stop.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await stop.click()
+      await expect(panel.locator('[data-canvas-generate]')).toBeVisible({ timeout: 15_000 })
+    }
+    await panel.locator('[data-canvas-prompt-mode-toggle="structured"]').click()
+    const editor = panel.locator('[data-structured-editor]')
+    await expect(editor).toBeVisible()
+    // Author the boxes; keep duration at the 6s default.
+    await editor.locator('[data-structured-input="style"]').fill('Cinematic')
+    await editor.locator('[data-structured-input="concept"]').fill('a night watchman closes the observatory')
+    await editor.locator('[data-structured-input="setting"]').fill('a mountain observatory under clearing storm clouds')
+    await editor.locator('[data-structured-input="lighting"]').fill('Cold moonlight through the dome slit')
+    await editor.locator('[data-structured-input="camera"]').fill('The camera tracks him at slow speed')
+    await editor.locator('[data-structured-flow-add]').click()
+    await editor.locator('[data-structured-flow-text]').last().fill('he locks each dome and pockets the keys')
+    await editor.locator('[data-structured-flow-add]').click()
+    await editor.locator('[data-structured-flow-from]').last().fill('3.5')
+    await editor.locator('[data-structured-flow-text]').last().fill('he pauses at the rail as the clouds break')
+    await editor.locator('[data-structured-input="audio-soundscape"]').fill('Wind drops to a low moan; keys jingle once.')
+    await page.waitForTimeout(1_100) // the settings commit lands before submit reads it
+
+    await panel.locator('[data-canvas-generate]').click()
+    // The real ladder passes: the submission lands a running job on the chain.
+    await expect(tile).toHaveAttribute('data-tile-status', 'running', { timeout: 20_000 })
+    const document = await activeDocument(page)
+    const chain = document.chains.find((entry) => entry.kind === 'generation')!
+    expect(chain.settings.promptMode).toBe('structured')
+    const persisted = chain.settings.structured as { concept: string; setting: string; lighting: string; style: string; camera: string; flow: Array<{ from: number; text: string }>; audio: { soundscape: string; music: string; dialogue: string } }
+    // The concat contract at the engine boundary: the graph the fake engine
+    // received carries the EXACT composed bytes (the downstream policies
+    // append after them, exactly as they would for a hand-typed freeform
+    // prompt — the engine sees no difference).
+    const composed = composeStructuredPrompt(
+      { concept: persisted.concept, subjects: [], setting: persisted.setting, lighting: persisted.lighting, style: persisted.style, camera: persisted.camera, flow: persisted.flow.map((row) => ({ ...row, to: row.from })), audio: persisted.audio },
+      { duration: chain.settings.duration as number },
+    )
+    expect(chain.settings.prompt).toBe(composed)
+    expect(submittedGraphs.length).toBeGreaterThan(0)
+    // Decode the submitted graphs and assert the composed bytes ride the
+    // text-conditioning input verbatim (the engine sees no difference from a
+    // hand-typed freeform prompt with the same string).
+    const enginePrompts = submittedGraphs.flatMap((body) => {
+      const graph = JSON.parse(body) as { prompt: Record<string, { inputs: Record<string, unknown> }> }
+      return Object.values(graph.prompt).flatMap((node) => Object.values(node.inputs)).filter((value): value is string => typeof value === 'string')
+    })
+    expect(enginePrompts.some((text) => text.startsWith(composed))).toBe(true)
+    // The queue record lands (persisted through the storage API the queue
+    // writes through — polled: persistence trails the tile's running state).
+    await expect.poll(async () => {
+      const jobs = ((await (await request.get('/api/lan/jobs')).json()) as { jobs: Array<{ status: string }> }).jobs
+      return jobs.filter((job) => job.status === 'running' || job.status === 'queued').length
+    }, { timeout: 15_000 }).toBeGreaterThan(0)
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
+    await resetSession(page).catch(() => undefined)
+    // The shared test-home returns to its EMPTY-model-roots state (the
+    // first-run-guidance precondition — the c57938b discipline).
+    fsModule.rmSync(modelRoot, { recursive: true, force: true })
     await new Promise<void>((resolve) => engine.close(() => resolve()))
   }
 })

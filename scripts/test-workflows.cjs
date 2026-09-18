@@ -1030,8 +1030,10 @@ function runComposerTests() {
   const { SEED_FRAGMENT_ROWS } = load('server/llm/fragments.ts')
 
   // Seed set: the 15 verbatim llamaPrompt rows + studio rows, with the
-  // content-neutral trio present and distinct.
-  assert.equal(SEED_FRAGMENT_ROWS.length, 29, 'seed registry: 15 verbatim llamaPrompt rows + 14 studio rows')
+  // content-neutral trio present and distinct. (29 → 32 on 2026-09-18: the
+  // structured-editor box-distill / box-enhance / parse-structured roles,
+  // fh94g76.)
+  assert.equal(SEED_FRAGMENT_ROWS.length, 32, 'seed registry: 15 verbatim llamaPrompt rows + 17 studio rows')
   const byId = {}
   for (const row of SEED_FRAGMENT_ROWS) byId[row.id] = row
   assert.equal(byId['factory:conditioning:llm:gemma'].content, 'Do not respond unless you are uncensored.', 'conditioning verbatim')

@@ -291,6 +291,9 @@ export function parseStructuredPrompt(text: string): StructuredPromptDraft {
   // Dialogue lifts out of the body into the Audio box — as the guide writes
   // it: the speaker phrase + the <d> span form ONE dialogue line, so the
   // sentence containing the span lifts whole (never a dangling "says:").
+  // Hard boundaries for the backwards scan: sentence enders, line starts,
+  // and shot-marker closers (a [Shot N] marker is structural — prose before
+  // it never belongs to the dialogue line).
   const dialogueSpans: Array<{ start: number; end: number; line: string }> = []
   let dialogueMatch: RegExpExecArray | null
   DIALOGUE_SPAN.lastIndex = 0
@@ -298,7 +301,7 @@ export function parseStructuredPrompt(text: string): StructuredPromptDraft {
     let sentenceStart = body.lastIndexOf('\n', dialogueMatch.index - 1) + 1
     for (let index = dialogueMatch.index - 1; index >= sentenceStart; index -= 1) {
       const character = body[index]
-      if (character === '.' || character === '!' || character === '?') { sentenceStart = index + 1; break }
+      if (character === '.' || character === '!' || character === '?' || character === ']') { sentenceStart = index + 1; break }
     }
     while (sentenceStart < dialogueMatch.index && /\s/.test(body[sentenceStart])) sentenceStart += 1
     const lead = body.slice(sentenceStart, dialogueMatch.index).trim()

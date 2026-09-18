@@ -208,7 +208,9 @@ export function PropertiesPanel() {
       const inSync = stored && composeStructuredPrompt(stored, { duration: draft.duration }) === draft.prompt
       patch({ promptMode: 'structured', structured: inSync ? stored : parseStructuredPrompt(draft.prompt) })
     } else {
-      // Switching back yields the concat — which prompt already holds.
+      // Switching back yields the concat (spec §4): while structured, prompt
+      // IS compose(structured) — every box edit recomposes, so the freeform
+      // surface shows exactly that string.
       patch({ promptMode: 'freeform' })
     }
   }
