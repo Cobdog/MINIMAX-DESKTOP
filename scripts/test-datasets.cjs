@@ -118,7 +118,9 @@ function client(port) {
     return { status: response.status, body }
   }
   const post = async (pathname, payload) => {
-    const response = await fetch(base + pathname, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
+    // Same-origin Origin header: the studio UI's own posture — the consent
+    // routes accept recording ONLY from it (fetch-consent Option A).
+    const response = await fetch(base + pathname, { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify(payload) })
     const body = await response.json().catch(() => ({}))
     return { status: response.status, body }
   }

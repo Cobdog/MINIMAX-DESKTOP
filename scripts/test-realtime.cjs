@@ -18,6 +18,13 @@
 //   (e) SSE v2 fallback (/api/lan/realtime) pushes telemetry
 //   (f) token mode: WS without/with a wrong token is refused before the
 //       handshake; the correct token connects
+//   (g) F6 live progress against a fake engine speaking the REAL contract:
+//       the shared upstream registers one STABLE server-side clientId
+//       (?clientId=), every /api/lan/prompt submission carries it (page ids
+//       ignored) + requests native previews (extra_data.preview_method
+//       'taesd') only when livePreview is set; targeted progress + binary
+//       preview frames fan out to EVERY fabric client while the engine sent
+//       them to exactly one session; the id survives an upstream reconnect
 // Run after `pnpm build` (the server and units load from dist-server).
 const { spawn } = require('node:child_process')
 const http = require('node:http')
@@ -385,9 +392,142 @@ async function main() {
   await authed.opened_()
   await authed.waitFor((state) => state.envelopes.some((envelope) => envelope.ch === 'system' && envelope.type === 'hello'), 'hello after token auth')
 
+  // ---- (g) F6 live progress: stable server-side clientId + preview wiring --
+  // A fake engine speaking the REAL contract (verified against the installed
+  // ComfyUI source 2026-09-18): /ws?clientId=<sid> registers a session;
+  // /prompt's client_id becomes the TARGET of every progress/preview event,
+  // and events for a sid owning no socket are silently DROPPED (send_bytes/
+  // send_json `elif sid in self.sockets` — exactly the drop that froze the
+  // old page-clientId submissions).
+  const engineHttp = http.createServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/prompt') {
+      let raw = ''
+      req.on('data', (chunk) => { raw += String(chunk) })
+      req.on('end', () => {
+        const body = JSON.parse(raw)
+        enginePromptRequests.push(body)
+        const sid = body.client_id
+        const socket = engineSockets.get(sid)
+        if (socket) {
+          // Targeted delivery, exactly like ComfyUI: only the submitter's
+          // registered session sees these.
+          socket.send(JSON.stringify({ type: 'execution_start', data: { prompt_id: ENGINE_PROMPT_ID } }))
+          socket.send(JSON.stringify({ type: 'progress', data: { value: 11, max: 30, prompt_id: ENGINE_PROMPT_ID } }))
+          socket.send(Buffer.concat([Buffer.from([0, 0, 0, 1, 0, 0, 0, 1]), engineJpeg]))
+          socket.send(JSON.stringify({ type: 'execution_success', data: { prompt_id: ENGINE_PROMPT_ID } }))
+          engineTargetedSends += 1
+        } else {
+          engineDroppedSubmissions += 1
+        }
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ prompt_id: ENGINE_PROMPT_ID, number: 1, node_errors: {} }))
+      })
+      return
+    }
+    res.writeHead(404); res.end('not found')
+  })
+  const engineWss = new WebSocketServer({ noServer: true })
+  const engineSockets = new Map() // sid -> socket (the engine's session map)
+  const engineClientIds = [] // the clientId each /ws connection registered
+  const enginePromptRequests = []
+  let engineTargetedSends = 0
+  let engineDroppedSubmissions = 0
+  const ENGINE_PROMPT_ID = 'f6-live-prompt-1'
+  const engineJpeg = Buffer.from([0xff, 0xd8, 0xfd, 0xf6, 0x11, 0x22, 0x33, 0x44])
+  engineHttp.on('upgrade', (request, socket, head) => {
+    const url = new URL(request.url ?? '/', 'http://engine.local')
+    engineWss.handleUpgrade(request, socket, head, (ws) => {
+      const sid = url.searchParams.get('clientId') ?? ''
+      engineClientIds.push(sid)
+      if (sid) engineSockets.set(sid, ws)
+      ws.on('close', () => engineSockets.delete(sid))
+    })
+  })
+  const enginePort = await listen(engineHttp)
+  servers.push(engineHttp)
+
+  const f6Home = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-realtime-f6-'))
+  fs.writeFileSync(path.join(f6Home, 'settings.json'), JSON.stringify({ comfyUrl: `http://127.0.0.1:${enginePort}` }))
+  const f6Port = await freePort()
+  bootServer(f6Home, f6Port)
+  await waitForHttp(f6Port, '/api/lan/settings')
+  // Two fabric clients (every client surface must see the live events).
+  const f6A = fabricClient(f6Port)
+  const f6B = fabricClient(f6Port)
+  await f6A.opened_()
+  await f6B.opened_()
+  f6A.send({ type: 'sub', ch: 'job' })
+  f6A.send({ type: 'sub', ch: 'preview' })
+  f6B.send({ type: 'sub', ch: 'job' })
+  f6B.send({ type: 'sub', ch: 'preview' })
+  // The shared upstream connects lazily on subscriber interest — wait for the
+  // engine to see the connection and its registered clientId.
+  await new Promise((resolve, reject) => {
+    const started = Date.now()
+    const check = () => { if (engineClientIds.length > 0) return resolve(); if (Date.now() - started > 6000) return reject(new Error('engine never saw the upstream WS')); setTimeout(check, 60) }
+    check()
+  })
+  const hubId = engineClientIds[0]
+  assert.ok(/^[a-f0-9-]{16,64}$/i.test(hubId), `the upstream must register a well-formed clientId (got "${hubId}")`)
+  assert.equal(engineClientIds.filter((sid) => sid === hubId).length, 1, 'exactly one shared upstream connection')
+
+  // Submission WITH live preview: the engine must see the HUB's id as
+  // client_id and the native-preview request in extra_data.
+  const liveSubmit = await fetch(`http://127.0.0.1:${f6Port}/api/lan/prompt`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ prompt: { '1': { class_type: 'KSampler', inputs: {} } }, livePreview: true, clientId: 'page-generated-id-owning-no-session' }),
+  })
+  assert.equal(liveSubmit.status, 200, 'the prompt route must accept the submission')
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  assert.equal(enginePromptRequests.length, 1)
+  assert.equal(enginePromptRequests[0].client_id, hubId, 'every submission carries the hub\'s stable clientId — the page id is ignored')
+  assert.deepEqual(enginePromptRequests[0].extra_data, { preview_method: 'taesd' }, 'livePreview requests native sampler previews (taesd)')
+  // Targeted events reached BOTH fabric clients (fan-out from the one session).
+  await f6A.waitFor((state) => state.envelopes.some((envelope) => envelope.ch === 'job' && envelope.type === 'progress' && envelope.payload.promptId === ENGINE_PROMPT_ID), 'client A sees targeted progress')
+  await f6B.waitFor((state) => state.envelopes.some((envelope) => envelope.ch === 'job' && envelope.type === 'progress' && envelope.payload.promptId === ENGINE_PROMPT_ID), 'client B sees targeted progress too')
+  const f6Frame = await f6A.waitFor((state) => state.frames.length > 0 ? state.frames[0] : null, 'client A receives the binary preview frame')
+  assert.equal(f6Frame.readUInt32BE(1), hashJobKey(ENGINE_PROMPT_ID), 'the frame hash correlates with the prompt')
+  assert.ok(f6Frame.subarray(6).equals(engineJpeg), 'the frame payload is the engine\'s exact bytes')
+  await f6B.waitFor((state) => state.frames.length > 0 ? state.frames[0] : null, 'client B receives the binary preview frame too')
+  assert.equal(engineTargetedSends, 1, 'the engine delivered to exactly ONE session (targeted, not broadcast)')
+  assert.equal(engineDroppedSubmissions, 0, 'nothing was dropped — the submitter owned a session')
+
+  // Submission WITHOUT live preview: no preview_method request rides along.
+  await fetch(`http://127.0.0.1:${f6Port}/api/lan/prompt`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ prompt: { '1': { class_type: 'KSampler', inputs: {} } } }),
+  })
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  assert.equal(enginePromptRequests.length, 2)
+  assert.equal(enginePromptRequests[1].client_id, hubId, 'the second submission still carries the hub id')
+  assert.equal(enginePromptRequests[1].extra_data, undefined, 'no preview request when livePreview is absent')
+
+  // Stability across an upstream reconnect: a changed comfyUrl (same engine,
+  // trailing-slash spelling) invalidates the shared upstream; the reconnect
+  // must register the SAME id — a fresh id would orphan in-flight prompts.
+  const current = fs.readFileSync(path.join(f6Home, 'settings.json'), 'utf8')
+  const parsed = JSON.parse(current)
+  parsed.comfyUrl = `http://127.0.0.1:${enginePort}/`
+  fs.writeFileSync(path.join(f6Home, 'settings.json'), JSON.stringify(parsed))
+  // The settings POST runs the invalidation path through the server.
+  const saved = await fetch(`http://127.0.0.1:${f6Port}/api/lan/settings`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { ...parsed, outputDirectory: parsed.outputDirectory ?? f6Home } }),
+  })
+  assert.equal(saved.status, 200, 'settings save accepted')
+  await new Promise((resolve, reject) => {
+    const started = Date.now()
+    const check = () => { if (engineClientIds.length >= 2) return resolve(); if (Date.now() - started > 8000) return reject(new Error('the upstream never reconnected')); setTimeout(check, 60) }
+    check()
+  })
+  assert.equal(engineClientIds[1], hubId, 'the reconnect registers the SAME stable clientId')
+
   for (const child of children) child.kill()
   for (const server of servers) server.close()
-  console.log('PASS: realtime event fabric — WS + SSE v2 transports behind the constant-time token gate; job channel normalized once from one SHARED upstream ComfyUI socket (prompt correlation server-side, binary preview frames hash-stamped, no base64 on the WS path, per-channel seq gapless); telemetry pushes without an engine and stops with zero subscribers; llm channel streams tokens from a local OpenAI-compatible endpoint with abort + SSRF rejection; backpressure is bounded-queue/oldest-dropped for JSON and newest-wins for previews.')
+  console.log('PASS: realtime event fabric — WS + SSE v2 transports behind the constant-time token gate; job channel normalized once from one SHARED upstream ComfyUI socket (prompt correlation server-side, binary preview frames hash-stamped, no base64 on the WS path, per-channel seq gapless); telemetry pushes without an engine and stops with zero subscribers; llm channel streams tokens from a local OpenAI-compatible endpoint with abort + SSRF rejection; backpressure is bounded-queue/oldest-dropped for JSON and newest-wins for previews; F6 — one stable server-side clientId registered on the shared upstream, carried by every submission (targeted events land, page ids retired), native taesd previews requested per prompt and fanned out as binary frames to every client.')
 }
 
 void main().catch((error) => fail(error instanceof Error ? error.stack : String(error)))

@@ -1,8 +1,16 @@
 import { existsSync } from 'node:fs'
+import http from 'node:http'
 import { resolve } from 'node:path'
 import Database from 'better-sqlite3'
 import type { Page } from '@playwright/test'
 import { expect } from '@playwright/test'
+import { WebSocketServer } from 'ws'
+
+/** A real decodable 1x1 JPEG — the fake engine's sampler-preview frame
+ *  payload (the tile's painter must actually decode and paint it). */
+function frameJpeg(): Buffer {
+  return Buffer.from('/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/9oACAEBAAA/APn+v//Z', 'base64')
+}
 
 /**
  * Vision-capture scenarios — CAPTURE ONLY, no judgment here.
@@ -643,6 +651,93 @@ export const SCENARIOS: VisionScenario[] = [
           'A GUIDANCE list: bullet lines of shape-based advice (e.g. one aspect dominating, uncaptioned counts, or "no shape outliers").',
           'Blessings: distribution bars are thin accent-colored strips with 10px labels — dense by design; a single-item dataset legitimately shows one bucket dominating (that is DATA, not a defect; the guidance line about it is the surface working).',
           'Defects to flag: preflight card missing trainer names or verdict, distribution cards empty when items exist, guidance list absent, overlapping text.',
+        ].join(' '),
+      },
+    ],
+  },
+  {
+    // F6 live progress (maintainer decision 1a, 2026-09-18): a generating
+    // tile mid-render — percent + label from targeted engine events and the
+    // painted sampler-preview frame. Engine-free: a fake ComfyUI-speaking
+    // WS emits the targeted stream; DOM truth is asserted at capture (the
+    // timeline-gap-menu misread lesson — faint content gets pixel-verified
+    // by the driver, never left to the judge).
+    id: 'canvas-live-progress',
+    label: 'F6 — a generating tile showing live progress + the sampler preview frame',
+    run: async (page) => {
+      const engine = http.createServer((req, res) => { res.writeHead(404); res.end() })
+      const wss = new WebSocketServer({ noServer: true })
+      engine.on('upgrade', (request, socket, head) => {
+        const sid = new URL(request.url ?? '/', 'http://engine.local').searchParams.get('clientId') ?? ''
+        wss.handleUpgrade(request, socket, head, (ws) => {
+          ws.send(JSON.stringify({ type: 'execution_start', data: { prompt_id: 'e2e-live-1' } }))
+          const timer = setInterval(() => {
+            if (ws.readyState !== ws.OPEN) return
+            ws.send(JSON.stringify({ type: 'progress', data: { value: 11, max: 30, prompt_id: 'e2e-live-1' } }))
+            ws.send(Buffer.concat([Buffer.from([0, 0, 0, 1, 0, 0, 0, 1]), frameJpeg()]))
+          }, 400)
+          ws.on('close', () => clearInterval(timer))
+          void sid
+        })
+      })
+      const enginePort = await new Promise<number>((resolve) => engine.listen(0, '127.0.0.1', () => resolve(engine.address().port)))
+      const settingsResponse = await page.request.get('/api/lan/settings')
+      const original = ((await settingsResponse.json()) as { settings: Record<string, unknown> }).settings
+      ;(page as unknown as { __visionEngine?: { close(): Promise<void>; original: Record<string, unknown> } }).__visionEngine = {
+        original,
+        close: async () => {
+          await new Promise<void>((resolve) => wss.close(() => resolve()))
+          await new Promise<void>((resolve) => engine.close(() => resolve()))
+        },
+      }
+      await page.request.post('/api/lan/settings', { data: { settings: { ...original, comfyUrl: `http://127.0.0.1:${enginePort}` } } })
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+      await page.goto('/?canvas=1&probe=canvas')
+      await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+      await page.locator('[data-canvas-prompt]').fill('a lantern-lit courtyard at dusk, camera drifting')
+      await page.locator('[data-canvas-submit]').click()
+      const tile = page.locator('[data-canvas-tile]').first()
+      await expect(tile).toBeVisible({ timeout: 10_000 })
+      // A running job whose promptId the engine targets (the scenario seam).
+      const scenario = await page.evaluate(() => (window as unknown as { __canvasScenario(name: string): { ok: boolean; reason?: string } }).__canvasScenario('live-progress'))
+      if (!scenario.ok) throw new Error(`canvas-live-progress capture: the live-progress scenario refused (${scenario.reason})`)
+      await expect(tile).toHaveAttribute('data-tile-status', 'running')
+      const readout = tile.locator('[data-canvas-live-readout]')
+      await expect(readout).toContainText('35%', { timeout: 15_000 })
+      await expect(readout).toContainText('Sampling · step 11 of 30')
+      // DOM truth at capture: the preview frame is a DECODED image before
+      // the screenshot fires (faint/streaky preview pixels stay judge-proof).
+      const painted = await expect.poll(async () => tile.locator('[data-canvas-live-preview]').evaluate((element) => (element as HTMLImageElement).naturalWidth), { timeout: 15_000 }).toBeGreaterThan(0)
+      void painted
+      await page.waitForTimeout(600)
+    },
+    after: async (page) => {
+      const carrier = page as unknown as { __visionEngine?: { close(): Promise<void>; original: Record<string, unknown> } }
+      if (carrier.__visionEngine) {
+        await page.request.post('/api/lan/settings', { data: { settings: carrier.__visionEngine.original } }).catch(() => undefined)
+        await carrier.__visionEngine.close()
+        carrier.__visionEngine = undefined
+      }
+      const listed = await page.request.get('/api/lan/jobs')
+      if (listed.ok()) {
+        const body = await listed.json() as { jobs?: Array<Record<string, unknown>> }
+        const stale = (body.jobs ?? []).filter((job) => job.status === 'queued' || job.status === 'running').map((job) => ({ ...job, status: 'cancelled' }))
+        if (stale.length) await page.request.post('/api/lan/jobs', { data: { jobs: stale } })
+      }
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
+    },
+    checkpoints: [
+      {
+        id: 'canvas-live-progress-1080p',
+        label: 'F6 — a generating tile at 1920x1080: live percent + sampling label + the in-progress preview frame',
+        rubric: [
+          SHELL_CONTEXT,
+          'One TILE centered in the canvas world: its media area shows a PAINTED PREVIEW FRAME — a small dark-blue/gray tealey image (a tiny JPEG scaled up; soft/blocky upscaled pixels are EXPECTED for a mid-sampling preview, not a defect) filling the tile’s media area.',
+          'At the tile’s bottom edge, a compact live READOUT strip: a percent reading "35%" in an accent/info tone, then a muted label line "Sampling · step 11 of 30".',
+          'The tile’s status ring is in its RUNNING state: a pulsing info-colored border around the tile.',
+          'A thin animated progress bar may also glow along the tile’s bottom — intended.',
+          'The status must be MID-RENDER: the tile must NOT read idle/stale/failed, must NOT show a take strip with a canonical take, and the canvas around it is otherwise calm (launcher bar present, no error toasts).',
+          'Defects to flag: a black/empty media area with NO painted frame, a readout missing the percent, a readout showing a terminal or queued-only label (like "Waiting for ComfyUI to start"), overlapping readout text, or the tile clipped by the viewport.',
         ].join(' '),
       },
     ],
