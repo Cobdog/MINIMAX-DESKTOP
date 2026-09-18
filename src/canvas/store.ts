@@ -102,7 +102,7 @@ import { locationReferences, loadLocationProjects } from '../lib/locationLibrary
 import { loadWardrobeProjects } from '../lib/wardrobeLibrary'
 import { useJobsStore } from '../state/jobsStore'
 import { useSessionStore } from '../state/sessionStore'
-import type { AceStepGenerationOptions, GenerationJob, MediaFile, ModelSelection } from '../types'
+import type { AceStepGenerationOptions, FetchEntryStatus, GenerationJob, MediaFile, ModelSelection } from '../types'
 
 /** The camera singleton for this route — attach in Substrate, never subscribe
  *  per-frame in React. */
@@ -222,6 +222,14 @@ type CanvasState = {
   gapMenu: { planId: string; afterSegmentId: string } | null
   /** Phase 4 (§8): Settings docked as a floating panel (the thin surface). */
   settingsDock: boolean
+  /** QOL wave (rrxlw2r): the fetch-catalog snapshot feeding the availability
+   *  facts' fetch-deep-link targets (loaded on boot, refreshed when the
+   *  settings dock opens; null = not loaded — rows degrade to install
+   *  guidance, never dead links). */
+  fetchCatalog: FetchEntryStatus[] | null
+  /** Catalog entry ids an unavailable row's fetch affordance asked the
+   *  FetchBrowser to highlight; consumed once by the dock (cleared after). */
+  fetchFocus: string[] | null
   /** Phase 5: the asset-authoring studios docked (the kept surfaces' canvas
    *  home until their full absorption — dated decisions in StudiosDock.tsx;
    *  the movie tab retired with MoviePlanner in Phase 5b). */
@@ -355,6 +363,13 @@ type CanvasActions = {
   persistView(): void
   /** Availability facts for the typed-hole menus (registry-driven). */
   optionAvailability(): OptionAvailability
+  /** QOL wave (rrxlw2r): reload the fetch-catalog snapshot (boot + dock). */
+  refreshFetchCatalog(): Promise<void>
+  /** QOL wave (rrxlw2r): open the settings dock with the FetchBrowser
+   *  highlighting these catalog entries (an unavailable row's affordance —
+   *  the click gets TO consent, never past it). */
+  openFetchBrowser(entryIds: string[]): void
+  setFetchFocus(ids: string[] | null): void
   /** The chain's resolved reference bindings (the panel + submit read this). */
   chainBindings(chainId: string): ReturnType<typeof resolveChainReferences>
 }
@@ -722,6 +737,8 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     toasts: [],
     inspectorOpen: false,
     indexOpen: false,
+    fetchCatalog: null,
+    fetchFocus: null,
     endpointMenu: null,
     forkMenu: null,
     opEditor: null,
@@ -740,6 +757,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
 
     boot: async () => {
       get().refreshLibraries()
+      void get().refreshFetchCatalog()
       void get().syncLibraryAssets().then(() => get().refreshAssets()).catch(() => undefined)
       void get().refreshAssets()
       try {
@@ -1142,7 +1160,25 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       return { ok: true }
     },
 
-    setSettingsDock: (open) => set({ settingsDock: open }),
+    setSettingsDock: (open) => {
+      set({ settingsDock: open })
+      // States change as the user fetches; re-snapshot on open so the menu's
+      // fetch affordances reflect what is actually on disk.
+      if (open) void get().refreshFetchCatalog()
+    },
+    refreshFetchCatalog: async () => {
+      try {
+        const { entries } = await window.minimax.listFetchCatalog()
+        set({ fetchCatalog: entries })
+      } catch {
+        // Offline/failed snapshot: the menus degrade to install guidance.
+      }
+    },
+    openFetchBrowser: (entryIds) => {
+      set({ fetchFocus: entryIds, settingsDock: true })
+      void get().refreshFetchCatalog()
+    },
+    setFetchFocus: (ids) => set({ fetchFocus: ids }),
     setStudiosDock: (dock) => set({ studiosDock: dock }),
     setDiagnosticsDock: (open) => set({ diagnosticsDock: open }),
     setAudioDock: (dock) => set({ audioDock: dock }),
@@ -2164,6 +2200,9 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
           available: Boolean(facts.connected && detection.available),
           missing: [...detection.missingNodes.map((node) => `node ${node}`), ...detection.missingModels],
           installHint: utility.ui.installHint,
+          // QOL wave (rrxlw2r): the structured form for the fetch deep-link.
+          missingSlots: detection.missingSlots,
+          missingNodes: detection.missingNodes,
         }
       })
       const selection = selectionFor('off', '')
@@ -2192,6 +2231,9 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
           available: Boolean(facts.connected && (aceSelection.base || aceSelection.sft) && aceSelection.vae && aceSelection.textEncoderSmall && aceSelection.textEncoderLarge),
           missing: [(aceSelection.base || aceSelection.sft) ? '' : 'ACE-Step XL model', aceSelection.vae ? '' : 'ACE audio VAE', (aceSelection.textEncoderSmall && aceSelection.textEncoderLarge) ? '' : 'Qwen ACE text encoders'].filter(Boolean),
         },
+        // QOL wave (rrxlw2r): the snapshot the options module intersects
+        // the deep-link mapping against (null until loaded = no targets).
+        fetchCatalog: get().fetchCatalog,
       }
     },
 

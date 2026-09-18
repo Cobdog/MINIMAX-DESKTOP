@@ -12,12 +12,23 @@
  * routes first, category visible on every row.
  */
 import { frameCount } from '../lib/workflow'
-import type { GenerationMode } from '../types'
+import { fetchTargetsForMissing, type FetchTarget } from '../lib/fetchDeepLink'
+import type { FetchEntryStatus, GenerationMode } from '../types'
 
 export type EndpointDirection = 'consume' | 'produce'
 export type SourceKind = 'image' | 'video' | 'audio'
 
-export type UtilityFact = { tool: string; label: string; available: boolean; missing: string[]; installHint?: string }
+export type UtilityFact = {
+  tool: string
+  label: string
+  available: boolean
+  missing: string[]
+  installHint?: string
+  /** QOL wave (rrxlw2r): the structured form of `missing` — unfilled model
+   * slots + absent node classes — for the fetch-deep-link mapping. */
+  missingSlots?: string[]
+  missingNodes?: string[]
+}
 
 /** Availability facts — computed by the canvas store from the shared
  *  registries (detectOptimizations / findLtx23Utility detection) and passed
@@ -35,6 +46,11 @@ export type OptionAvailability = {
   /** Phase 4: the audio engines (the dock's launcher rows read these). */
   music3: { available: boolean; missing: string[] }
   acestep: { available: boolean; missing: string[] }
+  /** QOL wave (rrxlw2r): the fetch catalog snapshot (store-loaded). The
+   * mapping intersects with it, so an unloaded catalog simply yields no
+   * fetch targets — rows degrade to their install guidance, never to dead
+   * links. */
+  fetchCatalog?: ReadonlyArray<FetchEntryStatus> | null
 }
 
 export type EndpointOption = {
@@ -60,6 +76,11 @@ export type EndpointOption = {
   reason?: string
   /** Parameter-directed constraint hint (§3). */
   hint?: string
+  /** QOL wave (rrxlw2r): catalog entries that satisfy this row's missing
+   * weights/packs — the row's fetch affordance deep-links into the
+   * FetchBrowser on exactly these (consent untouched). Absent = the missing
+   * piece is not fetchable; the reason carries the manual wording. */
+  fetchTargets?: FetchTarget[]
 }
 
 /** The parameter hints every generation row carries: the official H3 frame
@@ -153,7 +174,8 @@ export function endpointOptions(direction: EndpointDirection, sourceKinds: Reado
   rows.push({
     id: 'produce:fork-latents', group: 'fork', label: 'Fork — latents on disk', description: 'Continue from the saved sampler latent — Motion-Context conditioning, no re-encode.',
     action: { kind: 'fork', substrate: 'latents' }, available: availability.motionContextReady,
-    reason: availability.motionContextReady ? undefined : 'Latent continuation needs the ComfyUI-H3-Motion-Context custom nodes — install them, then refresh the engine.',
+    // No fetcher catalog entry for this pack (QOL wave rrxlw2r) — manual.
+    reason: availability.motionContextReady ? undefined : 'Latent continuation needs the ComfyUI-H3-Motion-Context custom nodes — install the pack manually (no fetcher entry), then refresh the engine.',
     hint: 'the take’s saved clip pins the context rows · motion + audio continue',
   })
   // §5.4 Phase 4 (L4 keep-utilities-only): the LTX-2.5 GENERAL i2v graph as
@@ -163,8 +185,10 @@ export function endpointOptions(direction: EndpointDirection, sourceKinds: Reado
       id: 'produce:ltx25', group: 'generate', label: 'Generate — LTX 2.5 image → video', description: 'A new chain on the LTX-2.5 general engine (4K/text ceilings; H3 stays the product default).',
       action: { kind: 'ltx25' },
       available: availability.ltx25.available,
+      // LTX-2.5 weights have no fetcher catalog entries (QOL wave rrxlw2r)
+      // — the honest manual wording, never a dead fetch link.
       reason: !availability.ltx25.available
-        ? `Not ready — missing ${availability.ltx25.missing.join('; ') || 'components'}.`
+        ? `Not ready — missing ${availability.ltx25.missing.join('; ') || 'components'} — install them manually, then refresh the engine.`
         : undefined,
       hint: 'engine switch lives in the chain’s properties',
     })
@@ -172,6 +196,12 @@ export function endpointOptions(direction: EndpointDirection, sourceKinds: Reado
   for (const utility of availability.utilities) {
     const wantsVideo = utility.tool !== 'ia2v'
     if (wantsVideo ? !hasVideo : !hasImage) continue
+    // QOL wave (rrxlw2r): missing weights/packs with catalog coverage get a
+    // fetch affordance (deep-link into the FetchBrowser, consent untouched);
+    // pieces without coverage keep the manual guidance in the reason.
+    const fetchTargets = !utility.available
+      ? fetchTargetsForMissing({ slots: utility.missingSlots ?? [], nodes: utility.missingNodes ?? [] }, availability.fetchCatalog)
+      : []
     rows.push({
       id: `produce:utility:${utility.tool}`, group: 'utility', label: utility.label,
       description: wantsVideo ? 'LTX-2.3 official-template tool over the 2.3-dev checkpoint.' : 'Image + audio → video through the official 2.3-dev template.',
@@ -180,6 +210,7 @@ export function endpointOptions(direction: EndpointDirection, sourceKinds: Reado
       reason: !utility.available
         ? `Not ready — missing ${utility.missing.join('; ') || 'components'}${utility.installHint ? `. ${utility.installHint}` : '.'}`
         : offline(availability.connected) ?? missingModels(availability.h3Ready, availability.connected),
+      fetchTargets: fetchTargets.length ? fetchTargets : undefined,
     })
   }
   return rows

@@ -95,6 +95,10 @@ export function CanvasApp() {
         return
       }
       if (typing) return
+      // QOL wave (rrxlw2r, 2026-09-18): Alt-modified keys belong to the
+      // shared chrome (the surface switcher's Alt+1..9) — the canvas's own
+      // single-letter keys (digits included) never fire with Alt held.
+      if (event.altKey) return
       const state = useCanvasStore.getState()
       // The modal surfaces own Escape/keys while open.
       if (state.opEditor || state.poseRig) return

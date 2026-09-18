@@ -2467,6 +2467,10 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .fetch-group-heading small { color: var(--muted-2); font-size: var(--text-xs); line-height: 1.4; }
 .fetch-group .node-pack-list { padding: 4px 0 0; }
 .fetch-row .fetch-state-placed, .fetch-row .fetch-state-present { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+/* QOL wave (rrxlw2r): the deep-link landing — entries an unavailable canvas
+   menu row pointed at get a brief accent outline + nudge. */
+.fetch-row.fetch-focused { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); animation: fetch-focused-nudge .5s ease 2; }
+@keyframes fetch-focused-nudge { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(3px); } }
 .fetch-progress { display: grid; gap: 4px; padding-top: 2px; }
 .fetch-progress small { color: var(--muted-2); font-size: 11px; overflow-wrap: anywhere; }
 .fetch-progress-bar { display: block; height: 5px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); overflow: hidden; }

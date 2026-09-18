@@ -23,6 +23,10 @@ export function SettingsDock() {
   const open = useCanvasStore((state) => state.settingsDock)
   const setSettingsDock = useCanvasStore((state) => state.setSettingsDock)
   const toast = useCanvasStore((state) => state.toast)
+  // QOL wave (rrxlw2r): the fetch affordance's focus ids (an unavailable
+  // canvas menu row deep-linked here) — consumed once by the FetchBrowser.
+  const fetchFocus = useCanvasStore((state) => state.fetchFocus)
+  const setFetchFocus = useCanvasStore((state) => state.setFetchFocus)
   const context = useContext(CanvasSessionContext)
   const [diagnosticRunning, setDiagnosticRunning] = useState(false)
 
@@ -113,6 +117,8 @@ export function SettingsDock() {
           onSave={() => void save()}
           onApplyDefaults={applyDefaults}
           onRunDiagnostics={() => void runDiagnosticsNow()}
+          fetchFocusEntryIds={fetchFocus ?? undefined}
+          onFetchFocusConsumed={() => setFetchFocus(null)}
         />
       </ErrorBoundary>
     </div>
