@@ -623,17 +623,49 @@ export const SCENARIOS: VisionScenario[] = [
     },
     checkpoints: [
       {
-        id: 'structured-prompt-editor-1080p',
-        label: 'Structured H3 prompt editor — populated boxes at 1080p',
+        id: 'structured-prompt-editor-top-1080p',
+        label: 'Structured editor — the toggle + Concept/Subjects/Setting/Lighting boxes (panel top)',
+        // The panel scrolls internally; this checkpoint captures the TOP.
+        drive: async (page) => {
+          const panel = page.locator('[data-canvas-properties]')
+          await expect(panel).toBeVisible()
+          await panel.locator('.canvas-properties-body').evaluate((element) => { element.scrollTop = 0 })
+          await expect(page.locator('[data-canvas-prompt-mode]')).toHaveAttribute('data-canvas-prompt-mode', 'structured')
+          await expect(page.locator('[data-structured-box="concept"]')).toBeVisible()
+        },
         rubric: [
           SHELL_CONTEXT,
-          'ONE seed tile on the canvas (dark rounded card titled with the watchman prompt). A PROPERTIES panel floats at the right: header with the object title + a "text → video" mode pill.',
-          'The panel\'s PROMPT section leads with a small two-button segmented toggle — "freeform" and "structured" — with "structured" ACTIVE (accent-highlighted). Below it, the STRUCTURED EDITOR: a stack of small bordered box sections, each with a collapsible header (a chevron, a bold label, a muted hint): Concept, Subjects, Setting, Lighting, Style, Camera, Flow, Audio — in that order.',
-          'Visible populated content: the Concept and Setting and Lighting and Style and Camera boxes each show a small textarea with readable English prose (style reads "Cinematic"). The Subjects box shows ONE dashed subject card with inputs: name "Idris", an appearance textarea about a weathered keeper, wardrobe and features inputs. The Flow box shows TWO dashed beat rows, each with two small number inputs (a "0 → 0" pair and a "3 → 3" pair) and a textarea of beat prose, plus tiny ↑ ↓ duplicate/remove icon buttons; a "+ beat" pill sits under them. The Audio box shows labeled sub-fields "soundscape", "music", "dialogue" with filled soundscape text, a dialogue line containing a <d>[English] Almost dawn.</d> fragment, and a small language-select + line-input + "+ <d>" helper row.',
-          'At the bottom of the editor: a muted "distill into boxes…" pill (right-aligned) and a collapsed-or-open "compose preview" block (dashed border) — when open it shows monospace composed text beginning "integrated_multimodal_description:".',
-          'Per-box assist buttons ("distill" / "enhance") may appear DIMMED — no local LLM in tests, CORRECT. Chips rows (small rounded pills like "golden hour", "Push In") may show under the Lighting/Camera/Style/Audio boxes.',
-          'Blessings: dense small text and muted sub-labels are the design language; the panel scrolls internally (later sections like Engine/References/Identity may sit below the fold — absence from view is NOT a defect); dimmed disabled controls are intended offline states; the bottom bar shows the generate surface.',
-          'Defects to flag: the toggle missing or "structured" not visibly active, no box sections at all, empty textareas where populated content was asserted, the Flow rows lacking their number inputs, overlapping boxes rendering text unreadably, a pure-white or pure-black dead region.',
+          'ONE seed tile on the canvas (dark rounded card, head/tail endpoint dots). A PROPERTIES panel floats at the right: header with the object title + a "text → video" mode pill.',
+          'The panel\'s PROMPT section leads with a small two-button segmented toggle — "freeform" and "structured" — with "structured" ACTIVE (accent-highlighted, clearly distinguishable from the muted "freeform").',
+          'Below the toggle, the STRUCTURED EDITOR: a vertical stack of small bordered box sections, each with a collapsible header (a chevron icon, a bold label, a muted hint). In view at the top: Concept, Subjects, Setting, Lighting (and possibly Style) — in that order.',
+          'Populated content visible: the Concept box\'s textarea reads about a night watchman closing the observatory; the Subjects box shows ONE dashed subject card with a name input reading "Idris", an appearance textarea about a weathered keeper in a wool coat, and wardrobe/features inputs; the Setting and Lighting boxes show textareas with readable prose (lighting mentions moonlight).',
+          'Per-box assist buttons ("distill" / "enhance") appear DIMMED — no local LLM in tests, CORRECT. Chip rows (small rounded pills like "a busy city street", "golden hour") may render under the Setting/Lighting boxes.',
+          'Blessings: dense small text and muted sub-labels are the design language; dimmed disabled controls are intended offline states; boxes further down (Style, Camera, Flow, Audio, Engine, References…) sit BELOW the panel\'s internal fold — their absence from THIS capture is NOT a defect (a second checkpoint covers them); the bottom bar shows the generate surface.',
+          'Defects to flag: the toggle missing or "structured" not visibly active, no box sections at all, empty textareas where populated content is described above, the subject card lacking its input fields, overlapping boxes rendering text unreadably, a pure-white or pure-black dead region.',
+        ].join(' '),
+      },
+      {
+        id: 'structured-prompt-editor-bottom-1080p',
+        label: 'Structured editor — Flow beats + Audio + compose preview (panel scrolled)',
+        // The same panel scrolled to the Flow box: the timeline made
+        // first-class + the audio box + the preview.
+        drive: async (page) => {
+          const panel = page.locator('[data-canvas-properties]')
+          await expect(panel).toBeVisible()
+          // FORCE the scroll (scrollIntoViewIfNeeded is a no-op for internal
+          // scrollers — the box is "visible" in the DOM sense while clipped).
+          await panel.locator('[data-structured-box="flow"]').evaluate((element) => element.scrollIntoView({ block: 'start' }))
+          await expect(page.locator('[data-structured-flow-row]').first()).toBeVisible()
+          await expect(page.locator('[data-structured-preview] pre')).toContainText('integrated_multimodal_description:')
+        },
+        rubric: [
+          SHELL_CONTEXT,
+          'The properties panel is scrolled internally to the STRUCTURED EDITOR\'s lower half: the Flow box, the Audio box, and the compose preview are in view; the toggle and Concept/Subjects sit above the fold — their absence from THIS capture is NOT a defect (the first checkpoint covers them).',
+          'The FLOW box ("Flow the timeline — beats with time ranges"): TWO dashed beat rows, each with TWO small number inputs rendered as a "0 → 0" and a "3 → 3" pair, a textarea of readable beat prose (locking domes / pausing at the rail), and a tight column of tiny ↑ ↓ copy trash icon buttons. A "+ beat" pill and dimmed "distill"/"enhance" buttons sit under the rows (dimmed = no local LLM in tests, CORRECT).',
+          'The AUDIO box: labeled sub-fields "soundscape" (small uppercase label with a "→ overall_soundscape" note; filled textarea about wind and keys), "music" ("→ non_diegetic_music"), and "dialogue" with a filled line containing a readable <d>[English] Almost dawn.</d> fragment; below it a compact helper row: a language select, a line input, and a "+ <d>" button.',
+          'Under the boxes: a right-aligned muted "distill into boxes…" pill (may be dimmed — CORRECT offline) and an OPEN "compose preview" block (dashed border, summary line with a copy icon reading "compose preview — this exact string is submitted") showing monospace composed text beginning "integrated_multimodal_description: [Shot 1] Cinematic,".',
+          'Blessings: dense small text and muted sub-labels are the design language; sections below (Engine, References, Identity, Guides, Takes) may sit below the fold — absence is NOT a defect; the bottom bar shows the generate surface.',
+          'Defects to flag: no flow rows at all, flow rows missing their number inputs, the Audio box missing its three labeled sub-fields, the dialogue line empty, the compose preview absent or empty, overlapping sections rendering text unreadably, a pure-white or pure-black dead region.',
         ].join(' '),
       },
     ],

@@ -395,6 +395,15 @@ test('the structured/freeform toggle round-trips without losing text; box edits 
   // The compose preview shows exactly that string.
   await panel.locator('[data-structured-preview] summary').click()
   await expect(panel.locator('[data-structured-preview] pre')).toHaveText(expected)
+
+  // AC 2 — subject cards accept identity pins: the chain's identity payload
+  // text pins straight into a card (badge + verbatim appearance).
+  await panel.locator('[data-canvas-identity-subject]').fill('the drummer, black coat, case in left hand')
+  await page.waitForTimeout(1_200) // the identity commit + document reload land
+  await editor.locator('[data-structured-subject-pin]').selectOption('identity')
+  await expect(editor.locator('[data-structured-subject]').first()).toBeVisible()
+  await expect(editor.locator('[data-structured-subject-appearance]').first()).toHaveValue('the drummer, black coat, case in left hand')
+  await expect(editor.locator('[data-structured-pin-badge]').first()).toBeVisible()
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
