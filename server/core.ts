@@ -38,7 +38,7 @@ import { FetchManager, transportForEnvironment } from './fetcher'
 import { createLlmService, type LlmService } from './llm'
 import { createRouterProvider } from './llm/providers/router'
 import { familyManifest, inferFamily } from './llm/registry'
-import { evaluateRequestGuard } from './requestGuard'
+import { evaluateRequestGuard, isUiOriginRequest } from './requestGuard'
 import { planVlmPass } from './datasets/vlm'
 import { CLIP_CONSENT_ID, CLIP_LICENSE_SPDX, CLIP_MODEL_ID } from './datasets/curation'
 
@@ -2130,7 +2130,21 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
         if (url.pathname === '/api/lan/prompt' && request.method === 'POST') {
           const body = await readJson(request, 5_000_000)
           if (!body.prompt || typeof body.prompt !== 'object') return sendJson(response, 400, { error: 'A ComfyUI workflow is required.' })
-          const clientId = typeof body.clientId === 'string' && /^[a-f0-9-]{16,64}$/i.test(body.clientId) ? body.clientId : randomUUID()
+          // F6 Option A (maintainer decision 2026-09-18): the submission's
+          // client_id is ALWAYS the realtime hub's stable id — the one
+          // clientId whose WebSocket session the engine will actually find,
+          // so every targeted progress/preview event flows to the shared
+          // upstream and through the fabric to every client. A page-supplied
+          // clientId (body.clientId) is deliberately IGNORED: it owns no
+          // engine session, which is exactly why progress used to freeze.
+          const clientId = realtimeHub.clientId()
+          // Live preview request side: ComfyUI sampler previews are opt-in
+          // per prompt via extra_data.preview_method (set_preview_method in
+          // execution.py) — 'taesd' makes the sampler decode each step's x0
+          // through the latent format's vae_approx decoder (taeh3 for H3)
+          // and push the frame at the submitter's socket.
+          const requestBody: Record<string, unknown> = { prompt: body.prompt, client_id: clientId }
+          if (body.livePreview === true) requestBody.extra_data = { preview_method: 'taesd' }
           // VRAM hygiene (pre-submit hook): when the router provider has
           // loaded models and unload-on-generate is on (default), unload them
           // BEFORE the graph lands. Bounded to ~2 s so a slow router can never
@@ -2139,7 +2153,7 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
             logFailure('llm/unload-before-generate', unloadFailure, undefined, 'debug')
           })
           try {
-            const result = await comfyFetch(settings.comfyUrl, '/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: body.prompt, client_id: clientId }) })
+            const result = await comfyFetch(settings.comfyUrl, '/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) })
             return sendJson(response, 200, result)
           } catch (upstream) {
             // The upstream body is EXTERNAL text (a ComfyUI validation or
@@ -2474,6 +2488,13 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
           // acknowledgement for the curation pass's CLIP weight download
           // (Apache-2.0, huggingface.co) in the settings fetch-consent ledger.
           if (url.pathname === '/api/lan/datasets/clip/consent' && request.method === 'POST') {
+            // Same rule shape as the fetcher's consent route (Option A): the
+            // CLIP consent writes into the SAME fetch-consent ledger, so it is
+            // accepted only from the studio's own UI origin.
+            if (!isUiOriginRequest(request, Boolean((request.socket as { encrypted?: boolean }).encrypted))) {
+              logEvent({ kind: 'datasets.clip-consent-refused', reason: 'not-ui-origin' })
+              return sendJson(response, 403, { error: 'Consent can only be recorded from the studio\'s own interface.' })
+            }
             const body = await readJson(request, 10_000).catch(() => ({}) as Record<string, unknown>)
             const consented = body.consented === true
             const consents = { ...settings.fetch.consents }
@@ -2803,6 +2824,17 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
           return sendJson(response, 200, { entries: await fetcher.catalogStatus() })
         }
         if (url.pathname === '/api/lan/fetch/consent' && request.method === 'POST') {
+          // Fetch-consent Option A (maintainer decision 2026-09-18): consent
+          // is RECORDED only from the studio's own UI — the Origin header
+          // must be present and same-origin. Cross-origin browsers die at the
+          // global gate above; this also refuses the raw no-Origin peer (the
+          // open-LAN posture is for USING the studio, not for authorizing
+          // network fetches on the maintainer's behalf). Token mode keeps its
+          // 401 at the global gate.
+          if (!isUiOriginRequest(request, Boolean((request.socket as { encrypted?: boolean }).encrypted))) {
+            logEvent({ kind: 'fetcher.consent-refused', reason: 'not-ui-origin' })
+            return sendJson(response, 403, { error: 'Consent can only be recorded from the studio\'s own interface.' })
+          }
           const body = await readJson(request, 10_000)
           const entry = findFetchEntry(typeof body.id === 'string' ? body.id : '')
           if (!entry) return sendJson(response, 400, { error: 'Unknown fetchable item id.' })

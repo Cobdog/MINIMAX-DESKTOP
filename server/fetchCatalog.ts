@@ -612,6 +612,31 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
 
   // ---- Clone-on-demand seam (task 3ay7wbz) --------------------------------
   {
+    // F6 live previews (maintainer decision 2026-09-18): the H3 native
+    // sampler-preview decoder. ComfyUI's latent_preview picks ANY vae_approx
+    // file starting with "taeh3" (the H3 latent format's taesd_decoder_name)
+    // when a prompt requests preview_method 'taesd' — this is the weight that
+    // makes those mid-sampling frames look like the video instead of RGB
+    // channel soup. Kijai's original TAE (the preview-override pack ships the
+    // same class of weight under the name taeh3_decoder.safetensors — either
+    // satisfies the engine's prefix match, and the app's selection accepts
+    // both names).
+    id: 'taeh3-preview-decoder',
+    name: 'taeh3 preview decoder (MiniMax-H3 tiny VAE)',
+    group: 'weights',
+    description: 'Kijai\'s quickly-trained 2D tiny VAE for MiniMax-H3, purpose-built for latent previews: with it present in vae_approx, every H3 render that requests live previews decodes each sampling step through this decoder instead of the crude latent-to-RGB approximation (the fast vae_approx-class path ComfyUI\'s native previewer uses; upstream warns it is PREVIEW-grade only — final frames always come from the real video VAE). ~9.3 MB, fetched once, used by every canvas render.',
+    licenseSpdx: 'Apache-2.0',
+    licenseNote: 'Apache-2.0 (repo license tag). The weights are a MiniMax-H3 derivative trained by Kijai for preview purposes; the repository ships under Apache-2.0.',
+    licenseUrl: 'https://huggingface.co/Kijai/MiniMax-H3-TAE/blob/main/README.md',
+    source: { kind: 'hf', repo: 'Kijai/MiniMax-H3-TAE', revision: { kind: 'sha', value: 'a213ac8bf2f148b4f32372279a7f207846978900' } },
+    destination: { kind: 'model-root', root: 'vae_approx' },
+    files: [{ path: 'vae_approx/taeh3.safetensors', sizeBytes: 9_791_388, sha256: 'f0f60fa072089997f817402098c2fd90777cb2660dd79cf5df42fc1e3e08e527' }],
+    detectGlob: 'taeh3*',
+    sizeBytes: 9_791_388,
+    sizeClass: 'small',
+    homepage: 'https://huggingface.co/Kijai/MiniMax-H3-TAE',
+  },
+  {
     id: 'engine-comfyui',
     name: 'ComfyUI reference checkout (v0.34.0)',
     group: 'engine',

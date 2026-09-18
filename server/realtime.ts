@@ -317,6 +317,18 @@ export function createRealtimeHub(options: RealtimeHubOptions) {
   const clients = new Set<RealtimeClient>()
 
   // ---- upstream ComfyUI link (ONE shared across every client) -------------
+  // The stable server-side clientId (F6 Option A, maintainer decision
+  // 2026-09-18): the shared upstream registers THIS id at connect
+  // (`/ws?clientId=…`) and every engine submission carries it as client_id,
+  // so ComfyUI's TARGETED events (progress, executing, preview binaries —
+  // sent only to the prompt submitter's socket, silently dropped when that
+  // sid owns no session) land on the one socket the fabric owns. One id per
+  // server process, deliberately STABLE across upstream reconnects and
+  // settings-triggered invalidations: a new id would orphan events for every
+  // prompt submitted before the reconnect. Page-generated clientIds are no
+  // longer forwarded for targeting (they owned no engine session — the
+  // overnight WS-probe root cause, junllxf F6).
+  const hubClientId = randomUUID()
   const upstream = {
     socket: null as WebSocket | null,
     wanted: false,
@@ -340,7 +352,7 @@ export function createRealtimeHub(options: RealtimeHubOptions) {
       }
       const parsed = new URL(comfyUrl)
       const wsOrigin = parsed.origin
-      const socket = new WebSocket(`${wsOrigin.replace(/^http/, 'ws')}/ws`)
+      const socket = new WebSocket(`${wsOrigin.replace(/^http/, 'ws')}/ws?clientId=${encodeURIComponent(hubClientId)}`)
       socket.binaryType = 'nodebuffer'
       upstream.socket = socket
       socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
@@ -742,6 +754,9 @@ export function createRealtimeHub(options: RealtimeHubOptions) {
     },
     /** SSE v2 endpoint handler (the HTTP route performs auth before this). */
     handleSse,
+    /** The stable server-side clientId the shared upstream registers and
+     *  every submission must carry (F6 Option A) — see `hubClientId` above. */
+    clientId: () => hubClientId,
     /** Settings changed (e.g. a new ComfyUI address): drop the shared
      *  upstream so the next connect resolves the fresh URL. Subscribers
      *  remain, so the close handler reconnects immediately with backoff. */
