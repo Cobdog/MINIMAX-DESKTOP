@@ -6,10 +6,14 @@ import type { Page } from '@playwright/test'
 import { expect } from '@playwright/test'
 import { WebSocketServer } from 'ws'
 
-/** A real decodable 1x1 JPEG — the fake engine's sampler-preview frame
- *  payload (the tile's painter must actually decode and paint it). */
+/** A real decodable 64x36 JPEG (a teal→warm diagonal gradient with a
+ *  bright horizontal band) — the fake engine's sampler-preview frame
+ *  payload. Deliberately STRUCTURED: a 1x1 frame painted uniformly dark and
+ *  the first judged capture read the painted tile as "black/empty" (the
+ *  DOM-truth assertion had proven it decoded). A visible gradient is
+ *  judge-legible evidence of the paint. */
 function frameJpeg(): Buffer {
-  return Buffer.from('/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/9oACAEBAAA/APn+v//Z', 'base64')
+  return Buffer.from('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAUDBAQEAwUEBAQFBQUGBwwIBwcHBw8LCwkMEQ8SEhEPERETFhwXExQaFRERGCEYGh0dHx8fExciJCIeJBweHx7/2wBDAQUFBQcGBw4ICA4eFBEUHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh7/wAARCAAkAEADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwCGO496sR3HvVpPA/i4ddJ/8mIv/iqmTwV4sHXSv/JiL/4qvosXm+Vy2xNP/wADj/mfD4XJsXHelL/wF/5FaO496sJce9Tp4N8VDrpf/kxH/wDFVKnhDxQOumf+R4//AIqvmsXj8BLatD/wJf5n0uFy2tHeD+5kUdx71YjuPenp4T8TDrpv/keP/wCKqVPC3iMddO/8jR//ABVfM4vEYWW1SP3o+kwuEcd0JHce9WI7j3pE8M+IR10//wAjR/8AxVTJ4c18dbH/AMjJ/wDFV81i/ZS2kvvPpMLTpx3aJB8XvDR/5c9W/wC/Uf8A8XTx8WvDZ/5c9V/79R//ABdfP0dx71PHce9fs+I8N8np/DGX/gR8Dh84xtTdr7j30fFbw6f+XTVP+/Uf/wAXTx8UvDx/5dNT/wC/af8AxdeDx3HvU6XHvXhYjgfLaeyf3nuYfEV6m57oPidoB6Wupf8AftP/AIunD4laCf8Al11H/v2n/wAXXiKXHvU6XHvXg4jhfB09k/vPdw9B1Nz2ofEbQz/y7ah/37T/AOKp4+IWiH/l3v8A/v2n/wAVXjUdx71PHce9eFiMno09rnuYfKaVTe55zG7etTxu3rRRX9P4xH5Hg1sWEdvWp43b1oor5TGH1ODWxYjduOanjdvWiivlcYj6rBosI7etTxu3rRRXymMR9Vg0f//Z', 'base64')
 }
 
 /**
@@ -732,7 +736,7 @@ export const SCENARIOS: VisionScenario[] = [
         label: 'F6 — a generating tile at 1920x1080: live percent + sampling label + the in-progress preview frame',
         rubric: [
           SHELL_CONTEXT,
-          'One TILE centered in the canvas world: its media area shows a PAINTED PREVIEW FRAME — a small dark-blue/gray tealey image (a tiny JPEG scaled up; soft/blocky upscaled pixels are EXPECTED for a mid-sampling preview, not a defect) filling the tile’s media area.',
+          'One TILE centered in the canvas world: its media area shows a PAINTED PREVIEW FRAME — a smooth color GRADIENT image (teal/blue toward the left warming to orange/red toward the right) crossed by one bright YELLOW-ISH horizontal band across the middle (a synthetic 64x36 JPEG scaled up; soft/blocky upscaled pixels are EXPECTED for a mid-sampling preview, not a defect) filling the tile’s media area.',
           'At the tile’s bottom edge, a compact live READOUT strip: a percent reading "35%" in an accent/info tone, then a muted label line "Sampling · step 11 of 30".',
           'The tile’s status ring is in its RUNNING state: a pulsing info-colored border around the tile.',
           'A thin animated progress bar may also glow along the tile’s bottom — intended.',
