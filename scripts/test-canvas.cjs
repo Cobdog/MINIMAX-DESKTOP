@@ -840,6 +840,250 @@ async function phase5Cores() {
 }
 
 // ---------------------------------------------------------------------------
+// (l–r) The structured H3 prompt editor's pure layer (fh94g76): the concat
+// contract's goldens, the no-loss round-trip parse (adversarial), merge
+// semantics for library box-sets, chips/warning data, and the settings
+// round-trip for promptMode/structured.
+// ---------------------------------------------------------------------------
+console.log('(l) composeStructuredPrompt — the concat contract goldens')
+{
+  const sp = loadTs('src/lib/structuredPrompt.ts')
+  const baker = {
+    concept: 'a baker opens her street bakery before sunrise',
+    subjects: [{ id: 's1', name: 'Mara', appearance: 'a middle-aged baker with flour-dusted forearms', wardrobe: 'a linen apron', features: 'a calm, slightly raspy voice' }],
+    setting: 'A small street bakery on a wet cobblestone lane',
+    lighting: 'Warm golden-hour light spilling from the shopfront',
+    style: 'Live-action, cinematic',
+    camera: 'The camera pushes in with small amplitude at slow speed',
+    flow: [
+      { id: 'f1', from: 0, to: 3, text: 'Mara unbolts the shutters and props the window display open' },
+      { id: 'f2', from: 3, to: 6, text: 'she sets the first loaves on the counter as steam rises' },
+      { id: 'f3', from: 6, to: 6, text: 'a moment — the doorbell rings once' },
+    ],
+    audio: { soundscape: 'Wooden shutters scrape open over a quiet street; the doorbell rings once.', music: 'A soft acoustic-guitar pattern at a moderate tempo.', dialogue: 'Mara (S1) says: <d>[English] First batch of the morning.</d>' },
+  }
+  // Guide-exact: style-led [Shot 1] opening, subjects defined before use,
+  // scene/lighting/camera prose, ordered timed shots (row 1 continues
+  // [Shot 1], moments render from their from-time), dialogue in <d>, the two
+  // audio fields last with a blank line between sections.
+  eq(
+    sp.composeStructuredPrompt(baker, { duration: 6 }),
+    'integrated_multimodal_description: [Shot 1] Live-action, cinematic, a baker opens her street bakery before sunrise. '
+    + 'Mara: a middle-aged baker with flour-dusted forearms, wearing a linen apron, a calm, slightly raspy voice. '
+    + 'A small street bakery on a wet cobblestone lane. Warm golden-hour light spilling from the shopfront. '
+    + 'The camera pushes in with small amplitude at slow speed. '
+    + 'Mara unbolts the shutters and props the window display open. '
+    + '[Shot 2] At 00:03.000, she sets the first loaves on the counter as steam rises. '
+    + '[Shot 3] At 00:06.000, a moment — the doorbell rings once. '
+    + 'Mara (S1) says: <d>[English] First batch of the morning.</d>\n\n'
+    + 'overall_soundscape: Wooden shutters scrape open over a quiet street; the doorbell rings once.\n\n'
+    + 'non_diegetic_music: A soft acoustic-guitar pattern at a moderate tempo.',
+    'golden: the full draft composes guide-exactly',
+  )
+  // Empty boxes contribute nothing.
+  eq(sp.composeStructuredPrompt(sp.emptyStructuredDraft(), { duration: 6 }), '', 'empty draft composes to the empty string')
+  eq(
+    sp.composeStructuredPrompt({ ...sp.emptyStructuredDraft(), style: 'Cinematic', concept: 'a lighthouse in fog' }),
+    'integrated_multimodal_description: [Shot 1] Cinematic, a lighthouse in fog.',
+    'visual-only draft: no audio sections emitted',
+  )
+  eq(
+    sp.composeStructuredPrompt({ ...sp.emptyStructuredDraft(), audio: { soundscape: 'Rain taps the glass.', music: '', dialogue: '' } }),
+    'overall_soundscape: Rain taps the glass.\n\nnon_diegetic_music: N/A',
+    'soundscape-only draft: music completes the pair as N/A (the guide\'s completed-prompt shape)',
+  )
+  eq(
+    sp.composeStructuredPrompt({ ...sp.emptyStructuredDraft(), audio: { soundscape: '', music: 'Sparse piano.', dialogue: '' } }),
+    'non_diegetic_music: Sparse piano.',
+    'music-only draft: the music field alone (no invented soundscape)',
+  )
+  // Empty flow rows are skipped; shot numbering counts rendered rows only.
+  const gapped = sp.composeStructuredPrompt({ ...sp.emptyStructuredDraft(), flow: [
+    { id: 'a', from: 0, to: 0, text: '' },
+    { id: 'b', from: 0, to: 2, text: 'the kettle boils' },
+    { id: 'c', from: 2, to: 4, text: '' },
+    { id: 'd', from: 4, to: 6, text: 'she pours' },
+  ] }, { duration: 6 })
+  eq(gapped, 'integrated_multimodal_description: [Shot 1] the kettle boils. [Shot 2] At 00:04.000, she pours.', 'empty rows skip; numbering counts rendered rows')
+  // Ranges clip to the duration; negative from clamps to zero.
+  const clipped = sp.composeStructuredPrompt({ ...sp.emptyStructuredDraft(), flow: [
+    { id: 'a', from: -3, to: 2, text: 'pre-roll beat' },
+    { id: 'b', from: 9, to: 9, text: 'late moment' },
+  ] }, { duration: 6 })
+  eq(clipped, 'integrated_multimodal_description: [Shot 1] pre-roll beat. [Shot 2] At 00:06.000, late moment.', 'clipping: negative from clamps to 0, past-duration from clips to the duration')
+  // No duration context: times render unclipped (compose never invents facts).
+  eq(
+    sp.composeStructuredPrompt({ ...sp.emptyStructuredDraft(), flow: [{ id: 'a', from: 12, to: 12, text: 'late' }] }),
+    'integrated_multimodal_description: [Shot 1] late.',
+    'single flow row: no cut label (it IS [Shot 1])',
+  )
+  // Byte-parity with the freeform path: compose output is a plain string the
+  // freeform surface could have typed — the engine sees no difference.
+  ok(!sp.composeStructuredPrompt(baker, { duration: 6 }).includes('undefined'), 'compose never leaks undefined parts')
+  ok(typeof sp.composeStructuredPrompt(baker) === 'string', 'compose works without a duration context')
+
+  eq(sp.flowCutLabel(3), 'At 00:03.000', 'cut label: seconds pad to MM:SS.mmm')
+  eq(sp.flowCutLabel(63.5), 'At 01:03.500', 'cut label: minutes carry')
+  eq(sp.flowCutLabel(0), 'At 00:00.000', 'cut label: zero')
+}
+
+console.log('(m) parseStructuredPrompt — the deterministic no-loss round-trip')
+{
+  const sp = loadTs('src/lib/structuredPrompt.ts')
+  // The parts the grammar pins recover EXACTLY from the composed output:
+  // flow rows (+ from-times), the audio fields, the style run.
+  const source = [
+    'integrated_multimodal_description: [Shot 1] Live-action, cinematic, a baker opens her shop.',
+    'Mara: a middle-aged baker. [Shot 2] At 00:03.000, she sets loaves on the counter.',
+    'Mara (S1) says: <d>[English] First batch of the morning.</d>',
+    '',
+    'overall_soundscape: Shutters scrape open over a quiet street.',
+    '',
+    'non_diegetic_music: A soft acoustic-guitar pattern.',
+  ].join('\n')
+  const parsed = sp.parseStructuredPrompt(source)
+  eq(parsed.style, 'Live-action, cinematic', 'parse: the leading style run splits into the Style box')
+  eq(parsed.flow.length, 2, 'parse: shot markers become flow rows')
+  eq(parsed.flow[1].from, 3, 'parse: "At MM:SS.mmm" becomes the row from-time')
+  eq(parsed.flow[1].text, 'she sets loaves on the counter.', 'parse: the row text follows the cut label')
+  eq(parsed.audio.dialogue, 'Mara (S1) says: <d>[English] First batch of the morning.</d>', 'parse: the dialogue sentence (speaker phrase + <d> span) lifts whole into the Audio dialogue')
+  eq(parsed.audio.soundscape, 'Shutters scrape open over a quiet street.', 'parse: the soundscape field splits out')
+  eq(parsed.audio.music, 'A soft acoustic-guitar pattern.', 'parse: the music field splits out')
+  ok(parsed.flow[0].text.includes('a baker opens her shop'), 'parse: the [Shot 1] opening becomes the first flow beat (never dropped)')
+  eq(sp.parseStructuredPrompt('non_diegetic_music: N/A').audio.music, '', 'parse: N/A music reads as empty (not the literal N/A)')
+
+  // Box stability for the grammar-pinned parts: parse∘compose recovers the
+  // from-times exactly, the cut-labeled rows' text exactly, and the audio
+  // fields + style run byte-exactly (the opening boxes merge into the [Shot 1]
+  // prose by design — their words survive in the opening beat).
+  const draft = {
+    concept: 'c', subjects: [], setting: '', lighting: '', style: 'Cinematic', camera: '',
+    flow: [
+      { id: '1', from: 0, to: 0, text: 'the opening beat' },
+      { id: '2', from: 2.5, to: 4, text: 'the second beat!' },
+    ],
+    audio: { soundscape: 'Room tone.', music: 'Sparse piano.', dialogue: '<d>[English] Hello.</d>' },
+  }
+  const round = sp.parseStructuredPrompt(sp.composeStructuredPrompt(draft, { duration: 6 }))
+  eq(round.flow.map((row) => row.from), [0, 2.5], 'round-trip: from-times are stable')
+  ok(round.flow[0].text.includes('the opening beat') && round.flow[0].text.includes('c'), 'round-trip: the opening beat keeps the merged opening prose words')
+  eq(round.flow[1].text, 'the second beat!', 'round-trip: cut-labeled row text is byte-stable')
+  eq(round.audio.dialogue, draft.audio.dialogue, 'round-trip: dialogue bytes are stable')
+  eq(round.audio.soundscape, draft.audio.soundscape, 'round-trip: soundscape is stable')
+  eq(round.audio.music, draft.audio.music, 'round-trip: music is stable')
+  eq(round.style, draft.style, 'round-trip: the style run is stable')
+
+  // ADVERSARIAL no-loss (AC 1): for hostile inputs, every CONTENT token of
+  // the input survives somewhere in compose(parse(input)) — the toggle never
+  // loses text in either direction, deterministically (no LLM). Structural
+  // spans (shot markers, cut-time labels) are the grammar, not content: the
+  // concat renumbers shots and normalizes times by contract.
+  const hostile = [
+    'Plain prose with unicode: 风筝 drift over 京都市 — café 拍摄 🎬.',
+    'A "quoted" line; <Picture 3> tags, [unclear] spans, and <d>[Chinese] 你好，世界</d> dialogue.',
+    '[Shot 4] At 99:99.999, garbage times and stray markers [Shot',
+    'Tabs\tand\t\tweird spacing   plus CR-safe endings',
+    'overall_soundscape: label mid-flow',
+    'SOFÍSTICATED ünïcode — ’typographic’ “quotes”',
+    '',
+    '   ',
+  ].join('\r\n')
+  const composed = sp.composeStructuredPrompt(sp.parseStructuredPrompt(hostile))
+  const structural = /\[Shot\s+\d+\]|At\s+\d{1,3}:\d{2}\.\d{3},?/gi
+  const missing = composed === '' ? [] : hostile.replace(structural, ' ').split(/\s+/).filter((token) => token && !composed.includes(token))
+  eq(missing, [], 'adversarial: every content token of a hostile prompt survives the round-trip (no silent drops)')
+
+  // The no-loss toggle pair, as the surface performs it: parse on the way in
+  // (string untouched), compose on any box edit (string becomes the concat).
+  const toggle = 'The quick brown fox says: <d>[English] Wow.</d>'
+  const afterParse = sp.parseStructuredPrompt(toggle)
+  ok(sp.parseStructuredPrompt(toggle) !== null, 'toggle in: the parse always produces a draft')
+  ok(sp.composeStructuredPrompt(afterParse).includes('The quick brown fox says:') && sp.composeStructuredPrompt(afterParse).includes('<d>[English] Wow.</d>', ), 'toggle out: the concat carries the words and the dialogue bytes')
+}
+
+console.log('(n) mergeStructuredDraft + the settings round-trip + guards')
+{
+  const sp = loadTs('src/lib/structuredPrompt.ts')
+  const current = { ...sp.emptyStructuredDraft(), concept: 'keep me', style: 'Cinematic', flow: [{ id: '1', from: 0, to: 1, text: 'beat one' }] }
+  const incoming = sp.parseStructuredPrompt('integrated_multimodal_description: [Shot 1] a library entry.\n\noverall_soundscape: Rain.\n\nnon_diegetic_music: N/A')
+  const merged = sp.mergeStructuredDraft(current, incoming)
+  eq(merged.concept, 'keep me', 'merge: existing text is never replaced')
+  eq(merged.style, 'Cinematic', 'merge: untouched boxes stay')
+  eq(merged.flow.map((row) => row.text), ['beat one', 'a library entry.'], 'merge: the entry\'s beat appends in order')
+  eq(merged.audio.soundscape, 'Rain.', 'merge: audio splits in')
+  eq(sp.mergeStructuredDraft(sp.emptyStructuredDraft(), incoming).flow.map((row) => row.text), ['a library entry.'], 'merge into empty = the incoming draft')
+
+  // The persistence guard: garbage reads as empty, never crashes.
+  eq(sp.readStructuredDraft(null), null, 'guard: null reads as null')
+  eq(sp.readStructuredDraft('nope'), null, 'guard: a string reads as null')
+  const guarded = sp.readStructuredDraft({ concept: 7, subjects: ['junk', { name: 'Mara' }], flow: [{ from: 'x', text: 't' }], audio: 'junk' })
+  eq(guarded.concept, '', 'guard: wrong-typed fields read as empty')
+  eq(guarded.subjects.length, 1, 'guard: malformed cards drop, well-formed ones survive')
+  eq(guarded.subjects[0].name, 'Mara', 'guard: the surviving card keeps its name')
+  eq(guarded.flow.length, 1, 'guard: malformed rows drop, well-formed ones survive')
+  eq(guarded.audio.soundscape, '', 'guard: a malformed audio object reads as empty fields')
+
+  // The chain-settings round-trip: promptMode + structured persist and
+  // reload through the tolerant reader (generation.ts is pure).
+  const generation = loadTs('src/canvas/generation.ts')
+  const settings = generation.readChainSettings({ prompt: 'p', promptMode: 'structured', structured: { concept: 'c', subjects: [{ name: 'Mara' }], flow: [{ from: 1, to: 2, text: 'b' }], audio: { soundscape: 's' } } })
+  eq(settings.promptMode, 'structured', 'settings: promptMode round-trips')
+  eq(settings.structured.concept, 'c', 'settings: the structured draft round-trips')
+  eq(settings.structured.subjects[0].name, 'Mara', 'settings: subject cards round-trip')
+  eq(settings.structured.flow[0].from, 1, 'settings: flow rows round-trip')
+  eq(settings.structured.audio.soundscape, 's', 'settings: the audio box round-trips')
+  const plain = generation.readChainSettings({ prompt: 'p' })
+  eq(plain.promptMode, 'freeform', 'settings: legacy chains default to freeform')
+  eq(plain.structured, null, 'settings: legacy chains carry no structured draft')
+  eq(generation.chainSettingsDefaults().promptMode, 'freeform', 'settings: defaults start freeform')
+}
+
+console.log('(o) chips, warnings, dialogue helper, assist adapters')
+{
+  const sp = loadTs('src/lib/structuredPrompt.ts')
+  // The camera chips are the guide §4.3 motion-type table.
+  const cameraLabels = sp.STRUCTURED_CHIPS.camera.map((chip) => chip.label)
+  for (const move of ['Static Shot', 'Push In', 'Pull Out', 'Pan Left', 'Pan Right', 'Tilt Up', 'Pedestal Down', 'Arc Shot', 'Tracking Shot', 'POV']) {
+    ok(cameraLabels.includes(move), `camera chips carry the official motion type "${move}"`)
+  }
+  ok(sp.STRUCTURED_CHIPS.camera.some((chip) => chip.insertion.startsWith('the camera pushes in')), 'camera chips insert natural-English motion prose (guide §4.3)')
+  ok(sp.STRUCTURED_CHIPS.style.some((chip) => chip.label === '2D-animated'), 'style chips carry the guide\'s style list')
+  for (const box of ['setting', 'lighting', 'style', 'camera', 'audio']) {
+    ok(sp.STRUCTURED_CHIPS[box].length >= 5, `the ${box} chip row is substantive`)
+  }
+  eq(sp.appendChipText('', 'golden hour'), 'golden hour', 'chip append: empty box takes the insertion directly')
+  eq(sp.appendChipText('soft overcast daylight', 'golden hour'), 'soft overcast daylight, golden hour', 'chip append: vocabulary joins with ", "')
+  eq(sp.appendChipText('the camera pushes in', 'with large amplitude'), 'the camera pushes in with large amplitude', 'chip append: modifiers join with a space')
+
+  const warnings = sp.flowRowWarnings([
+    { id: 'a', from: 0, to: 2, text: 'fine' },
+    { id: 'b', from: 7, to: 9, text: 'late beat' },
+    { id: 'c', from: 1, to: 1, text: 'goes backwards' },
+    { id: 'd', from: 2, to: 2, text: '' },
+  ], 6)
+  eq(warnings.length, 3, 'warnings: out-of-range start, past-duration end, and non-increasing cuts each warn')
+  ok(warnings[0].warning.includes('outside the 6s clip'), 'warnings: the out-of-range wording names the duration')
+  ok(warnings[1].warning.includes('past the 6s duration'), 'warnings: the past-end wording names the duration')
+  ok(warnings[2].warning.includes('strictly increase'), 'warnings: the guide\'s strictly-increasing rule rides along')
+  eq(sp.flowRowWarnings([{ id: 'x', from: 0, to: 0, text: 'moment' }], 6), [], 'warnings: a moment (to ≤ from) inside range is legal — no warning')
+
+  eq(sp.wrapDialogueLine('Hello there.', 'English'), '<d>[English] Hello there.</d>', 'dialogue helper: wraps a bare line with the language tag')
+  eq(sp.wrapDialogueLine('<d>[English] already wrapped</d>'), '<d>[English] already wrapped</d>', 'dialogue helper: already-formatted lines pass through untouched')
+  eq(sp.wrapDialogueLine('   '), '', 'dialogue helper: blank lines stay blank')
+
+  const context = sp.buildBoxAssistContext('camera', { duration: 8, mode: 'text' })
+  ok(context.includes('camera box'), 'assist context: names the box being refined')
+  ok(context.includes('8 seconds'), 'assist context: carries the duration')
+  const constrained = sp.buildBoxAssistContext('audio', { duration: 8, mode: 'text', noDialogue: true })
+  ok(constrained.includes('no spoken dialogue'), 'assist context: the no-dialogue constraint reaches the audio box')
+  ok(sp.buildStructuredParseInstructions().includes('Never invent'), 'parse instructions: the no-invention contract')
+  ok(sp.structuredParseSchema.properties.flow, 'parse schema: carries the flow rows shape')
+  eq(sp.parseFlowRows('[Shot 1] opens on the shop. [Shot 2] At 00:03.500, she pours.')[1].from, 3.5, 'flow assist parser: cut times become from-seconds')
+  eq(sp.parseFlowRows('one line\nanother line').length, 2, 'flow assist parser: unmarked lines each become a beat')
+  eq(sp.parseFlowRows('[Shot 1] opens on the shop. [Shot 2] At 00:03.500, she pours.')[1].text, 'she pours.', 'flow assist parser: the row text follows the label')
+}
+
+// ---------------------------------------------------------------------------
 // Phase 5b (task 2u0rent) — the Director Suite pure layer: the plan document
 // (canvas_plan.document_json per document-model §1), the MEASURED gap menu
 // (verdicts from docs/research/h3-transitions-and-latent-continuity.md), and

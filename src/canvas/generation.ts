@@ -18,6 +18,7 @@ import { allocateWorkspaceReferences } from '../lib/promptComposer'
 import { characterReferences } from '../lib/characterLibrary'
 import { locationReferences } from '../lib/locationLibrary'
 import { composeH3Prompt, resolveRenderReferenceImages } from '../lib/promptPolicies'
+import { readStructuredDraft, type StructuredPromptDraft } from '../lib/structuredPrompt'
 import type { H3RenderRequest } from '../lib/h3Submit'
 import type { DocumentChain, DocumentTake } from './derive'
 
@@ -78,6 +79,14 @@ export type CanvasChainSettings = {
   referenceAssetIds: string[]
   /** Reference-mode keyframe guides (§2: persist as chain settings). */
   timelineGuides: Array<{ file: MediaFile; seconds: number }>
+  /** Structured H3 prompt editor (fh94g76): which prompt surface is active.
+   *  `prompt` stays the single source of truth for the engine — in structured
+   *  mode it always holds composeStructuredPrompt(structured); the concat
+   *  contract means the engine sees no difference between the modes. */
+  promptMode: 'freeform' | 'structured'
+  /** The box draft (null in freeform mode; the deterministic parse fills it
+   *  on toggle so the switch never loses text). */
+  structured: StructuredPromptDraft | null
 }
 
 const RESOLUTIONS = ['1344x768', '768x1344', '768x768']
@@ -112,6 +121,8 @@ export function chainSettingsDefaults(settings?: AppSettings | null): CanvasChai
     referenceLocationIds: [],
     referenceAssetIds: [],
     timelineGuides: [],
+    promptMode: 'freeform',
+    structured: null,
   }
 }
 
@@ -171,6 +182,8 @@ export function readChainSettings(raw: Record<string, unknown>, settings?: AppSe
     referenceLocationIds: idList(raw.referenceLocationIds),
     referenceAssetIds: idList(raw.referenceAssetIds),
     timelineGuides: guides,
+    promptMode: raw.promptMode === 'structured' ? 'structured' : 'freeform',
+    structured: readStructuredDraft(raw.structured),
   }
 }
 

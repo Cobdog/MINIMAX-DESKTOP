@@ -23,10 +23,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Rnd } from 'react-rnd'
 import { Captions, Clock3, Dices, LoaderCircle, Play, Sparkles, Square, Star, Volume2, WandSparkles, X } from 'lucide-react'
 import { SmartPromptEditor, type SmartPromptEditorHandle } from '../components/SmartPromptEditor'
+import { StructuredPromptEditor } from '../components/StructuredPromptEditor'
 import { PromptLibraryBrowser } from '../components/PromptLibraryBrowser'
 import { detectOptimizations } from '../lib/graph'
 import { guideFrameWarning } from '../lib/workflow'
 import { buildPromptAssistantContext } from '../lib/promptComposer'
+import { composeStructuredPrompt, mergeStructuredDraft, parseFlowRows, parseStructuredPrompt, type StructuredPromptDraft } from '../lib/structuredPrompt'
 import { useLlmStream } from '../lib/useLlmStream'
 import { useSessionStore } from '../state/sessionStore'
 import { STATUS_LABEL } from './derive'
@@ -150,6 +152,22 @@ export function PropertiesPanel() {
     void setChainIdentity(chainId, { strength: value })
   }, 300)
 
+  // Structured mode (fh94g76): a duration change re-clips the flow ranges —
+  // recompose the concat once per duration change (never on box edits, which
+  // compose inline in applyStructured).
+  const lastComposedDuration = useRef<number | null>(null)
+  useEffect(() => {
+    if (!draft || !chainId) return
+    if (draft.promptMode !== 'structured' || !draft.structured) {
+      lastComposedDuration.current = null
+      return
+    }
+    if (lastComposedDuration.current === draft.duration) return
+    lastComposedDuration.current = draft.duration
+    const composed = composeStructuredPrompt(draft.structured, { duration: draft.duration })
+    setDraft((current) => current && current.prompt !== composed ? { ...current, prompt: composed } : current)
+  }, [draft, chainId])
+
   const turboFamilies = useMemo(() => detectOptimizations(info, models).filter((entry) => entry.entry.kind === 'turbo'), [info, models])
   // Bindings + validation recompute per render on purpose: validation reads
   // the PERSISTED settings (which lag the draft by the debounce), so the
@@ -176,6 +194,31 @@ export function PropertiesPanel() {
     }
   }
 
+  // ---- The structured ⇄ freeform toggle (fh94g76, spec §4) ----
+  // `prompt` stays the engine's single source of truth: in structured mode
+  // every box edit composes into it; toggling never rewrites it (AC 1 — the
+  // string only changes when a box changes).
+  const setPromptMode = (next: 'freeform' | 'structured') => {
+    if (!draft || draft.promptMode === next) return
+    if (next === 'structured') {
+      // Switching to structured starts from the parse — deterministic, never
+      // lossy. When the stored draft is still the concat of the current
+      // string (no freeform edits since), it restores the exact boxes.
+      const stored = draft.structured
+      const inSync = stored && composeStructuredPrompt(stored, { duration: draft.duration }) === draft.prompt
+      patch({ promptMode: 'structured', structured: inSync ? stored : parseStructuredPrompt(draft.prompt) })
+    } else {
+      // Switching back yields the concat — which prompt already holds.
+      patch({ promptMode: 'freeform' })
+    }
+  }
+
+  /** Every structured edit re-composes: the submitted string is byte-what-
+   *  the-freeform-path-would-send (the concat contract). */
+  const applyStructured = (next: StructuredPromptDraft) => {
+    patch({ structured: next, prompt: composeStructuredPrompt(next, { duration: draft?.duration ?? 6 }) })
+  }
+
   // ---- Phase 4: the local-LLM prompt tools (the CreateView absorption) ----
   const llmDescriptor = useSessionStore.getState().llm
   const llmAvailable = llmDescriptor ? llmDescriptor.connected && Boolean(llmDescriptor.model) : ollamaModels.length > 0
@@ -191,6 +234,11 @@ export function PropertiesPanel() {
       useCanvasStore.getState().toast('error', 'Write a rough prompt first, then ask the local assistant to refine it.')
       return
     }
+    // 2026-09-18 retirement (spec AC 4): the timeline tool no longer appends
+    // prose to the prompt — it fills the Flow box of the structured editor.
+    // The switch below runs the deterministic no-loss parse; the suggestion
+    // panel's "fill Flow box" appends the parsed timed rows.
+    if (tool === 'timeline' && draft.promptMode !== 'structured') setPromptMode('structured')
     const referenceMap = bindings.length
       ? bindings.map((binding, index) => `<Picture ${index + 1}> = ${binding.label}`)
       : undefined
@@ -212,6 +260,21 @@ export function PropertiesPanel() {
     } finally {
       setPromptingTool(null)
     }
+  }
+
+  /** The retired timeline tool's landing: the suggestion's timed-shot text
+   *  parses into flow rows (same grammar compose emits) and appends to the
+   *  Flow box; the prompt recomposes. Reads state through setDraft so a
+   *  concurrent box edit can never be clobbered. */
+  const fillFlowFromSuggestion = () => {
+    if (!promptSuggestion) return
+    setDraft((current) => {
+      if (!current) return current
+      const base = current.promptMode === 'structured' && current.structured ? current.structured : parseStructuredPrompt(current.prompt)
+      const next: StructuredPromptDraft = { ...base, flow: [...base.flow, ...parseFlowRows(promptSuggestion)] }
+      return { ...current, promptMode: 'structured', structured: next, prompt: composeStructuredPrompt(next, { duration: current.duration }) }
+    })
+    setPromptSuggestion('')
   }
 
   // Vision captioning of a bound reference picture (the local vision model
@@ -252,25 +315,58 @@ export function PropertiesPanel() {
     <div className="canvas-inspector-body canvas-properties-body">
       <section className="canvas-properties-section" data-canvas-section="prompt">
         <label>Prompt <span className="canvas-properties-hint">// presets</span></label>
-        <SmartPromptEditor
-          ref={promptRef}
-          id={`canvas-prompt-${chain.id}`}
-          value={draft.prompt}
-          onChange={(prompt) => patch({ prompt })}
-          placeholder="Describe the shot… type // for production presets"
-          ariaLabel="Chain prompt"
-        />
+        {/* The structured ⇄ freeform toggle (fh94g76): a first-class co-equal
+            mode — same submit path, the concat contract keeps the engine
+            string identical. */}
+        <div className="canvas-properties-promptmode" role="radiogroup" aria-label="Prompt mode" data-canvas-prompt-mode={draft.promptMode}>
+          <button type="button" role="radio" aria-checked={draft.promptMode === 'freeform'} data-canvas-prompt-mode-toggle="freeform" className={draft.promptMode === 'freeform' ? 'active' : ''} onClick={() => setPromptMode('freeform')}>freeform</button>
+          <button type="button" role="radio" aria-checked={draft.promptMode === 'structured'} data-canvas-prompt-mode-toggle="structured" className={draft.promptMode === 'structured' ? 'active' : ''} onClick={() => setPromptMode('structured')}>structured</button>
+        </div>
+        {draft.promptMode === 'structured' ? (
+          <StructuredPromptEditor
+            draft={draft.structured ?? parseStructuredPrompt(draft.prompt)}
+            duration={draft.duration}
+            mode={mode}
+            noDialogue={draft.noDialogue}
+            composed={draft.prompt}
+            llmAvailable={llmAvailable}
+            llmStream={llmStream}
+            pinSources={{
+              characters: libraries.characters.map((character) => ({ id: character.id, name: character.name })),
+              assets: assets.map((asset) => ({ id: asset.id, label: asset.label, kind: asset.kind })),
+              identitySubjectText: chain.identity?.subjectText ?? '',
+            }}
+            notify={(tone, text) => useCanvasStore.getState().toast(tone, text)}
+            onChange={applyStructured}
+          />
+        ) : (
+          <SmartPromptEditor
+            ref={promptRef}
+            id={`canvas-prompt-${chain.id}`}
+            value={draft.prompt}
+            onChange={(prompt) => patch({ prompt })}
+            placeholder="Describe the shot… type // for production presets"
+            ariaLabel="Chain prompt"
+          />
+        )}
         {/* Phase 4 (§5.5 + L11): the prompt surfaces CreateView carried — the
-            local-LLM tools and the community prompt library, properties-side. */}
+            local-LLM tools and the community prompt library, properties-side.
+            In structured mode the boxes own their content (per-box assists
+            replace the whole-prompt tools); the timeline tool is retired into
+            the Flow box everywhere (2026-09-18, spec AC 4). */}
         <div className="canvas-properties-prompttools" data-canvas-prompt-tools>
-          <button type="button" data-canvas-prompt-tool="enhance" disabled={!llmAvailable || Boolean(promptingTool)} title={!llmAvailable ? 'Connect a local text model (llama.cpp router or Ollama) in Settings — nothing leaves this workstation' : 'Rewrite the prompt for stronger MiniMax video direction'} onClick={() => void runPromptTool('enhance')}>
-            {promptingTool === 'enhance' ? <LoaderCircle size={12} className="spin" /> : <WandSparkles size={12} />} enhance
-          </button>
-          <button type="button" data-canvas-prompt-tool="timeline" disabled={!llmAvailable || Boolean(promptingTool)} title={!llmAvailable ? 'Connect a local text model in Settings' : 'Add a concise sequence of timed shots'} onClick={() => void runPromptTool('timeline')}>
-            {promptingTool === 'timeline' ? <LoaderCircle size={12} className="spin" /> : <Clock3 size={12} />} timeline
-          </button>
-          <button type="button" data-canvas-prompt-tool="audio" disabled={!llmAvailable || Boolean(promptingTool)} title={!llmAvailable ? 'Connect a local text model in Settings' : 'Improve ambience, dialogue, and sound cues'} onClick={() => void runPromptTool('audio')}>
-            {promptingTool === 'audio' ? <LoaderCircle size={12} className="spin" /> : <Volume2 size={12} />} audio pass
+          {draft.promptMode === 'freeform' && (
+            <>
+              <button type="button" data-canvas-prompt-tool="enhance" disabled={!llmAvailable || Boolean(promptingTool)} title={!llmAvailable ? 'Connect a local text model (llama.cpp router or Ollama) in Settings — nothing leaves this workstation' : 'Rewrite the prompt for stronger MiniMax video direction'} onClick={() => void runPromptTool('enhance')}>
+                {promptingTool === 'enhance' ? <LoaderCircle size={12} className="spin" /> : <WandSparkles size={12} />} enhance
+              </button>
+              <button type="button" data-canvas-prompt-tool="audio" disabled={!llmAvailable || Boolean(promptingTool)} title={!llmAvailable ? 'Connect a local text model in Settings' : 'Improve ambience, dialogue, and sound cues'} onClick={() => void runPromptTool('audio')}>
+                {promptingTool === 'audio' ? <LoaderCircle size={12} className="spin" /> : <Volume2 size={12} />} audio pass
+              </button>
+            </>
+          )}
+          <button type="button" data-canvas-prompt-tool="timeline" disabled={!llmAvailable || Boolean(promptingTool)} title={!llmAvailable ? 'Connect a local text model in Settings' : 'Retired 2026-09-18: fills the structured editor\'s Flow box with timed beats (no longer appends prompt text)'} onClick={() => void runPromptTool('timeline')}>
+            {promptingTool === 'timeline' ? <LoaderCircle size={12} className="spin" /> : <Clock3 size={12} />} timeline → Flow
           </button>
           <button type="button" data-canvas-prompt-library title="Search public Civitai generation metadata for reusable prompts" onClick={() => setLibraryOpen(true)}>
             <Sparkles size={12} /> library
@@ -283,7 +379,11 @@ export function PropertiesPanel() {
             <textarea aria-label="Local prompt suggestion" value={promptSuggestion} readOnly rows={3} />
             <div className="canvas-prompt-suggestion-actions">
               <button type="button" onClick={() => setPromptSuggestion('')}>dismiss</button>
-              <button type="button" className="primary" onClick={() => { patch({ prompt: promptSuggestion }); setPromptSuggestion('') }}>use suggestion</button>
+              {promptingTool === 'timeline' || draft.promptMode === 'structured' ? (
+                <button type="button" className="primary" data-canvas-prompt-suggestion-flow onClick={fillFlowFromSuggestion}>fill Flow box</button>
+              ) : (
+                <button type="button" className="primary" onClick={() => { patch({ prompt: promptSuggestion }); setPromptSuggestion('') }}>use suggestion</button>
+              )}
             </div>
           </div>
         )}
@@ -536,7 +636,17 @@ export function PropertiesPanel() {
       </section>
 
     </div>
-      {libraryOpen && <PromptLibraryBrowser onClose={() => setLibraryOpen(false)} onInsert={(prompt) => { promptRef.current?.insert(prompt) }} />}
+      {libraryOpen && <PromptLibraryBrowser onClose={() => setLibraryOpen(false)} onInsert={(prompt) => {
+        // AC 5: in structured mode a library entry loads as a BOX-SET — the
+        // same best-effort parse the round-trip uses, append-merged so an
+        // insert can never drop existing box content.
+        if (draft.promptMode === 'structured' && draft.structured) {
+          applyStructured(mergeStructuredDraft(draft.structured, parseStructuredPrompt(prompt)))
+          useCanvasStore.getState().toast('neutral', 'Library entry parsed into the boxes — best-effort, nothing replaced.')
+        } else {
+          promptRef.current?.insert(prompt)
+        }
+      }} />}
       <footer className="canvas-properties-submit">
         <div className="canvas-properties-state">
           <span className="canvas-tile-ring" data-status={tile.status} /> {STATUS_LABEL[tile.status]}

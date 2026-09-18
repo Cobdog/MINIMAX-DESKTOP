@@ -100,6 +100,12 @@ const ROLE_MUSIC3_CAPTION = 'Improve the supplied music caption while keeping it
 const ROLE_CHAT_PROMPT = 'Act as a concise local creative copilot. Answer the request directly and help improve prompts for visual generation.'
 const ROLE_CHAT_IMAGE = 'Turn the request into one polished production-ready still-image prompt. Include subject, environment, composition, lens, lighting, texture, color, and exclusions when useful. Do not include motion, sound, or multiple shots. Return only the prompt.'
 const ROLE_CHAT_VIDEO = 'Turn the request into one production-ready single-shot video prompt. Use this order: subject and starting state, environment, chronological action, framing and angle, lens, camera movement, lighting, visual treatment, continuity, and ambient sound. Avoid cuts and montages. Return only the prompt.'
+// Structured H3 prompt editor (fh94g76) — per-box assists + the reviewed
+// freeform→boxes distill. Box scope arrives through the request's
+// instructions layer (buildBoxAssistContext); these roles pin the shape.
+const ROLE_BOX_DISTILL = 'Turn the supplied rough notes into polished content for ONE box of a structured MiniMax H3 video prompt, staying inside that box\'s dimension. Return only the finished box text — no preamble, no quotes, no markdown, no other boxes\' content.'
+const ROLE_BOX_ENHANCE = 'Rewrite the supplied box content in guide-correct MiniMax H3 vocabulary, preserving every concrete fact, name, and quoted byte. Return only the finished box text.'
+const ROLE_PARSE_STRUCTURED = 'Split the supplied freeform MiniMax H3 video prompt into the structured box fields exactly as the schema defines. Every fact in the prompt must survive in exactly one field — never invent, summarize, translate, or drop content.'
 
 // Layer 3 — output_format rows for the studio's target engines.
 const OF_MINIMAX_H3 = 'Write natural production language in this order when relevant: subject/identity, starting state, environment, literal chronological action, shot size, camera angle, lens/depth of field, camera movement, lighting, visual treatment, continuity, dialogue, ambient sound/effects, and reference assignments. Depict the finished shot as vivid, chronological prose.'
@@ -144,6 +150,10 @@ export const SEED_FRAGMENT_ROWS: FragmentRow[] = [
   row('factory:role:task:timeline:family:minimax-h3', 'role', ROLE_TIMELINE_H3, { task: 'timeline', targetFamily: 'minimax-h3' }),
   row('factory:role:task:audio:family:minimax-h3', 'role', ROLE_AUDIO_H3, { task: 'audio', targetFamily: 'minimax-h3' }),
   row('factory:role:task:shot:family:minimax-h3', 'role', ROLE_SHOT_H3, { task: 'shot', targetFamily: 'minimax-h3' }),
+  // role — structured H3 prompt editor tasks (fh94g76).
+  row('factory:role:task:box-distill:family:minimax-h3', 'role', ROLE_BOX_DISTILL, { task: 'box-distill', targetFamily: 'minimax-h3' }),
+  row('factory:role:task:box-enhance:family:minimax-h3', 'role', ROLE_BOX_ENHANCE, { task: 'box-enhance', targetFamily: 'minimax-h3' }),
+  row('factory:role:task:parse-structured:family:minimax-h3', 'role', ROLE_PARSE_STRUCTURED, { task: 'parse-structured', targetFamily: 'minimax-h3' }),
   row('factory:role:task:music3-caption:family:music3', 'role', ROLE_MUSIC3_CAPTION, { task: 'music3-caption', targetFamily: 'music3' }),
   row('factory:role:task:chat-prompt', 'role', ROLE_CHAT_PROMPT, { task: 'chat-prompt' }),
   row('factory:role:task:chat-image', 'role', ROLE_CHAT_IMAGE, { task: 'chat-image' }),
