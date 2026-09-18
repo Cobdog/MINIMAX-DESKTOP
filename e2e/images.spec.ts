@@ -331,6 +331,11 @@ test('a generation lands as ONE take whose artifacts are the packet frames (fake
   } finally {
     await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
     await request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
+    // Remove the dummy model files: the shared test-home must return to its
+    // EMPTY-model-roots state — the first-run-guidance e2e keys on it (the
+    // QOL wave's precondition). Scratch this test created, in a gitignored
+    // tree, removed by the same test.
+    await import('node:fs').then((fs) => { fs.rmSync(modelRoot, { recursive: true, force: true }) })
     await new Promise<void>((resolve) => engine.close(() => resolve()))
   }
 })
