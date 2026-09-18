@@ -93,7 +93,7 @@ export const SCENARIOS: VisionScenario[] = [
   {
     // QOL wave (rrxlw2r) — the shared surface switcher: registry-driven nav
     // chrome in BOTH titlebars. DOM truth asserted before each capture: the
-    // registered surfaces (canvas + datasets today), the active one marked.
+    // registered surfaces (canvas + datasets + images — k9vu6t0 appended the images entry), the active one marked.
     id: 'surface-switcher',
     label: 'Surface switcher — registry-driven nav in both titlebars (QOL wave)',
     run: async (page) => {
@@ -102,7 +102,8 @@ export const SCENARIOS: VisionScenario[] = [
       await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
       const switcher = page.locator('[data-surface-switcher]')
       await expect(switcher).toBeVisible()
-      await expect(switcher.locator('[data-surface]')).toHaveCount(2)
+      // k9vu6t0: the images workbench appended its registry entry — three now.
+      await expect(switcher.locator('[data-surface]')).toHaveCount(3)
       await expect(switcher.locator('[data-surface="canvas"]')).toHaveAttribute('aria-current', 'page')
       await page.waitForTimeout(400)
     },
@@ -112,7 +113,7 @@ export const SCENARIOS: VisionScenario[] = [
         label: 'Canvas titlebar — the surface switcher leads (canvas active)',
         rubric: [
           SHELL_CONTEXT,
-          'The titlebar\'s LEFT EDGE carries the surface switcher: a compact rounded-border pill group with two linked pills — "canvas" (with a small frame icon, highlighted as the active surface: brighter text on a raised background with a thin inner outline) and "datasets" (with a small database icon, muted). It sits BEFORE the canvas tabs and must not overlap them.',
+          'The titlebar\'s LEFT EDGE carries the surface switcher: a compact rounded-border pill group with three linked pills — "canvas" (with a small frame icon, highlighted as the active surface: brighter text on a raised background with a thin inner outline), "datasets" (with a small database icon, muted), and "images" (with a small image icon, muted — the H3 Image Workbench entry, k9vu6t0). It sits BEFORE the canvas tabs and must not overlap them.',
           'The switcher reads as one coherent control: same pill height, consistent 12px-scale labels, hover affordance is fine. Muted-but-readable labels are the app\'s dense design language — not a contrast defect.',
           'Defects to flag: pills of visibly different heights or misaligned baselines, the group overlapping the canvas tabs or radar, a pill clipped by the viewport edge, an ACTIVE state that is indistinguishable from the inactive one at a glance.',
         ].join(' '),
@@ -129,7 +130,7 @@ export const SCENARIOS: VisionScenario[] = [
         label: 'Datasets titlebar — the same switcher, datasets active (no one-way back link)',
         rubric: [
           'Context: a dark-theme desktop studio app at 1920x1080 on the datasets surface — a full-screen workbench, NOT the canvas: no dotted-grid infinite canvas, no canvas tabs.',
-          'The titlebar leads with "Dataset manager" brand text (database icon), immediately followed by the SAME surface-switcher pill group seen on the canvas titlebar — here "datasets" is the highlighted/active pill and "canvas" is the muted link that returns to the canvas. There is NO "← canvas" text link anymore (replaced by the switcher — its absence is the design, not a regression).',
+          'The titlebar leads with "Dataset manager" brand text (database icon), immediately followed by the SAME surface-switcher pill group seen on the canvas titlebar — here "datasets" is the highlighted/active pill; "canvas" and "images" are the muted links ("images" opens the H3 Image Workbench, k9vu6t0). There is NO "← canvas" text link anymore (replaced by the switcher — its absence is the design, not a regression).',
           'Tab pills (library active, dashboard, export, trash) sit to the right of the switcher without overlap.',
           'Defects to flag: the switcher missing from this titlebar, both pills looking active or both muted, overlap between the switcher and the brand text or tab pills.',
         ].join(' '),
@@ -805,6 +806,108 @@ export const SCENARIOS: VisionScenario[] = [
           'A thin animated progress bar may also glow along the tile’s bottom — intended.',
           'The status must be MID-RENDER: the tile must NOT read idle/stale/failed, must NOT show a take strip with a canonical take, and the canvas around it is otherwise calm (launcher bar present, no error toasts).',
           'Defects to flag: a black/empty media area with NO painted frame, a readout missing the percent, a readout showing a terminal or queued-only label (like "Waiting for ComfyUI to start"), overlapping readout text, or the tile clipped by the viewport.',
+        ].join(' '),
+      },
+    ],
+  },
+  {
+    // H3 Image Workbench (k9vu6t0): the required NEW vision scenario — the
+    // workbench surface at ?images=1 at 1080p: mode rail + preview + the
+    // 9-slot reference strip, one checkpoint, DOM-truth asserted at capture.
+    id: 'h3-image-workbench',
+    label: 'H3 Image Workbench — the compose surface (mode rail, preview, 9-slot ref strip) at 1080p',
+    run: async (page) => {
+      // Seed one session chain + one landed packet take through the same
+      // documents API the landing loop writes (DOM truth before capture).
+      const project = await (await page.request.post('/api/lan/documents/projects', { data: { name: 'IW vision' } })).json()
+      const chain = await (await page.request.post('/api/lan/documents/chains', {
+        data: {
+          projectId: project.project.id,
+          kind: 'h3img',
+          settings: {
+            family: 'h3img.compose.refs',
+            intent: 'a lone hiker on a granite ridge at dawn, layered mist below',
+            tier: 5,
+            keepDial: 0.55,
+            seed: 90210,
+            resolution: '1344x768',
+            loras: [],
+            refs: [
+              { id: 'r1', role: 'subject', transport: null, keepOverride: null, note: '', source: { kind: 'file', path: '/nonexistent/identity.png', name: 'identity.png' } },
+              { id: 'r2', role: 'pose', transport: 'semantic', keepOverride: null, note: '', source: { kind: 'file', path: '/nonexistent/pose.png', name: 'pose.png' } },
+              { id: 'r3', role: 'lighting', transport: null, keepOverride: null, note: '', source: { kind: 'file', path: '/nonexistent/lighting.png', name: 'lighting.png' } },
+            ],
+            semanticOverflow: false,
+            framePicks: {},
+            refineEngine: '',
+            poserigInbox: null,
+          },
+        },
+      })).json()
+      const output = await (await page.request.post('/api/lan/documents/outputs', { data: { chainId: chain.chain.id, substrates: ['decoded'] } })).json()
+      const frames = [
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==',
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M/wHwAEAQH/cetH5QAAAABJRU5ErkJggg==',
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYPj/HwADAgH/5ncLrgAAAABJRU5ErkJggg==',
+      ]
+      const artifacts: string[] = []
+      for (let index = 0; index < frames.length; index += 1) {
+        const ingested = await (await page.request.post('/api/lan/documents/blobs/ingest', { data: { data: frames[index], name: `iw-vision-frame-${index}.png`, kind: 'image' } })).json()
+        artifacts.push(ingested.path)
+      }
+      await page.request.post('/api/lan/documents/takes', {
+        data: {
+          outputId: output.output.id,
+          jobId: null,
+          artifacts,
+          metrics: {
+            kind: 'image',
+            duration: 0,
+            width: 1344,
+            height: 768,
+            sourcePath: artifacts[0],
+            h3img: {
+              family: 'h3img.generate.packet',
+              profile: 'packet',
+              tier: 5,
+              frames: 3,
+              prompt: 'the generated contract text',
+              refs: [],
+              loras: [],
+              seed: 90210,
+              resolution: '1344x768',
+              hybrid: true,
+              scorer: { bestIndex: 1, reason: 'sharpest of the pool', metricBasis: 'pixel metrics only' },
+              canonicalFrameIndex: 1,
+            },
+          },
+        },
+      })
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [project.project.id], activeProject: project.project.id } })
+      await page.goto('/?images=1')
+      await expect(page.locator('[data-iw-root]')).toBeVisible()
+      await expect(page.locator('[data-iw-root][data-iw-family="h3img.compose.refs"]')).toBeVisible()
+      await expect(page.locator('[data-iw-ref-count]')).toHaveText('3/9')
+      await expect(page.locator('[data-iw-ref-slot]')).toHaveCount(3)
+      await expect(page.locator('[data-iw-frame]')).toHaveCount(3)
+      await expect(page.locator('[data-iw-preview-image]')).toBeVisible()
+      await page.waitForTimeout(400)
+    },
+    after: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
+    },
+    checkpoints: [
+      {
+        id: 'h3-image-workbench-compose-1080p',
+        label: 'H3 Image Workbench — compose mode: mode rail, preview canvas with picked frame + scorer verdict, 9-slot reference strip',
+        drive: async () => undefined,
+        rubric: [
+          'Context: a dark-theme desktop studio app at 1920x1080 on the ?images=1 route — a DEDICATED full-screen image workbench (a different surface from the canvas): its own slim TITLEBAR reading "H3 Image Workbench" with a "canvas" back link at the left, an engine status chip at the right reading "engine offline" (offline is CORRECT in tests — intended, not a defect), and a muted family label.',
+          'MODE RAIL under the titlebar: text-mode buttons Generate / Compose / Edit / Refine / Burst / Exit, with COMPOSE highlighted in the accent color.',
+          'MAIN AREA split: a large PREVIEW region on the left (a framed panel with a small colored square image — a 1x1 pixel test PNG scaled, blocky is EXPECTED — and beneath its bottom edge a muted caption line mentioning the packet family, "frame 2/3", a scorer verdict chip naming the sharpest pick, and the caption row is thin and muted by design), and a CONTROLS column on the right (~320px) containing: an "INTENT" textarea with the hiker prompt text, a collapsible "Ownership contract (generated — never hand-written)" section, a "REFERENCES" block with a "3/9" counter, a short muted note starting "9 native references", THREE small reference-slot rows each with a role select and transport select, an "add image" / "from canvas" / "from pose rig" button row, a "Keep unspecified traits" slider with a numeric value like 0.55, LoRA slots section, resolution + seed fields, a semantic-overflow checkbox labeled experimental, and a green-accented "Generate (5-frame packet)" button.',
+          'FOOTER TAKE STRIP along the bottom: one take card labeled "5-frame" with a "canonical" marker and THREE small frame thumbnails in a row, the middle one highlighted with an accent border and a small star badge (the scorer pick).',
+          'Blessings: dimmed/muted sub-labels, 10px dense text, disabled refine/burst buttons (engine offline / experiment gates — intended), and the tiny scaled test PNG in the preview are all the intended design, not defects.',
+          'Defects to flag: no mode rail, no preview panel, an empty take strip, reference slots overlapping or clipped, the controls column cut off at the right edge, any pure-white or dead-black region.',
         ].join(' '),
       },
     ],

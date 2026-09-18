@@ -98,6 +98,7 @@ function shaLike(value: string): boolean {
 
 export const FETCH_CATALOG: FetchCatalogEntry[] = [
   nodePackEntry('minimax-h3-turbo'),
+  nodePackEntry('h3-hybrid-loader'),
   nodePackEntry('krea2-controlnet'),
   nodePackEntry('h3-audio-t8'),
   nodePackEntry('krea2edit'),
@@ -259,6 +260,27 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
     sizeClass: 'huge',
     optional: true,
     homepage: 'https://huggingface.co/smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models',
+  },
+
+  // ---- H3 Image Workbench (k9vu6t0, spec §10 provisioning lanes) ---------
+  // The T=1 Fast profile's decoder. On THIS box it is provisioned-on-box
+  // (consolidated into the central model home — the provisioning lane the
+  // spec names); this row is the fetch lane for other machines.
+  {
+    id: 'mamad8-t1-image-vae',
+    name: 'Mamad8 MiniMax-H3 T=1 image VAE (step1597)',
+    group: 'weights',
+    description: 'The single-frame decoder the H3 Image Workbench\'s T=1 Fast profile pins: H3 encoder frozen, decoder + post_quant_conv fine-tuned to reconstruct from one temporal latent (30.44 dB PSNR / 0.9393 SSIM class; soft on fine text, hair, foliage — the profile\'s labeled ceiling). NEVER substitutes into multi-frame video graphs: a factory-level guard rejects it there.',
+    licenseSpdx: 'MiniMax H3 Community License',
+    licenseNote: 'A MiniMax-H3 derivative — the model card states usage "remains subject to the applicable MiniMax H3 license and terms" (no separate grant; verified on the HF page 2026-09-18). Same license class as the source H3 checkpoints, docs/LICENSES.md §5.',
+    licenseUrl: 'https://huggingface.co/Mamad8/MiniMax-H3-Image-VAE',
+    source: { kind: 'hf', repo: 'Mamad8/MiniMax-H3-Image-VAE', revision: { kind: 'branch', value: 'main' } },
+    destination: { kind: 'model-root', root: 'vae' },
+    files: [{ path: 'minimax_h3_t1_image_vae_step1597.safetensors', sizeBytes: 5_207_808_784, sha256: '6c3d0bfa055986a803a566a862fcde283a1e63db62829e5ef4a2a5aebf50bb86' }],
+    detectGlob: '*t1_image_vae*',
+    sizeBytes: 5_207_808_784,
+    sizeClass: 'huge',
+    homepage: 'https://huggingface.co/Mamad8/MiniMax-H3-Image-VAE',
   },
 
   // ---- Experiment prerequisites: preprocessor weights --------------------

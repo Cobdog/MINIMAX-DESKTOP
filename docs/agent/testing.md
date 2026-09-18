@@ -21,7 +21,7 @@ TMPDIR=/home/agent/tmp-gpu pnpm gate
 
 Runs the entire verification chain in canonical order — `typecheck` →
 `lint` → `license:audit` → unit suites (`test`, `test:registry`,
-`test:storage`, `test:realtime`, `test:filmstrip`, `test:llm`,
+`test:h3img`, `test:storage`, `test:realtime`, `test:filmstrip`, `test:llm`,
 `test:engine`, `test:runtime`, `test:fetcher`, `test:lora-form`,
 `test:poserig`, `test:camera`, `test:datasets`) → `build` → `smoke:server`
 → e2e → vision-capture — each in its own process, wall-clock timed,
@@ -35,6 +35,12 @@ same chain without the harness niceties. Individual suites run directly
   against golden fixtures — regenerate deliberately
   (`node scripts/test-registry.cjs --update-golden`) and review the diff;
   the fixture IS the contract.
+- `test:h3img` (k9vu6t0) proves the H3 image workbench families: golden
+  snapshots (`node scripts/test-h3img.cjs --update-golden`), the
+  research-pinned recipe table, the Mamad8 never-in-video-graphs factory
+  guard (with the failing-without-it proof), the first-party scorer on
+  crafted frames, the burst-fuse never-worse fallback + tone-lock DSP, VRAM
+  staging plans, and the session model's packet-take projections.
 - `test:lora-form` needs `python3` + `numpy` (skips loudly without python,
   fails loudly with python but no numpy).
 - `test:datasets` (sv14rt0) boots the built server on a scratch home and

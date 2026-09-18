@@ -114,6 +114,21 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     homepage: 'https://github.com/Larryvrh/ComfyUI-MiniMax-H3-Turbo',
   },
   {
+    // H3 Image Workbench (k9vu6t0, spec §4/§10 — decision 10: the hybrid
+    // profile is a RUNTIME merge, one mmap per checkpoint, no duplicated
+    // multi-GB files). MIT (LICENSE.txt read from the canonical shared
+    // install clone at this exact rev, 2026-09-18).
+    id: 'h3-hybrid-loader',
+    name: 'ComfyUI_MinimaxH3HybridLoader',
+    description: 'scottmudge\'s hybrid loader for MiniMax H3: overlays selected tensor groups of one checkpoint onto another AT LOAD (MiniMaxH3HybridLoader, block_range_adaln 25..49 = the b25-49 fl2va+ref2va hybrid the H3 Image Workbench packet/T=1 profiles run on). One mmap per checkpoint — no pre-merged duplicate on disk; behaves exactly like the stock loader when the preset is "none".',
+    repoUrl: 'https://github.com/scottmudge/ComfyUI_MinimaxH3HybridLoader',
+    pinnedRevision: 'a44c69b02242e41fbd01e22abe2a492adc853038',
+    licenseSpdx: 'MIT',
+    licenseNote: 'MIT (LICENSE.txt in the repo, read from the canonical shared install at this rev, 2026-09-18). Vendor-eligible; user-fetch until a vendoring increment is wanted (the Larryvrh posture).',
+    installMode: 'user-fetch',
+    homepage: 'https://github.com/scottmudge/ComfyUI_MinimaxH3HybridLoader',
+  },
+  {
     id: 'krea2-controlnet',
     name: 'comfyui-krea2-controlnet',
     description: 'facok\'s Krea 2 ControlNet-LoRA pack (depth structure lock for Krea 2 regeneration). The repo carries NO license file — all-rights-reserved by default — so it is never vendored and only ever installed into your own instance from a local copy, with your consent.',

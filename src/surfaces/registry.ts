@@ -21,7 +21,7 @@
  */
 import { lazy } from 'react'
 import type { ComponentType, LazyExoticComponent } from 'react'
-import { Database, Frame } from 'lucide-react'
+import { Database, Frame, ImagePlus } from 'lucide-react'
 
 export type Surface = {
   /** Stable id (also the switcher's data-surface value). */
@@ -45,6 +45,12 @@ export type Surface = {
 // The dataset manager (sv14rt0): own surface at ?datasets=1.
 const DatasetsApp = lazy(() => import('../datasets/DatasetsApp').then((m) => ({ default: m.DatasetsApp })))
 
+// H3 Image Workbench (k9vu6t0, spec docs/specs/image-workbench-v1.md): own
+// surface at ?images=1 — compose/edit/refine images on H3, then hand them
+// to video as start frames. The session is a canvas chain of kind 'h3img'
+// in the active project; the canvas handoffs are explicit actions.
+const WorkbenchApp = lazy(() => import('../images/WorkbenchApp').then((m) => ({ default: m.WorkbenchApp })))
+
 // Canvas Phase 5 (7mcp11b): the canvas IS the app — the default route.
 // ?canvas=1 stays a harmless alias (matches() never requires it).
 const CanvasApp = lazy(() => import('../canvas/CanvasApp').then((m) => ({ default: m.CanvasApp })))
@@ -54,6 +60,7 @@ const CanvasApp = lazy(() => import('../canvas/CanvasApp').then((m) => ({ defaul
 export const SURFACES: Surface[] = [
   { id: 'canvas', label: 'Canvas', short: 'canvas', href: '/', icon: Frame, default: true, matches: () => true, component: CanvasApp },
   { id: 'datasets', label: 'Dataset manager', short: 'datasets', href: '/?datasets=1', icon: Database, matches: (params) => params.get('datasets') === '1', component: DatasetsApp },
+  { id: 'images', label: 'Image workbench', short: 'images', href: '/?images=1', icon: ImagePlus, matches: (params) => params.get('images') === '1', component: WorkbenchApp },
   // ← APPEND new surfaces above this line (see the header's append-point note).
 ]
 

@@ -1,6 +1,6 @@
 import type { GenerationOptions, ModelSelection, UploadedFile } from '../types'
 import type { ObjectInfo } from './comfyInfo'
-import { createGraphContext, findOptimization, H3, resolveTurboPlan, upscaleEntryFor } from './graph'
+import { assertNoT1ImageVaeInVideoGraph, createGraphContext, findOptimization, H3, resolveTurboPlan, upscaleEntryFor } from './graph'
 import type { ComfyPrompt, Link, TransformOptions } from './graph'
 
 // The graph data model + optimization registry live in ./graph; the type is
@@ -89,6 +89,12 @@ export function buildMiniMaxWorkflow(
   }
 
   const frames = frameCount(options.duration)
+  // FACTORY GUARD (H3 Image Workbench spec AC8): the Mamad8 T=1 image VAE is
+  // pinned to single-frame graphs. Any video-frame-count graph referencing it
+  // is a factory validation error — the constraint is enforced here, at the
+  // video factory, not documented away (multi-frame decode through it
+  // regresses with patch-grid ghosting and cross-frame mixing).
+  assertNoT1ImageVaeInVideoGraph(models.videoVae, frames)
   const ctx = createGraphContext(prompt, H3.unet, {
     previewVae: models.previewVae,
     frameCount: frames,
@@ -333,6 +339,42 @@ export function extractOutputUrl(history: Record<string, unknown>, promptId: str
   const query = new URLSearchParams({ filename: file.filename, subfolder: file.subfolder ?? '', type: file.type ?? 'output' })
   const upstream = `${comfyUrl.replace(/\/+$/, '')}/view?${query.toString()}`
   return `minimax-media://comfy?url=${encodeURIComponent(upstream)}`
+}
+
+/** EVERY output file of one media type a finished prompt reported, ordered
+ *  by node id then filename — the packet-frame attribution (the H3 image
+ *  workbench's per-frame publish nodes each save one frame; landing collects
+ *  them all, never just the first). */
+export function extractAllOutputFiles(history: Record<string, unknown>, promptId: string, mediaType: 'video' | 'audio' | 'image' = 'image'): ComfyOutputFile[] {
+  const entry = history[promptId] as { outputs?: Record<string, Record<string, unknown>> } | undefined
+  if (!entry?.outputs) return []
+  const expected = mediaType === 'audio' ? /\.(flac|wav|mp3|ogg|m4a|aac|opus)$/i : mediaType === 'image' ? /\.(png|jpe?g|webp)$/i : /\.(mp4|webm|mov|mkv|gif)$/i
+  const files: Array<{ node: string; file: ComfyOutputFile }> = []
+  for (const nodeId of Object.keys(entry.outputs).sort()) {
+    const visit = (value: unknown) => {
+      if (Array.isArray(value)) {
+        value.forEach(visit)
+        return
+      }
+      if (!value || typeof value !== 'object') return
+      const object = value as Record<string, unknown>
+      if (typeof object.filename === 'string' && expected.test(object.filename)) {
+        files.push({
+          node: nodeId,
+          file: {
+            filename: object.filename,
+            subfolder: typeof object.subfolder === 'string' ? object.subfolder : undefined,
+            type: typeof object.type === 'string' ? object.type : undefined,
+          },
+        })
+      }
+      Object.values(object).forEach(visit)
+    }
+    visit(entry.outputs[nodeId])
+  }
+  return files
+    .sort((a, b) => (a.node === b.node ? a.file.filename.localeCompare(b.file.filename) : a.node.localeCompare(b.node, undefined, { numeric: true })))
+    .map((item) => item.file)
 }
 
 /** Recovers the output descriptor encoded in a minimax-media://comfy URL that
