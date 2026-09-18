@@ -236,7 +236,10 @@ export async function submitH3Render(
     // take-landing path reads them to persist forkable latent provenance.
     if (request.chain) manifest.motionContext = { folder: request.chain.folder, clipIndex: request.chain.index }
     if (request.manifestExtra) Object.assign(manifest, request.manifestExtra)
-    const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, facts.clientId)
+    // livePreview rides the submission (the server asks the engine for
+    // native sampler previews via extra_data.preview_method); clientId stays
+    // for interface compatibility — the server pins its own session id.
+    const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, facts.clientId, request.livePreview.enabled)
     if (io.cancellationRequests.current.has(localId)) {
       await window.minimax.cancelPrompt(settings.comfyUrl, response.prompt_id)
       io.setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'cancelled', error: undefined } : item))

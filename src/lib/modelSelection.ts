@@ -18,7 +18,13 @@ export function inferSelections(files: ModelFile[], turbo: 'off' | '4' | '8', fa
     textEncoder: find('text_encoders', [/^qwen3vl_32b_minimax_h3_nvfp4_awq\.safetensors$/i, /^qwen3vl_32b_minimax_h3.*\.safetensors$/i]),
     videoVae: find('vae', [/^minimax_h3_video_vae_fp16\.safetensors$/i, /^minimax_h3_video_vae.*\.safetensors$/i]),
     audioVae: find('vae', [/^minimax_h3_audio_vae_fp32\.safetensors$/i, /^minimax_h3_audio_vae.*\.safetensors$/i]),
-    previewVae: find('vae_approx', /^taeh3_decoder\.safetensors$/i),
+    // The H3 preview TAE ships under two names: Kijai's original
+    // vae_approx/taeh3.safetensors (the fetchable catalog entry) and the
+    // preview-override pack's taeh3_decoder.safetensors. The engine's native
+    // previewer matches any vae_approx file starting with "taeh3" — this
+    // selection feeds the graph-side override node, so both names resolve
+    // (the explicit decoder name stays preferred).
+    previewVae: find('vae_approx', [/^taeh3_decoder\.safetensors$/i, /^taeh3\.safetensors$/i]),
     // Turbo inference is family-ranked through the optimization registry:
     // official weights first, then lightx2v newest-first, with an explicit
     // family choice (registry entry id) constraining the patterns to it.

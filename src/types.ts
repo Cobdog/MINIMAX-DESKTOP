@@ -712,7 +712,10 @@ export type DesktopApi = {
   chooseMedia(type: MediaKind): Promise<{ path: string; name: string } | null>
   scanModels(settings: AppSettings): Promise<ModelFile[]>
   getComfyStatus(url: string): Promise<ComfyStatus>
-  submitPrompt(url: string, prompt: unknown, clientId?: string): Promise<{ prompt_id: string; number?: number; node_errors?: unknown }>
+  /** clientId is accepted for interface compatibility but ignored by the
+   *  server: submissions carry the server's own stable engine-session id
+   *  (F6 Option A). livePreview asks for native sampler previews. */
+  submitPrompt(url: string, prompt: unknown, clientId?: string, livePreview?: boolean): Promise<{ prompt_id: string; number?: number; node_errors?: unknown }>
   getHistory(url: string, promptId: string): Promise<Record<string, unknown>>
   cancelPrompt(url: string, promptId: string): Promise<{ cancelled: boolean; state: 'running' | 'pending' | 'finished' | 'unknown' }>
   uploadInput(url: string, filePath: string): Promise<UploadedFile>

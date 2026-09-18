@@ -2199,6 +2199,22 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
         useCanvasStore.getState().recompute()
         return { ok: true, chainId: tile.id, jobId }
       }
+      if (name === 'live-progress') {
+        // F6 seam: park a RUNNING job with a promptId on the first seed
+        // chain — the fabric's live events for that promptId then drive the
+        // tile's progress readout and preview painter exactly as a real
+        // engine submission would (the e2e fake engine emits them targeted).
+        const tile = state.tiles.find((entry) => entry.kind === 'seed' && !entry.jobId)
+        if (!tile) return { ok: false, reason: 'no unlinked seed chain' }
+        const jobId = `${CANVAS_MOCK_JOB_PREFIX}${tile.id}`
+        useCanvasStore.setState((current) => ({ chainJobs: { ...current.chainJobs, [tile.id]: jobId } }))
+        useJobsStore.getState().setJobs((jobs) => [...jobs.filter((job) => job.id !== jobId), {
+          id: jobId, mode: 'text', prompt: tile.prompt, createdAt: Date.now(), status: 'running', progress: 4, progressLabel: 'Waiting for ComfyUI to start', promptId: 'e2e-live-1',
+          width: 1344, height: 768, duration: 6, provider: 'minimax', mediaType: 'video', manifest: { canvasPhase2Mock: true },
+        }])
+        useCanvasStore.getState().recompute()
+        return { ok: true, chainId: tile.id, jobId }
+      }
       if (name === 'complete-mock') {
         // Complete the first linked job using the first media take's real
         // stored source — exercises the REAL completion landing path.

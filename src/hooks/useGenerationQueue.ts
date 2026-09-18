@@ -66,7 +66,18 @@ export function useGenerationQueue(options: {
 
   const onLiveProgress = useCallback((id: string, update: LiveProgress) => {
     if (!id) return
-    setJobs((current) => current.map((j) => j.promptId === id && ['running', 'queued'].includes(j.status) ? { ...j, ...update, progress: update.progress ?? j.progress, status: 'running' } : j))
+    // The fabric's LiveProgress speaks `label`; the job record's field is
+    // `progressLabel` — mapping explicitly (a bare spread dropped the label,
+    // freezing tiles at "Waiting for ComfyUI to start" while progress ticked;
+    // caught by the F6 live-progress e2e).
+    setJobs((current) => current.map((j) => j.promptId === id && ['running', 'queued'].includes(j.status) ? {
+      ...j,
+      progress: update.progress ?? j.progress,
+      progressLabel: update.label || j.progressLabel,
+      currentStep: update.currentStep ?? j.currentStep,
+      totalSteps: update.totalSteps ?? j.totalSteps,
+      status: 'running',
+    } : j))
   }, [setJobs])
 
   // Persistence is debounced (1 s trailing): during a live render the poll
