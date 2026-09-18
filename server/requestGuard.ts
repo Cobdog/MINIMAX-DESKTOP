@@ -70,6 +70,18 @@ export function isSameOrigin(request: IncomingMessage, socketEncrypted: boolean,
   return origin.trim().toLowerCase() === `${scheme}://${hostHeader.trim().toLowerCase()}`
 }
 
+/** True ONLY when the request proves it is the studio's own UI: the Origin
+ *  header must be PRESENT and same-origin with the request's Host on the
+ *  socket's scheme. Stricter than `isSameOrigin` (which treats an absent
+ *  Origin as benign): consent RECORDING is a user-acknowledgement act, so a
+ *  raw peer with no Origin at all is not an acceptable author (fetch-consent
+ *  Option A, maintainer decision 2026-09-18). Cross-origin browsers were
+ *  already refused by the global gate; this closes the no-Origin path. */
+export function isUiOriginRequest(request: IncomingMessage, socketEncrypted: boolean): boolean {
+  if (request.headers.origin === undefined) return false
+  return isSameOrigin(request, socketEncrypted, request.headers.host ?? '')
+}
+
 /** True when a state-changing request's body declaration is JSON: either an
  *  explicit application/json content type, or no body at all (no content
  *  type, no chunked encoding, and content-length 0 or absent — a request

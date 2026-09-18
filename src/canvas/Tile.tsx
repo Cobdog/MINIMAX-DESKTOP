@@ -15,10 +15,13 @@
  * reason this component re-renders (op edits re-derive the tile too, which
  * is the live-update contract).
  */
-import { memo } from 'react'
+import { memo, useEffect, useRef } from 'react'
 import { Database, Film, GitFork, Lock, Star } from 'lucide-react'
 import { FilmstripPoster } from '../components/PooledVideoCard'
 import { useFilmstrip } from '../media/useFilmstrip'
+import type { PreviewMime } from '../types'
+import { onPreviewFrame } from '../lib/useRealtime'
+import { useJobsStore } from '../state/jobsStore'
 import { documentsApi } from './api'
 import { opPreviewStyle } from './ops'
 import type { ZoomBand } from './camera'
@@ -79,6 +82,61 @@ function TilePreview({ tile, previewUrl }: { tile: Tile; previewUrl?: string }) 
   </FilmstripPoster>
 }
 
+/** The live sampler-preview painter (F6): binary frames for one prompt key,
+ *  painted straight into an <img> — newest frame per animation frame, bytes
+ *  never entering React state and never persisted (frames are transient; the
+ *  landed take remains the only durable artifact). rAF coalescing IS the
+ *  bound: an off-screen or hidden tab simply stops painting. */
+function LiveFrame({ promptKey }: { promptKey: string }) {
+  const imageRef = useRef<HTMLImageElement | null>(null)
+  useEffect(() => {
+    let stopped = false
+    let raf = 0
+    let pending: { bytes: ArrayBuffer; mime: PreviewMime } | null = null
+    let url = ''
+    const stop = onPreviewFrame(promptKey, (bytes, mime) => {
+      if (stopped) return
+      // Last-frame-wins: a newer frame replaces any pending one outright.
+      pending = { bytes, mime }
+      if (!raf) {
+        raf = requestAnimationFrame(() => {
+          raf = 0
+          const next = pending
+          pending = null
+          if (!next || stopped) return
+          const previous = url
+          url = URL.createObjectURL(new Blob([next.bytes], { type: next.mime }))
+          if (imageRef.current) imageRef.current.src = url
+          if (previous) URL.revokeObjectURL(previous)
+        })
+      }
+    })
+    return () => {
+      stopped = true
+      if (raf) cancelAnimationFrame(raf)
+      stop()
+      if (url) URL.revokeObjectURL(url)
+    }
+  }, [promptKey])
+  return <img ref={imageRef} className="canvas-tile-live-frame" data-canvas-live-preview="" alt="" aria-hidden />
+}
+
+/** The generating tile's live readout: the linked job's progress percent +
+ *  label (job events through the realtime fabric) and the painter above.
+ *  Subscribes to the ONE job, so progress ticks re-render this component,
+ *  not the tile tree. */
+function TileLiveProgress({ jobId }: { jobId: string }) {
+  const job = useJobsStore((state) => state.jobs.find((item) => item.id === jobId && (item.status === 'running' || item.status === 'queued')) ?? null)
+  if (!job) return null
+  return <div className="canvas-tile-live" data-canvas-live={job.status}>
+    {job.promptId ? <LiveFrame promptKey={job.promptId} /> : null}
+    <div className="canvas-tile-live-readout" data-canvas-live-readout>
+      {job.progress > 0 ? <span className="canvas-tile-live-pct">{Math.round(job.progress)}%</span> : null}
+      {job.progressLabel ? <span className="canvas-tile-live-label">{job.progressLabel}</span> : null}
+    </div>
+  </div>
+}
+
 function TileBase({ tile, band, selected, previewUrl, onSelect, onDismissFailure, onEndpoint, onFork, onOpenOps, onSwitchTake }: {
   tile: Tile
   band: ZoomBand
@@ -126,6 +184,9 @@ function TileBase({ tile, band, selected, previewUrl, onSelect, onDismissFailure
 
     <div className="canvas-tile-media">
       <TilePreview tile={tile} previewUrl={previewUrl} />
+      {/* F6 live progress: percent + label + in-progress sampler frames on
+          the generating tile (nothing when the linked job is terminal). */}
+      {tile.jobId && (tile.status === 'running' || tile.status === 'queued-gpu') ? <TileLiveProgress jobId={tile.jobId} /> : null}
       {/* the status ring — on-object state, always visible in every band */}
       <span className="canvas-tile-ring" data-status={tile.status} aria-label={STATUS_LABEL[tile.status]} />
       {tile.status === 'running' && <span className="canvas-tile-progress" aria-hidden />}

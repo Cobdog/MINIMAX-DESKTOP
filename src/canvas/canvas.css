@@ -68,6 +68,16 @@
 .canvas-tile-progress { position: absolute; left: 10px; right: 10px; bottom: 8px; height: 3px; border-radius: 999px; background: color-mix(in srgb, var(--color-info) 22%, transparent); overflow: hidden; }
 .canvas-tile-progress::after { content: ''; position: absolute; inset: 0; width: 40%; border-radius: inherit; background: var(--color-info); animation: canvas-slide 1.2s ease-in-out infinite; }
 @keyframes canvas-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(320%); } }
+
+/* F6 live progress — in-progress sampler frames + the percent/label readout
+   on the generating tile. Frames are transient (never a take, never stored):
+   the painter swaps the <img> src at most once per animation frame. */
+.canvas-tile-live { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.canvas-tile-live-frame { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 8px; }
+.canvas-tile-live-frame:not([src]) { display: none; }
+.canvas-tile-live-readout { position: absolute; left: 8px; right: 8px; bottom: 16px; display: flex; align-items: baseline; gap: 7px; padding: 4px 9px; border: 1px solid color-mix(in srgb, var(--color-info) 38%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--surface-abyss) 80%, transparent); }
+.canvas-tile-live-pct { color: var(--color-info); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.canvas-tile-live-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-2); font-size: var(--text-2xs); }
 .canvas-tile-lock { position: absolute; top: 7px; right: 7px; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; background: color-mix(in srgb, var(--color-surface-abyss) 72%, transparent); color: var(--warning); }
 .canvas-tile-failure { position: absolute; left: 8px; right: 8px; bottom: 8px; display: flex; align-items: center; gap: 7px; padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--danger) 46%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--danger) 88%, transparent); color: var(--danger); font-size: var(--text-sm); }
 .canvas-tile-failure p { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

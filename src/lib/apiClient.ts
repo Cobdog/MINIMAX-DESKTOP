@@ -139,8 +139,13 @@ export function createWebApiClient(): DesktopApi {
     async getObjectInfo() {
       return apiFetch('/api/lan/object-info')
     },
-    async submitPrompt(_url: string, prompt: unknown, clientId?: string) {
-      return postJson('/api/lan/prompt', { prompt, clientId })
+    async submitPrompt(_url: string, prompt: unknown, _clientId?: string, livePreview?: boolean) {
+      // clientId is no longer forwarded: the server pins its own stable id
+      // (the realtime hub's engine session — F6 Option A), so page-generated
+      // ids cannot orphan targeted progress events anymore. livePreview asks
+      // the server to request native sampler previews for this prompt
+      // (extra_data.preview_method).
+      return postJson('/api/lan/prompt', livePreview === true ? { prompt, livePreview: true } : { prompt })
     },
     async getHistory(_url: string, promptId: string) {
       const body = await apiFetch<{ history?: Record<string, unknown> }>(`/api/lan/history/${encodeURIComponent(promptId)}`)

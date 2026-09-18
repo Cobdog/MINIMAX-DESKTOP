@@ -659,7 +659,7 @@ async function main() {
       const noConsent = await api('/api/lan/fetch/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'pack:krea2-controlnet' }) })
       ok(noConsent.status === 403 && /consent/i.test(noConsent.body.error), 'POST start without consent is a 403 with the reason')
 
-      const consented = await api('/api/lan/fetch/consent', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'pack:krea2-controlnet', consented: true }) })
+      const consented = await api('/api/lan/fetch/consent', { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ id: 'pack:krea2-controlnet', consented: true }) })
       ok(consented.status === 200, 'POST consent records the acknowledgement')
       const savedSettings = (await api('/api/lan/settings')).body.settings
       ok(savedSettings.fetch.consents['pack:krea2-controlnet']?.consented === true && savedSettings.fetch.consents['pack:krea2-controlnet']?.licenseSpdx === 'NO-LICENSE', 'the consent persists through normalizeSettings with its license')
@@ -678,7 +678,7 @@ async function main() {
 
       // Mismatch through the routes: wrong bytes in the mock → failed fetch,
       // nothing placed, honest note.
-      await api('/api/lan/fetch/consent', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'mlsd-annotator', consented: true }) })
+      await api('/api/lan/fetch/consent', { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ id: 'mlsd-annotator', consented: true }) })
       await api('/api/lan/fetch/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'mlsd-annotator' }) })
       await waitUntil(async () => {
         const state = await api('/api/lan/fetch/catalog')

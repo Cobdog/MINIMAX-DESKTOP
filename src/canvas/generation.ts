@@ -397,7 +397,12 @@ export function buildCanvasRenderRequest(
     referenceVideos: mode === 'reference' ? sources.referenceVideos ?? [] : [],
     referenceAudios: mode === 'reference' ? sources.referenceAudios ?? [] : [],
     timelineGuides: mode === 'reference' ? settings.timelineGuides : [],
-    livePreview: { enabled: false, mode: 'standard' },
+    // F6 (maintainer decision 2026-09-18): canvas renders request native
+    // sampler previews — the frames surface on the generating tile. Mode
+    // 'standard' is the engine-side vae_approx decode (taeh3 for H3); the
+    // 'h3-override' graph node remains the separate opt-in animated-preview
+    // path on the old surface.
+    livePreview: { enabled: true, mode: 'standard' },
     ...(chain ? { chain } : {}),
     filenamePrefix: `video/Canvas_H3_${Date.now()}`,
   }

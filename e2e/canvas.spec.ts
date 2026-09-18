@@ -1,7 +1,9 @@
 import fs from 'node:fs'
+import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { WebSocketServer } from 'ws'
 
 // Canvas Phase 2 (task flyuh6h) — the ?canvas=1 route against the production
 // build, ENGINE-INDEPENDENT by design: submission paths assert the honest
@@ -1666,5 +1668,75 @@ test('the mobile companion still boots, marked unmaintained (L10)', async ({ pag
   await expect(page.locator('main.mobile-app')).toBeVisible({ timeout: 15_000 })
   await expect(page.locator('.mobile-header')).toContainText('MiniMax Studio')
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('F6 live progress: targeted engine events + preview frames surface on the generating tile', async ({ page }) => {
+  const problems = await trackErrors(page)
+  // A fake engine speaking the REAL contract (verified against the installed
+  // ComfyUI source 2026-09-18): /ws?clientId=<sid> registers a session and
+  // mid-render events are TARGETED at the submitting session only. The app
+  // server's shared upstream pins its stable id, so these flow through the
+  // fabric to the page — proving the whole chain engine-free.
+  const engine = http.createServer((req, res) => { res.writeHead(404); res.end() })
+  const wss = new WebSocketServer({ noServer: true })
+  const seenClientIds: string[] = []
+  // A real decodable 64x36 gradient JPEG (teal→warm + a bright band) so the
+  // tile's <img> actually paints — and is VISIBLE (a 1x1 dark frame painted
+  // fine but read as an empty tile by the vision judge; DOM truth held).
+  const frameJpeg = Buffer.from('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAUDBAQEAwUEBAQFBQUGBwwIBwcHBw8LCwkMEQ8SEhEPERETFhwXExQaFRERGCEYGh0dHx8fExciJCIeJBweHx7/2wBDAQUFBQcGBw4ICA4eFBEUHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh7/wAARCAAkAEADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwCGO496sR3HvVpPA/i4ddJ/8mIv/iqmTwV4sHXSv/JiL/4qvosXm+Vy2xNP/wADj/mfD4XJsXHelL/wF/5FaO496sJce9Tp4N8VDrpf/kxH/wDFVKnhDxQOumf+R4//AIqvmsXj8BLatD/wJf5n0uFy2tHeD+5kUdx71YjuPenp4T8TDrpv/keP/wCKqVPC3iMddO/8jR//ABVfM4vEYWW1SP3o+kwuEcd0JHce9WI7j3pE8M+IR10//wAjR/8AxVTJ4c18dbH/AMjJ/wDFV81i/ZS2kvvPpMLTpx3aJB8XvDR/5c9W/wC/Uf8A8XTx8WvDZ/5c9V/79R//ABdfP0dx71PHce9fs+I8N8np/DGX/gR8Dh84xtTdr7j30fFbw6f+XTVP+/Uf/wAXTx8UvDx/5dNT/wC/af8AxdeDx3HvU6XHvXhYjgfLaeyf3nuYfEV6m57oPidoB6Wupf8AftP/AIunD4laCf8Al11H/v2n/wAXXiKXHvU6XHvXg4jhfB09k/vPdw9B1Nz2ofEbQz/y7ah/37T/AOKp4+IWiH/l3v8A/v2n/wAVXjUdx71PHce9eFiMno09rnuYfKaVTe55zG7etTxu3rRRX9P4xH5Hg1sWEdvWp43b1oor5TGH1ODWxYjduOanjdvWiivlcYj6rBosI7etTxu3rRRXymMR9Vg0f//Z', 'base64')
+  engine.on('upgrade', (request, socket, head) => {
+    const sid = new URL(request.url ?? '/', 'http://engine.local').searchParams.get('clientId') ?? ''
+    seenClientIds.push(sid)
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      // Start once per connection, then the sampling heartbeat — exactly the
+      // event stream a mid-render H3 sampler emits at its registered session.
+      ws.send(JSON.stringify({ type: 'execution_start', data: { prompt_id: 'e2e-live-1' } }))
+      const timer = setInterval(() => {
+        if (ws.readyState !== ws.OPEN) return
+        ws.send(JSON.stringify({ type: 'progress', data: { value: 11, max: 30, prompt_id: 'e2e-live-1' } }))
+        ws.send(Buffer.concat([Buffer.from([0, 0, 0, 1, 0, 0, 0, 1]), frameJpeg]))
+      }, 400)
+      ws.on('close', () => clearInterval(timer))
+    })
+  })
+  const enginePort = await new Promise<number>((resolve) => engine.listen(0, '127.0.0.1', () => resolve(engine.address().port)))
+
+  const settingsResponse = await page.request.get('/api/lan/settings')
+  const originalSettings = ((await settingsResponse.json()) as { settings: Record<string, unknown> }).settings
+  try {
+    await page.request.post('/api/lan/settings', { data: { settings: { ...originalSettings, comfyUrl: `http://127.0.0.1:${enginePort}` } } })
+    await resetSession(page)
+    await page.goto('/?canvas=1&probe=canvas')
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    await page.locator('[data-canvas-prompt]').fill('live progress probe shot')
+    await page.locator('[data-canvas-submit]').click()
+    const tile = page.locator('[data-canvas-tile]').first()
+    await expect(tile).toBeVisible({ timeout: 10_000 })
+    // Park a RUNNING job linked to the seed chain — the fabric's events for
+    // its promptId then drive the tile exactly as a real submission would.
+    const scenario = await page.evaluate(() => (window as unknown as { __canvasScenario(name: string): { ok: boolean; reason?: string } }).__canvasScenario('live-progress'))
+    expect(scenario.ok, scenario.reason).toBe(true)
+    await expect(tile).toHaveAttribute('data-tile-status', 'running')
+
+    // Progress reaches the tile: percent + label from the targeted events
+    // (11/30 → 34.8 → the readout rounds to 35%).
+    const readout = tile.locator('[data-canvas-live-readout]')
+    await expect(readout).toContainText('35%', { timeout: 15_000 })
+    await expect(readout).toContainText('Sampling · step 11 of 30')
+    // The preview frame PAINTS (a decodable image, blob-served).
+    const painted = tile.locator('[data-canvas-live-preview]')
+    await expect(painted).toBeVisible({ timeout: 15_000 })
+    await expect.poll(async () => painted.evaluate((element) => (element as HTMLImageElement).naturalWidth), { timeout: 15_000 }).toBeGreaterThan(0)
+    // The upstream registered a well-formed clientId — targeted delivery,
+    // not a broadcast accident.
+    expect(seenClientIds.length).toBeGreaterThan(0)
+    expect(seenClientIds[0]).toMatch(/^[a-f0-9-]{16,64}$/)
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    await page.request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
+    await resetSession(page).catch(() => undefined)
+    await new Promise<void>((resolve) => wss.close(() => resolve()))
+    await new Promise<void>((resolve) => engine.close(() => resolve()))
+  }
 })
 

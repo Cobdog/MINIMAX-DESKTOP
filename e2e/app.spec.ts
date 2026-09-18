@@ -1,4 +1,7 @@
+import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
 import { expect, test, type Page } from '@playwright/test'
 
 // Canvas Phase 5 (task 7mcp11b): the old shell is DELETED — the canvas is the
@@ -505,4 +508,48 @@ test('canvas media tiles render durable video posters from stored blobs', async 
   }, undefined, { timeout: 10_000 })
   expect(await page.evaluate(() => document.querySelectorAll('video').length)).toBe(1)
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('settings-GET Option B: token mode gates the read, the SPA editor path keeps working', async ({ page }) => {
+  const problems = await trackErrors(page)
+  // A dedicated token-mode server on this run's own port (the shared e2e
+  // webServer is open mode by design). Option B (maintainer decision
+  // 2026-09-18): GET /settings requires the token in token mode; the SPA
+  // attaches it from the launch link, so the settings editor loads.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-e2e-token-'))
+  const port = 5710 + Math.floor(Math.random() * 80) // this agent's 5700-5799 range
+  const child = spawn(process.execPath, ['dist-server/server/index.js'], {
+    env: { ...process.env, MINIMAX_STUDIO_HOME: home, MINIMAX_LAN_PORT: String(port), MINIMAX_NO_HTTPS: '1', MINIMAX_LAN_TOKEN: '1' },
+    stdio: ['ignore', 'ignore', 'ignore'],
+  })
+  try {
+    const base = `http://127.0.0.1:${port}`
+    let token = ''
+    for (let attempt = 0; attempt < 50 && !token; attempt += 1) {
+      try { token = fs.readFileSync(path.join(home, 'lan-access-token.txt'), 'utf8').trim() } catch { await new Promise((resolve) => setTimeout(resolve, 200)) }
+    }
+    expect(token).toMatch(/^[a-f0-9]{32}$/i)
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      try { if ((await fetch(`${base}/api/lan/settings`, { headers: { 'x-minimax-token': token } })).ok) break } catch { /* booting */ }
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+    // Option B, mode 1 — token mode: the bare read is 401 (checked from a
+    // browser context, not just node): no token, no settings.
+    await page.goto(base)
+    const bareStatus = await page.evaluate(async (origin) => (await fetch(`${origin}/api/lan/settings`)).status, base)
+    expect(bareStatus).toBe(401)
+    // Mode 2 — the SPA editor path: launch-link token in hand, the settings
+    // dock loads through the same GET the editor round-trips.
+    await page.goto(`${base}/?canvas=1&token=${token}`)
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready', { timeout: 20_000 })
+    await page.locator('[data-canvas-settings-button]').click()
+    const dock = page.locator('[data-canvas-settings-dock]')
+    await expect(dock).toBeVisible()
+    await expect(dock.locator('[data-canvas-settings-body]')).toBeVisible()
+    await expect(dock.getByText(/comfyui/i).first()).toBeVisible()
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    child.kill()
+    await new Promise<void>((resolve) => { if (child.exitCode !== null) resolve(); else child.on('exit', () => resolve()) })
+  }
 })

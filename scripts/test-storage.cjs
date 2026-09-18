@@ -447,6 +447,31 @@ async function main() {
       socket.on('open', () => { socket.close(); resolve('opened') })
     })
     assert.equal(cleanSocket, 'opened', 'a WS upgrade without a foreign Origin must succeed')
+
+    // Fetch-consent Option A (maintainer decision 2026-09-18): consent
+    // RECORDING is accepted only from the studio's own UI — the Origin must
+    // be PRESENT and same-origin. The global gate above already refuses
+    // foreign origins everywhere; these pin the stricter consent-only rule
+    // (a raw no-Origin peer cannot authorize network fetches) and that the
+    // UI's own flow keeps working.
+    const consentBody = JSON.stringify({ id: 'mlsd-annotator', consented: true })
+    const ledgerNow = () => {
+      const raw = JSON.parse(fs.readFileSync(path.join(home, 'settings.json'), 'utf8'))
+      return raw.fetch?.consents ?? {}
+    }
+    const consentNoOrigin = await probe({ method: 'POST', headers: { 'content-type': 'application/json' }, body: consentBody }, '/api/lan/fetch/consent')
+    assert.equal(consentNoOrigin, 403, `consent without an Origin header must be refused (got ${consentNoOrigin})`)
+    const consentForeign = await probe({ method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://evil.example' }, body: consentBody }, '/api/lan/fetch/consent')
+    assert.equal(consentForeign, 403, `cross-origin consent must be refused (got ${consentForeign})`)
+    assert.equal(ledgerNow()['mlsd-annotator'], undefined, 'refused consent attempts must leave the ledger untouched')
+    const consentUi = await probe({ method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: consentBody }, '/api/lan/fetch/consent')
+    assert.equal(consentUi, 200, `the studio UI's same-origin consent POST must keep working (got ${consentUi})`)
+    assert.equal(ledgerNow()['mlsd-annotator']?.consented, true, 'the same-origin consent records into the ledger')
+    // The dataset CLIP consent writes into the SAME ledger — same rule shape.
+    const clipNoOrigin = await probe({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ consented: true }) }, '/api/lan/datasets/clip/consent')
+    assert.equal(clipNoOrigin, 403, `the CLIP consent route enforces the same UI-origin rule (got ${clipNoOrigin})`)
+    const clipUi = await probe({ method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ consented: true }) }, '/api/lan/datasets/clip/consent')
+    assert.equal(clipUi, 200, `the CLIP consent keeps working from the UI (got ${clipUi})`)
   }
 
   // ---- (g) in-process seams: comfyFetch SSRF funnel + rotateToken scheme ---
@@ -484,6 +509,54 @@ async function main() {
       assert.ok(rotated.url.startsWith(`${scheme}://`), `rotated links must follow the ${scheme} scheme (got ${rotated.url})`)
     } finally {
       studio.stopLanServer()
+    }
+  }
+
+  // ---- (h) settings-GET Option B: token-gated whenever token mode is on ---
+  // The maintainer decision (2026-09-18) pins the contract: in token mode the
+  // settings read requires the token (the SPA attaches it as a header from
+  // the launch link); in open mode — the main child above served GET
+  // /api/lan/settings unauthenticated throughout this run — it stays open.
+  {
+    const { pathToFileURL } = require('node:url')
+    const coreUrl = pathToFileURL(path.resolve('dist-server/server/core.js')).href
+    const { createStudioServer } = await import(coreUrl)
+    const tokenHome = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-storage-settings-'))
+    const tokenPort = await freePort()
+    fs.writeFileSync(path.join(tokenHome, 'lan-access-token.txt'), '0123456789abcdef0123456789abcdef\n')
+    const studio = createStudioServer({
+      settingsFile: path.join(tokenHome, 'settings.json'),
+      lanTokenFile: path.join(tokenHome, 'lan-access-token.txt'),
+      tempDirectory: os.tmpdir(),
+      documentsDirectory: tokenHome,
+      staticRoot: path.resolve('dist'),
+    })
+    const previousTokenEnv = process.env.MINIMAX_LAN_TOKEN
+    const previousPortEnv = process.env.MINIMAX_LAN_PORT
+    const previousNoHttpsEnv = process.env.MINIMAX_NO_HTTPS
+    process.env.MINIMAX_LAN_TOKEN = '1'
+    process.env.MINIMAX_LAN_PORT = String(tokenPort)
+    process.env.MINIMAX_NO_HTTPS = '1'
+    try {
+      await studio.startLanServer()
+      const tokenBase = `http://127.0.0.1:${tokenPort}`
+      const noToken = await fetch(`${tokenBase}/api/lan/settings`)
+      assert.equal(noToken.status, 401, `token mode: GET /settings without a token must 401 (got ${noToken.status})`)
+      const wrongToken = await fetch(`${tokenBase}/api/lan/settings`, { headers: { 'x-minimax-token': 'wrong' } })
+      assert.equal(wrongToken.status, 401, `token mode: a wrong token must 401 (got ${wrongToken.status})`)
+      const liveToken = fs.readFileSync(path.join(tokenHome, 'lan-access-token.txt'), 'utf8').trim()
+      const withToken = await fetch(`${tokenBase}/api/lan/settings`, { headers: { 'x-minimax-token': liveToken } })
+      assert.equal(withToken.status, 200, `token mode: the SPA's header token reads settings (got ${withToken.status})`)
+      const tokenBody = await withToken.json()
+      assert.ok(tokenBody.settings && typeof tokenBody.settings.comfyUrl === 'string', 'the tokened read returns the settings object (the editor data source)')
+    } finally {
+      studio.stopLanServer()
+      if (previousTokenEnv === undefined) delete process.env.MINIMAX_LAN_TOKEN
+      else process.env.MINIMAX_LAN_TOKEN = previousTokenEnv
+      if (previousPortEnv === undefined) delete process.env.MINIMAX_LAN_PORT
+      else process.env.MINIMAX_LAN_PORT = previousPortEnv
+      if (previousNoHttpsEnv === undefined) delete process.env.MINIMAX_NO_HTTPS
+      else process.env.MINIMAX_NO_HTTPS = previousNoHttpsEnv
     }
   }
 
