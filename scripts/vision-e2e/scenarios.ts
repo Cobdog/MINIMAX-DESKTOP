@@ -93,7 +93,7 @@ export const SCENARIOS: VisionScenario[] = [
   {
     // QOL wave (rrxlw2r) — the shared surface switcher: registry-driven nav
     // chrome in BOTH titlebars. DOM truth asserted before each capture: the
-    // registered surfaces (canvas + datasets today), the active one marked.
+    // registered surfaces (canvas + datasets + images — k9vu6t0 appended the images entry), the active one marked.
     id: 'surface-switcher',
     label: 'Surface switcher — registry-driven nav in both titlebars (QOL wave)',
     run: async (page) => {
@@ -102,7 +102,8 @@ export const SCENARIOS: VisionScenario[] = [
       await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
       const switcher = page.locator('[data-surface-switcher]')
       await expect(switcher).toBeVisible()
-      await expect(switcher.locator('[data-surface]')).toHaveCount(2)
+      // k9vu6t0: the images workbench appended its registry entry — three now.
+      await expect(switcher.locator('[data-surface]')).toHaveCount(3)
       await expect(switcher.locator('[data-surface="canvas"]')).toHaveAttribute('aria-current', 'page')
       await page.waitForTimeout(400)
     },
@@ -112,7 +113,7 @@ export const SCENARIOS: VisionScenario[] = [
         label: 'Canvas titlebar — the surface switcher leads (canvas active)',
         rubric: [
           SHELL_CONTEXT,
-          'The titlebar\'s LEFT EDGE carries the surface switcher: a compact rounded-border pill group with two linked pills — "canvas" (with a small frame icon, highlighted as the active surface: brighter text on a raised background with a thin inner outline) and "datasets" (with a small database icon, muted). It sits BEFORE the canvas tabs and must not overlap them.',
+          'The titlebar\'s LEFT EDGE carries the surface switcher: a compact rounded-border pill group with three linked pills — "canvas" (with a small frame icon, highlighted as the active surface: brighter text on a raised background with a thin inner outline), "datasets" (with a small database icon, muted), and "images" (with a small image icon, muted — the H3 Image Workbench entry, k9vu6t0). It sits BEFORE the canvas tabs and must not overlap them.',
           'The switcher reads as one coherent control: same pill height, consistent 12px-scale labels, hover affordance is fine. Muted-but-readable labels are the app\'s dense design language — not a contrast defect.',
           'Defects to flag: pills of visibly different heights or misaligned baselines, the group overlapping the canvas tabs or radar, a pill clipped by the viewport edge, an ACTIVE state that is indistinguishable from the inactive one at a glance.',
         ].join(' '),
@@ -129,7 +130,7 @@ export const SCENARIOS: VisionScenario[] = [
         label: 'Datasets titlebar — the same switcher, datasets active (no one-way back link)',
         rubric: [
           'Context: a dark-theme desktop studio app at 1920x1080 on the datasets surface — a full-screen workbench, NOT the canvas: no dotted-grid infinite canvas, no canvas tabs.',
-          'The titlebar leads with "Dataset manager" brand text (database icon), immediately followed by the SAME surface-switcher pill group seen on the canvas titlebar — here "datasets" is the highlighted/active pill and "canvas" is the muted link that returns to the canvas. There is NO "← canvas" text link anymore (replaced by the switcher — its absence is the design, not a regression).',
+          'The titlebar leads with "Dataset manager" brand text (database icon), immediately followed by the SAME surface-switcher pill group seen on the canvas titlebar — here "datasets" is the highlighted/active pill; "canvas" and "images" are the muted links ("images" opens the H3 Image Workbench, k9vu6t0). There is NO "← canvas" text link anymore (replaced by the switcher — its absence is the design, not a regression).',
           'Tab pills (library active, dashboard, export, trash) sit to the right of the switcher without overlap.',
           'Defects to flag: the switcher missing from this titlebar, both pills looking active or both muted, overlap between the switcher and the brand text or tab pills.',
         ].join(' '),
