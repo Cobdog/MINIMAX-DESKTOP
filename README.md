@@ -258,6 +258,7 @@ Reference downloads and node documentation are maintained by [Comfy-Org's ACE-St
 | [docs/research/h3-lora-form-compatibility.md](docs/research/h3-lora-form-compatibility.md) | Full-width↔pruned LoRA form compatibility: mechanism, math, load-time patch architecture |
 | [docs/research/fun-control-input-surface.md](docs/research/fun-control-input-surface.md) | Fun Control wire format, DWPose render spec, extraction matrix, IK-rig architecture, E-FC1 verdict |
 | [docs/research/krea2-edit-mode.md](docs/research/krea2-edit-mode.md) | Krea 2 edit mode: instruction editing, masked refine, preservation ladder (E-K1) |
+| [docs/research/h3-image-workbench.md](docs/research/h3-image-workbench.md) | H3 Image Workbench: multi-image compose/merge, edit taxonomy per path, refmod+LoRA stacking, refinement story, start-frame handoff + xlfl0iv call |
 | [docs/research/ap10k-control-lora-training.md](docs/research/ap10k-control-lora-training.md) | AP-10K control-branch LoRA feasibility: GO-WITH-ADAPTATION |
 | [docs/research/ap10k-trainer-survey.md](docs/research/ap10k-trainer-survey.md) | Trainer comparison for the control-branch finetune (DiffSynX, musubi, ai-toolkit, …) |
 | [docs/research/autocontext-deepread.md](docs/research/autocontext-deepread.md) | AutoContext mechanism deep-read: anchoring math, ref filtering, temporal-exclusivity rules |
