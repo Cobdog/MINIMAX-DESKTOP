@@ -102,6 +102,20 @@
 
 ## Building (in flight)
 
+- **Design-decision implementations** (2hbv2ib) — the maintainer's 1a/2a/3a/4b
+  calls built: F6 live progress (one stable server-side clientId registered on
+  the shared upstream WS and carried by every submission — targeted engine
+  events reach every client surface; native sampler previews requested per
+  prompt via extra_data.preview_method=taesd and decoded through the taeh3
+  vae_approx weight, fetched via the catalog consent flow into the central
+  home; percent/label + in-progress frames on the generating tile, frames
+  transient), fetch-consent Option A (consent recorded only from the studio's
+  own UI origin — present + same-origin; 403 otherwise), settings-GET Option B
+  (the token-mode 401-without-token contract pinned by tests; open mode
+  unchanged; the SPA editor path proven in both modes). 3a (token-mode
+  default stays open) recorded, not implemented — switch only if the studio
+  leaves the home LAN. Mechanism capture: docs/research/
+  comfyui-live-progress-mechanism.md. PR train.
 - **Post-audit cleanup wave** (twmpu4m) — latent-path naming alignment, menu clamping,
   the seeding race, the unique-index backstop, honest /free + 400/404 refusals, VDN
   consolidation, and the four design-decision option papers. PR train.
