@@ -168,6 +168,14 @@ export function PropertiesPanel() {
     setDraft((current) => current && current.prompt !== composed ? { ...current, prompt: composed } : current)
   }, [draft, chainId])
 
+  // Structured mode with a missing/malformed persisted draft (legacy data):
+  // the no-loss parse stands in — memoized so the parse (and its generated
+  // ids) stay stable across renders while the prompt is unchanged.
+  const structuredDraft = useMemo(
+    () => (draft && draft.promptMode === 'structured') ? (draft.structured ?? parseStructuredPrompt(draft.prompt)) : null,
+    [draft],
+  )
+
   const turboFamilies = useMemo(() => detectOptimizations(info, models).filter((entry) => entry.entry.kind === 'turbo'), [info, models])
   // Bindings + validation recompute per render on purpose: validation reads
   // the PERSISTED settings (which lag the draft by the debounce), so the
@@ -326,7 +334,7 @@ export function PropertiesPanel() {
         </div>
         {draft.promptMode === 'structured' ? (
           <StructuredPromptEditor
-            draft={draft.structured ?? parseStructuredPrompt(draft.prompt)}
+            draft={structuredDraft!}
             duration={draft.duration}
             mode={mode}
             noDialogue={draft.noDialogue}
