@@ -111,7 +111,10 @@ Five modes, one surface, small targeted graphs per family (the Identity Edit doc
 
 ## 8. Refine
 
-- **Auto-run on T=1 outputs; opt-in per chain on packets** (decision 6).
+- **Always opt-in — never automatic** (maintainer amendment 2026-09-18, superseding
+  decision 6's auto-on-T=1: "sometimes it might be good enough as is"). T=1 outputs
+  present a prominent one-tap Refine affordance (softness is structural there), but the
+  user decides every time.
 - **Default engine Krea 2** (measured 6× preservation on edits); **klein as the fast
   tier**; Qwen-IE 2511 a watch-item (catalog-gated if ever added).
 - The **tone-lock frequency blend is an app-side op-stack op** (composable,
@@ -154,7 +157,8 @@ Five modes, one surface, small targeted graphs per family (the Identity Edit doc
 5. Candidates: takes land, scored-best canonical, ContactSheet override; the burst lane
    renders behind its gate with honest labels; the app-side fuse runs locally if E-IW2
    approves it.
-6. Refine: auto-on-T=1 / opt-in-packets; Krea 2 default, klein tier; tone-lock as an op.
+6. Refine: always opt-in (one-tap affordance on T=1 outputs); Krea 2 default, klein
+   tier; tone-lock as an op.
 7. The start-frame exit produces a real chain continuation (frame-latent anchored), with
    the hybrid profile availability-gated.
 8. Byte-level: workbench outputs never mutate inputs; all handoffs consent-gated.
