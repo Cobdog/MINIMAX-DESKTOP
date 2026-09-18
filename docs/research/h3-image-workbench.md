@@ -120,6 +120,8 @@ Mechanics (stacking guide fetched today; single-author, treat numbers as one pra
 4. **Qwen-Image-Edit 2511 = watch-item**, not v1: it is the community's native choice for exactly this defect class and ships a frequency-separation recipe, but it adds a third model family (DiT + 7B TE + VAE) to stage. Revisit at the next ecosystem sweep.
 5. **Own the tone-lock blend app-side regardless of engine**: frequency-separated blending (refiner detail + H3 low frequencies) is a cheap deterministic compositing op — an op-stack `refine-blend` op (radius/strength dials) that works with ANY refiner output, including manual re-upscales. This de-risks the engine choice: even a "wrong" refiner contributes only its high-frequency band.
 
+**Post-pass addendum (2026-09-18):** a fourth refine tier was researched on maintainer direction — **burst-frame enhancement** (fuse packet neighbors into the picked frame: HDR+-style robust frequency merge app-side, optional SeedVR2 model arm; 5/9/13 packet tiers match SeedVR2's 4n+1 batch contract exactly). Full analysis + E-IW2 experiment spec: [burst-frame-enhancement.md](burst-frame-enhancement.md).
+
 ---
 
 ## 6. Lane E — the start-frame handoff, and the xlfl0iv call
