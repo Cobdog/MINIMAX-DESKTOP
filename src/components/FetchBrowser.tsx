@@ -24,7 +24,7 @@ function flaggedLicense(spdx: string): boolean {
   return spdx === 'NO-LICENSE' || spdx.startsWith('GPL') || spdx.startsWith('AGPL') || spdx.startsWith('CC')
 }
 
-export function FetchBrowser({ settings, setSettings, onAfterFetch, onAdoptCheckout }: { settings: AppSettings; setSettings(value: AppSettings): void; onAfterFetch(): void; onAdoptCheckout(path: string): void }) {
+export function FetchBrowser({ settings, setSettings, onAfterFetch, onAdoptCheckout, focusEntryIds, onFocusConsumed }: { settings: AppSettings; setSettings(value: AppSettings): void; onAfterFetch(): void; onAdoptCheckout(path: string): void; focusEntryIds?: ReadonlyArray<string>; onFocusConsumed?(): void }) {
   const [entries, setEntries] = useState<FetchEntryStatus[] | null>(null)
   const [filter, setFilter] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -33,6 +33,10 @@ export function FetchBrowser({ settings, setSettings, onAfterFetch, onAdoptCheck
   const [acknowledged, setAcknowledged] = useState(false)
   const [progress, setProgress] = useState<Record<string, FetchProgress>>({})
   const [destinationDir, setDestinationDir] = useState('')
+  /** QOL wave (rrxlw2r): entries an unavailable canvas menu row pointed at
+   *  (the deep-link affordance) — outlined briefly so the landing is
+   *  unmissable; the consent dialog stays a separate explicit step. */
+  const [highlight, setHighlight] = useState<string[]>([])
   const checkboxRef = useRef<HTMLInputElement | null>(null)
   // The consent record lives in the SERVER's settings; keep the caller's
   // copy fresh so a later Save never wipes it back off.
@@ -46,6 +50,25 @@ export function FetchBrowser({ settings, setSettings, onAfterFetch, onAdoptCheck
   }
 
   useEffect(() => { void refresh() }, [settings.engine.checkoutPath, settings.modelRoot, settings.paths.diffusion_models])
+
+  // The deep-link landing (QOL wave rrxlw2r): once the catalog has loaded,
+  // scroll the first focused entry into view, outline them all, and consume
+  // the focus request (one flash per click — reopening settings later never
+  // re-flashes). The outline clears on its OWN timer (a separate effect) so
+  // consuming the ids here cannot cancel it.
+  useEffect(() => {
+    if (!focusEntryIds || focusEntryIds.length === 0 || entries === null) return
+    setHighlight(focusEntryIds.slice())
+    const first = document.querySelector(`[data-fetch-entry="${focusEntryIds[0]}"]`)
+    if (first) first.scrollIntoView({ block: 'center' })
+    onFocusConsumed?.()
+  }, [entries, focusEntryIds, onFocusConsumed])
+
+  useEffect(() => {
+    if (highlight.length === 0) return
+    const timer = window.setTimeout(() => setHighlight([]), 8000)
+    return () => window.clearTimeout(timer)
+  }, [highlight])
 
   // Live fetch progress rides the fabric's system channel ({type:'fetch'}).
   // One subscription for the component's life (the callbacks go through a
@@ -135,7 +158,7 @@ export function FetchBrowser({ settings, setSettings, onAfterFetch, onAdoptCheck
             const live = progress[entry.id] ?? (entry.inFlight ? { phase: 'downloading' as const, at: Date.now(), id: entry.id } : null)
             const fetching = Boolean(live) && live!.phase !== 'done' && live!.phase !== 'failed'
             const fraction = live && typeof live.bytes === 'number' && typeof live.totalBytes === 'number' && live.totalBytes > 0 ? Math.min(1, live.bytes / live.totalBytes) : null
-            return <div className="node-pack-row fetch-row" key={entry.id}>
+            return <div className={`node-pack-row fetch-row ${highlight.indexOf(entry.id) >= 0 ? 'fetch-focused' : ''}`} key={entry.id} data-fetch-entry={entry.id}>
               <div className="node-pack-main">
                 <div className="node-pack-title">
                   <strong>{entry.name}</strong>

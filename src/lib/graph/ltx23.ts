@@ -192,6 +192,10 @@ export type Ltx23Detection = {
   missingNodes: string[]
   /** Human-readable missing weights with fetch pointers. */
   missingModels: string[]
+  /** The unfilled model-selection SLOT ids (QOL wave rrxlw2r): the
+   * structured form missingModels renders — what the fetch-deep-link
+   * mapping (src/lib/fetchDeepLink.ts) resolves against the catalog. */
+  missingSlots: string[]
   /** The concrete files a build would use, when everything resolves. */
   resolved?: Partial<Record<keyof Ltx23ModelSelection, string>>
 }
@@ -254,10 +258,12 @@ const SLOT_LABELS: Partial<Record<keyof Ltx23ModelSelection, string>> = {
 function detectUtility(info: ObjectInfo | undefined, files: ModelFile[], packNodes: readonly string[], modelSlots: readonly (keyof Ltx23ModelSelection)[]): Ltx23Detection {
   const selection = resolveLtx23Selection(info, files)
   const missingNodes = packNodes.filter((nodeClass) => !info?.[nodeClass])
-  const missingModels = modelSlots.filter((slot) => !selection[slot]).map((slot) => SLOT_LABELS[slot] ?? slot)
+  const missingSlots = modelSlots.filter((slot) => !selection[slot])
+  const missingModels = missingSlots.map((slot) => SLOT_LABELS[slot] ?? slot)
   return {
     available: missingNodes.length === 0 && missingModels.length === 0,
     missingNodes,
+    missingSlots,
     missingModels,
     resolved: missingModels.length === 0 && missingNodes.length === 0 ? selection : undefined,
   }

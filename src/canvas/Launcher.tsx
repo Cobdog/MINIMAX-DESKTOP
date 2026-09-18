@@ -9,8 +9,9 @@
  * launcher comes alive, no mode switch; a refused engine surfaces honestly.
  */
 import { useEffect, useRef, useState } from 'react'
-import { AudioLines, Clapperboard, FileVideo, ImagePlus, Layers, MessageSquareOff, Music2, Plus, Sparkles, Upload, Users } from 'lucide-react'
+import { AudioLines, Clapperboard, FileVideo, ImagePlus, MessageSquareOff, Music2, Plus, Sparkles, Upload, Users } from 'lucide-react'
 import { PromptLibraryBrowser } from '../components/PromptLibraryBrowser'
+import { FirstRunNotice } from './FirstRunNotice'
 import { useCanvasStore } from './store'
 
 export function Launcher({ onPickFile }: { onPickFile(): void }) {
@@ -56,6 +57,9 @@ export function Launcher({ onPickFile }: { onPickFile(): void }) {
 
   return <div className="canvas-launcher" data-canvas-launcher>
     <div className="canvas-launcher-inner">
+      {/* QOL wave (rrxlw2r): model-roots-empty onboarding — the app is never
+          silently dead on a fresh install; dismissible once per browser. */}
+      <FirstRunNotice />
       <h1>{activeDocument ? activeDocument.project.name : 'A blank canvas'}</h1>
       <p className="canvas-launcher-sub">
         {activeDocument && activeDocument.chains.length
@@ -128,13 +132,11 @@ export function Launcher({ onPickFile }: { onPickFile(): void }) {
         <button type="button" className="canvas-chip" data-canvas-chip="studios" title="Asset authoring studios — characters, hair, wardrobe, accessories, locations" onClick={() => useCanvasStore.getState().setStudiosDock({ tab: 'characters' })}>
           <Users size={13} /> studios
         </button>
-        {/* Dataset manager workbench (sv14rt0): its own surface at
-            ?datasets=1 — import/crop/caption/curate/export training sets.
-            The bridge is two explicit actions (canvas take → source here;
-            dataset layer → canvas reference there). */}
-        <a className="canvas-chip" data-canvas-chip="datasets" href="?datasets=1" title="Dataset manager — training-set prep workbench">
-          <Layers size={13} /> datasets
-        </a>
+        {/* The datasets chip was RETIRED 2026-09-18 (QOL wave rrxlw2r): the
+            surface switcher in the titlebar is the one entry point per
+            surface — the chip duplicated it. The canvas bridge stays two
+            explicit actions (canvas take → source; dataset layer →
+            canvas reference). */}
         <button type="button" className="canvas-chip" data-canvas-chip="movie" title="The timeline projection — the plan chronology + measured transitions (the Director Suite)" onClick={() => useCanvasStore.getState().setTimelineOpen(true)}>
           <Clapperboard size={13} /> movie plan
         </button>

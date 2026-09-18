@@ -295,6 +295,7 @@ const localStorageStub = {
 }
 const generation = loadTs('src/canvas/generation.ts', { localStorage: localStorageStub, window: { dispatchEvent: () => undefined, addEventListener: () => undefined } })
 const options = loadTs('src/canvas/options.ts')
+const fetchDeepLink = loadTs('src/lib/fetchDeepLink.ts')
 const h3Submit = loadTs('src/lib/h3Submit.ts', { localStorage: localStorageStub })
 const ops = loadTs('src/canvas/ops.ts')
 const ltx23Submit = loadTs('src/lib/ltx23UtilitySubmit.ts', { localStorage: localStorageStub })
@@ -417,6 +418,57 @@ console.log('(n) typed-hole option menus (§3 filtering + hints)')
   ok(consume.find((row) => row.id === 'consume:first-frame').available, 'consume(image): first-frame role offered')
   ok(!options.endpointOptions('consume', ['video'], ready).some((row) => row.id === 'consume:first-frame'), 'consume(video): first-frame role filtered out for video sources')
   ok(options.endpointOptions('consume', ['video'], ready).find((row) => row.id === 'consume:reference').available, 'consume(video): reference role accepts any media kind')
+}
+
+// QOL wave (rrxlw2r) — the one-click fetch affordance (nits idg8ui4):
+// missing-deps → catalog mapping + unavailable rows carrying fetch targets.
+console.log('(n2) fetch deep-link mapping — slots/nodes → catalog entries')
+{
+  const entry = (id, state) => ({ id, name: `name of ${id}`, state, group: 'weights' })
+  const catalog = [
+    entry('ltx23-dev-checkpoint', 'absent'),
+    entry('ltx23-dev-fp8', 'absent'),
+    entry('ltx23-gemma-encoders', 'placed'),
+    entry('ltx23-kijai-vaes', 'absent'),
+    entry('pack:ltxvideo', 'absent'),
+    entry('pack:kjnodes', 'present'),
+    entry('unrelated-entry', 'absent'),
+  ]
+  const targets = fetchDeepLink.fetchTargetsForMissing(
+    { slots: ['checkpoint', 'textEncoder', 'videoVae', 'outpaintLora', 'madeUpSlot'], nodes: ['LTXICLoRALoaderModelOnly', 'GetImageSizeAndCount', 'MiniMaxH3MotionContext'] },
+    catalog,
+  )
+  const ids = targets.map((target) => target.id).join('|')
+  ok(ids === 'ltx23-dev-checkpoint|ltx23-dev-fp8|ltx23-kijai-vaes|pack:ltxvideo', `mapping: slots+nodes resolve to the live catalog, catalog order, alternatives kept (${ids})`)
+  ok(!ids.includes('ltx23-gemma-encoders'), 'mapping: an already-PLACED entry is never offered (fetching it again fixes nothing)')
+  ok(!ids.includes('pack:kjnodes'), 'mapping: an already-PRESENT pack is never offered')
+  ok(!ids.includes('unrelated-entry'), 'mapping: unrelated catalog entries stay out')
+  ok(!ids.includes('ltx23-ic-outpaint'), 'mapping: a slot whose entry id is not in the live catalog degrades to nothing (no dead links)')
+  ok(targets.every((target) => typeof target.name === 'string' && target.name.length > 0), 'mapping: every target carries its display name')
+  eq(fetchDeepLink.fetchTargetsForMissing({ slots: ['checkpoint'], nodes: [] }, null), [], 'mapping: no catalog snapshot → no targets (rows degrade to install guidance)')
+  eq(fetchDeepLink.fetchTargetsForMissing({ slots: [], nodes: [] }, catalog), [], 'mapping: nothing missing → no targets')
+
+  // Rows: an unavailable utility with catalog coverage carries fetchTargets;
+  // the manual wording surfaces where no catalog entry can satisfy the gap.
+  const facts = {
+    connected: true, h3Ready: true, motionContextReady: false,
+    ltx25: { available: false, missing: ['LTX-2.5 models'] },
+    music3: { available: true, missing: [] }, acestep: { available: true, missing: [] },
+    fetchCatalog: catalog,
+    utilities: [{ tool: 'remove-subtitles', label: 'Remove subtitles', available: false, missing: ['ltx-2.3-22b-dev checkpoint'], missingSlots: ['checkpoint'], missingNodes: [] }],
+  }
+  const rows = options.endpointOptions('produce', ['video'], facts)
+  const utilityRow = rows.find((row) => row.id === 'produce:utility:remove-subtitles')
+  ok(utilityRow && !utilityRow.available, 'rows: the unavailable utility stays disabled')
+  ok(utilityRow.fetchTargets && utilityRow.fetchTargets.map((target) => target.id).join('|') === 'ltx23-dev-checkpoint|ltx23-dev-fp8', 'rows: the unavailable utility carries its fetch targets (consent still separate)')
+  const latentsRow = rows.find((row) => row.id === 'produce:fork-latents')
+  ok(latentsRow && !latentsRow.available && /install the pack manually/.test(latentsRow.reason), 'rows: Motion-Context (no catalog entry) keeps the honest manual wording')
+  ok(!latentsRow.fetchTargets, 'rows: manual cases carry no fetch targets')
+  const ltx25Row = options.endpointOptions('produce', ['image'], facts).find((row) => row.id === 'produce:ltx25')
+  ok(ltx25Row && !ltx25Row.available && /install them manually/.test(ltx25Row.reason), 'rows: LTX-2.5 (no catalog entries) says install manually')
+  ok(!ltx25Row.fetchTargets, 'rows: LTX-2.5 carries no fetch targets')
+  const covered = options.endpointOptions('produce', ['video'], { ...facts, utilities: [{ ...facts.utilities[0], available: true, missingSlots: [], missingNodes: [], missing: [] }] })
+  ok(!covered.find((row) => row.id === 'produce:utility:remove-subtitles').fetchTargets, 'rows: an AVAILABLE utility needs no fetch affordance')
 }
 
 console.log('(o) reference binding allocation (the promptComposer model, per chain)')

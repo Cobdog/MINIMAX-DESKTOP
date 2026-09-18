@@ -859,6 +859,24 @@ test('engines-as-ops: the utility typed-hole seam builds the official template (
   await expect(ia2vRow).toBeVisible()
   await expect(ia2vRow).toBeDisabled()
   await expect(ia2vRow).toContainText('Not ready — missing')
+
+  // QOL wave (rrxlw2r, nits idg8ui4): the one-click fetch affordance — the
+  // unavailable row deep-links into the FetchBrowser with the missing
+  // entries highlighted, and the consent gate stays INTACT (the click gets
+  // TO consent, never past it: no consent modal, nothing fetched).
+  const fetchButton = menu.locator('[data-canvas-menu-fetch="produce:utility:ia2v"]')
+  await expect(fetchButton).toBeVisible()
+  await fetchButton.click()
+  await expect(page.locator('[data-canvas-endpoint-menu="produce"]')).toHaveCount(0)
+  const dock = page.locator('[data-canvas-settings-dock]')
+  await expect(dock).toBeVisible()
+  const focused = dock.locator('.fetch-row.fetch-focused')
+  await expect(focused.first()).toBeVisible({ timeout: 15_000 })
+  expect(await focused.count()).toBeGreaterThan(1)
+  // The highlighted entry's own Fetch button is the next explicit step —
+  // no consent dialog was opened by the deep-link itself.
+  await expect(page.locator('.fetch-consent-modal')).toHaveCount(0)
+  await expect(focused.first().getByRole('button', { name: /fetch/i })).toBeVisible()
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 

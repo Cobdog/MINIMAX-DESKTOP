@@ -8,6 +8,7 @@
  * type-natural generation routes lead.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Download } from 'lucide-react'
 import { useCanvasStore } from './store'
 import { endpointOptions, type SourceKind } from './options'
 import type { DocumentChain } from './derive'
@@ -94,19 +95,39 @@ export function EndpointMenu() {
           return <div key={group} className="canvas-menu-group" data-canvas-menu-group={group}>
             <span className="canvas-menu-group-label">{group === 'generate' ? 'generate' : group === 'input' ? 'inputs' : group === 'control' ? 'control inputs' : group === 'utility' ? 'utilities' : 'fork'}</span>
             {rows.map((option) => (
-              <button
-                type="button"
-                key={option.id}
-                className={`canvas-menu-row ${option.available ? '' : 'unavailable'}`}
-                data-canvas-menu-row={option.id}
-                disabled={!option.available}
-                title={[option.reason, option.available && menu.direction === 'consume' && !context.sourceChainId ? 'Select the object to consume from first.' : '', option.hint].filter(Boolean).join('\n')}
-                onClick={() => void runEndpointAction(menu.chainId, menu.direction, option, context.sourceChainId ?? undefined)}
-              >
-                <span className="canvas-menu-row-label">{option.label}</span>
-                <span className="canvas-menu-row-note">{option.available ? option.description : option.reason}</span>
-                {option.hint && option.available && <span className="canvas-menu-row-hint">{option.hint}</span>}
-              </button>
+              <div key={option.id} className="canvas-menu-rowwrap">
+                <button
+                  type="button"
+                  className={`canvas-menu-row ${option.available ? '' : 'unavailable'}`}
+                  data-canvas-menu-row={option.id}
+                  disabled={!option.available}
+                  title={[option.reason, option.available && menu.direction === 'consume' && !context.sourceChainId ? 'Select the object to consume from first.' : '', option.hint].filter(Boolean).join('\n')}
+                  onClick={() => void runEndpointAction(menu.chainId, menu.direction, option, context.sourceChainId ?? undefined)}
+                >
+                  <span className="canvas-menu-row-label">{option.label}</span>
+                  <span className="canvas-menu-row-note">{option.available ? option.description : option.reason}</span>
+                  {option.hint && option.available && <span className="canvas-menu-row-hint">{option.hint}</span>}
+                </button>
+                {/* QOL wave (rrxlw2r, nits idg8ui4): the one-click fetch
+                    affordance — outside the disabled action button, so the
+                    guidance stays clickable. Opens the settings dock with
+                    these entries highlighted in the FetchBrowser; the fetch
+                    itself still goes through its own consent dialog. */}
+                {option.fetchTargets && option.fetchTargets.length > 0 && (
+                  <button
+                    type="button"
+                    className="canvas-menu-row-fetch"
+                    data-canvas-menu-fetch={option.id}
+                    title={`Opens the fetchable-items browser on: ${option.fetchTargets.map((target) => target.name).join(' · ')}`}
+                    onClick={() => {
+                      useCanvasStore.getState().openFetchBrowser(option.fetchTargets!.map((target) => target.id))
+                      setEndpointMenu(null)
+                    }}
+                  >
+                    <Download size={11} /> fetch missing ({option.fetchTargets.length})
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         })}

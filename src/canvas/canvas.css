@@ -109,6 +109,18 @@
 .canvas-launcher { position: absolute; inset: 0; display: grid; place-items: start center; padding-top: 12vh; pointer-events: none; background: color-mix(in srgb, var(--color-surface-abyss) 42%, transparent); }
 .canvas-launcher-inner { display: grid; gap: var(--space-4); width: min(680px, 86vw); padding: var(--space-4); border: 1px solid var(--line); border-radius: 16px; background: color-mix(in srgb, var(--color-surface-abyss) 88%, transparent); backdrop-filter: blur(8px); pointer-events: auto; }
 .canvas-launcher-inner h1 { font-size: var(--text-xl); font-weight: 750; }
+/* QOL wave (rrxlw2r): first-run onboarding — shown when the model scan finds
+   nothing; dismissible once per browser (never a nag). */
+.canvas-first-run { display: flex; gap: 11px; align-items: flex-start; padding: 11px 13px; border: 1px dashed color-mix(in srgb, var(--color-info, #7ab8ff) 45%, transparent); border-radius: 11px; background: color-mix(in srgb, var(--color-info, #7ab8ff) 7%, transparent); color: var(--muted); }
+.canvas-first-run > svg { flex: 0 0 auto; margin-top: 2px; color: var(--color-info, #7ab8ff); }
+.canvas-first-run-body { display: grid; gap: 4px; }
+.canvas-first-run-body strong { color: var(--text); font-size: var(--text-md); }
+.canvas-first-run-body span { font-size: var(--text-sm); line-height: 1.45; }
+.canvas-first-run-actions { display: flex; gap: 8px; margin-top: 4px; }
+.canvas-first-run-actions button { padding: 4px 11px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--text); font-size: var(--text-sm); font-weight: 600; cursor: pointer; }
+.canvas-first-run-actions button:hover { border-color: color-mix(in srgb, var(--color-info, #7ab8ff) 55%, transparent); }
+.canvas-first-run-dismiss { margin-left: auto; border: 0; background: transparent; color: var(--muted-2); cursor: pointer; }
+.canvas-first-run-dismiss:hover { color: var(--text); }
 .canvas-launcher-sub { color: var(--muted); font-size: var(--text-md); }
 .canvas-promptbar { display: flex; gap: 8px; align-items: stretch; }
 .canvas-promptbar textarea { flex: 1; min-height: 76px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--text); font: inherit; resize: vertical; }
@@ -214,6 +226,12 @@
 .canvas-menu-row-label { font-size: var(--text-md); font-weight: 650; }
 .canvas-menu-row-note { color: var(--muted); font-size: var(--text-2xs); line-height: 1.35; }
 .canvas-menu-row-hint { margin-top: 2px; color: var(--accent); font-family: ui-monospace, Consolas, monospace; font-size: var(--text-2xs); }
+/* QOL wave (rrxlw2r): unavailable rows can carry a fetch affordance — the
+   wrapper stacks the (disabled) action button and the deep-link so the
+   guidance stays clickable without enabling the action. */
+.canvas-menu-rowwrap { display: grid; gap: 3px; }
+.canvas-menu-row-fetch { display: inline-flex; align-items: center; gap: 5px; width: max-content; padding: 3px 8px; border: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--accent) 7%, transparent); color: var(--accent); font-size: var(--text-2xs); font-weight: 600; cursor: pointer; }
+.canvas-menu-row-fetch:hover { border-style: solid; background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .canvas-endpoint-menu footer { padding: 7px 11px; border-top: 1px solid var(--line); color: var(--muted-2); font-size: var(--text-2xs); }
 .canvas-take-fork { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: var(--text-2xs); cursor: pointer; }
 .canvas-take-fork:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }

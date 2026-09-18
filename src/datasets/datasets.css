@@ -7,8 +7,6 @@
 
 .ds-titlebar { display: flex; align-items: center; gap: 16px; padding: 8px 14px; border-bottom: 1px solid color-mix(in srgb, var(--muted, #8f9b94) 22%, transparent); flex: 0 0 auto; }
 .ds-brand { display: flex; align-items: center; gap: 8px; font-weight: 700; }
-.ds-brand a.ds-back { font-size: var(--text-2xs, 10px); color: var(--muted, #8f9b94); text-decoration: none; margin-left: 6px; }
-.ds-brand a.ds-back:hover { color: var(--accent, var(--color-info)); }
 .ds-tabs { display: flex; gap: 4px; }
 .ds-tab { border: 1px solid transparent; background: none; color: var(--muted, #8f9b94); padding: 4px 12px; border-radius: 999px; cursor: pointer; text-transform: capitalize; }
 .ds-tab.active { color: var(--accent, var(--color-info)); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
