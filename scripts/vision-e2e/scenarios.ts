@@ -116,12 +116,12 @@ export const SCENARIOS: VisionScenario[] = [
           'The switcher reads as one coherent control: same pill height, consistent 12px-scale labels, hover affordance is fine. Muted-but-readable labels are the app\'s dense design language — not a contrast defect.',
           'Defects to flag: pills of visibly different heights or misaligned baselines, the group overlapping the canvas tabs or radar, a pill clipped by the viewport edge, an ACTIVE state that is indistinguishable from the inactive one at a glance.',
         ].join(' '),
+        // DOM truth at capture: this checkpoint's PNG is the CANVAS state
+        // run() left (the datasets navigation is the NEXT checkpoint's
+        // drive — drives run BEFORE their own capture).
         drive: async (page) => {
-          await page.locator('[data-surface-switcher] [data-surface="datasets"]').click()
-          await expect(page.locator('[data-ds-root]')).toBeVisible()
-          const switcher = page.locator('[data-surface-switcher]')
-          await expect(switcher.locator('[data-surface="datasets"]')).toHaveAttribute('aria-current', 'page')
-          await page.waitForTimeout(400)
+          await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+          await expect(page.locator('[data-surface-switcher] [data-surface="canvas"]')).toHaveAttribute('aria-current', 'page')
         },
       },
       {
@@ -133,6 +133,13 @@ export const SCENARIOS: VisionScenario[] = [
           'Tab pills (library active, dashboard, export, trash) sit to the right of the switcher without overlap.',
           'Defects to flag: the switcher missing from this titlebar, both pills looking active or both muted, overlap between the switcher and the brand text or tab pills.',
         ].join(' '),
+        drive: async (page) => {
+          await page.locator('[data-surface-switcher] [data-surface="datasets"]').click()
+          await expect(page.locator('[data-ds-root]')).toBeVisible()
+          const switcher = page.locator('[data-surface-switcher]')
+          await expect(switcher.locator('[data-surface="datasets"]')).toHaveAttribute('aria-current', 'page')
+          await page.waitForTimeout(400)
+        },
       },
     ],
     after: async (page) => {
