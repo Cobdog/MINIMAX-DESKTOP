@@ -557,8 +557,8 @@ test('settings-GET Option B: token mode gates the read, the SPA editor path keep
 // ---------------------------------------------------------------------------
 // QOL wave (rrxlw2r) — registry-driven surface navigation + first-run
 // guidance. The switcher is shared chrome (src/surfaces/): surfaces
-// self-register (canvas + datasets today); the images workbench appears
-// ONLY when its entry lands.
+// self-register (canvas + datasets + images — the workbench appended its
+// entry with k9vu6t0, the registry's documented append point).
 // ---------------------------------------------------------------------------
 
 test('surface switcher: registry entries in the canvas titlebar, canvas active', async ({ page }) => {
@@ -569,10 +569,11 @@ test('surface switcher: registry entries in the canvas titlebar, canvas active',
   const switcher = page.locator('[data-surface-switcher]')
   await expect(switcher).toBeVisible()
   // Exactly the REGISTERED surfaces — unregistered routes never appear.
-  await expect(switcher.locator('[data-surface]')).toHaveCount(2)
+  // (k9vu6t0: the images workbench's registry entry landed — three now.)
+  await expect(switcher.locator('[data-surface]')).toHaveCount(3)
   await expect(switcher.locator('[data-surface="canvas"]')).toHaveAttribute('aria-current', 'page')
   await expect(switcher.locator('[data-surface="datasets"]')).toHaveAttribute('href', '/?datasets=1')
-  await expect(switcher.locator('[data-surface="images"]')).toHaveCount(0)
+  await expect(switcher.locator('[data-surface="images"]')).toHaveAttribute('href', '/?images=1')
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
