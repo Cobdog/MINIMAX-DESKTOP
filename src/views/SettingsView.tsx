@@ -17,6 +17,34 @@ import type { DoctorReport } from '../lib/doctor'
 import { FetchBrowser } from '../components/FetchBrowser'
 import { useSessionStore } from '../state/sessionStore'
 
+/** Inline directory-path feedback (maintainer flag 2026-09-19: "changing a
+ *  directory location does not validate the path"). Debounced stat through
+ *  the server's /api/lan/fs/check — exists-as-directory ✓, missing ⚠ (the
+ *  field still saves; the note names the consequence), file ⚠, error ⚠. */
+function PathCheckNote({ path }: { path: string }) {
+  const [state, setState] = useState<'idle' | 'checking' | 'ok' | 'missing' | 'file' | 'error'>('idle')
+  const [detail, setDetail] = useState('')
+  useEffect(() => {
+    const trimmed = path.trim()
+    if (!trimmed || !trimmed.startsWith('/')) { setState('idle'); setDetail(''); return }
+    setState('checking')
+    const timer = setTimeout(() => {
+      void window.minimax.checkPath(trimmed).then((result) => {
+        if (result.error) { setState('error'); setDetail(result.error); return }
+        if (!result.exists) { setState('missing'); return }
+        setState(result.directory ? 'ok' : 'file')
+      }).catch((error: unknown) => { setState('error'); setDetail(error instanceof Error ? error.message : String(error)) })
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [path])
+  if (state === 'idle') return null
+  return <p className={`settings-note path-check ${state}`} role="status">{state === 'checking' ? 'Checking path…'
+    : state === 'ok' ? <><Check size={13} /> Directory found.</>
+    : state === 'missing' ? <><AlertCircle size={13} /> No such directory yet — nothing scans here until it exists. Saves as typed.</>
+    : state === 'file' ? <><AlertCircle size={13} /> That path is a file, not a directory.</>
+    : <><AlertCircle size={13} /> {detail || 'Path check failed.'}</>}</p>
+}
+
 export function SettingsView({ settings, setSettings, info, models, h3Report, scanning, status, checking, diagnosticRunning, ollamaModels, onRefreshOllama, onScan, onCheck, onSave, onApplyDefaults, onRunDiagnostics, onRunLtxUtility, fetchFocusEntryIds, onFetchFocusConsumed }: { settings: AppSettings; setSettings(value: AppSettings): void; info: ObjectInfo; models: ModelFile[]; h3Report: ReturnType<typeof h3StackReport>; scanning: boolean; status: ComfyStatus; checking: boolean; diagnosticRunning: boolean; ollamaModels: OllamaModel[]; onRefreshOllama(): void; onScan(): void; onCheck(): void; onSave(): void; onApplyDefaults(): void; onRunDiagnostics(): void; onRunLtxUtility?: (options: { tool: Ltx23UtilityKind; input: MediaFile | null; audio?: MediaFile | null; prompt?: string }) => Promise<string | null>; fetchFocusEntryIds?: ReadonlyArray<string>; onFetchFocusConsumed?(): void }) {
   const pathRows: Array<{ kind: ModelKind; label: string; note: string }> = [
     { kind: 'diffusion_models', label: 'Diffusion models', note: 'FL2VA and Ref2VA checkpoints' },
@@ -79,13 +107,30 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
   // ---- LLM layer (llama.cpp router primary, Ollama fallback) ----------------
   const [llmList, setLlmList] = useState<LlmModelsResult | null>(null)
   const [llmTesting, setLlmTesting] = useState(false)
+  // The URL last tested — the debounced re-test below skips no-op runs so
+  // typing in the router field re-verifies quietly without thrashing.
+  const [llmTestedUrl, setLlmTestedUrl] = useState<string | null>(null)
   const testLlm = async (candidate: string) => {
     setLlmTesting(true)
+    setLlmTestedUrl(candidate)
     try { setLlmList(await window.minimax.listLlmModels(candidate)) } catch (error) {
       setLlmList({ provider: candidate.trim() ? 'router' : 'ollama', endpoint: candidate, model: '', models: [], connected: false, latencyMs: 0, error: error instanceof Error ? error.message : String(error) })
     } finally { setLlmTesting(false) }
   }
   useEffect(() => { void testLlm('') /* current settings on mount */ }, [])
+  // Feedback while editing the address: after a quiet pause, re-test the
+  // endpoint so the pill/result/list reflect what was typed (the Test
+  // button stays for an immediate check).
+  useEffect(() => {
+    if (settings.llamaCppUrl === llmTestedUrl) return
+    const timer = setTimeout(() => { void testLlm(settings.llamaCppUrl) }, 600)
+    return () => clearTimeout(timer)
+  }, [settings.llamaCppUrl, llmTestedUrl])
+  // The model the NEXT call will use — the server-side `active` in llmList
+  // reflects what the router has LOADED, which lags the pick in router mode
+  // (the model loads per call). The pick drives the UI; the badge stays for
+  // the loaded state.
+  const llmSelectedModel = settings.llamaCppModel.trim()
 
   // ---- Managed engine runtime (increment 1) ---------------------------------
   // Runtime state rides the session store (the hook polls it ONLY while
@@ -170,11 +215,11 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
             launch this engine — point it at the instance's own custom_nodes
             folder and node packs install/clone into it (same pinned-revision
             and foreign-refusal discipline as the managed checkout). */}
-        <div className="connection-row"><div className="field-group grow"><label htmlFor="external-custom-nodes">External custom nodes folder</label><input id="external-custom-nodes" data-external-custom-nodes value={settings.engine.externalCustomNodesDir} placeholder="/path/to/ComfyUI/custom_nodes — pack installs land here" onChange={(event) => updateEngine({ externalCustomNodesDir: event.target.value })} /></div></div>
+        <div className="connection-row"><div className="field-group grow"><label htmlFor="external-custom-nodes">External custom nodes folder</label><input id="external-custom-nodes" data-external-custom-nodes value={settings.engine.externalCustomNodesDir} placeholder="/path/to/ComfyUI/custom_nodes — pack installs land here" onChange={(event) => updateEngine({ externalCustomNodesDir: event.target.value })} /><PathCheckNote path={settings.engine.externalCustomNodesDir} /></div></div>
         <p className="settings-note managed-engine-note" data-external-custom-nodes-note>External mode keeps the connection above as the engine. With a custom nodes folder set, the node packs below install into it — from a local copy here, or one consented fetch of the pinned revision (Fetchable items). Model inventory is pulled from the instance itself, so no local model roots are required.</p>
       </>}
       {settings.engine.mode === 'managed' && <>
-        <div className="connection-row"><div className="field-group grow"><label htmlFor="managed-checkout">ComfyUI checkout (existing)</label><input id="managed-checkout" value={settings.engine.checkoutPath} placeholder="/path/to/ComfyUI — must contain main.py" onChange={(event) => updateEngine({ checkoutPath: event.target.value })} /></div></div>
+        <div className="connection-row"><div className="field-group grow"><label htmlFor="managed-checkout">ComfyUI checkout (existing)</label><input id="managed-checkout" value={settings.engine.checkoutPath} placeholder="/path/to/ComfyUI — must contain main.py" onChange={(event) => updateEngine({ checkoutPath: event.target.value })} /><PathCheckNote path={settings.engine.checkoutPath} /></div></div>
         <p className="settings-note managed-engine-note">No checkout yet? The <strong>Fetchable items</strong> section below can fetch the reference ComfyUI revision (v0.34.0, GPL-3.0, consent-gated) and then nominate it here with one click.</p>
         <div className="connection-row">
           <div className="field-group grow"><label htmlFor="managed-python">Python executable</label><input id="managed-python" value={settings.engine.pythonPath} placeholder="empty = python3 (python on Windows)" onChange={(event) => updateEngine({ pythonPath: event.target.value })} /></div>
@@ -418,14 +463,20 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
           : <><AlertCircle size={14} /><span>{llmList.error || 'No models listed — check the address and that the server runs in router mode.'}</span></>}
       </div>}
       {llmList && llmList.models.length > 0 && <div className="llm-model-list" aria-label="Router models">
-        {llmList.models.map((model) => (
-          <button type="button" key={model.id} className={`llm-model-row ${model.active ? 'active' : ''}`} onClick={() => setSettings({ ...settings, llamaCppModel: model.id })} title={model.active ? 'Active chat model' : `Make ${model.id} the active chat model`}>
+        {llmList.models.map((model) => {
+          const selected = llmSelectedModel ? llmSelectedModel === model.id : model.active
+          return (
+          <button type="button" key={model.id} aria-pressed={selected} className={`llm-model-row ${selected ? 'active' : ''}`} onClick={() => setSettings({ ...settings, llamaCppModel: model.id })} title={selected ? 'Selected chat model (used on the next call; saves with Save settings)' : `Make ${model.id} the selected chat model`}>
             <span className={`llm-family-badge family-${model.family}`}>{model.family}</span>
             <span className="llm-model-name">{model.id}</span>
-            <span className="llm-model-flags">{model.vision && <em title="Vision-capable (image input)"><Eye size={13} /> vision</em>}{model.status && <em className="llm-model-status">{model.status}</em>}{model.active && <em className="llm-model-active"><Check size={13} /> active</em>}</span>
+            <span className="llm-model-flags">{model.vision && <em title="Vision-capable (image input)"><Eye size={13} /> vision</em>}{model.status && <em className="llm-model-status">{model.status}</em>}{selected && <em className="llm-model-active"><Check size={13} /> selected</em>}</span>
           </button>
-        ))}
+          )
+        })}
       </div>}
+      {llmList && llmList.connected && llmList.models.length > 0 && (llmSelectedModel
+        ? <p className="settings-note" role="status">Next call uses <strong>{llmSelectedModel}</strong>{llmList.model && llmList.model !== llmSelectedModel ? ` (router currently has ${llmList.model} loaded — it loads per call)` : ''}. Saved with Save settings.</p>
+        : <p className="settings-note">No model picked — the router decides per call. Pick a row above to pin one.</p>)}
       <div className="generation-defaults-grid">
         <label className="settings-check"><input type="checkbox" checked={settings.unloadLlmOnGenerate} onChange={(event) => setSettings({ ...settings, unloadLlmOnGenerate: event.target.checked })} /><span><strong><Unplug size={14} /> Unload models before generating</strong><small>Frees VRAM by unloading non-sticky router models when a render submits (≈2 s budget, never blocks the queue).</small></span></label>
         <label className="settings-check"><input type="checkbox" checked={settings.llmThinkingDefault === 'on'} onChange={(event) => setSettings({ ...settings, llmThinkingDefault: event.target.checked ? 'on' : 'off' })} /><span><strong>Thinking by default (freeform)</strong><small>Structured/JSON requests always run thinking-off for speed; this sets the default for freeform enhancement.</small></span></label>
@@ -446,8 +497,8 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
       </div>
       <p className="settings-note">Prompts go directly to the local Ollama server. Embedding and cloud-backed models are excluded.</p>
     </section>
-    <section className="settings-section"><div className="settings-heading"><div><HardDrive size={19} /><span><strong>Model locations</strong><small>Local roots are indexed in place and never moved or copied — and when the engine is connected, its own model listing is merged in (tagged "instance"), so an external instance needs no local roots at all.</small></span></div><button className="secondary-button" onClick={onScan} disabled={scanning}>{scanning ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}{scanning ? 'Scanning…' : 'Rescan'}</button></div><div className="path-table">{pathRows.map((row) => { const kindModels = models.filter((model) => model.kind === row.kind); const instanceCount = kindModels.filter((model) => model.source === 'instance' || model.source === 'both').length; const localCount = kindModels.length - kindModels.filter((model) => model.source === 'instance').length; return <div className="path-row" key={row.kind}><div className="path-kind"><Folder size={17} /><span><strong>{row.label}</strong><small>{row.note}</small></span></div><div className="path-input"><input value={settings.paths[row.kind]} onChange={(event) => setSettings({ ...settings, paths: { ...settings.paths, [row.kind]: event.target.value } })} /></div><span className="file-count" data-model-kind-count={row.kind}>{kindModels.length} files{instanceCount > 0 ? ` · ${instanceCount} instance · ${localCount} local` : ''}</span></div>})}</div></section>
-    <section className="settings-section"><div className="settings-heading"><div><FolderOpen size={19} /><span><strong>Input &amp; output</strong><small>Renders and prepared media stay local, under the app folder by default.</small></span></div></div><div className="connection-row"><div className="field-group grow"><label htmlFor="input-path">Input directory</label><input id="input-path" data-input-path value={settings.inputDirectory} onChange={(event) => setSettings({ ...settings, inputDirectory: event.target.value })} /></div></div><div className="connection-row"><div className="field-group grow"><label htmlFor="output-path">Output directory</label><input id="output-path" value={settings.outputDirectory} onChange={(event) => setSettings({ ...settings, outputDirectory: event.target.value })} /></div></div><div className="connection-row clip-tool-path"><div className="field-group grow"><label htmlFor="ffmpeg-path">FFmpeg executable</label><input id="ffmpeg-path" value={settings.ffmpegPath} onChange={(event) => setSettings({ ...settings, ffmpegPath: event.target.value })} /></div></div><p className="settings-note">Unset, both default under the app's own data folder (<code>&lt;app&gt;/data/input</code>, <code>&lt;app&gt;/data/output</code>) — nothing lands in Documents. An absolute path you set is kept as-is. The clip editor uses FFmpeg for frame extraction, trim points, joining, and full-project export.</p></section>
+    <section className="settings-section"><div className="settings-heading"><div><HardDrive size={19} /><span><strong>Model locations</strong><small>Local roots are indexed in place and never moved or copied — and when the engine is connected, its own model listing is merged in (tagged "instance"), so an external instance needs no local roots at all.</small></span></div><button className="secondary-button" onClick={onScan} disabled={scanning}>{scanning ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}{scanning ? 'Scanning…' : 'Rescan'}</button></div><div className="path-table">{pathRows.map((row) => { const kindModels = models.filter((model) => model.kind === row.kind); const instanceCount = kindModels.filter((model) => model.source === 'instance' || model.source === 'both').length; const localCount = kindModels.length - kindModels.filter((model) => model.source === 'instance').length; return <div className="path-row" key={row.kind}><div className="path-kind"><Folder size={17} /><span><strong>{row.label}</strong><small>{row.note}</small></span></div><div className="path-input"><input value={settings.paths[row.kind]} onChange={(event) => setSettings({ ...settings, paths: { ...settings.paths, [row.kind]: event.target.value } })} /><PathCheckNote path={settings.paths[row.kind]} /></div><span className="file-count" data-model-kind-count={row.kind}>{kindModels.length} files{instanceCount > 0 ? ` · ${instanceCount} instance · ${localCount} local` : ''}</span></div>})}</div></section>
+    <section className="settings-section"><div className="settings-heading"><div><FolderOpen size={19} /><span><strong>Input &amp; output</strong><small>Renders and prepared media stay local, under the app folder by default.</small></span></div></div><div className="connection-row"><div className="field-group grow"><label htmlFor="input-path">Input directory</label><input id="input-path" data-input-path value={settings.inputDirectory} onChange={(event) => setSettings({ ...settings, inputDirectory: event.target.value })} /><PathCheckNote path={settings.inputDirectory} /></div></div><div className="connection-row"><div className="field-group grow"><label htmlFor="output-path">Output directory</label><input id="output-path" value={settings.outputDirectory} onChange={(event) => setSettings({ ...settings, outputDirectory: event.target.value })} /><PathCheckNote path={settings.outputDirectory} /></div></div><div className="connection-row clip-tool-path"><div className="field-group grow"><label htmlFor="ffmpeg-path">FFmpeg executable</label><input id="ffmpeg-path" value={settings.ffmpegPath} onChange={(event) => setSettings({ ...settings, ffmpegPath: event.target.value })} /></div></div><p className="settings-note">Unset, both default under the app's own data folder (<code>&lt;app&gt;/data/input</code>, <code>&lt;app&gt;/data/output</code>) — nothing lands in Documents. An absolute path you set is kept as-is. The clip editor uses FFmpeg for frame extraction, trim points, joining, and full-project export.</p></section>
     <section className="settings-section license-source-section" aria-label="License and source">
       <div className="settings-heading"><div><Scale size={19} /><span><strong>License &amp; source</strong><small>This app is free software — its source belongs to everyone who uses it.</small></span></div></div>
       <p className="settings-note">MiniMax Studio is licensed under the <strong>GNU AGPLv3</strong> (<a href="https://github.com/Cobdog/MINIMAX-DESKTOP/blob/main/LICENSE" target="_blank" rel="noreferrer">full text</a>). The corresponding source lives at <a href="https://github.com/Cobdog/MINIMAX-DESKTOP" target="_blank" rel="noreferrer">github.com/Cobdog/MINIMAX-DESKTOP</a> — if you run a modified copy for others over a network, share your source with them. Third-party components and model-weight licenses are inventoried in <a href="https://github.com/Cobdog/MINIMAX-DESKTOP/blob/main/docs/LICENSES.md" target="_blank" rel="noreferrer">docs/LICENSES.md</a>.</p>

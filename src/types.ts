@@ -785,6 +785,7 @@ export type DesktopApi = {
   generateWithOllama(url: string, model: string, prompt: string): Promise<string>
   generateStructuredWithOllama(url: string, model: string, prompt: string, schema: Record<string, unknown>): Promise<unknown>
   listLlmModels(url?: string): Promise<LlmModelsResult>
+  checkPath(path: string): Promise<{ exists: boolean; directory: boolean; error?: string }>
   llmGenerate(options: LlmGenerateOptions & { prompt?: string }): Promise<string>
   llmGenerateStructured(options: LlmGenerateOptions & { schema: Record<string, unknown> }): Promise<unknown>
   llmPrepareStream(options: LlmGenerateOptions): Promise<LlmStreamRequest>

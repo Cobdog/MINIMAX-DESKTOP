@@ -189,6 +189,9 @@ export function createWebApiClient(): DesktopApi {
       const query = url && url.trim() ? `?url=${encodeURIComponent(url.trim())}` : ''
       return apiFetch<LlmModelsResult>(`/api/lan/llm/models${query}`)
     },
+    async checkPath(path) {
+      return apiFetch<{ exists: boolean; directory: boolean; error?: string }>(`/api/lan/fs/check?path=${encodeURIComponent(path.trim())}`)
+    },
     async llmGenerate(options) {
       const body = await postJson<{ response: string }>('/api/lan/llm/generate', options)
       return body.response

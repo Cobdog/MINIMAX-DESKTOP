@@ -2535,3 +2535,10 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .nav-button.retired-view .retired-badge { margin-left: auto; padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted-2); font-size: var(--text-2xs); font-style: normal; letter-spacing: .04em; text-transform: uppercase; }
 .retired-affordance { opacity: .55; }
 .retired-affordance:hover { opacity: .8; }
+
+/* Directory-path feedback (maintainer flag 2026-09-19): inline validation
+   under Settings' directory fields. */
+.path-input .path-check, .field-group .path-check { margin: 4px 0 0; font-size: var(--text-2xs, 12px); display: flex; align-items: center; gap: 5px; }
+.path-check.ok { color: var(--color-ok, #3fb950); }
+.path-check.missing, .path-check.file, .path-check.error { color: var(--warning, #d29922); }
+.path-check.checking { color: var(--muted-2, #888); }

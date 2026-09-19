@@ -2730,6 +2730,24 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
           return sendJson(response, 404, { error: `Unknown dataset-manager route ${url.pathname}.` })
         }
         // ---- LLM layer routes (v2 wave) --------------------------------------
+        // Directory-path feedback (maintainer flag 2026-09-19): a stat-only
+        // existence/type check for paths the user is TYPING into Settings'
+        // directory fields. No listing, no contents — existence + is-directory
+        // only, which the settings write+read surface already implies within
+        // the accepted LAN posture; the request guard (origin/token) gates it
+        // like every other route.
+        if (url.pathname === '/api/lan/fs/check' && request.method === 'GET') {
+          const target = (url.searchParams.get('path') ?? '').trim()
+          if (!target || !isAbsolute(target)) return sendJson(response, 400, { error: 'An absolute path is required.' })
+          try {
+            const info = await stat(target)
+            return sendJson(response, 200, { exists: true, directory: info.isDirectory() })
+          } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code ?? ''
+            if (code === 'ENOENT' || code === 'ENOTDIR') return sendJson(response, 200, { exists: false, directory: false })
+            return sendJson(response, 200, { exists: false, directory: false, error: code === 'EACCES' ? 'Not permitted to inspect this path.' : code || 'unknown error' })
+          }
+        }
         // Model listing from the ACTIVE provider, shaped for the client:
         // family inference, vision capability, router status, active flag.
         // An optional ?url= probes a CANDIDATE endpoint (Settings' Test
