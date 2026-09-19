@@ -36,6 +36,7 @@ import { H3IMG_RECIPE_PINS, TRANSPORT_FOR_ROLE, findH3ImgFamily } from '../lib/g
 import type { H3ImgRefRole } from '../lib/graph/h3image'
 import { mediaForOutput, buildOutputIndex } from '../canvas/generation'
 import { chainSettingsDefaults } from '../canvas/generation'
+import { CANVAS_EDIT_HANDOFF_KEY, handoffPreviewUrl } from '../canvas/stillIntent'
 import './workbench.css'
 
 const ROLES: H3ImgRefRole[] = ['subject', 'pose', 'style', 'lighting', 'background', 'freeform']
@@ -231,6 +232,30 @@ function WorkbenchSurface() {
         return
       }
       void patchSettings({ refs: [...current.refs, { id: `ref-${Date.now()}`, role: 'pose', transport: null, keepOverride: null, note: 'poserig render', source: { kind: 'poserig', path: parsed.path, name: parsed.name } }] })
+    } catch {
+      /* a malformed handoff is dropped silently — it is a convenience key */
+    }
+  }, [sessionChain, patchSettings])
+
+  // Canvas image+control handoff (34afx79, dated decision 2026-09-19): the
+  // canvas's stills intent with a BOUND image routes HERE — the Edit surface
+  // with the image anchored as the source (Picture 1). The canvas ships no
+  // control-stills graph; reference/canny-style image work is this surface's
+  // job (the ControlNet-Union-on-Z-Image path retired with Z-Image). Unlike
+  // the poserig inbox, this consumes ONLY once the session chain exists — a
+  // first-open handoff survives the session bootstrap instead of being read
+  // and dropped before it can land.
+  useEffect(() => {
+    if (!sessionChain) return
+    try {
+      const raw = window.localStorage.getItem(CANVAS_EDIT_HANDOFF_KEY)
+      if (!raw) return
+      window.localStorage.removeItem(CANVAS_EDIT_HANDOFF_KEY)
+      const parsed = JSON.parse(raw) as { path: string; name: string; intent: string }
+      if (typeof parsed.path !== 'string' || !parsed.path) return
+      setSourceFile({ path: parsed.path, name: typeof parsed.name === 'string' && parsed.name ? parsed.name : parsed.path.split('/').pop() ?? 'source.png', preview: handoffPreviewUrl(parsed.path) })
+      void patchSettings({ family: 'h3img.edit.freeform', intent: typeof parsed.intent === 'string' ? parsed.intent : '' })
+      setNotice('Canvas handoff: the bound image is anchored as the Edit source (Picture 1) — name the change in the intent box, then generate.')
     } catch {
       /* a malformed handoff is dropped silently — it is a convenience key */
     }
@@ -660,7 +685,7 @@ function WorkbenchSurface() {
               {sourceFile ? (
                 <figure>
                   {sourceFile.preview ? <img src={sourceFile.preview} alt="source" /> : <span>{sourceFile.name}</span>}
-                  <figcaption>{sourceFile.name} <button type="button" onClick={() => setSourceFile(null)}>remove</button></figcaption>
+                  <figcaption data-iw-source-name>{sourceFile.name} <button type="button" onClick={() => setSourceFile(null)}>remove</button></figcaption>
                 </figure>
               ) : <button type="button" onClick={() => sourceInput.current?.click()} data-iw-source-pick>Choose the source image</button>}
             </div>

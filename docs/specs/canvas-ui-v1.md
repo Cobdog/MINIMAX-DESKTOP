@@ -357,6 +357,21 @@ still directly navigable (their D-dependencies hold until Phase 5);
 CreateView stays (the D1 dependency, Phase 4). CreateView/JobsView/Library
 full retirement follows their Phase-4 capability absorbments.
 
+**Addendum (2026-09-19, task 34afx79 — the image pathway reroute):** the
+Phase-3 Z-Image stills op is SUPERSEDED. The image intent now renders
+H3-1F — the h3image Generate-T=1 family through the workbench's shared
+submit core (availability-gated on the H3 stack like every family; takes
+land through the packet-aware branch like any chain) — with the engine
+selected per chain through a two-slot typed-hole seam (`imageEngine`:
+'h3-1f' wired, 'krea2' the queued Krea 2 stills slot, mf3wfq6). The
+image+control intent (the old control-via-selected-image surface) no
+longer builds a canvas graph at all: it hands off to the workbench's Edit
+surface with the bound image anchored as the source (Picture 1) — the
+ControlNet-Union-on-Z-Image path is retired with Z-Image itself
+(`lib/zImageSubmit.ts` / `lib/zImageControlnet.ts` /
+`ZImageWorkspace.tsx` deleted; the asset studios keep their own
+`lib/zimage.ts` reference generation).
+
 **Phase 5 landed (task 7mcp11b, 2026-09-17):** the deletion wave — the canvas
 is THE app. The 7 greyed views (ClipEditor, VideoReferenceClipper,
 FrameBookmarkStudio, CreateView, JobsView, LibraryView, Ltx25Workspace) are

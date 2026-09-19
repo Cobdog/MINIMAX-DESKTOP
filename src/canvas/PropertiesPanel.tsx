@@ -32,7 +32,7 @@ import { composeStructuredPrompt, mergeStructuredDraft, parseFlowRows, parseStru
 import { useLlmStream } from '../lib/useLlmStream'
 import { useSessionStore } from '../state/sessionStore'
 import { STATUS_LABEL } from './derive'
-import { effectiveMode, MODE_LABEL, readChainSettings, type CanvasChainSettings } from './generation'
+import { effectiveMode, IMAGE_ENGINES, MODE_LABEL, readChainSettings, type CanvasChainSettings } from './generation'
 import { useCanvasStore } from './store'
 import type { DocumentChain } from './derive'
 
@@ -409,7 +409,12 @@ export function PropertiesPanel() {
       </section>
 
       <section className="canvas-properties-section" data-canvas-section="engine">
-        <label>Engine — {draft.mediaType === 'audio' ? (draft.audio.engine === 'music3' ? 'MiniMax Music 3' : 'ACE-Step XL 1.5') : draft.engine === 'ltx25' ? 'LTX-2.5 general' : 'MiniMax H3'}</label>
+        <label>Engine — {draft.mediaType === 'audio' ? (draft.audio.engine === 'music3' ? 'MiniMax Music 3' : 'ACE-Step XL 1.5') : draft.mediaType === 'image' ? (IMAGE_ENGINES.find((engine) => engine.id === draft.imageEngine) ?? IMAGE_ENGINES[0]).label : draft.engine === 'ltx25' ? 'LTX-2.5 general' : 'MiniMax H3'}</label>
+        {draft.mediaType === 'image' && (
+          <p className="canvas-properties-note" data-canvas-image-engine-note>
+            {IMAGE_ENGINES.find((engine) => engine.id === draft.imageEngine)?.note ?? IMAGE_ENGINES[0].note} The image intent renders one H3-1F still per take; image-with-reference hands off to the workbench's Edit surface.
+          </p>
+        )}
         {draft.mediaType === 'audio' && (
           <div className="canvas-properties-row">
             <button type="button" className="canvas-chip" data-canvas-open-audio-dock onClick={() => useCanvasStore.getState().setAudioDock({ engine: draft.audio.engine, chainId: chain.id })}>

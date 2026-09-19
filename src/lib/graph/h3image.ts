@@ -275,8 +275,9 @@ export type H3ImgRequest = {
   width: number
   height: number
   seed: number
-  /** Packet tier (packet profile only; directed pins 39). */
-  tier?: 5 | 9 | 13 | 39
+  /** Packet tier (packet profile only; directed pins 39, T=1 pins its single
+   *  frame — validateRequest enforces the profile's own legal value). */
+  tier?: 1 | 5 | 9 | 13 | 39
   /** Ordered reference slots (<=9, wired <Picture N> by order). */
   refs: H3ImgRefSlot[]
   /** Anchored source (packet I2I / edit anchor) — uploaded image name. */
