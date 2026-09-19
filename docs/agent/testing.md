@@ -39,8 +39,9 @@ Runs the entire verification chain in canonical order — `typecheck` →
 `test:h3img`, `test:storage`, `test:documents`, `test:realtime`,
 `test:filmstrip`, `test:llm`, `test:engine`, `test:runtime`, `test:fetcher`,
 `test:instance`, `test:lora-form`, `test:poserig`, `test:camera`,
-`test:canvas`, `test:benchmarks`, `test:datasets`) → `build` → `smoke:server`
-→ e2e → vision-capture — each in its own process, wall-clock timed,
+`test:canvas`, `test:benchmarks`, `test:datasets`) → `build` →
+`test:launcher` → `smoke:server` → e2e → vision-capture — each in its own
+process, wall-clock timed,
 known-benign output filtered (the filter tally prints so nothing disappears
 silently), one summary table, non-zero exit on any failure. A failed
 `build` skips only its dependents (smoke/e2e/vision). `pnpm test:all` is the
@@ -74,6 +75,13 @@ same chain without the harness niceties. Individual suites run directly
   real settings pipeline, and the routes against a local fake engine. The
   route sections self-skip without the web build (the Windows-leg NOTE
   pattern).
+- `test:launcher` (ukyxwfa) drives the real `start.sh` under `sh` with
+  hermetic scratch configs (MINIMAX_START_CONFIG) and probed 7000–7099
+  ports: seeding, --set/--print round-trips, flag parsing, env precedence,
+  busy-port/missing-deps honesty, the prompts-configure save path (engine
+  URL write + token regen), dev-vs-prod plan selection, and a real
+  production boot + SIGTERM teardown. Runs after `build` in the gate so the
+  boot leg always has dist; NOTE-skips on win32 (POSIX sh only).
 
 ## VM-harness pitfalls (scripts/test-*.cjs)
 
