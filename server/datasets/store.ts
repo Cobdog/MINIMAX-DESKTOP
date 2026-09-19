@@ -609,12 +609,21 @@ export function createDatasetStore(db: Database.Database, options: DatasetStoreO
     }
   }
 
-  /** The async decoded-frame-count probe (§2.2): full decode, background. */
+  /** The async decoded-frame-count probe (§2.2): full decode, background.
+   *  App-tour wave (d6iy68r, review M2): non-videos and REFUSED sources are
+   *  terminal at once — a still's facts were probed at ingest (one frame),
+   *  and a refused source never carries layers or bakes, so counting its
+   *  frames is moot work. Before this, both sat 'pending' forever and the
+   *  client's 1.5 s library poll never ended. */
   async function runDecodeProbe(sourceId: string): Promise<void> {
     const source = hydrateSource(st.sourceById.get(sourceId))
     if (!source) throw new Error(`No source ${sourceId}.`)
     if (source.kind === 'image') {
       st.updateSourceProbe.run(JSON.stringify({ ...source.probe }), 1, 'done', null, now(), sourceId)
+      return
+    }
+    if (source.floorVerdict === 'refuse') {
+      st.updateSourceProbe.run(JSON.stringify(source.probe), null, 'done', null, now(), sourceId)
       return
     }
     db.prepare("UPDATE dataset_sources SET probe_state = 'probing', updated_at = ? WHERE id = ?").run(now(), sourceId)

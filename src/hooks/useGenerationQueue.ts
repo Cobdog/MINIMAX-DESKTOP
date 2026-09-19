@@ -99,12 +99,11 @@ export function useGenerationQueue(options: {
     persistJobs(() => {
       // The submit graph is for in-memory retry only — never persisted.
       const persistable = jobsRef.current.slice(0, 100).map((job) => { const rest = { ...job }; delete rest.graph; return rest })
-      // Empty-jobs guard (review M13, 2026-09-19): the boot transition (this
-      // effect firing once storageBootDone flips, list still empty) used to
-      // POST {"jobs":[]} on EVERY fresh boot — the server rejects empty
-      // batches with a 400 and the catch then mirrored [] to localStorage as
-      // "degraded mode". The route is per-job upserts: an empty list has
-      // nothing to persist, so it is skipped client-side.
+      // Empty-jobs guard (both review waves found this independently — g5x37k8
+      // M13 + d6iy68r m2, 2026-09-19): the boot transition used to POST
+      // {"jobs":[]} on every fresh boot; the server rejects empty batches
+      // with a 400 and the catch mirrored [] to localStorage as bogus
+      // "degraded mode". An empty list has nothing to persist.
       if (!persistable.length) return
       void saveServerJobs(persistable).catch(() => {
         // Degraded mode: mirror to the legacy store so a boot while the API

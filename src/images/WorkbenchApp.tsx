@@ -15,7 +15,7 @@
  * through the shared landing loop; nothing here re-implements queueing.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowLeft, ImagePlus, Layers, LoaderCircle, Lock, Send, Settings, Sparkles, Wand2 } from 'lucide-react'
+import { ImagePlus, Layers, LoaderCircle, Lock, Send, Settings, Sparkles, Wand2 } from 'lucide-react'
 import { useStudioSession } from '../hooks/useStudioSession'
 import { useGenerationQueue } from '../hooks/useGenerationQueue'
 import { useLivePreview } from '../lib/useLivePreview'
@@ -37,6 +37,7 @@ import type { H3ImgRefRole } from '../lib/graph/h3image'
 import { mediaForOutput, buildOutputIndex } from '../canvas/generation'
 import { chainSettingsDefaults } from '../canvas/generation'
 import { CANVAS_EDIT_HANDOFF_KEY, handoffPreviewUrl } from '../canvas/stillIntent'
+import { SurfaceSwitcher } from '../surfaces/SurfaceSwitcher'
 import './workbench.css'
 
 const ROLES: H3ImgRefRole[] = ['subject', 'pose', 'style', 'lighting', 'background', 'freeform']
@@ -553,10 +554,12 @@ function WorkbenchSurface() {
   return (
     <div className="iw-root" data-iw-root data-iw-family={settings.family}>
       <header className="iw-header">
-        <a className="iw-back" href={`/${token ? `?token=${encodeURIComponent(token)}` : ''}`} title="Back to the canvas"><ArrowLeft size={14} /> canvas</a>
-        {/* Settings reachability (review M2, g5x37k8 2026-09-19): this
-            surface has its own session host but no docked settings panel —
-            the deep-link opens the dock on the canvas in one click. */}
+        {/* Both review waves (union): the registry-driven surface switcher
+            (d6iy68r M1 — Alt+1..9 live, one way to reach a surface) PLUS
+            the settings deep-link (g5x37k8 M2 — this surface has its own
+            session host but no docked settings panel; one click opens the
+            dock on the canvas). */}
+        <SurfaceSwitcher />
         <a className="iw-back" data-iw-settings-link href={`/?settings=1${token ? `&token=${encodeURIComponent(token)}` : ''}`} title="Settings — opens docked on the canvas surface"><Settings size={14} /> settings</a>
         <strong>H3 Image Workbench</strong>
         <span className={`iw-engine ${sessionState.status.connected ? 'ok' : 'warn'}`} data-iw-engine={sessionState.status.connected ? 'on' : 'off'}>
@@ -787,7 +790,14 @@ function WorkbenchSurface() {
             <span>semantic overflow <em>experimental</em></span>
           </label>
 
-          <button type="button" className="iw-generate" data-iw-generate disabled={busy || !detectionOf(settings.family)?.available} onClick={() => void generate()}>
+          <button
+            type="button"
+            className="iw-generate"
+            data-iw-generate
+            disabled={busy || !detectionOf(settings.family)?.available}
+            title={detectionOf(settings.family)?.available ? 'Generate' : (detectionOf(settings.family)?.missingModels.join('; ') || detectionOf(settings.family)?.missingNodes.join('; ') || 'unavailable')}
+            onClick={() => void generate()}
+          >
             {busy ? <LoaderCircle className="spin" size={13} /> : <Sparkles size={13} />}
             Generate {family?.profile === 't1' ? '(T=1 fast — structurally soft)' : `(${family?.kind === 'generate-directed' ? 39 : settings.tier}-frame packet)`}
           </button>

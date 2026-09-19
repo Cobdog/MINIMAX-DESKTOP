@@ -86,6 +86,14 @@ export function CropEditor({ source, layer, aspects, onClose, onSaved }: Props) 
 
   // The wheel contract: scroll = resize; shift+scroll = aspect scrub with
   // HARD STOPS (clamped index — the spectrum never loops, spec §3).
+  // App-tour wave (d6iy68r, review M4): every tick moves each dimension at
+  // least ONE grid step in the tick's direction. The multiplicative 6 %
+  // alone deadlocks below ~267 px (6 % < 16 px, and each tick restarted
+  // from the previous SNAPPED value — 256, 192, 160… were fixed points;
+  // the review measured 15+ ticks with zero change). The draft is always
+  // grid-snapped (clampToFrame below), so value ± GRID lands exactly on
+  // grid and the snap stays display/save truth. Sub-floor sizes still
+  // refuse at save-time with the floor reason — resizable, never stranded.
   const onWheel = useCallback((event: WheelEvent) => {
     event.preventDefault()
     if (event.shiftKey) {
@@ -101,10 +109,16 @@ export function CropEditor({ source, layer, aspects, onClose, onSaved }: Props) 
     } else {
       setDraft((current) => {
         const factor = event.deltaY > 0 ? 0.94 : 1.06
+        const step = (value: number) => {
+          const scaled = value * factor
+          if (factor < 1 && value - scaled < GRID) return value - GRID
+          if (factor > 1 && scaled - value < GRID) return value + GRID
+          return scaled
+        }
         const cx = current.crop.x + current.crop.w / 2
         const cy = current.crop.y + current.crop.h / 2
-        const w = current.crop.w * factor
-        const h = current.crop.h * factor
+        const w = step(current.crop.w)
+        const h = step(current.crop.h)
         return { ...current, crop: clampToFrame({ x: cx - w / 2, y: cy - h / 2, w, h }, source.probe.width, source.probe.height) }
       })
       setStatus('')
@@ -130,6 +144,18 @@ export function CropEditor({ source, layer, aspects, onClose, onSaved }: Props) 
     node.addEventListener('wheel', onWheel, { passive: false })
     return () => node.removeEventListener('wheel', onWheel)
   }, [onWheel])
+
+  // App-tour wave (d6iy68r, review m3): the editor answers Escape (Close
+  // was the only exit). Not while a save is in flight — the save's outcome
+  // (or its refusal reason) belongs on screen.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || busy) return
+      onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [busy, onClose])
 
   const onPointerDown = (event: React.PointerEvent) => {
     if (event.button !== 0) return

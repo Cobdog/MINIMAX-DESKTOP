@@ -60,6 +60,20 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
+/** One synthetic 512² still, ingested by reference (the app-tour wave's
+ * poll-terminus coverage — images resolve their probe facts at ingest). */
+async function seedStill(request: APIRequestContext) {
+  const home = join(process.cwd(), 'test-home')
+  mkdirSync(home, { recursive: true })
+  const dir = mkdtempSync(join(home, 'ds-e2e-'))
+  const still = join(dir, 'e2e-still.png')
+  await exec('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=duration=1:size=512x512:rate=24', '-frames:v', '1', still])
+  const response = await request.post('/api/lan/datasets/ingest/reference', { data: { path: still } })
+  expect(response.ok()).toBeTruthy()
+  const body = await response.json()
+  return body.source.id as string
+}
+
 test('the workbench boots at ?datasets=1 with the seeded master in the gallery', async ({ page }) => {
   const problems = await trackErrors(page)
   const sourceId = await seedLibrary(page.request)
@@ -169,4 +183,150 @@ test('the surface switcher carries the datasets entry from the canvas (QOL wave 
   // shared chrome every surface carries.
   await expect(page.locator('[data-canvas-chip="datasets"]')).toHaveCount(0)
   await expect(page.locator('[data-surface-switcher] [data-surface="datasets"]')).toBeVisible()
+})
+
+// ---------------------------------------------------------------------------
+// App-tour UX fix wave (d6iy68r) — the adversarial review's datasets findings:
+// the forever-poll terminus, the vanishing error banner, the crop-editor
+// scroll deadlock below the 32-grid floor, and Escape on the overlays.
+
+test('an ingested still settles its probe state — the library poll terminates (no forever-fetch)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await seedLibrary(page.request)
+  await seedStill(page.request)
+  // A below-floor still: refused at import — its chip must carry the
+  // server's detailed reason (app-tour wave d6iy68r, review M6), and it
+  // too must settle its probe state. Content identity is the hash, so a
+  // re-run on the shared home DEDUPES into the earlier run's source — the
+  // ingest response then carries no refusal field, but the refused row and
+  // its reason live on in the library; the DOM assertions below are the
+  // truth either way (the accumulation trap testing.md documents).
+  const home = join(process.cwd(), 'test-home')
+  const tinyDir = mkdtempSync(join(home, 'ds-e2e-'))
+  const tinyStill = join(tinyDir, 'e2e-tiny-still.png')
+  await exec('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=duration=1:size=200x200:rate=24', '-frames:v', '1', tinyStill])
+  await page.request.post('/api/lan/datasets/ingest/reference', { data: { path: tinyStill } })
+  await page.goto('/?datasets=1')
+  const stillMaster = page.locator('[data-ds-master]', { hasText: 'e2e-still' }).first()
+  await expect(stillMaster).toBeVisible({ timeout: 10_000 })
+  // The still never counts as probe-pending: no "probing…" flag renders for it.
+  await expect(stillMaster.locator('.ds-master-flag', { hasText: /probing/ })).toHaveCount(0)
+  // The refusal chip explains itself (the full server reason rides the
+  // title — the same honesty the crop editor gives at crop-time).
+  const refusedMaster = page.locator('[data-ds-master]', { hasText: 'e2e-tiny-still' }).first()
+  await expect(refusedMaster).toBeVisible({ timeout: 10_000 })
+  await expect(refusedMaster.locator('.ds-master-flag', { hasText: 'refused at import' })).toHaveAttribute('title', /256²/)
+  // The poll terminus, observed on the wire: after the initial load, ZERO
+  // further library fetches for >2 poll cycles (1.5 s each). Before the
+  // server-side fix the still sat 'pending' forever and this count grew
+  // every 1.5 s — two requests per cycle, sustained for the session's life.
+  let libraryFetches = 0
+  page.on('request', (request) => {
+    if (request.url().includes('/api/lan/datasets/library')) libraryFetches += 1
+  })
+  await page.waitForTimeout(3400)
+  expect(libraryFetches).toBe(0)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('error banners survive the background poll — action failures stay readable', async ({ page }) => {
+  const problems = await trackErrors(page)
+  // A LONG clip keeps its decode probe pending through the assertion window
+  // (the poll runs only while a video probe is pending — the exact condition
+  // that used to wipe the banner on every successful refresh).
+  const home = join(process.cwd(), 'test-home')
+  mkdirSync(home, { recursive: true })
+  const dir = mkdtempSync(join(home, 'ds-e2e-'))
+  const longClip = join(dir, 'e2e-long.mp4')
+  await exec('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=duration=120:size=480x832:rate=24', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', longClip])
+  const ingested = await (await page.request.post('/api/lan/datasets/ingest/reference', { data: { path: longClip } })).json()
+  // A layer exists and is selectable; the trigger token is UNSET so the
+  // first export attempt must refuse at the gates (the review's repro).
+  await page.request.post('/api/lan/datasets/settings', { data: { triggerToken: '', contentClass: 'style' } })
+  await page.request.post('/api/lan/datasets/layers', { data: { sourceId: ingested.source.id, name: 'banner-layer' } })
+  await page.goto('/?datasets=1')
+  const master = page.locator('[data-ds-master]', { hasText: 'e2e-long' }).first()
+  await expect(master).toBeVisible({ timeout: 10_000 })
+  await master.locator('.ds-master-name').click() // expand to see the layer
+  const layer = master.locator('[data-ds-layer]', { hasText: 'banner-layer' }).first()
+  await expect(layer).toBeVisible()
+  await layer.locator('.ds-layer-select').click()
+  await page.locator('.ds-tab', { hasText: 'export' }).click()
+  await page.locator('[data-ds-run-export]').click()
+  await expect(page.locator('[data-ds-error]')).toContainText(/refuse/i, { timeout: 10_000 })
+  // Two-plus poll cycles pass with background refreshes succeeding while
+  // the probe is still pending — the banner must SURVIVE them (before the
+  // fix it vanished within ~1.5 s, faster than a human could read it).
+  await page.waitForTimeout(3400)
+  await expect(page.locator('[data-ds-error]')).toBeVisible()
+  await expect(page.locator('[data-ds-error]')).toContainText(/refuse/i)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('the crop editor scroll-resize never strands below the grid floor (the 256×256 deadlock)', async ({ page }) => {
+  await seedLibrary(page.request)
+  await page.goto('/?datasets=1')
+  const master = page.locator('[data-ds-master]', { hasText: 'e2e-clip' }).first()
+  await expect(master).toBeVisible({ timeout: 10_000 })
+  await master.getByRole('button', { name: /layer/ }).first().click()
+  await expect(page.locator('[data-ds-editor]')).toBeVisible()
+  const stage = page.locator('[data-ds-stage]')
+  const readoutHeight = async () => {
+    const text = await page.locator('.ds-crop-readout').innerText()
+    return Number(/h (\d+)/.exec(text)?.[1] ?? 0)
+  }
+  // Shrink deep into the sub-267 px zone where a 6 % multiplicative tick is
+  // smaller than one 32 px grid step. The old code re-snapped EVERY tick
+  // from the previous snapped value, so 256 (and 192, 160…) were fixed
+  // points — the review measured 15+ ticks with zero change.
+  for (let index = 0; index < 9; index += 1) {
+    await stage.hover()
+    await page.mouse.wheel(0, 200)
+  }
+  const plateau = await readoutHeight()
+  for (let index = 0; index < 5; index += 1) {
+    await stage.hover()
+    await page.mouse.wheel(0, 200)
+  }
+  const shrunkFurther = await readoutHeight()
+  expect(shrunkFurther).toBeLessThan(plateau)
+  // Growth un-strands too: scrolling back up must grow it again.
+  for (let index = 0; index < 3; index += 1) {
+    await stage.hover()
+    await page.mouse.wheel(0, -200)
+  }
+  const grown = await readoutHeight()
+  expect(grown).toBeGreaterThan(shrunkFurther)
+})
+
+test('the crop editor and caption panel answer Escape (one press, one action)', async ({ page }) => {
+  await seedLibrary(page.request)
+  await page.goto('/?datasets=1')
+  const master = page.locator('[data-ds-master]', { hasText: 'e2e-clip' }).first()
+  await expect(master).toBeVisible({ timeout: 10_000 })
+  // Crop editor: Escape closes it (Close was the only exit before).
+  await master.getByRole('button', { name: /layer/ }).first().click()
+  await expect(page.locator('[data-ds-editor]')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('[data-ds-editor]')).toHaveCount(0)
+  // A saved layer gives the caption phase its subject (the default full-frame
+  // stamp, same as the aspect-spectrum test's save).
+  await master.getByRole('button', { name: /layer/ }).first().click()
+  await expect(page.locator('[data-ds-editor]')).toBeVisible()
+  await page.locator('[data-ds-save-layer]').click()
+  await expect(page.locator('[data-ds-editor]')).toHaveCount(0)
+  // Caption panel: Escape closes the panel — but the inner VLM modal owns
+  // the FIRST press while it is open.
+  await master.locator('.ds-master-name').click()
+  const layer = page.locator('[data-ds-layer]').first()
+  await expect(layer).toBeVisible()
+  await layer.getByRole('button', { name: 'caption' }).click()
+  await expect(page.locator('[data-ds-caption]')).toBeVisible()
+  await page.locator('[data-ds-caption] .ds-btn.ghost', { hasText: 'VLM' }).click()
+  await expect(page.locator('[data-ds-vlm]')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('[data-ds-vlm]')).toHaveCount(0)
+  await expect(page.locator('[data-ds-caption]')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('[data-ds-caption]')).toHaveCount(0)
 })

@@ -1521,8 +1521,14 @@ test('engines-as-ops complete: LTX-2.5 general row + the audio docks (probe seam
   expect(ace.graph.saveAudio).toBe(true)
 
   // The audio dock: the bottom bar's nothing-selected context opens Music 3;
-  // offline the submit button carries the honest refusal.
+  // offline the submit button carries the honest refusal. One press, one
+  // action (app-tour wave d6iy68r, review m1): the FIRST Escape closes the
+  // menu only — the second deselects, returning the bar to its empty
+  // context (the old single-press close-AND-deselect was the bug itself).
   await page.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.canvas-tile.selected')).toHaveCount(0)
   await page.locator('[data-canvas-bar-music3]').click()
   const dock = page.locator('[data-canvas-audio-dock]')
   await expect(dock).toBeVisible()

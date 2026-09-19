@@ -10,8 +10,6 @@
 
 .iw-header { display: flex; align-items: center; gap: 14px; padding: 8px 14px; border-bottom: 1px solid color-mix(in srgb, var(--muted) 22%, transparent); flex: 0 0 auto; }
 .iw-header strong { font-size: var(--text-sm, 13px); }
-.iw-back { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); text-decoration: none; font-size: var(--text-2xs, 10px); }
-.iw-back:hover { color: var(--accent, var(--color-info)); }
 .iw-engine { margin-left: auto; font-size: var(--text-2xs, 10px); padding: 2px 9px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--muted) 40%, transparent); color: var(--muted); }
 .iw-engine.ok { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
 .iw-engine.warn { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }

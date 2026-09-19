@@ -87,6 +87,12 @@ export function CanvasApp() {
         return
       }
       if (event.key === 'Escape') {
+        // App-tour wave (d6iy68r, review m1, decided 2026-09-19): ONE action
+        // per press. Overlays with their own Escape handlers (index, library,
+        // endpoint menu) stopPropagation — the overlay that ACTS owns the
+        // keypress and this chain never runs for it (before, closing an
+        // overlay ALSO deselected in the same press). This handler stays the
+        // owner for everything without its own handler.
         const state = useCanvasStore.getState()
         if (state.indexOpen) setIndexOpen(false)
         else if (state.gapMenu) state.setGapMenu(null)

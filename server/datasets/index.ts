@@ -91,9 +91,13 @@ export function createDatasetManager(options: DatasetManagerOptions) {
   const slowMoCache = new Map<string, { suspect: boolean; reasons: string[] }>()
 
   // ---- ingest orchestration (async decode probe never blocks import) -------
+  // App-tour wave (d6iy68r, review M2): EVERY freshly-inserted source gets
+  // its probe settled — runDecodeProbe is terminal-at-once for stills and
+  // refused sources (both facts-complete without a decode) and async only
+  // for floor-passing videos, which are the one real pending workload.
   async function ingestReference(path: string, provenance?: { originNote?: string; originDate?: string; aiGenerated?: boolean; consentNote?: string }) {
     const result = await store.ingestReference(path, provenance)
-    if (!result.deduped && result.source.floorVerdict !== 'refuse' && result.source.kind === 'video') {
+    if (!result.deduped) {
       void store.runDecodeProbe(result.source.id).catch((error: unknown) => options.logFailure('datasets/probe', error, { id: result.source.id }))
     }
     return result
@@ -101,10 +105,20 @@ export function createDatasetManager(options: DatasetManagerOptions) {
 
   async function ingestUpload(name: string, bytes: Buffer, provenance?: { originNote?: string; originDate?: string; aiGenerated?: boolean; consentNote?: string }) {
     const result = await store.ingestUpload(name, bytes, provenance)
-    if (!result.deduped && result.source.floorVerdict !== 'refuse' && result.source.kind === 'video') {
+    if (!result.deduped) {
       void store.runDecodeProbe(result.source.id).catch((error: unknown) => options.logFailure('datasets/probe', error, { id: result.source.id }))
     }
     return result
+  }
+
+  // Boot sweep (d6iy68r): heal sources stranded non-terminal by the pre-fix
+  // orchestrator (images and refused sources ingested before this wave sat
+  // 'pending'/'probing' forever, so the client's poll never ended on
+  // existing homes). Re-queueing a floor-passing video is idempotent (the
+  // decode simply re-runs); mid-probe rows from a crashed server recover too.
+  for (const source of store.listSources()) {
+    if (source.probeState === 'done' || source.probeState === 'failed') continue
+    void store.runDecodeProbe(source.id).catch((error: unknown) => options.logFailure('datasets/probe-sweep', error, { id: source.id }))
   }
 
   /** Canvas bridge, direction 1 (§11): a completed take / canvas media file

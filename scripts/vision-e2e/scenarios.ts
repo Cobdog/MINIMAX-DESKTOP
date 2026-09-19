@@ -95,7 +95,7 @@ export const SCENARIOS: VisionScenario[] = [
     // chrome in BOTH titlebars. DOM truth asserted before each capture: the
     // registered surfaces (canvas + datasets + images — k9vu6t0 appended the images entry), the active one marked.
     id: 'surface-switcher',
-    label: 'Surface switcher — registry-driven nav in both titlebars (QOL wave)',
+    label: 'Surface switcher — registry-driven nav in every titlebar (QOL wave; workbench joined d6iy68r)',
     run: async (page) => {
       await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
       await page.goto('/')
@@ -139,6 +139,26 @@ export const SCENARIOS: VisionScenario[] = [
           await expect(page.locator('[data-ds-root]')).toBeVisible()
           const switcher = page.locator('[data-surface-switcher]')
           await expect(switcher.locator('[data-surface="datasets"]')).toHaveAttribute('aria-current', 'page')
+          await page.waitForTimeout(400)
+        },
+      },
+      {
+        // App-tour wave (d6iy68r, review M1): the workbench titlebar joined
+        // the shared chrome — its one-way "← canvas" link retired with the
+        // switcher, like the datasets chip before it.
+        id: 'surface-switcher-workbench-1080p',
+        label: 'Workbench titlebar — the same switcher, images active (no one-way back link)',
+        rubric: [
+          'Context: a dark-theme desktop studio app at 1920x1080 on the H3 Image Workbench surface — a full-screen generation workbench, NOT the canvas: no dotted-grid infinite canvas, no canvas tabs.',
+          'The titlebar leads with the SAME surface-switcher pill group seen on the canvas and datasets titlebars — here "images" is the highlighted/active pill; "canvas" and "datasets" are the muted links. To its right sit the "H3 Image Workbench" title text, an engine chip, and the current mode note. There is NO "← canvas" text link anymore (replaced by the switcher — its absence is the design, not a regression).',
+          'Below the titlebar: the mode rail (Generate/Compose/Edit/Refine/Burst/Exit) on the left edge, the preview canvas in the middle, the controls column on the right, the take strip along the bottom.',
+          'Defects to flag: the switcher missing from this titlebar, more than one pill looking active, overlap between the switcher and the title text or engine chip, a pill clipped by the viewport edge.',
+        ].join(' '),
+        drive: async (page) => {
+          await page.locator('[data-surface-switcher] [data-surface="images"]').click()
+          await expect(page.locator('[data-iw-mode-rail]')).toBeVisible({ timeout: 15_000 })
+          const switcher = page.locator('[data-surface-switcher]')
+          await expect(switcher.locator('[data-surface="images"]')).toHaveAttribute('aria-current', 'page')
           await page.waitForTimeout(400)
         },
       },
