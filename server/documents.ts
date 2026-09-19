@@ -1299,10 +1299,20 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
 
     // workspace → ONE initial project's chain-settings defaults (§6). The old
     // surface keeps reading workspace_state untouched until Phase 5.
+    // App-tour wave (d6iy68r, review M5): seed ONLY when actual legacy data
+    // exists — a virgin install has no workspace_state, no jobs, no user
+    // prompts, and no characters, and an unconditional seed gave every fresh
+    // boot a "Imported workspace" Resume card for a workspace that never was
+    // (while making the honest no-other-canavas-yet empty state unreachable).
     const legacyProjectId = 'legacy:project'
     const workspace = db.prepare("SELECT data_json FROM workspace_state WHERE name = 'create'").get() as { data_json: string } | undefined
     const defaults = workspace ? parseJson<Record<string, unknown>>(workspace.data_json, {}) : {}
-    if (!statements.getProject.get(legacyProjectId)) {
+    const countOf = (sql: string) => Number((db.prepare(sql).get() as { n: number }).n)
+    const hasLegacyData = Boolean(workspace)
+      || countOf('SELECT COUNT(*) AS n FROM jobs') > 0
+      || countOf('SELECT COUNT(*) AS n FROM saved_prompts WHERE technique = 0') > 0
+      || (options.characters?.length ?? 0) > 0
+    if (hasLegacyData && !statements.getProject.get(legacyProjectId)) {
       statements.insertProject.run({
         id: legacyProjectId,
         name: 'Imported workspace',
@@ -1313,7 +1323,7 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
         created_at: now(),
       })
       counts.projectsSeeded = 1
-    } else {
+    } else if (statements.getProject.get(legacyProjectId)) {
       statements.setProjectSettingsDefaults.run(JSON.stringify(defaults), now(), legacyProjectId)
     }
 

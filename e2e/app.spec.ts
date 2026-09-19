@@ -787,3 +787,113 @@ test('external instance: instance-sourced models, live pack chips, install into 
     engine.close()
   }
 })
+
+// ---------------------------------------------------------------------------
+// App-tour UX fix wave (d6iy68r) — the adversarial review's canvas findings:
+// the Escape double-action (one press must do ONE thing) and the boot-time
+// empty-jobs 400 (the debounced persist POSTed {"jobs":[]} on every fresh
+// boot; the server's 1..100 upsert contract rejected it and the catch
+// mirrored [] to localStorage as "degraded mode").
+
+test('canvas Escape does one action per press: closing the index keeps the selection', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  // A workbench session chain renders as a canvas object (the images.spec
+  // seed shape — no media bytes needed for a selectable tile).
+  const project = await (await page.request.post('/api/lan/documents/projects', { data: { name: 'Escape e2e' } })).json()
+  await page.request.post('/api/lan/documents/chains', {
+    data: {
+      projectId: project.project.id,
+      kind: 'h3img',
+      settings: {
+        family: 'h3img.generate.packet', intent: '', tier: 5, keepDial: 0.55, seed: 7,
+        resolution: '1344x768', loras: [], refs: [], semanticOverflow: false,
+        framePicks: {}, refineEngine: '', poserigInbox: null,
+      },
+    },
+  })
+  await page.request.post('/api/lan/documents/session', { data: { openProjects: [project.project.id], activeProject: project.project.id } })
+  await page.goto('/')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 15_000 })
+  await page.locator('[data-canvas-tile]').first().click()
+  await expect(page.locator('.canvas-tile.selected')).toHaveCount(1)
+  // ⌘K opens the index (focus lands in its input — the overlay's own Escape
+  // handler is the one that fires). One Escape closes the index…
+  await page.keyboard.press('Control+k')
+  await expect(page.locator('[data-canvas-index]')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('[data-canvas-index]')).toHaveCount(0)
+  // …and the SELECTION SURVIVES the same press (before the fix the window
+  // handler then read the already-updated state, fell through the chain,
+  // and deselected — panel + selection vanished from ONE Escape).
+  await expect(page.locator('.canvas-tile.selected')).toHaveCount(1)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('boot never POSTs an empty job list — no 400 on a fresh home', async ({ page }) => {
+  const problems = await trackErrors(page)
+  // A dedicated fresh home (the token-mode precedent): the shared e2e home
+  // accumulates jobs across runs, which would mask the empty-list path.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-e2e-jobs400-'))
+  const port = 6910 + Math.floor(Math.random() * 80) // this agent's 6900–6999 range
+  const child = spawn(process.execPath, ['dist-server/server/index.js'], {
+    env: { ...process.env, MINIMAX_STUDIO_HOME: home, MINIMAX_LAN_PORT: String(port), MINIMAX_NO_HTTPS: '1' },
+    stdio: ['ignore', 'ignore', 'ignore'],
+  })
+  try {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      try { if ((await fetch(`http://127.0.0.1:${port}/api/lan/settings`)).ok) break } catch { /* booting */ }
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+    const rejectedJobPosts: Array<number | string> = []
+    page.on('response', (response) => {
+      if (response.url().endsWith('/api/lan/jobs') && response.request().method() === 'POST' && response.status() >= 400) {
+        rejectedJobPosts.push(response.status())
+      }
+    })
+    await page.goto(`http://127.0.0.1:${port}/?canvas=1`)
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready', { timeout: 20_000 })
+    // The debounced (1 s) persist fires after the boot load settles; give it
+    // generous room. An empty list has nothing to upsert — the client guards
+    // it and the server's "1 to 100 jobs" contract never sees the request.
+    await page.waitForTimeout(3000)
+    expect(rejectedJobPosts).toEqual([])
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    child.kill()
+    await new Promise<void>((resolve) => { if (child.exitCode !== null) resolve(); else child.on('exit', () => resolve()) })
+  }
+})
+
+test('a virgin home seeds no "Imported workspace" — the legacy import gates on actual data', async ({ page }) => {
+  const problems = await trackErrors(page)
+  // A dedicated fresh home: virgin is exactly the phantom-project condition
+  // (review M5) — no workspace_state, no jobs, no prompts, no characters.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-e2e-legacy-'))
+  const port = 6910 + Math.floor(Math.random() * 80) // this agent's 6900–6999 range
+  const child = spawn(process.execPath, ['dist-server/server/index.js'], {
+    env: { ...process.env, MINIMAX_STUDIO_HOME: home, MINIMAX_LAN_PORT: String(port), MINIMAX_NO_HTTPS: '1' },
+    stdio: ['ignore', 'ignore', 'ignore'],
+  })
+  try {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      try { if ((await fetch(`http://127.0.0.1:${port}/api/lan/settings`)).ok) break } catch { /* booting */ }
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+    await page.goto(`http://127.0.0.1:${port}/?canvas=1`)
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready', { timeout: 20_000 })
+    // The canvas boot ran the §6 legacy import on this virgin home — with
+    // nothing to import it must seed NOTHING (before, every fresh install
+    // got an "Imported workspace" resume card for a workspace that never
+    // existed, and the honest empty state was unreachable).
+    const bootstrap = await (await fetch(`http://127.0.0.1:${port}/api/lan/documents/bootstrap`)).json()
+    expect(bootstrap.legacyImport.imported).toBe(true)
+    expect(bootstrap.legacyImport.counts.projectsSeeded).toBe(0)
+    await expect(page.locator('[data-canvas-resume="legacy:project"]')).toHaveCount(0)
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    child.kill()
+    await new Promise<void>((resolve) => { if (child.exitCode !== null) resolve(); else child.on('exit', () => resolve()) })
+  }
+})
