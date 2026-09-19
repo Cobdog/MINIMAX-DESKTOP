@@ -327,6 +327,68 @@
 .structured-preview summary { display: flex; align-items: center; gap: 5px; padding: 4px 8px; color: var(--muted-2); font-size: var(--text-2xs); cursor: pointer; list-style: none; }
 .structured-preview summary::-webkit-details-marker { display: none; }
 .structured-preview pre { margin: 0; padding: 7px 9px; border-top: 1px solid var(--line); color: var(--muted); font-family: ui-monospace, Consolas, monospace; font-size: var(--text-2xs); white-space: pre-wrap; max-height: 160px; overflow: auto; }
+
+/* ---- The camera path editor modal (y93rk61 — the compiler's first surface) ---- */
+.camera-path-modal { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: min(920px, 94vw); max-height: min(780px, 92vh); border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); box-shadow: 0 18px 48px rgba(0,0,0,.5); overflow: hidden; }
+.camera-path-root { display: contents; }
+.camera-path-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+.camera-path-header strong { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-md); }
+.camera-path-header span { display: block; color: var(--muted-2); font-size: var(--text-2xs); }
+.camera-path-approximate { color: var(--warning); font-size: var(--text-2xs); font-style: normal; }
+.camera-path-body { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(260px, .9fr); gap: 10px; padding: 10px 14px; overflow: auto; }
+.camera-path-canvas { display: grid; gap: 8px; align-content: start; }
+.camera-path-orbit, .camera-path-timeline { margin: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); }
+.camera-path-orbit svg { display: block; width: 100%; max-height: 240px; }
+.camera-path-orbit figcaption, .camera-path-timeline figcaption, .camera-path-framing figcaption { padding-top: 3px; color: var(--muted-2); font-size: var(--text-2xs); }
+.camera-orbit-guide { fill: none; stroke: var(--line); stroke-dasharray: 2 3; }
+.camera-orbit-label { fill: var(--muted-2); font-size: 8px; font-family: ui-monospace, Consolas, monospace; }
+.camera-orbit-path { fill: none; stroke: var(--accent); stroke-width: 1.6; }
+.camera-orbit-subject circle { fill: var(--text); }
+.camera-orbit-subject line { stroke: var(--muted); stroke-width: 1; }
+.camera-orbit-key { fill: var(--surface); stroke: var(--muted); stroke-width: 1.4; }
+.camera-orbit-key.selected { stroke: var(--accent); stroke-width: 2; }
+.camera-orbit-aim { stroke: color-mix(in srgb, var(--accent) 60%, transparent); stroke-width: 1; stroke-dasharray: 3 3; }
+.camera-orbit-playhead { fill: var(--accent); }
+.camera-path-framing { margin: 0; width: 180px; }
+.camera-path-framing svg { display: block; width: 100%; }
+.camera-frame-outline { fill: none; stroke: var(--line-strong); }
+.camera-frame-horizon { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 3; }
+.camera-frame-subject { fill: color-mix(in srgb, var(--accent) 18%, transparent); stroke: var(--accent); }
+.camera-path-timeline svg { display: block; width: 100%; touch-action: none; }
+.camera-timeline-curve { fill: none; stroke: var(--accent); stroke-width: 1.4; opacity: .85; }
+.camera-timeline-rail-line { stroke: var(--line-strong); stroke-width: 1; }
+.camera-timeline-key { fill: var(--surface); stroke: var(--muted); stroke-width: 1.4; }
+.camera-timeline-key.selected { stroke: var(--accent); stroke-width: 2; }
+.camera-timeline-key[data-camera-keyframe='0'] { fill: var(--muted); }
+.camera-timeline-playhead { stroke: var(--warning); stroke-width: 1; pointer-events: none; }
+.camera-timeline-playhead-grip { fill: var(--warning); }
+.camera-path-controls { display: grid; gap: 7px; align-content: start; }
+.camera-path-field { display: grid; gap: 3px; color: var(--muted-2); font-size: var(--text-2xs); }
+.camera-path-field select, .camera-path-field input { padding: 4px 7px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface-2); color: var(--text); font-size: var(--text-2xs); }
+.camera-path-field input[type='range'] { padding: 0; accent-color: var(--accent); }
+.camera-path-field input[type='number'] { font-family: ui-monospace, Consolas, monospace; }
+.camera-path-note { margin: 0; color: var(--muted-2); font-size: var(--text-2xs); }
+.camera-path-mirror { margin: 0; padding: 6px 8px; border: 1px dashed color-mix(in srgb, var(--warning) 45%, transparent); border-radius: 8px; color: var(--muted); font-size: var(--text-2xs); }
+.camera-path-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.camera-path-presets-label { display: inline-flex; align-items: center; gap: 4px; width: 100%; color: var(--muted-2); font-size: var(--text-2xs); }
+.camera-path-presets button { padding: 3px 9px; border: 1px solid var(--line-strong); border-radius: 999px; background: transparent; color: var(--muted); font-size: var(--text-2xs); cursor: pointer; }
+.camera-path-presets button:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.camera-path-inspector { display: grid; gap: 6px; padding: 7px 8px; border: 1px dashed var(--line-strong); border-radius: 8px; }
+.camera-path-delete { display: inline-flex; align-items: center; gap: 4px; width: max-content; padding: 3px 9px; border: 1px solid var(--line-strong); border-radius: 7px; background: transparent; color: var(--muted); font-size: var(--text-2xs); cursor: pointer; }
+.camera-path-delete:hover:not(:disabled) { color: var(--warning); }
+.camera-path-delete:disabled { opacity: .4; cursor: default; }
+.camera-path-diagnostics { display: grid; gap: 3px; margin: 0; padding: 0 0 0 2px; list-style: none; }
+.camera-path-diagnostics li { color: var(--muted); font-size: var(--text-2xs); }
+.camera-path-diagnostics li::before { content: '⚠ '; color: var(--warning); }
+.camera-path-error { margin: 0; color: var(--danger, #e5484d); font-size: var(--text-2xs); }
+.camera-path-footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--surface-2); }
+.camera-path-compiled { display: grid; gap: 4px; min-width: 0; }
+.camera-path-compiled pre { margin: 0; padding: 7px 9px; border: 1px dashed var(--line-strong); border-radius: 8px; color: var(--muted); font-family: ui-monospace, Consolas, monospace; font-size: var(--text-2xs); white-space: pre-wrap; max-height: 130px; overflow: auto; }
+.camera-path-actions { display: flex; gap: 6px; }
+.camera-path-actions button { padding: 6px 14px; border: 1px solid var(--line-strong); border-radius: 8px; background: transparent; color: var(--muted); font-size: var(--text-sm); cursor: pointer; }
+.camera-path-actions button.primary { border-color: transparent; background: var(--accent); color: var(--on-accent, #0b0d12); }
+.camera-path-actions button:disabled { opacity: .4; cursor: default; }
+.camera-path-actions button.primary:hover:not(:disabled) { filter: brightness(1.1); }
 .canvas-tile-poster[data-canvas-poster="blob"] { object-fit: cover; width: 100%; height: 100%; }
 .canvas-engine-chip.online { border-style: solid; color: var(--color-status-ok); }
 .canvas-engine-chip.online .status-dot { background: var(--color-status-ok); }

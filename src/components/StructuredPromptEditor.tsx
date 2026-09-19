@@ -9,10 +9,11 @@
  * the same router path the freeform tools use). The compose preview shows the
  * exact string the concat contract submits.
  */
-import { useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, Copy, CopyPlus, LoaderCircle, Sparkles, Trash2, WandSparkles } from 'lucide-react'
+import { useRef, useState, type ReactNode } from 'react'
+import { Camera, ChevronDown, ChevronRight, Copy, CopyPlus, LoaderCircle, Sparkles, Trash2, WandSparkles } from 'lucide-react'
 import type { GenerationMode } from '../types'
 import type { LlmStreamUi } from '../lib/useLlmStream'
+import { CameraPathEditor } from './CameraPathEditor'
 import {
   appendChipText, buildBoxAssistContext, buildStructuredParseInstructions, flowRowWarnings, flowRowsToAssistText, parseFlowRows, readStructuredDraft,
   STRUCTURED_BOXES, STRUCTURED_CHIPS, structuredId, structuredParseSchema, subjectCardsToAssistText, subjectLinesToCards, wrapDialogueLine,
@@ -38,11 +39,16 @@ export function StructuredPromptEditor(props: {
   llmAvailable: boolean
   llmStream: LlmStreamUi
   pinSources: StructuredPinSource
+  /** The reference-frame shape when the chain carries one (image/frames/
+   *  reference modes) — the camera path editor compiles loop closure only
+   *  against a connected reference image (the compiler's own contract). */
+  referenceImageShape?: { shape: number[] } | null
   notify(tone: 'error' | 'success' | 'neutral', text: string): void
   onChange(next: StructuredPromptDraft): void
 }) {
-  const { draft, duration, mode, noDialogue, composed, llmAvailable, llmStream, pinSources, notify, onChange } = props
+  const { draft, duration, mode, noDialogue, composed, llmAvailable, llmStream, pinSources, referenceImageShape, notify, onChange } = props
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const [cameraPathOpen, setCameraPathOpen] = useState(false)
   const [assisting, setAssisting] = useState<StructuredBoxId | null>(null)
   const [suggestion, setSuggestion] = useState<{ box: StructuredBoxId; text: string } | null>(null)
   const [parsing, setParsing] = useState(false)
@@ -159,9 +165,9 @@ export function StructuredPromptEditor(props: {
     </button>
   )
 
-  const textBox = (id: TextBoxId, label: string, hint: string, placeholder: string, chips?: 'setting' | 'lighting' | 'style' | 'camera') => (
+  const textBox = (id: TextBoxId, label: string, hint: string, placeholder: string, chips?: 'setting' | 'lighting' | 'style' | 'camera', extraTools?: ReactNode, meta?: string) => (
     <section className="structured-box" data-structured-box={id} data-structured-empty={draft[id].trim() ? undefined : 'true'}>
-      {boxHeader(id, label, hint)}
+      {boxHeader(id, label, hint, meta)}
       {!collapsed[id] && (
         <div className="structured-box-body">
           <textarea
@@ -175,6 +181,7 @@ export function StructuredPromptEditor(props: {
           {chips && chipsRow(chips, (next) => patch({ [id]: next } as Partial<StructuredPromptDraft>), draft[id])}
           <div className="structured-box-tools">
             {assistButtons(id)}
+            {extraTools}
           </div>
         </div>
       )}
@@ -237,7 +244,36 @@ export function StructuredPromptEditor(props: {
       if (box.id === 'setting') return <div key={box.id}>{textBox('setting', box.label, box.hint, 'Environment, location, era, atmosphere…', 'setting')}</div>
       if (box.id === 'lighting') return <div key={box.id}>{textBox('lighting', box.label, box.hint, 'Light language — source, quality, direction…', 'lighting')}</div>
       if (box.id === 'style') return <div key={box.id}>{textBox('style', box.label, box.hint, 'Live-action, cinematic, 2D-animated…', 'style')}</div>
-      if (box.id === 'camera') return <div key={box.id}>{textBox('camera', box.label, box.hint, 'Motion type + amplitude + speed as natural English…', 'camera')}</div>
+      if (box.id === 'camera') {
+        return <div key={box.id}>
+          {textBox(
+            'camera', box.label, box.hint, 'Motion type + amplitude + speed as natural English — or author a compiled path…', 'camera',
+            <button
+              type="button"
+              data-structured-camera-path-edit
+              title="Open the camera path editor — author keyframes, compile through the camera compiler, land the guide-correct block here"
+              onClick={() => setCameraPathOpen(true)}
+            >
+              <Camera size={11} /> edit path
+            </button>,
+            draft.cameraPath ? 'compiled path' : undefined,
+          )}
+          {cameraPathOpen && (
+            <CameraPathEditor
+              open
+              boxText={draft.camera}
+              doc={draft.cameraPath}
+              duration={duration}
+              referenceImage={referenceImageShape ?? null}
+              onClose={() => setCameraPathOpen(false)}
+              onApply={(next) => {
+                onChange({ ...draft, camera: next.boxText, cameraPath: next.doc })
+                setCameraPathOpen(false)
+              }}
+            />
+          )}
+        </div>
+      }
       if (box.id === 'subjects') {
         return <section className="structured-box" key={box.id} data-structured-box="subjects" data-structured-empty={draft.subjects.length ? undefined : 'true'}>
           {boxHeader('subjects', box.label, box.hint, `${draft.subjects.length} card${draft.subjects.length === 1 ? '' : 's'}`)}

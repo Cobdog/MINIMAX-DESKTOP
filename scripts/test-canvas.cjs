@@ -1186,6 +1186,147 @@ console.log('(y) Phase 5b — plan documents + the measured gap menu + the timel
   eq(plan.formatTimelineDuration(0), '0:00', 'format: zero')
 }
 
+// ---------------------------------------------------------------------------
+// The camera path editor's pure layer (y93rk61) — the camera compiler's
+// FIRST consumer: the doc model, the profile/duration grid mapping, the
+// compile step, the Camera-box text contract (emit → best-effort parse →
+// never-lossy splice), the persistence guard, and the one-click presets.
+// ---------------------------------------------------------------------------
+console.log('(z) cameraPath — the compile step + the box-text round-trip')
+{
+  const cp = loadTs('src/lib/cameraPath.ts')
+  const sp = loadTs('src/lib/structuredPrompt.ts')
+
+  // The profile grid: the compiler's three proven profiles, nearest-first
+  // (all ≡5 mod 17 — the same grid workflow.frameCount quantizes to).
+  eq(cp.nearestProfile(6), '124 frames (~5.17s)', 'profiles: a 6s chain (144 frames) is nearest 124')
+  eq(cp.nearestProfile(10), '243 frames (~10.13s)', 'profiles: a 10s chain is nearest 243')
+  eq(cp.nearestProfile(15), '362 frames (~15.08s)', 'profiles: a 15s chain is nearest 362')
+  eq(cp.nearestProfile(0), '124 frames (~5.17s)', 'profiles: degenerate durations clamp to the shortest')
+  ok(Math.abs(cp.planEndOf('124 frames (~5.17s)') - 123 / 24) < 1e-12, 'profiles: the timeline uses the (frames-1)/24 last-visible-frame convention')
+
+  const defaults = cp.defaultCameraPathDoc(6)
+  eq(defaults.keyframes.length, 3, 'default doc: the upstream DEFAULT_PATH trajectory')
+  eq(defaults.orbitDirection, 'invert H3 orbit', 'default doc: the mirror-quirk calibration default')
+  eq(defaults.profile, '124 frames (~5.17s)', 'default doc: profile follows the chain duration')
+
+  // The compile step is the product: compileCameraDoc routes through the
+  // port's public API and surfaces the plan + read-only diagnostics.
+  const doc = {
+    keyframes: [
+      { time: 0, azimuth: 0, elevation: 0, distance: 1 },
+      { time: 0.3, azimuth: -120, elevation: -12, distance: 1.5 },
+      { time: 0.7, azimuth: -60, elevation: 20, distance: 0.55 },
+      { time: 1, azimuth: -240, elevation: 0, distance: 2 },
+    ],
+    profile: '243 frames (~10.13s)', interpolation: 'smooth', elevationRange: '+/-30', orbitDirection: 'invert H3 orbit', subjectBox: '',
+  }
+  const compiled = cp.compileCameraDoc(doc)
+  eq(compiled.result.frames, 243, 'compile: the profile\'s frame count (wire into generation length)')
+  eq(compiled.result.fps, 24, 'compile: 24 fps rides the result')
+  ok(compiled.plan.camera_choreography.startsWith('From 0.000s to 3.025s:'), 'compile: the plan carries the per-segment choreography')
+  ok(compiled.result.compiledPrompt.includes('subject_definitions:') && compiled.result.storyboardJson.includes('h3-camera-plan'), 'compile: the six-section prompt + the storyboard are available for graph-side adoption')
+  let threw = ''
+  try { cp.compileCameraDoc({ ...doc, keyframes: [{ time: 0, azimuth: 0, elevation: 0, distance: 1 }, { time: 0, azimuth: 5, elevation: 0, distance: 1 }] }) } catch (error) { threw = error.message }
+  eq(threw, 'Keyframe times must be strictly increasing.', 'compile: the compiler\'s own error taxonomy reaches the editor')
+
+  // The box text: the compiler's own bytes, header-anchored, closed grammar.
+  const text = cp.cameraBoxText(doc)
+  ok(text.startsWith('Compiled camera path — 243 frames at 24 fps (10.083s):'), 'box text: the parseable header leads')
+  ok(text.includes('physically move the CAMERA 120.000 degrees around the fixed target toward the camera\'s RIGHT'), 'box text: the signed (mirrored) orbit language')
+  ok(text.includes('Reach the final pose at 10.083333s; there is no additional hold.'), 'box text: the final sentence terminates the block')
+  ok(!text.includes('subject_definitions:'), 'box text: NOT the six-section compiledPrompt (it would collide with the outer concat structure)')
+  const boxed = cp.cameraBoxText({ ...doc, subjectBox: '[L=0.516, T=0.148, W=0.071, H=0.249]' })
+  ok(boxed.includes('the main subject occupies [L=0.516, T=0.148, W=0.071, H=0.249]'), 'box text: a subject box lands its literal anchor instruction')
+  ok(!text.includes('main subject occupies'), 'box text: no anchor line without a subject box')
+
+  // The best-effort parse: signed-frame reconstruction (no direction drift —
+  // 'same as HUD' reproduces the same bytes), approximate by contract.
+  const parsed = cp.parseCameraBoxText(text, 10)
+  ok(parsed.approximate, 'parse: reconstruction is flagged approximate (review-gated)')
+  eq(parsed.doc.profile, '243 frames (~10.13s)', 'parse: the profile recovers from the header')
+  eq(parsed.doc.orbitDirection, 'same as HUD', 'parse: reconstructs in the signed frame (recompile = same bytes)')
+  eq(parsed.doc.keyframes.length, 4, 'parse: one keyframe per segment boundary + the anchor')
+  eq(parsed.doc.keyframes.map((point) => point.azimuth), [0, 120, 60, 240], 'parse: signed azimuths recover (the authored -120 mirrored to +120)')
+  eq(parsed.doc.keyframes.map((point) => point.elevation), [0, -12, 20, 0], 'parse: elevation endpoints recover')
+  eq(parsed.doc.keyframes.map((point) => point.distance), [1, 1.5, 0.55, 2], 'parse: radius endpoints recover')
+  ok(Math.abs(parsed.doc.keyframes[1].time - 0.3) < 1e-3 && Math.abs(parsed.doc.keyframes[2].time - 0.7) < 1e-3, 'parse: times recover within the 3-decimal text rounding')
+  eq(parsed.doc.keyframes[3].time, 1, 'parse: the final keyframe lands exactly on time 1')
+  ok(parsed.block && parsed.block.start === 0, 'parse: the block starts at the header')
+  eq(cp.cameraBoxText(parsed.doc), text, 'parse → recompile is byte-stable (the round-trip never drifts)')
+
+  // Foreign text: no header → the default doc, no block (apply must append).
+  const foreign = cp.parseCameraBoxText('The camera tracks him at slow speed', 6)
+  eq(foreign.block, null, 'parse: hand prose carries no block')
+  eq(foreign.doc.keyframes.length, 3, 'parse: foreign text falls back to the default doc')
+
+  // The never-lossy splice.
+  const chipGlue = ', the camera pushes in with small amplitude at slow speed'
+  const edited = { ...parsed.doc, keyframes: parsed.doc.keyframes.map((point, index) => index === 2 ? { ...point, azimuth: 30 } : point) }
+  const recompiled = cp.cameraBoxText(edited)
+  ok(recompiled !== text, 'splice setup: the edited recompile differs')
+  const applied = cp.applyCameraBoxText(text + chipGlue, recompiled)
+  ok(applied.includes('the camera pushes in with small amplitude at slow speed'), 'splice: chip text glued after the final sentence SURVIVES')
+  ok(applied.includes('move the CAMERA 90.000 degrees around the fixed target toward the camera\'s LEFT'), 'splice: the new block lands (the edited 90° left segment)')
+  ok(!applied.includes('Reach the final pose at 10.083333s; there is no additional hold.\nFrom 0.000s'), 'splice: no block duplication')
+  const prefixed = cp.applyCameraBoxText(`The camera arcs low.\n${text}`, recompiled)
+  ok(prefixed.startsWith('The camera arcs low.\nCompiled camera path'), 'splice: foreign text BEFORE the block survives')
+  eq(cp.applyCameraBoxText('The camera tracks him at slow speed', text), `The camera tracks him at slow speed\n${text}`, 'splice: with no recognized block the compiled text APPENDS (never replaces)')
+  eq(cp.applyCameraBoxText('', text), text, 'splice: an empty box takes the block directly')
+
+  // The persistence guard.
+  ok(cp.readCameraPathDoc(doc) !== null, 'guard: a valid doc reads back')
+  eq(cp.readCameraPathDoc(doc).keyframes[1].azimuth, -120, 'guard: the authored (HUD) azimuth round-trips, not the signed one')
+  eq(cp.readCameraPathDoc(null), null, 'guard: null reads null')
+  eq(cp.readCameraPathDoc('junk'), null, 'guard: a string reads null')
+  eq(cp.readCameraPathDoc({ ...doc, keyframes: 'nope' }), null, 'guard: malformed keyframes read null')
+  eq(cp.readCameraPathDoc({ ...doc, orbitDirection: 'sideways' }), null, 'guard: an unknown widget value reads null (the compiler\'s choice taxonomy)')
+  eq(cp.readCameraPathDoc({ ...doc, keyframes: [{ time: 0, azimuth: 0, elevation: 0, distance: 1 }, { time: 0, azimuth: 9, elevation: 0, distance: 1 }] }), null, 'guard: keyframes violating validatePath read null')
+
+  // The structured draft carries the doc; compose never reads it.
+  eq(sp.emptyStructuredDraft().cameraPath, null, 'draft: the empty draft carries no doc')
+  const withPath = { ...sp.emptyStructuredDraft(), concept: 'a probe', cameraPath: doc }
+  eq(sp.composeStructuredPrompt(withPath, { duration: 6 }), sp.composeStructuredPrompt({ ...sp.emptyStructuredDraft(), concept: 'a probe' }, { duration: 6 }), 'draft: the doc is inert to compose (the box text is the contract)')
+  ok(sp.readStructuredDraft({ concept: 'c', cameraPath: doc }).cameraPath.keyframes.length === 4, 'draft: the doc shallow-preserves through the persistence guard')
+  ok(sp.readStructuredDraft({ concept: 'c', cameraPath: [1, 2] }).cameraPath === null, 'draft: a malformed doc reads as null, never a crash')
+  ok(sp.mergeStructuredDraft(sp.emptyStructuredDraft(), withPath).cameraPath.keyframes.length === 4, 'draft: merge carries an incoming doc when none exists')
+  ok(sp.mergeStructuredDraft(withPath, sp.emptyStructuredDraft()).cameraPath.keyframes.length === 4, 'draft: merge keeps the current doc')
+  const generation = loadTs('src/canvas/generation.ts')
+  const settings = generation.readChainSettings({ prompt: 'p', promptMode: 'structured', structured: { concept: 'c', cameraPath: doc } })
+  ok(settings.structured.cameraPath.keyframes[3].distance === 2, 'settings: the authored doc round-trips through chain settings')
+
+  // The one-click presets: the compiler's vocabulary, clamped to its ranges.
+  // A path with tail room APPENDS; the DEFAULT_PATH (already ending at 1)
+  // mutates its final keyframe instead.
+  const tailDoc = { ...defaults, keyframes: [{ time: 0, azimuth: 0, elevation: 0, distance: 1 }, { time: 0.4, azimuth: 45, elevation: 10, distance: 1 }, { time: 0.8, azimuth: 90, elevation: 0, distance: 0.8 }] }
+  const orbited = cp.applyCameraMovePreset(tailDoc, 'orbit')
+  eq(orbited.keyframes.length, 4, 'presets: orbit appends a keyframe when the path has tail room')
+  eq(orbited.keyframes[3].azimuth, 180, 'presets: orbit turns +90 from the current end (90 → 180)')
+  ok(orbited.keyframes[3].time > 0.8 && orbited.keyframes[3].time <= 1, 'presets: the new keyframe lands inside the remaining tail')
+  eq(cp.applyCameraMovePreset(tailDoc, 'static').keyframes[3].azimuth, 90, 'presets: static holds the end pose')
+  eq(cp.applyCameraMovePreset(tailDoc, 'rise').keyframes[3].elevation, 15, 'presets: rise adds +15° to the END pose (0 → 15, inside the +/-30 range)')
+  const elevated = { ...defaults, keyframes: [{ time: 0, azimuth: 0, elevation: 0, distance: 1 }, { time: 0.5, azimuth: 45, elevation: 10, distance: 1 }, { time: 1, azimuth: 90, elevation: 28, distance: 0.8 }] }
+  eq(cp.applyCameraMovePreset(elevated, 'rise').keyframes[2].elevation, 30, 'presets: rise clamps at the elevation range (28 + 15 → 30, mutating the at-1 end)')
+  ok(Math.abs(cp.applyCameraMovePreset(tailDoc, 'closer').keyframes[3].distance - 0.56) < 1e-9, 'presets: closer multiplies the radius by 0.7 (0.8 → 0.56)')
+  const away = cp.applyCameraMovePreset({ ...defaults, keyframes: [{ time: 0, azimuth: 0, elevation: 0, distance: 1 }, { time: 0.5, azimuth: 45, elevation: 10, distance: 3 }, { time: 1, azimuth: 90, elevation: 0, distance: 3.2 }] }, 'away')
+  eq(away.keyframes[2].distance, 4, 'presets: away caps at the compiler\'s 4× radius ceiling (3.2 × 1.4, mutating the at-1 end)')
+  eq(cp.applyCameraMovePreset(defaults, 'orbit').keyframes.length, 3, 'presets: a path already ending at time 1 mutates the final keyframe instead')
+  eq(cp.applyCameraMovePreset(defaults, 'orbit').keyframes[2].azimuth, 180, 'presets: the mutation still applies the move (90 → 180)')
+  eq(cp.applyCameraMovePreset(defaults, 'nope'), null, 'presets: unknown ids read null')
+  ok(cp.CAMERA_MOVE_PRESETS.map((preset) => preset.id).join('|') === 'orbit|rise|fall|closer|away|static', 'presets: exactly the AC\'s six (orbit/rise/fall/closer/away/static)')
+
+  // The freeform detour: compose → parse never drops compiled-block bytes
+  // (the structured editor's no-loss rule holds for the camera language —
+  // the deterministic parse parks them in Concept; the doc is derived state
+  // and re-derives best-effort through the editor).
+  const detourDraft = { ...sp.emptyStructuredDraft(), concept: 'a probe shot', camera: text + ', the camera pushes in' }
+  const detoured = sp.parseStructuredPrompt(sp.composeStructuredPrompt(detourDraft, { duration: 6 }))
+  const detourText = [detoured.concept, detoured.setting, detoured.lighting, detoured.style, detoured.camera].concat(detoured.flow.map((row) => row.text)).join('\n')
+  for (const fragment of ['Compiled camera path — 243 frames at 24 fps', 'physically move the CAMERA', 'Reach the final pose', 'the camera pushes in']) {
+    ok(detourText.includes(fragment), `freeform detour: "${fragment.slice(0, 34)}" survives compose → parse`)
+  }
+}
+
 phase5Cores()
   .then(() => { console.log(`\ntest-canvas: ${passed} assertions passed`) })
   .catch((error) => { console.error(error); process.exit(1) })
