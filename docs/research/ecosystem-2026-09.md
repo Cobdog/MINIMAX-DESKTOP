@@ -153,3 +153,29 @@ Scope note: MiniMax H3 launched July 31, 2026 ([official blog](https://www.minim
 - **Quant quality-loss benchmarks** — no published fidelity comparisons between INT8/INT4/NVFP4/GGUF for H3 (community wiki explicitly notes none).
 
 Key primary sources for ongoing tracking: [Comfy-Org/workflow_templates commits](https://github.com/Comfy-Org/workflow_templates) (H3 Max/Multiframe added this month), [docs.comfy.org MiniMax index](https://docs.comfy.org/tutorials/video/minimax/minimax-h3), [AtlasCloudAI/awesome-minimax-h3](https://github.com/AtlasCloudAI/awesome-minimax-h3) (auto-verified twice weekly), and the [Comfy-Org/MiniMax-H3 HF discussions](https://huggingface.co/Comfy-Org/MiniMax-H3/discussions) where speed findings surface first.
+
+---
+
+## Addendum 2026-09-19 — hyperflow (videorebirth/hyperflow, released 2026-09-17)
+
+**Watchlist-ADOPT.** Data-free flow self-distillation LoRA for H3: the base model teaches
+itself a two-time `(t, r)` flow schedule replacing the 49-NFE sigma ladder with **8 fixed
+forwards**; ~3× end-to-end on H200-class hardware (fl2va, 124f, 1344×768). Rank 256 /
+2.8 GB adapter (attention + FFN + two time embedders — NOT a generic LoRA); t2va/fl2va/
+ref2va all claimed covered (ref2va works because adaln_proj is untouched — form-compat
+relevant). Quality claims unquantified beyond fl2va; reproducible (fixed seed ≈43–50 dB
+video PSNR). [COMM, self-reported]
+
+**Why watchlist, not adopt (as of this date):** (1) **no ComfyUI loader exists** — it
+ships as a diffusers≥0.40 `hyperflow-h3` pip package with its own TwoTimeEmbedder; the
+"comfyui?" HF discussion is unanswered; adopting means porting the loader + schedule as
+a custom node (form-adapter-class surgery); (2) **tested only on 80 GB cards** — the 24 GB
+envelope is untested (the card's own offload-margin note is tantalizingly 24 GB but that
+is not our workload); (3) zero independent validation, 2 commits, 2 days old. VDN/cache/
+spectrum interplay unmentioned. Weights license: MiniMax H3 Community License with a
+territory exclusion list (EU/UK/KR/US) — Canada clear; surface at fetch-consent time per
+the license-matching flow if ever cataloged. [measured against our adoption gates]
+
+**The measured path if pursued:** port the custom node → benchmark harness candidate run
+at our tier ladder (8 NFEs vs the turbo families at 8/20/25) with blind judging — the
+claim that matters for us is quality-at-8-NFEs on 24 GB, not the H200 wall-clock.
