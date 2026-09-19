@@ -96,7 +96,7 @@ import { buildMusic3Workflow, inferMusic3Selection, type Music3GenerationOptions
 import { buildAceStepWorkflow, inferAceStepSelections } from '../lib/aceStepWorkflow'
 import { buildLtx25Workflow } from '../lib/ltx25Workflow'
 import { choices } from '../lib/comfyInfo'
-import { buildLtx23UtilityGraph, findLtx23Utility } from '../lib/graph'
+import { buildLtx23UtilityGraph, findLtx23Utility } from '../lib/graph/ltx23'
 import { characterReferences, loadCharacterProjects } from '../lib/characterLibrary'
 import { locationReferences, loadLocationProjects } from '../lib/locationLibrary'
 import { loadWardrobeProjects } from '../lib/wardrobeLibrary'

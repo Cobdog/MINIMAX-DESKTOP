@@ -8,7 +8,7 @@
  * job bookkeeping are testable without an engine.
  */
 import { createId } from './createId'
-import { buildLtx23UtilityGraph, findLtx23Utility, resolveLtx23Selection, type Ltx23UtilityKind } from './graph'
+import { buildLtx23UtilityGraph, findLtx23Utility, resolveLtx23Selection, type Ltx23UtilityKind } from './graph/ltx23'
 import type { ComfyPrompt } from './graph'
 import type { ObjectInfo } from './comfyInfo'
 import type { AppSettings, GenerationJob, MediaFile, ModelFile } from '../types'
