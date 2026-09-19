@@ -17,6 +17,7 @@ import { createId } from './createId'
 import { buildMiniMaxWorkflow, frameIndexForSeconds, guideFrameWarning } from './workflow'
 import { prepareImage } from './imageCrop'
 import { buildRenderManifest } from './manifest'
+import type { OverrideResolution } from './modelOverrides'
 import type { ObjectInfo } from './comfyInfo'
 import type { AppSettings, GenerationJob, GenerationMode, MediaFile, ModelFile, ModelSelection, UpscaleMode } from '../types'
 
@@ -86,6 +87,12 @@ export type H3SubmitFacts = {
   clientId?: string
   /** Detected H3 Preview Override node class, when installed. */
   h3PreviewOverrideNode?: string
+  /** Model-override resolution for the minimax family when the caller
+   *  consulted overrides building `selection` (task euxwdva): refused slots
+   *  refuse the submission with their reason; degraded slots fell back to
+   *  auto and surface their warning visibly. Absent = no overrides were
+   *  consulted (the pre-override behavior exactly). */
+  modelOverrides?: OverrideResolution
 }
 
 export type H3SubmitIo = {
@@ -104,7 +111,7 @@ export type H3SubmitIo = {
  * message, or null when the request may proceed. Pure — VM-harness tested
  * without an engine.
  */
-export function validateH3Render(request: H3RenderRequest, facts: Pick<H3SubmitFacts, 'connected' | 'modelReady' | 'selection' | 'h3PreviewOverrideNode'>): string | null {
+export function validateH3Render(request: H3RenderRequest, facts: Pick<H3SubmitFacts, 'connected' | 'modelReady' | 'selection' | 'h3PreviewOverrideNode' | 'modelOverrides'>): string | null {
   const { upscale } = request
   if (upscale.mode === 'ltx' && (!upscale.model || !upscale.vae)) {
     return 'LTX 2.5 spatial upscaler and video VAE must be available in ComfyUI.'
@@ -120,6 +127,14 @@ export function validateH3Render(request: H3RenderRequest, facts: Pick<H3SubmitF
   }
   if (!request.prompt.trim()) return 'Add a prompt before generating.'
   if (!facts.connected) return 'Start ComfyUI and verify the server connection in Settings.'
+  // Model overrides (task euxwdva): a wrong-kind pick refuses BEFORE the
+  // readiness rung — the render never ships a graph the family contract
+  // rejects. Degraded picks (file gone since set) already fell back to auto
+  // and only warn, at submit.
+  const overrideRefusal = facts.modelOverrides?.refusals[0]
+  if (overrideRefusal) {
+    return `Model override refused — ${overrideRefusal.slot}: ${overrideRefusal.reason}`
+  }
   if (!facts.modelReady) return 'One or more required MiniMax H3 model components are missing.'
   if (request.livePreview.enabled && request.livePreview.mode === 'h3-override' && !facts.h3PreviewOverrideNode) {
     return 'MiniMax H3 animated preview is selected, but its Preview Override node was not detected. Install or enable the custom node, restart ComfyUI, then click the Local engine status to refresh.'
@@ -164,6 +179,10 @@ export async function submitH3Render(
     return { ok: false, message: refusal }
   }
   const { settings } = facts
+  // Degraded overrides (the picked file vanished from the scan) proceed on
+  // auto — visibly: the warning rides the notice tier right where the render
+  // starts, never a silent swap.
+  for (const warning of facts.modelOverrides?.warnings ?? []) io.notify('neutral', warning)
   io.notify('neutral', 'Uploading inputs and preparing the ComfyUI graph…')
   const upscale = request.upscale
   const localId = createId()
@@ -238,6 +257,11 @@ export async function submitH3Render(
       timelineGuides: guides.length ? guides.map((guide) => ({ frameIndex: frameIndexForSeconds(guide.seconds) })) : undefined,
       filenamePrefix,
     }, facts.selection, facts.models, settings.comfyUrl, graph)
+    // Override provenance (task euxwdva): which slots rode an explicit pick.
+    // manifest.models above already records the RESOLVED filenames; this
+    // record says which of them were picks rather than inference.
+    const appliedSlots = facts.modelOverrides ? Object.keys(facts.modelOverrides.applied) : []
+    if (appliedSlots.length) manifest.modelOverrides = { ...facts.modelOverrides!.applied }
     // The saved-clip facts ride the manifest's motionContext record — the
     // take-landing path reads them to persist forkable latent provenance.
     if (request.chain) manifest.motionContext = { folder: request.chain.folder, clipIndex: request.chain.index }

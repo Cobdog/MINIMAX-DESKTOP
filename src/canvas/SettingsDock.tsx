@@ -105,7 +105,7 @@ export function SettingsDock() {
           setSettings={(value) => void setSettings(value)}
           info={session.info}
           models={models}
-          h3Report={h3StackReport(models)}
+          h3Report={h3StackReport(models, settings.modelOverrides?.minimax)}
           scanning={scanning}
           status={status}
           checking={checking}

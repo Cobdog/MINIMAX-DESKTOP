@@ -246,6 +246,12 @@
 .canvas-properties-row label { color: var(--muted); font-size: var(--text-sm); }
 .canvas-properties-row input[type="number"], .canvas-properties-row select { padding: 4px 7px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); color: var(--text); font-size: var(--text-sm); }
 .canvas-properties-row input[type="number"] { width: 84px; }
+.canvas-properties-models { display: grid; gap: 4px; }
+.canvas-properties-models > summary { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--text-sm); font-weight: 700; letter-spacing: .03em; text-transform: uppercase; cursor: pointer; list-style: none; }
+.canvas-properties-models > summary::-webkit-details-marker { display: none; }
+.canvas-properties-models[open] > summary { color: var(--text); }
+.canvas-properties-models .canvas-properties-row { flex-direction: column; align-items: stretch; gap: 3px; }
+.canvas-properties-models .canvas-properties-row select { width: 100%; }
 .canvas-properties-tiers { display: flex; flex-wrap: wrap; gap: 4px; }
 .canvas-properties-refs { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
 .canvas-properties-refs li { display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); }

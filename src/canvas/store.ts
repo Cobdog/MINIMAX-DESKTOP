@@ -10,8 +10,12 @@
  * dropped bytes ingest into content-addressed blobs. Phase 3 adds the OP
  * STACK surface (§5.1: the modal editor's store actions — add/edit/reorder/
  * bake/undo, canonical-pointer switching, locks), the LTX-2.3 utility
- * invocation through the shared core (lib/ltx23UtilitySubmit.ts), Z-Image
- * stills as an op (lib/zImageSubmit.ts), and the pose-rig dock state.
+ * invocation through the shared core (lib/ltx23UtilitySubmit.ts), and the
+ * pose-rig dock state. The stills intent (34afx79, 2026-09-19) renders H3-1F
+ * — the h3image Generate-T=1 family through the workbench's shared submit
+ * core (images/submit.ts), engine-selected per chain via the two-slot seam
+ * in canvas/stillIntent.ts; Z-Image is retired (lib/zImageSubmit.ts deleted
+ * — the asset studios keep their own lib/zimage.ts reference generation).
  *
  * The camera is deliberately NOT here (camera.ts owns it, outside React) —
  * the store only emits rare `cameraCommands` that the substrate executes.
@@ -32,6 +36,7 @@ import { create } from 'zustand'
 export type StudiosDockTab = 'characters' | 'hair' | 'wardrobes' | 'accessories' | 'locations'
 import { documentsApi, DocumentsHttpError, type ProjectMeta } from './api'
 import { isWorkbenchJob, landWorkbenchTake } from '../images/landing'
+import { sessionContract } from '../images/session'
 import { type CameraState, createCamera, parseViewBlob, type ViewBlob } from './camera'
 import {
   attention,
@@ -86,11 +91,14 @@ import { activeLorasOf, compileLoraTimeline, loraTimelineToPlanDocument, readLor
 import { DEFAULT_SETTINGS, type OpKind } from './ops'
 import type { EndpointDirection, EndpointOption, OptionAvailability } from './options'
 import { findH3PreviewOverrideNode } from '../lib/h3Stack'
+import { mergeModelOverrides, resolveModelOverrides, resolveModels, type ModelFamilyId, type OverrideResolution } from '../lib/modelOverrides'
 import { inferLtx25Selections, inferSelections } from '../lib/modelSelection'
 import { submitH3Render, validateH3Render } from '../lib/h3Submit'
 import { submitLtx23Utility, validateLtx23Utility } from '../lib/ltx23UtilitySubmit'
 import { submitLtx25, validateLtx25, LTX25_NATIVE_REQUIRED_NODES } from '../lib/ltx25Submit'
-import { submitZImage, validateZImage, planZImageGraph } from '../lib/zImageSubmit'
+import { submitWorkbenchGeneration, validateWorkbenchRequest } from '../images/submit'
+import { canvasEditHandoff, canvasH3OneFrameRequest, queuedImageEngineRefusal, stashCanvasEditHandoff } from './stillIntent'
+import { buildH3ImageGraph, H3IMG_RECIPE_PINS } from '../lib/graph/h3image'
 import { submitMusic3, validateMusic3 } from '../lib/music3Submit'
 import { submitAceStep, validateAceStep } from '../lib/aceStepSubmit'
 import { buildMusic3Workflow, inferMusic3Selection, type Music3GenerationOptions } from '../lib/music3Workflow'
@@ -103,7 +111,7 @@ import { locationReferences, loadLocationProjects } from '../lib/locationLibrary
 import { loadWardrobeProjects } from '../lib/wardrobeLibrary'
 import { useJobsStore } from '../state/jobsStore'
 import { useSessionStore } from '../state/sessionStore'
-import type { AceStepGenerationOptions, FetchEntryStatus, GenerationJob, MediaFile, ModelSelection } from '../types'
+import type { AceStepGenerationOptions, FetchEntryStatus, GenerationJob, MediaFile, ModelOverrideSlots, ModelSelection } from '../types'
 
 /** The camera singleton for this route — attach in Substrate, never subscribe
  *  per-frame in React. */
@@ -146,10 +154,16 @@ function locationReferencesOf(location: ReturnType<typeof loadLocationProjects>[
 }
 
 /** The LTX-2.5 component selection for the current engine (the upscaler
- *  choices come from object-info exactly like the old surface computes it). */
-function ltx25SelectionOf() {
-  const { models, info } = engineFacts()
-  return inferLtx25Selections(models, choices(info, 'LatentUpscaleModelLoader', 'model_name'))
+ *  choices come from object-info exactly like the old surface computes it).
+ *  Model overrides (euxwdva) consult through the shared seam: chain-level
+ *  picks beat the global Settings picks beat inference. */
+function ltx25SelectionOf(chainOverrides?: ModelOverrideSlots) {
+  const { models, info, settings } = engineFacts()
+  return resolveModels('ltx25',
+    inferLtx25Selections(models, choices(info, 'LatentUpscaleModelLoader', 'model_name')),
+    models,
+    mergeModelOverrides(chainOverrides, settings?.modelOverrides?.ltx25),
+  ).selection
 }
 
 /** Motion-Context readiness: all four node classes reported by the engine. */
@@ -158,10 +172,58 @@ function motionContextReady(): boolean {
   return MOTION_CONTEXT_NODES.every((node) => Boolean(info?.[node]))
 }
 
-/** H3 readiness for one turbo tier (the App-root computation, per chain). */
-function selectionFor(turbo: 'off' | '4' | '8', family: string): ModelSelection {
-  return inferSelections(useSessionStore.getState().models, turbo, family || undefined)
+/** The model-override layers for one family as the seam sees them: the
+ *  chain's explicit picks over the global (Settings) picks. */
+function familyOverrides(family: ModelFamilyId, chainOverrides?: ModelOverrideSlots): ModelOverrideSlots {
+  const settings = useSessionStore.getState().settings
+  return mergeModelOverrides(chainOverrides, settings?.modelOverrides?.[family])
 }
+
+/** The override RESOLUTION for a family (refusals block submissions;
+ *  degradations warn) — the honest-UI companion to the resolved selection. */
+function overrideOutcomeFor(family: ModelFamilyId, chainOverrides?: ModelOverrideSlots): OverrideResolution {
+  const { models } = engineFacts()
+  return resolveModelOverrides(family, models, familyOverrides(family, chainOverrides))
+}
+
+/** H3 readiness for one turbo tier (the App-root computation, per chain).
+ *  Overrides apply through the seam — inference itself is untouched. */
+function selectionFor(turbo: 'off' | '4' | '8', family: string, chainOverrides?: ModelOverrideSlots): ModelSelection {
+  const { models } = engineFacts()
+  return resolveModels('minimax',
+    inferSelections(models, turbo, family || undefined),
+    models,
+    familyOverrides('minimax', chainOverrides),
+  ).selection
+}
+
+/** Music 3 / ACE-Step selections with overrides through the same seam. */
+function music3SelectionOf(chainOverrides?: ModelOverrideSlots) {
+  const { models } = engineFacts()
+  return resolveModels('music3', inferMusic3Selection(models), models, familyOverrides('music3', chainOverrides)).selection
+}
+
+function aceSelectionOf(chainOverrides?: ModelOverrideSlots) {
+  const { models } = engineFacts()
+  return resolveModels('acestep', inferAceStepSelections(models), models, familyOverrides('acestep', chainOverrides)).selection
+}
+
+/** The offline plan probe's fully-resolved H3 image selection (34afx79) —
+ * construction is pure, so the plan builds with TEST names exactly like the
+ * video plan's fakeSelection. Mirrors the h3img golden matrix's
+ * canvas-t1-inline entry (scripts/lib/h3img-matrix.cjs). */
+const CANVAS_T1_TEST_SELECTION = {
+  fl2va: 'TEST-fl2va.safetensors',
+  ref2va: 'TEST-ref2va.safetensors',
+  textEncoder: 'TEST-qwen3vl.safetensors',
+  videoVae: 'TEST-video-vae.safetensors',
+  audioVae: 'TEST-audio-vae.safetensors',
+  t1ImageVae: 'TEST-minimax_h3_t1_image_vae.safetensors',
+  turboLora: 'TEST-fl2v-turbo-8step.safetensors',
+  detailAdapterLora: 'TEST-detail-adapter.safetensors',
+  krea2: null,
+  klein: { unet: '', textEncoder: '', vae: '' },
+} as const
 
 function modelReadyFor(selection: ModelSelection, turbo: 'off' | '4' | '8'): boolean {
   const activeModel = turbo === 'off' ? selection.fl2va : selection.ref2va
@@ -1133,7 +1195,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         const segment = plan.segments[index]
         const context = chainRenderContext(segment.chainId!)
         if (!context) continue
-        const selection = selectionFor(context.settings.turbo, context.settings.turboFamily)
+        const selection = selectionFor(context.settings.turbo, context.settings.turboFamily, context.settings.modelOverrides)
         // The scene-chain convention: segment N saves clip N into the episode
         // folder; N > 0 loads clip N-1 as never-denoised conditioning.
         const chainOption = { index: index - fromIndex, folder: motionContextFolder(episodeKey) }
@@ -1149,6 +1211,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
             info: facts.info,
             clientId: engineBridge.clientId,
             h3PreviewOverrideNode: findH3PreviewOverrideNode(facts.info) || undefined,
+            modelOverrides: overrideOutcomeFor('minimax', context.settings.modelOverrides),
           },
           {
             notify: (tone, text) => get().toast(tone === 'neutral' ? 'neutral' : tone, text),
@@ -1264,12 +1327,12 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       if (engine === 'music3') {
         return validateMusic3(
           { caption, lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'audio/plan' },
-          { connected: facts.connected, selection: inferMusic3Selection(facts.models) },
+          { connected: facts.connected, selection: music3SelectionOf() },
         )
       }
       return validateAceStep(
         { model: 'base', tags: caption, lyrics: '', instrumental: false, duration: 60, seed: 1, bpm: 120, timeSignature: '4', language: 'en', keyScale: 'C major', generateAudioCodes: false, filenamePrefix: 'audio/plan' },
-        { connected: facts.connected, info: facts.info, selection: inferAceStepSelections(facts.models) },
+        { connected: facts.connected, info: facts.info, selection: aceSelectionOf() },
       )
     },
 
@@ -1486,7 +1549,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
           // The canvas link rides the manifest (M1): without it a reload
           // mid-render permanently orphans the landing (chainJobs relink
           // reads manifest.canvas.chainId only).
-          const result = await submitAceStep(options, { settings: facts.settings, connected: facts.connected, info: facts.info, selection: inferAceStepSelections(facts.models), clientId: engineBridge.clientId }, io, { canvas: { chainId, projectId } })
+          const result = await submitAceStep(options, { settings: facts.settings, connected: facts.connected, info: facts.info, selection: aceSelectionOf(settings.modelOverrides), clientId: engineBridge.clientId }, io, { canvas: { chainId, projectId } })
           return result.ok ? { ok: true } : { ok: false, message: result.message }
         }
         const options: Music3GenerationOptions = {
@@ -1497,32 +1560,41 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
           tiledDecode: true,
           filenamePrefix: `audio/Canvas_Music3_${Date.now()}`,
         }
-        const result = await submitMusic3(options, { settings: facts.settings, connected: facts.connected, info: facts.info, selection: inferMusic3Selection(facts.models), clientId: engineBridge.clientId }, io, { canvas: { chainId, projectId } })
+        const result = await submitMusic3(options, { settings: facts.settings, connected: facts.connected, info: facts.info, selection: music3SelectionOf(settings.modelOverrides), clientId: engineBridge.clientId }, io, { canvas: { chainId, projectId } })
         return result.ok ? { ok: true } : { ok: false, message: result.message }
       }
-      // §5.4 engines-as-ops (Phase 3): image INTENT routes the still surface —
-      // nothing-selected = a Z-Image Turbo still; a selected image = the Fun
-      // ControlNet Union graph over that image (the zImageControlnet
-      // machinery). Selection still decides the surface (L4), extended to the
-      // image engine; frames/reference modes remain H3 video concepts.
+      // §5.4 engines-as-ops, rerouted 2026-09-19 (34afx79): image INTENT is
+      // engine-selected per chain (the two-slot seam in stillIntent.ts) and
+      // renders H3-1F — the h3image Generate-T=1 family through the
+      // workbench's SHARED submit core, so the still lands takes like any
+      // chain (the packet-aware landing branch). A BOUND image (the old
+      // control/canny surface) is no canvas graph at all: it hands off to
+      // the workbench's Edit surface with the image anchored as Picture 1 —
+      // the dated decision that retired the dead ControlNet-Union path with
+      // Z-Image itself. Frames/reference modes remain H3 video concepts.
       const stillIntent = settings.mediaType === 'image' && (effectiveMode(settings) === 'text' || effectiveMode(settings) === 'image')
       if (stillIntent) {
         const mode = effectiveMode(settings)
         const facts = engineFacts()
+        const queued = queuedImageEngineRefusal(settings.imageEngine)
+        if (queued) {
+          get().toast('error', queued)
+          return { ok: false, message: queued }
+        }
+        if (mode === 'image') {
+          if (!firstFrame) return { ok: false, message: 'Choose a first frame for this mode.' }
+          // The Edit handoff: stash the bound image + intent, then full-nav
+          // to the workbench (the surface-switcher precedent — the handoff
+          // key carries the payload across the page load, like the poserig
+          // inbox). The receiving surface announces it; no job parks here.
+          stashCanvasEditHandoff(canvasEditHandoff(settings.prompt, firstFrame))
+          window.location.assign('/?images=1')
+          return { ok: true }
+        }
         if (!facts.settings) return { ok: false, message: 'Studio settings are still loading.' }
-        const result = await submitZImage(
-          {
-            prompt: settings.prompt,
-            seed: settings.seed,
-            width: Number(settings.resolution.split('x')[0]) || 1344,
-            height: Number(settings.resolution.split('x')[1]) || 768,
-            surface: mode === 'image' ? 'control' : 'plain',
-            controlImage: mode === 'image' ? firstFrame : null,
-            controlMode: 'canny',
-            filenamePrefix: `MiniMax_first_frames/Canvas_ZImage_${Date.now()}`,
-            manifestExtra: { canvas: { chainId, projectId } },
-          },
-          { settings: facts.settings, connected: facts.connected, info: facts.info },
+        const result = await submitWorkbenchGeneration(
+          canvasH3OneFrameRequest(chainId, settings),
+          { settings: facts.settings, connected: facts.connected, models: facts.models, info: facts.info, clientId: engineBridge.clientId },
           {
             notify: (tone, text) => get().toast(tone === 'neutral' ? 'neutral' : tone, text),
             setJobs: (update) => useJobsStore.getState().setJobs(update),
@@ -1535,7 +1607,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         )
         return result.ok ? { ok: true } : { ok: false, message: result.message }
       }
-      const selection = selectionFor(settings.turbo, settings.turboFamily)
+      const selection = selectionFor(settings.turbo, settings.turboFamily, settings.modelOverrides)
       const facts = engineFacts()
       if (!facts.settings) return { ok: false, message: 'Studio settings are still loading.' }
       // §5.4 (Phase 4): the LTX-2.5 GENERAL graph as an engine-op — the
@@ -1550,7 +1622,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
             filenamePrefix: `video/Canvas_LTX25_${Date.now()}`,
           },
           firstFrame,
-          { settings: facts.settings, connected: facts.connected, info: facts.info, selection: ltx25SelectionOf(), clientId: engineBridge.clientId },
+          { settings: facts.settings, connected: facts.connected, info: facts.info, selection: ltx25SelectionOf(settings.modelOverrides), clientId: engineBridge.clientId },
           {
             notify: (tone, text) => get().toast(tone === 'neutral' ? 'neutral' : tone, text),
             setJobs: (update) => useJobsStore.getState().setJobs(update),
@@ -1584,6 +1656,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
           info: facts.info,
           clientId: engineBridge.clientId,
           h3PreviewOverrideNode: findH3PreviewOverrideNode(facts.info) || undefined,
+          modelOverrides: overrideOutcomeFor('minimax', settings.modelOverrides),
         },
         {
           notify: (tone, text) => get().toast(tone === 'neutral' ? 'neutral' : tone, text),
@@ -1614,24 +1687,30 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         if (settings.audio.engine === 'acestep') {
           return validateAceStep(
             { model: settings.audio.model, tags: settings.audio.caption, lyrics: settings.audio.lyrics, instrumental: settings.audio.instrumental, duration: settings.audio.duration, seed: settings.audio.seed, bpm: settings.audio.bpm, timeSignature: '4', language: 'en', keyScale: 'C major', generateAudioCodes: false, filenamePrefix: 'audio/plan' },
-            { connected: facts.connected, info: facts.info, selection: inferAceStepSelections(facts.models) },
+            { connected: facts.connected, info: facts.info, selection: aceSelectionOf(settings.modelOverrides) },
           )
         }
         return validateMusic3(
           { caption: settings.audio.caption, lyrics: settings.audio.lyrics, duration: settings.audio.duration, seed: settings.audio.seed, tiledDecode: true, filenamePrefix: 'audio/plan' },
-          { connected: facts.connected, selection: inferMusic3Selection(facts.models) },
+          { connected: facts.connected, selection: music3SelectionOf(settings.modelOverrides) },
         )
       }
-      // The still surface (§5.4) validates through its own ladder.
+      // The stills intent (34afx79) validates through the seam: the queued
+      // second engine refuses honestly; image+control states the Edit-surface
+      // handoff; H3-1F rides the workbench's own ladder (family availability
+      // on the H3 stack, exactly like the workbench surface gates it).
       if (settings.mediaType === 'image' && (effectiveMode(settings) === 'text' || effectiveMode(settings) === 'image')) {
-        return validateZImage(
-          {
-            prompt: settings.prompt, seed: settings.seed, width: 1344, height: 768,
-            surface: effectiveMode(settings) === 'image' ? 'control' : 'plain',
-            controlImage: effectiveMode(settings) === 'image' ? firstFrame : null,
-            controlMode: 'canny',
-          },
-          { connected: facts.connected, info: facts.info },
+        const queued = queuedImageEngineRefusal(settings.imageEngine)
+        if (queued) return queued
+        if (effectiveMode(settings) === 'image') {
+          return firstFrame
+            ? 'Image-with-reference renders on the workbench\'s Edit surface — generate opens it with this image anchored as the source (Picture 1). The canvas ships no control-stills path (dated 2026-09-19, task 34afx79).'
+            : 'Choose a first frame for this mode.'
+        }
+        if (!facts.settings) return 'Studio settings are still loading.'
+        return validateWorkbenchRequest(
+          canvasH3OneFrameRequest(chainId, settings),
+          { settings: facts.settings, connected: facts.connected, models: facts.models, info: facts.info },
         )
       }
       // The LTX-2.5 general surface (§5.4 Phase 4).
@@ -1639,7 +1718,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         return validateLtx25(
           { mode: 'image', prompt: settings.prompt, width: 1344, height: 768, duration: settings.duration, seed: settings.seed, preset: 'quality', filenamePrefix: 'video/plan' },
           firstFrame,
-          { connected: facts.connected, info: facts.info, selection: ltx25SelectionOf() },
+          { connected: facts.connected, info: facts.info, selection: ltx25SelectionOf(settings.modelOverrides) },
         )
       }
       // The latent-fork gate (Phase 4): honest refusals before the H3 ladder.
@@ -1647,13 +1726,14 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         if (!motionContextReady()) return 'Latent continuation needs the ComfyUI-H3-Motion-Context custom nodes — install them, then refresh the engine.'
         if (context.latentRefusal) return context.latentRefusal
       }
-      const selection = selectionFor(settings.turbo, settings.turboFamily)
+      const selection = selectionFor(settings.turbo, settings.turboFamily, settings.modelOverrides)
       const request = buildCanvasRenderRequest(settings, { firstFrame, lastFrame, referenceImages: referenceMedia, referenceVideos, referenceAudios }, bindings)
       return validateH3Render(request, {
         connected: facts.connected,
         modelReady: facts.settings ? modelReadyFor(selection, settings.turbo) : false,
         selection,
         h3PreviewOverrideNode: findH3PreviewOverrideNode(facts.info) || undefined,
+        modelOverrides: overrideOutcomeFor('minimax', settings.modelOverrides),
       })
     },
 
@@ -2286,9 +2366,10 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       const ltx25Selection = ltx25SelectionOf()
       const ltx25MissingNodes = LTX25_NATIVE_REQUIRED_NODES.filter((node) => !facts.info[node])
       const ltx25ModelsReady = Boolean(ltx25Selection.diffusion && ltx25Selection.textEncoder && ltx25Selection.videoVae && ltx25Selection.audioVae && ltx25Selection.latentUpscaler)
-      // The audio engines (§5.4 Phase 4): detection over the shared infer*.
-      const music3Selection = inferMusic3Selection(facts.models)
-      const aceSelection = inferAceStepSelections(facts.models)
+      // The audio engines (§5.4 Phase 4): detection over the shared infer*,
+      // with global overrides consulted (euxwdva).
+      const music3Selection = music3SelectionOf()
+      const aceSelection = aceSelectionOf()
       return {
         connected: facts.connected,
         h3Ready: modelReadyFor(selection, 'off'),
@@ -2525,17 +2606,18 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
   /** Engine-free submit-plan probe: maps a selection spec through the REAL
    *  builder + graph construction and returns the built graph's facts plus
    *  the honest validation against the live session (offline → the real
-   *  refusal string). This is what the e2e suite asserts per mode. Phase 3:
-   *  a `mediaType: 'image'` spec routes through the Z-Image plan (§5.4
-   *  stills) exactly like submitChain does. Phase 4: `mediaType: 'audio'`
-   *  routes through the audio cores; `engine: 'ltx25'` through the LTX-2.5
-   *  general plan; `latentFrom` builds the Motion-Context latent-fork graph. */
+   *  refusal string). This is what the e2e suite asserts per mode. The
+   *  stills intent (34afx79) routes through the H3-1F seam — `imageEngine`
+   *  selects the slot. Phase 4: `mediaType: 'audio'` routes through the
+   *  audio cores; `engine: 'ltx25'` through the LTX-2.5 general plan;
+   *  `latentFrom` builds the Motion-Context latent-fork graph. */
   Object.defineProperty(window, '__canvasSubmitPlan', {
     configurable: true,
     value: (spec: {
       prompt?: string
       mediaType?: 'video' | 'image' | 'audio'
       engine?: 'h3' | 'ltx25'
+      imageEngine?: 'h3-1f' | 'krea2'
       audioEngine?: 'music3' | 'acestep'
       firstFrameOutputId?: string | null
       lastFrameOutputId?: string | null
@@ -2545,12 +2627,16 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
       duration?: number
       resolution?: string
       latentFrom?: { folder: string; clipIndex: number }
+      /** Chain-level model overrides (euxwdva) — merged over the global
+       *  Settings picks exactly like a real chain's would be. */
+      modelOverrides?: ModelOverrideSlots
     }) => {
       const settings = {
         ...chainSettingsDefaults(useSessionStore.getState().settings),
         prompt: spec.prompt ?? 'a lone drummer on a night train',
         mediaType: spec.mediaType ?? 'video',
         engine: spec.engine ?? 'h3',
+        imageEngine: spec.imageEngine ?? 'h3-1f',
         firstFrameOutputId: spec.firstFrameOutputId ?? null,
         lastFrameOutputId: spec.lastFrameOutputId ?? null,
         referenceOutputIds: spec.referenceOutputIds ?? [],
@@ -2566,7 +2652,7 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
         if (audioEngine === 'music3') {
           const validation = validateMusic3(
             { caption: settings.prompt, lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'audio/plan' },
-            { connected: facts.connected, selection: inferMusic3Selection(facts.models) },
+            { connected: facts.connected, selection: music3SelectionOf() },
           )
           const graph = buildMusic3Workflow({ caption: settings.prompt, lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'audio/LTX_plan' }, { diffusion: 'TEST-music3.safetensors', textEncoder: 'TEST-music3-te.safetensors', vae: 'TEST-music3-dav.safetensors' })
           const nodes = Object.values(graph)
@@ -2583,7 +2669,7 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
         }
         const validation = validateAceStep(
           { model: 'base', tags: settings.prompt, lyrics: '', instrumental: false, duration: 60, seed: 1, bpm: 120, timeSignature: '4', language: 'en', keyScale: 'C major', generateAudioCodes: false, filenamePrefix: 'audio/plan' },
-          { connected: facts.connected, info: facts.info, selection: inferAceStepSelections(facts.models) },
+          { connected: facts.connected, info: facts.info, selection: aceSelectionOf() },
         )
         const graph = buildAceStepWorkflow(
           { model: 'base', tags: settings.prompt, lyrics: '', instrumental: false, duration: 60, seed: 1, bpm: 120, timeSignature: '4', language: 'en', keyScale: 'C major', generateAudioCodes: false, filenamePrefix: 'audio/ACE_plan' },
@@ -2619,30 +2705,58 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
           },
         }
       }
-      // The still surface (§5.4): construction through the Z-Image machinery.
+      // The stills intent (34afx79): the seam's plan — the queued engine
+      // refuses, image+control reports the Edit-surface handoff (no graph is
+      // the honest answer there), and H3-1F maps through the same request the
+      // submit core builds (the T=1 graph facts the e2e asserts; the golden
+      // for the inline shape lives in the h3img matrix as canvas-t1-inline).
       if (settings.mediaType === 'image' && (effectiveMode(settings) === 'text' || effectiveMode(settings) === 'image')) {
         const facts = engineFacts()
+        const queued = queuedImageEngineRefusal(settings.imageEngine)
+        if (queued) return { mode: 'image-queued-engine', validation: queued, graph: null }
         const snapshot = useCanvasStore.getState()
         const doc = snapshot.activeProjectId ? snapshot.documents[snapshot.activeProjectId] : null
         const outputs = doc ? buildOutputIndex(doc) : new Map()
         const controlImage = settings.firstFrameOutputId ? mediaForOutput(outputs.get(settings.firstFrameOutputId))?.media ?? null : null
-        const surface = effectiveMode(settings) === 'image' ? 'control' as const : 'plain' as const
-        const validation = validateZImage(
-          { prompt: settings.prompt, seed: settings.seed, width: 1344, height: 768, surface, controlImage, controlMode: 'canny' },
-          { connected: facts.connected, info: facts.info },
-        )
-        const fakeZSelection = { model: 'TEST-z_image_turbo.safetensors', encoder: 'TEST-qwen_3_4b.safetensors', vae: 'TEST-ae.safetensors', controlnet: 'TEST-zimage-fun-controlnet-union.safetensors' }
-        const graph = planZImageGraph({ prompt: settings.prompt, seed: 1, width: 1344, height: 768, surface, controlImage, controlMode: 'canny' }, fakeZSelection, surface === 'control' ? { controlImage: 'plan-control.png' } : {})
+        if (effectiveMode(settings) === 'image') {
+          return {
+            mode: 'h3-1f-edit-handoff',
+            validation: controlImage
+              ? 'Image-with-reference renders on the workbench\'s Edit surface — generate opens it with this image anchored as the source (Picture 1).'
+              : 'Choose a first frame for this mode.',
+            handoff: { surface: '/?images=1', family: 'h3img.edit.freeform', sourceAnchored: Boolean(controlImage) },
+            graph: null,
+          }
+        }
+        const request = canvasH3OneFrameRequest('plan', settings)
+        const validation = !facts.settings
+          ? 'Studio settings are still loading.'
+          : validateWorkbenchRequest(request, { settings: facts.settings, connected: facts.connected, models: facts.models, info: facts.info })
+        const graph = buildH3ImageGraph({
+          family: request.settings.family,
+          prompt: sessionContract(request.settings, { sourceAnchored: false }),
+          width: Number(settings.resolution.split('x')[0]) || 1344,
+          height: Number(settings.resolution.split('x')[1]) || 768,
+          seed: settings.seed,
+          tier: H3IMG_RECIPE_PINS.t1.frames,
+          refs: [],
+          loras: [],
+          filenamePrefix: 'images/H3IMG_plan',
+        }, CANVAS_T1_TEST_SELECTION, facts.info)
         const nodes = Object.values(graph)
         return {
-          mode: surface === 'control' ? 'z-image-control' : 'z-image',
+          mode: 'h3-1f',
           validation,
           graph: {
             nodeClasses: nodes.map((node) => node.class_type),
-            unetModel: nodes.find((node) => node.class_type === 'UNETLoader')?.inputs.unet_name ?? null,
+            hybrid: nodes.some((node) => node.class_type === 'MiniMaxH3HybridLoader'),
+            unetModel: (nodes.find((node) => node.class_type === 'UNETLoader')?.inputs.unet_name ?? null) as string | null,
+            t1Vae: (nodes.find((node) => node.class_type === 'VAELoader')?.inputs.vae_name ?? null) as string | null,
+            sampler: nodes.find((node) => node.class_type === 'KSamplerSelect')?.inputs.sampler_name ?? null,
+            scheduler: nodes.find((node) => node.class_type === 'BasicScheduler')?.inputs.scheduler ?? null,
+            steps: nodes.find((node) => node.class_type === 'BasicScheduler')?.inputs.steps ?? null,
             loadImageCount: nodes.filter((node) => node.class_type === 'LoadImage').length,
-            saveNode: nodes.some((node) => node.class_type === 'SaveImage'),
-            controlnet: nodes.some((node) => node.class_type === 'QwenImageDiffsynthControlnet'),
+            saveImageCount: nodes.filter((node) => node.class_type === 'SaveImage').length,
             total: nodes.length,
           },
         }
@@ -2660,12 +2774,13 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
       const chainOption = spec.latentFrom ? canvasChainOption('plan', spec.latentFrom) : motionContextReady() ? canvasChainOption('plan', null) : undefined
       const request = buildCanvasRenderRequest(settings, { firstFrame, lastFrame, referenceImages: referenceMedia as MediaFile[], referenceVideos: [], referenceAudios: [] }, bindings, chainOption)
       const facts = engineFacts()
-      const selection = selectionFor(settings.turbo, settings.turboFamily)
+      const selection = selectionFor(settings.turbo, settings.turboFamily, spec.modelOverrides)
       const validation = validateH3Render(request, {
         connected: facts.connected,
         modelReady: facts.settings ? modelReadyFor(selection, settings.turbo) : false,
         selection,
         h3PreviewOverrideNode: findH3PreviewOverrideNode(facts.info) || undefined,
+        modelOverrides: overrideOutcomeFor('minimax', spec.modelOverrides),
       })
       // The graph builds regardless of the engine — construction is pure.
       const fakeSelection: ModelSelection = {

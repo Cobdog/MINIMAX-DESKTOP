@@ -39,6 +39,10 @@ export type RenderManifest = {
    *  chained after the turbo seam, recorded at submit time so take landing
    *  can state which LoRAs were active on this render. */
   loraStack?: Array<{ name: string; strength: number }>
+  /** Model overrides (task euxwdva): the slots that rode an explicit pick
+   *  (filename per slot). `models` above already records the RESOLVED
+   *  filenames; this says which of them were user picks, not inference. */
+  modelOverrides?: Record<string, string>
   graphVersion: string
   engine: { comfyUrl: string; app: string }
 }

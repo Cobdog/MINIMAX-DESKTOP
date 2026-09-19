@@ -299,7 +299,6 @@ const fetchDeepLink = loadTs('src/lib/fetchDeepLink.ts')
 const h3Submit = loadTs('src/lib/h3Submit.ts', { localStorage: localStorageStub })
 const ops = loadTs('src/canvas/ops.ts')
 const ltx23Submit = loadTs('src/lib/ltx23UtilitySubmit.ts', { localStorage: localStorageStub })
-const zImageSubmit = loadTs('src/lib/zImageSubmit.ts', { localStorage: localStorageStub })
 
 const media = (path, kind) => ({ path, name: path.split('/').pop(), kind })
 const take = (id, overrides) => ({ id, outputId: 'out-1', jobId: null, artifacts: [], latentPath: null, metrics: null, createdAt: 1, supersededBy: null, evicted: false, contentHash: null, ...overrides })
@@ -321,6 +320,15 @@ console.log('(l) L4 — selection decides the surface (effectiveMode)')
   eq(read.resolution, '768x1344', 'settings: known resolution kept')
   eq(read.referenceOutputIds, ['a', 'b'], 'settings: non-string reference ids dropped, never a crash')
   eq(generation.readChainSettings({}).mode || 'text', 'text', 'settings: absent settings fall back cleanly')
+  // Model overrides (euxwdva): tolerant read — string slots survive, junk
+  // drops to auto; absent key = the empty (auto) slots, never undefined.
+  const overridesRead = generation.readChainSettings({ modelOverrides: { checkpoint: 'merge.safetensors', textEncoder: 7, vae: '  ', lora: 'x.safetensors' } })
+  eq(overridesRead.modelOverrides.checkpoint, 'merge.safetensors', 'settings: a string override slot survives')
+  eq('textEncoder' in overridesRead.modelOverrides, false, 'settings: a non-string slot drops to auto')
+  eq('vae' in overridesRead.modelOverrides, false, 'settings: a blank slot drops to auto')
+  eq('lora' in overridesRead.modelOverrides, false, 'settings: unknown slot keys are not invented')
+  const noOverrides = generation.readChainSettings({})
+  eq(Object.keys(noOverrides.modelOverrides || {}).length, 0, 'settings: absent modelOverrides reads as the empty (auto) set')
 }
 
 console.log('(m) fork substrates → input refs (§2 outputRef)')
@@ -675,43 +683,96 @@ console.log('(t) the LTX-2.3 utility validation ladder + official-template plan'
   ok(plan.refusal.includes('not ready'), 'plan: the refusal names the missing stack')
 }
 
-console.log('(u) Z-Image as an op — the still-surface validation ladder + graph plan')
-{
-  const offlineFacts = { connected: false, info: {} }
-  eq(zImageSubmit.validateZImage({ prompt: 'a still', seed: 1, width: 1344, height: 768, surface: 'plain', controlImage: null, controlMode: 'canny' }, offlineFacts), 'Start ComfyUI and verify the server connection in Settings.', 'ladder: offline refuses with the honest message')
-  eq(
-    zImageSubmit.validateZImage({ prompt: '   ', seed: 1, width: 1344, height: 768, surface: 'plain', controlImage: null, controlMode: 'canny' }, offlineFacts),
-    'Add a prompt before generating.',
-    'ladder: an empty prompt refuses before anything else',
-  )
-  const fakeInfo = {
-    UNETLoader: { input: { required: { unet_name: [['z_image_turbo_bf16.safetensors', 'other.safetensors']] } } },
-    CLIPLoader: { input: { required: { clip_name: [['qwen_3_4b.safetensors']] } } },
-    VAELoader: { input: { required: { vae_name: [['ae.safetensors']] } } },
-    ModelPatchLoader: { input: { required: { model_name: [['Z-Image-Turbo-Fun-Controlnet-Union.safetensors']] } } },
-    QwenImageDiffsynthControlnet: { input: { required: {} } },
-    GetImageSize: { input: { required: {} } },
-    Canny: { input: { required: {} } },
-  }
-  const selection = zImageSubmit.resolveZImageSelection(fakeInfo)
-  eq(selection.model, 'z_image_turbo_bf16.safetensors', 'resolve: the combo list resolves the turbo model name')
-  eq(selection.encoder, 'qwen_3_4b.safetensors', 'resolve: the Qwen 3 encoder resolves')
-  ok(zImageSubmit.zImageControlNodesReady(fakeInfo, 'canny'), 'resolve: the canny control path is node-ready')
-  ok(!zImageSubmit.zImageControlNodesReady(fakeInfo, 'depth'), 'resolve: depth needs its aux preprocessor (not installed here)')
-  const noControlImage = zImageSubmit.validateZImage({ prompt: 'a still', seed: 1, width: 1344, height: 768, surface: 'control', controlImage: null, controlMode: 'canny' }, { connected: true, info: fakeInfo })
-  eq(noControlImage, 'Choose a control image for the structure-guided still.', 'ladder: control surface without an image refuses')
+// The H3 image stack the T=1 family resolves (34afx79) — shared by the (u)
+// ladder block and the (u-run) submission leg below.
+const h3imgModel = (name, kind) => ({ name, kind, bytes: 1000 })
+const H3_T1_FULL_STACK = [
+  h3imgModel('minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'diffusion_models'),
+  h3imgModel('minimax_h3_ref2va_pruned_int8_convrot.safetensors', 'diffusion_models'),
+  h3imgModel('qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', 'text_encoders'),
+  h3imgModel('minimax_h3_video_vae_fp16.safetensors', 'vae'),
+  h3imgModel('minimax_h3_audio_vae_fp32.safetensors', 'vae'),
+  h3imgModel('minimax_h3_t1_image_vae_step1597.safetensors', 'vae'),
+  h3imgModel('minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', 'loras'),
+  h3imgModel('MaxiMin-HHH-R2V-ThisIsFine.safetensors', 'loras'),
+]
+// One load of the shared workbench submit core with a STUBBED engine window
+// (loadTs caches by path — the (u-run) leg reuses this exact module binding;
+// the upload stubs throw because the text-only T=1 path must never upload).
+const t1SubmittedGraphs = []
+const stillSubmitCore = loadTs('src/images/submit.ts', { window: { minimax: {
+  submitPrompt: async (url, graph) => { t1SubmittedGraphs.push({ url, graph }); return { prompt_id: 't1-run-1' } },
+  uploadInput: async () => { throw new Error('unexpected upload on the text-only T=1 path') },
+  uploadImageData: async () => { throw new Error('unexpected image-data upload on the text-only T=1 path') },
+  cancelPrompt: async () => undefined,
+} } })
+const h3imageGraph = loadTs('src/lib/graph/h3image.ts')
 
-  // Graph plans: plain = the Z-Image turbo template; control = the
-  // zImageControlnet machinery (Fun ControlNet Union).
-  const plainPlan = zImageSubmit.planZImageGraph({ prompt: 'a still', seed: 7, width: 1024, height: 576, surface: 'plain', controlImage: null, controlMode: 'canny' }, selection)
-  const plainClasses = Object.values(plainPlan).map((node) => node.class_type)
-  ok(plainClasses.includes('UNETLoader') && plainClasses.includes('SaveImage'), 'plan: the plain surface builds the Z-Image turbo template')
-  ok(!plainClasses.includes('LoadImage'), 'plan: the plain surface wires no image loader (text→still)')
-  const controlPlan = zImageSubmit.planZImageGraph({ prompt: 'a still', seed: 7, width: 1024, height: 576, surface: 'control', controlImage: { path: '/x.png', name: 'x.png', kind: 'image' }, controlMode: 'canny' }, selection, { controlImage: 'x.png' })
-  const controlClasses = Object.values(controlPlan).map((node) => node.class_type)
-  ok(controlClasses.includes('QwenImageDiffsynthControlnet'), 'plan: the control surface wires the Fun ControlNet Union node')
-  ok(controlClasses.includes('Canny'), 'plan: the control surface preprocesses through native Canny')
-  ok(controlClasses.includes('ModelPatchLoader'), 'plan: the control surface loads the union patch')
+console.log('(u) H3-1F as the image op — the two-slot seam, the T=1 request, the Edit handoff (34afx79)')
+{
+  const still = loadTs('src/canvas/stillIntent.ts', { window: { localStorage: localStorageStub } })
+  const submitCore = stillSubmitCore
+  const h3image = h3imageGraph
+  const fullStack = H3_T1_FULL_STACK
+  const selectionForModels = (files) => submitCore.buildH3ImgSelection({ models: files })
+
+  // The two-slot seam: H3-1F wired, Krea 2 the typed hole that refuses
+  // honestly (never silently falls back) until mf3wfq6 docks in.
+  eq(still.queuedImageEngineRefusal('h3-1f'), null, 'seam: the wired slot imposes no refusal')
+  const queued = still.queuedImageEngineRefusal('krea2')
+  ok(typeof queued === 'string' && queued.includes('mf3wfq6'), 'seam: the queued slot refuses honestly, naming its task')
+
+  // The canvas chain settings map to ONE workbench request — the same shape
+  // the workbench surface builds, so validation/graph/manifest/landing are
+  // one code path (family, seed, resolution ride the chain).
+  const request = still.canvasH3OneFrameRequest('chain-1', { prompt: 'a lighthouse over a black sea, still', seed: 4242, resolution: '768x1344' })
+  eq(request.chainId, 'chain-1', 'request: the chain link rides the request (the landing keys on it)')
+  eq(request.settings.family, 'h3img.generate.t1', 'request: the T=1 Fast family')
+  eq(request.settings.intent, 'a lighthouse over a black sea, still', 'request: the chain prompt is the intent')
+  eq(request.settings.seed, 4242, 'request: the chain seed rides through')
+  eq(request.settings.resolution, '768x1344', 'request: the chain resolution rides through')
+  eq(request.refs, [], 'request: the text intent wires no reference slots')
+  eq(request.source, null, 'request: the text intent anchors no source')
+  ok(findFamilyProfile(h3image, request.settings.family) === 't1', 'request: the family is the t1 profile (one latent frame)')
+
+  // The ladder is the workbench's own (family availability on the H3 stack
+  // FIRST — install guidance before the connection check, the workbench's
+  // established order — then engine, then intent).
+  const emptyStackFacts = { settings: { comfyUrl: 'http://x' }, connected: false, models: [], info: {} }
+  const unavailable = submitCore.validateWorkbenchRequest(request, emptyStackFacts)
+  ok(typeof unavailable === 'string' && unavailable.includes('Generate (T=1 Fast) is not available'), 'ladder: the missing H3 stack refuses with the family\'s install guidance')
+  ok(typeof unavailable === 'string' && unavailable.includes('T=1 image VAE') && unavailable.includes('turbo LoRA'), 'ladder: the refusal names the T=1-specific components (the family\'s gating)')
+  const offline = submitCore.validateWorkbenchRequest(request, { settings: { comfyUrl: 'http://x' }, connected: false, models: fullStack, info: {} })
+  eq(offline, 'Start ComfyUI and verify the server connection in Settings.', 'ladder: offline (stack present) refuses with the honest connection message')
+  eq(
+    submitCore.validateWorkbenchRequest(still.canvasH3OneFrameRequest('chain-1', { prompt: '   ', seed: 1, resolution: '1344x768' }), { settings: { comfyUrl: 'http://x' }, connected: true, models: fullStack, info: {} }),
+    'Describe what you want before generating.',
+    'ladder: an empty intent refuses before anything else on a ready engine',
+  )
+  eq(submitCore.validateWorkbenchRequest(request, { settings: { comfyUrl: 'http://x' }, connected: true, models: fullStack, info: {} }), null, 'ladder: a ready engine passes clean')
+
+  // The builder's own pin (why the core derives the tier): a T=1 request
+  // carrying a packet-tier value is a contract violation, caught by the
+  // builder — the core must never forward the session dial.
+  let pinThrew = null
+  try {
+    h3image.buildH3ImageGraph({ family: 'h3img.generate.t1', prompt: 'x', width: 1344, height: 768, seed: 1, tier: 5, refs: [], loras: [], filenamePrefix: 'p' }, selectionForModels(fullStack), {})
+  } catch (error) {
+    pinThrew = error instanceof Error ? error.message : String(error)
+  }
+  ok(pinThrew !== null && pinThrew.includes('exactly one frame'), 'pin: the builder refuses a T=1 request carrying the session packet tier (the core derives it — proven in (x))')
+
+  // The Edit handoff (image+control, dated 2026-09-19): the payload carries
+  // the bound image + intent; the preview is derived, never serialized.
+  const handoff = still.canvasEditHandoff('make it winter', media('/out/frame-1.png', 'image'))
+  eq(handoff, { path: '/out/frame-1.png', name: 'frame-1.png', intent: 'make it winter' }, 'handoff: the bound image + intent is the whole payload')
+  eq(still.handoffPreviewUrl('canvas-blobs/ab/cd.png'), '/api/lan/documents/blobs/file?path=canvas-blobs%2Fab%2Fcd.png', 'handoff: a blob artifact previews through the blob file route')
+  eq(still.handoffPreviewUrl('/out/frame-1.png'), '/api/lan/media?source=output&path=%2Fout%2Fframe-1.png', 'handoff: an output artifact previews through the output media route')
+
+  function findFamilyProfile(mod, id) {
+    const family = mod.H3IMG_FAMILIES.find((entry) => entry.id === id)
+    return family ? family.profile : null
+  }
 }
 
 
@@ -837,6 +898,51 @@ async function phase5Cores() {
   eq(await contact.submitCharacterContactSheet(project, contactFacts({ connected: false }), io), 'Start ComfyUI and verify the server connection in Settings.', 'contact sheet: offline refuses first (the shared ladder)')
   eq(await contact.submitCharacterContactSheet({ id: 'char-2', name: 'Mira' }, contactFacts(), io), 'Approve a character identity image first.', 'contact sheet: no approved identity image refuses')
   eq(await contact.submitCharacterContactSheet(project, contactFacts(), io), 'Install the ComfyUI-H3-ContactSheet nodes and the five-view turnaround LoRA (minimax_h3_five_view_*), then refresh the engine.', 'contact sheet: the ContactSheet nodes + turnaround LoRA are REQUIRED (Phase-4 cleanup applied — the LTX survey fallback is gone)')
+}
+
+// ---------------------------------------------------------------------------
+// (u-run) The canvas H3-1F submission through the SHARED core (34afx79).
+// Async (the submission is an async function), like phase5Cores. This is the
+// failing-without-it leg for the core's T=1 tier pin: before the pin, the
+// session's packet-tier default (5) tripped the builder's exactly-one-frame
+// guard on EVERY T=1 submission — the run below would return the refusal and
+// no engine prompt would exist.
+// ---------------------------------------------------------------------------
+async function h3OneFrameSubmitRun() {
+  console.log('(u-run) H3-1F submission — the tier pin, the T=1 graph, the canvas link (34afx79)')
+  const still = loadTs('src/canvas/stillIntent.ts', { window: { localStorage: localStorageStub } })
+  const request = still.canvasH3OneFrameRequest('chain-t1', { prompt: 'a ceramic bowl of lemons on an oak table, morning light', seed: 77, resolution: '1344x768' })
+  let jobState = []
+  let linkedJobId = null
+  const notices = []
+  const io = {
+    notify: (tone, text) => { notices.push(`${tone}|${text}`) },
+    setJobs: (update) => { jobState = update(jobState) },
+    cancellationRequests: { current: new Set() },
+    onJobCreated: (jobId) => { linkedJobId = jobId },
+  }
+  const result = await stillSubmitCore.submitWorkbenchGeneration(request, { settings: { comfyUrl: 'http://engine.test' }, connected: true, models: H3_T1_FULL_STACK, info: {} }, io)
+  eq(result.ok, true, 'submit: the text→still T=1 run submits clean through the shared core (the tier pin holds)')
+  ok(jobState.length === 1 && jobState[0].status === 'running', 'submit: the job parks running after the engine accepts')
+  ok(linkedJobId === jobState[0].id, 'submit: onJobCreated fires the moment the job record exists (the canvas-link discipline added with 34afx79)')
+  ok(jobState[0].mediaType === 'image', 'submit: the job is an image job (the queue poll completes it with the image kind)')
+  eq(t1SubmittedGraphs.length, 1, 'submit: exactly one engine prompt submitted (no upload touched — the text intent uploads nothing)')
+  const graph = t1SubmittedGraphs[0].graph
+  const nodes = Object.values(graph)
+  const classes = nodes.map((node) => node.class_type)
+  ok(classes.filter((cls) => cls === 'SaveImage').length === 1, 'submit: ONE per-frame publish — the T=1 single frame (without the tier pin the builder refused here)')
+  ok(!classes.includes('LoadImage'), 'submit: no image loaders on the text intent')
+  ok(classes.includes('MiniMaxH3SigmaShift'), 'submit: the pinned T=1 sigma shifts ride the model chain')
+  ok(nodes.filter((node) => node.class_type === 'VAELoader').some((node) => /^minimax_h3_t1_image_vae/.test(String(node.inputs.vae_name))), 'submit: the decode rides the Mamad8 T=1 VAE (never the video VAE on this profile)')
+  eq(nodes.find((node) => node.class_type === 'KSamplerSelect').inputs.sampler_name, 'er_sde', 'submit: the pinned sampler er_sde')
+  eq(nodes.find((node) => node.class_type === 'BasicScheduler').inputs.scheduler, 'sgm_uniform', 'submit: the pinned scheduler sgm_uniform')
+  eq(nodes.find((node) => node.class_type === 'BasicScheduler').inputs.steps, 8, 'submit: the pinned 8-step recipe')
+  eq(h3imageGraph.h3imgGraphAudit(graph), [], 'submit: the built graph audits clean (no video-only nodes, publish set matches)')
+  const manifest = jobState[0].manifest
+  ok(manifest && manifest.h3img && manifest.h3img.family === 'h3img.generate.t1', 'submit: the h3img provenance rides the manifest (the packet-aware landing keys on it)')
+  ok(manifest.h3img.frames === 1, 'submit: the provenance records the single frame')
+  ok(manifest.canvas && manifest.canvas.chainId === 'chain-t1', 'submit: the canvas chain link rides the manifest (reload relink)')
+  ok(notices.some((entry) => entry.startsWith('success|') && entry.includes('Generate (T=1 Fast)')), 'submit: the success notice names the family honestly')
 }
 
 // ---------------------------------------------------------------------------
@@ -1527,6 +1633,7 @@ console.log('(aa) LoRA timeline — the compiler, the grid, the measured windows
     'metrics: a missing strength defaults 1; malformed stack entries drop; garbage never crashes')
 }
 
-phase5Cores()
+h3OneFrameSubmitRun()
+  .then(() => phase5Cores())
   .then(() => { console.log(`\ntest-canvas: ${passed} assertions passed`) })
   .catch((error) => { console.error(error); process.exit(1) })

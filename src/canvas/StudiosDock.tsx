@@ -30,6 +30,7 @@
 import { Suspense, lazy, useContext, useMemo } from 'react'
 import { Rnd } from 'react-rnd'
 import { Clapperboard, X } from 'lucide-react'
+import { resolveModelOverrides, resolveModels } from '../lib/modelOverrides'
 import { inferSelections } from '../lib/modelSelection'
 import { submitH3Render } from '../lib/h3Submit'
 import { locationWalkthroughRequest } from '../lib/locationWalkthrough'
@@ -72,7 +73,10 @@ export function StudiosDock() {
   const llmDescriptor = useSessionStore((state) => state.llm)
   const ollamaModels = context?.session.ollamaModels ?? []
 
-  const selection = useMemo(() => inferSelections(context?.session.models ?? [], 'off'), [context?.session.models])
+  const selection = useMemo(
+    () => resolveModels('minimax', inferSelections(context?.session.models ?? [], 'off'), context?.session.models ?? [], context?.session.settings?.modelOverrides?.minimax).selection,
+    [context?.session.models, context?.session.settings?.modelOverrides?.minimax],
+  )
 
   if (!dock || !context) return null
   const { session } = context
@@ -81,7 +85,10 @@ export function StudiosDock() {
 
   const llmAvailable = llmDescriptor ? llmDescriptor.connected && Boolean(llmDescriptor.model) : ollamaModels.length > 0
   const modelReady = Boolean(status.connected && selection.fl2va && selection.ref2va && selection.textEncoder && selection.videoVae && selection.audioVae)
-  const facts = { settings, connected: status.connected, modelReady, selection, models, info: session.info, clientId: engineBridge.clientId, h3PreviewOverrideNode: findH3PreviewOverrideNode(session.info) || undefined }
+  // The override resolution rides the facts like the canvas submit path — a
+  // wrong-kind pick refuses the walkthrough/contact-sheet submits too.
+  const overrideResolution = resolveModelOverrides('minimax', models, settings.modelOverrides?.minimax)
+  const facts = { settings, connected: status.connected, modelReady, selection, models, info: session.info, clientId: engineBridge.clientId, h3PreviewOverrideNode: findH3PreviewOverrideNode(session.info) || undefined, modelOverrides: overrideResolution }
 
   return <Rnd
     className="canvas-settings-dock"

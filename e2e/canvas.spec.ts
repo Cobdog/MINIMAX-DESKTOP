@@ -1037,49 +1037,221 @@ test('engines-as-ops: the utility typed-hole seam builds the official template (
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
-test('Z-Image as an op: image intent spawns a still chain; control via a selected image (probe)', async ({ page }) => {
+test('H3-1F as the image op: the stills intent routes the T=1 family; image+control hands off to Edit (probe)', async ({ page }) => {
   const problems = await trackErrors(page)
   await resetSession(page)
   await page.goto('/?canvas=1&probe=canvas')
   await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
 
-  // Nothing-selected + image intent (§5.4): the launcher's image chip + Enter.
+  // Nothing-selected + image intent (§5.4, rerouted 34afx79): the launcher's
+  // image chip + Enter — the chain lands and the family gate refuses honestly
+  // offline (empty model roots: the T=1 stack's install guidance, never a
+  // parked job).
   await page.locator('[data-canvas-chip="image"]').click()
   await page.locator('[data-canvas-prompt]').fill('a lighthouse over a black sea, still')
   await page.locator('[data-canvas-submit]').click()
   const tile = page.locator('[data-canvas-tile]').first()
   await expect(tile).toBeVisible({ timeout: 10_000 })
-  // Offline the Z-Image surface refuses honestly — the object still lands.
-  await expect(page.locator('[data-canvas-toast="error"]').first()).toContainText('ComfyUI')
+  await expect(page.locator('[data-canvas-toast="error"]').first()).toContainText('T=1')
   await expect(page.locator('[data-canvas-radar]')).toHaveAttribute('data-queued', '0')
   let document = await activeDocument(page)
   expect(document.chains[0]!.settings.mediaType).toBe('image')
+  expect(document.chains[0]!.settings.imageEngine).toBe('h3-1f')
 
-  // A real ingested image to select against (the control surface).
+  // A real ingested image to bind (the image+control intent).
   await page.keyboard.press('Escape')
-  await dropPng(page, 'zimage-control.png')
+  await dropPng(page, 'edit-handoff-source.png')
   await expect(page.locator('[data-canvas-tile]')).toHaveCount(2, { timeout: 10_000 })
   document = await activeDocument(page)
   const controlOutput = document.chains.find((chain) => chain.kind === 'media')!.outputs[0]!.id
 
   const plan = page.evaluate.bind(page)
-  const plain = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; validation: string | null; graph: { saveNode: boolean; loadImageCount: number; controlnet: boolean; unetModel: string | null } } }).__canvasSubmitPlan(spec), { mediaType: 'image' })
-  expect(plain.mode).toBe('z-image')
-  expect(plain.validation).toContain('Start ComfyUI')
-  expect(plain.graph.saveNode).toBe(true) // SaveImage — the still surface
-  expect(plain.graph.loadImageCount).toBe(0)
-  expect(plain.graph.controlnet).toBe(false)
+  const plain = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; validation: string | null; graph: { sampler: string; scheduler: string; steps: number; saveImageCount: number; loadImageCount: number; t1Vae: string | null; hybrid: boolean } } }).__canvasSubmitPlan(spec), { mediaType: 'image' })
+  expect(plain.mode).toBe('h3-1f')
+  expect(plain.validation).toContain('not available') // offline: the family gate's install guidance names the stack
+  expect(plain.graph.sampler).toBe('er_sde') // the pinned T=1 recipe (H3IMG_RECIPE_PINS.t1)
+  expect(plain.graph.scheduler).toBe('sgm_uniform')
+  expect(plain.graph.steps).toBe(8)
+  expect(plain.graph.saveImageCount).toBe(1) // ONE frame published — the single-latent-frame profile
+  expect(plain.graph.loadImageCount).toBe(0) // text→still wires no image loader
+  expect(plain.graph.t1Vae).toContain('t1_image_vae') // the Mamad8 decoder, never the video VAE here
+  expect(plain.graph.hybrid).toBe(false) // offline object-info: the stock profile builds
 
-  const control = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; graph: { loadImageCount: number; controlnet: boolean; unetModel: string | null } } }).__canvasSubmitPlan(spec), { mediaType: 'image', firstFrameOutputId: controlOutput })
-  expect(control.mode).toBe('z-image-control')
-  expect(control.graph.loadImageCount).toBe(1) // the control image loader
-  expect(control.graph.controlnet).toBe(true) // the Fun ControlNet Union node
-  expect(control.graph.unetModel).toBe('TEST-z_image_turbo.safetensors')
+  const control = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; validation: string | null; handoff: { surface: string; family: string; sourceAnchored: boolean }; graph: unknown } }).__canvasSubmitPlan(spec), { mediaType: 'image', firstFrameOutputId: controlOutput })
+  expect(control.mode).toBe('h3-1f-edit-handoff')
+  expect(control.handoff.surface).toBe('/?images=1')
+  expect(control.handoff.family).toBe('h3img.edit.freeform')
+  expect(control.handoff.sourceAnchored).toBe(true)
+  expect(control.graph).toBeNull() // no canvas graph — the honest Edit-surface answer
+
+  // The two-slot seam: the queued Krea 2 slot refuses honestly (mf3wfq6).
+  const queued = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; validation: string | null } }).__canvasSubmitPlan(spec), { mediaType: 'image', imageEngine: 'krea2' })
+  expect(queued.mode).toBe('image-queued-engine')
+  expect(queued.validation).toContain('mf3wfq6')
 
   // Video intent is untouched: the same probe without mediaType stays H3.
-  const video = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; graph: { saveNode?: boolean } } }).__canvasSubmitPlan(spec), {})
+  const video = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; graph: { saveImageCount?: number } } }).__canvasSubmitPlan(spec), {})
   expect(video.mode).toBe('text')
-  expect((video.graph as { saveNode?: boolean }).saveNode).toBeUndefined()
+  expect(video.graph.saveImageCount).toBeUndefined()
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+test('the H3-1F still renders end to end through the fake engine and lands its take (34afx79)', async ({ page, request }) => {
+  const problems = await trackErrors(page)
+  const { mkdirSync, writeFileSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const http = await import('node:http')
+
+  // Dummy model files so the T=1 family's availability resolves (the images
+  // e2e precedent — scanner-safe dummy bytes, removed in finally).
+  const modelRoot = join(process.cwd(), 'test-home', 'canvas-t1-models')
+  for (const [kind, files] of Object.entries({
+    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
+    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
+    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors', 'minimax_h3_t1_image_vae_step1597.safetensors'],
+    loras: ['minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', 'MaxiMin-HHH-R2V-ThisIsFine.safetensors'],
+  })) {
+    mkdirSync(join(modelRoot, kind), { recursive: true })
+    for (const file of files as string[]) writeFileSync(join(modelRoot, kind, file), 'x')
+  }
+
+  const framePng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64')
+  const PROMPT_ID = 'canvas-t1-e2e-1'
+  const submitted: Array<Record<string, { class_type: string; inputs: Record<string, unknown> }>> = []
+  const engine = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://engine.local')
+    if (url.pathname === '/system_stats') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ system: {}, devices: [] }))
+      return
+    }
+    if (url.pathname === '/object_info') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ MiniMaxH3HybridLoader: {}, KSamplerSelect: {}, BasicScheduler: {}, VAELoader: {} }))
+      return
+    }
+    if (url.pathname === '/upload/image') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ name: 'uploaded.png', subfolder: '', type: 'input' }))
+      return
+    }
+    if (url.pathname === '/prompt') {
+      let body = ''
+      req.on('data', (chunk: Buffer) => { body += chunk.toString() })
+      req.on('end', () => {
+        submitted.push(JSON.parse(body).prompt)
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ prompt_id: PROMPT_ID, number: 1, node_errors: {} }))
+      })
+      return
+    }
+    if (url.pathname === `/history/${PROMPT_ID}`) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ [PROMPT_ID]: { prompt: [], outputs: { '700': { images: [{ filename: 'canvas-t1-frame-00001_.png', subfolder: '', type: 'output' }] } }, status: { completed: true } } }))
+      return
+    }
+    if (url.pathname === '/view') {
+      res.writeHead(200, { 'content-type': 'image/png' })
+      res.end(framePng)
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  const enginePort = await new Promise<number>((resolve) => engine.listen(0, '127.0.0.1', () => resolve((engine.address() as { port: number }).port)))
+
+  const originalSettings = ((await (await request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
+  try {
+    const listed = await (await request.get('/api/lan/jobs')).json() as { jobs?: Array<Record<string, unknown>> }
+    const stale = (listed.jobs ?? []).filter((job) => job.status === 'queued' || job.status === 'running').map((job) => ({ ...job, status: 'cancelled' }))
+    if (stale.length) await request.post('/api/lan/jobs', { data: { jobs: stale } })
+    await request.post('/api/lan/settings', { data: { settings: {
+      ...originalSettings,
+      comfyUrl: `http://127.0.0.1:${enginePort}`,
+      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: join(modelRoot, 'diffusion_models'), text_encoders: join(modelRoot, 'text_encoders'), vae: join(modelRoot, 'vae'), loras: join(modelRoot, 'loras') },
+    } } })
+    await request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+    await page.goto('/?canvas=1')
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    await page.locator('[data-canvas-chip="image"]').click()
+    await page.locator('[data-canvas-prompt]').fill('a lighthouse over a black sea, still')
+    await page.locator('[data-canvas-submit]').click()
+    const tile = page.locator('[data-canvas-tile]').first()
+    await expect(tile).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('[data-canvas-toast="success"]').first()).toContainText('T=1 Fast')
+
+    // The submitted graph is the T=1 family through the shared core: hybrid
+    // loader, the Mamad8 decoder, the pinned recipe, ONE publish.
+    await expect.poll(() => submitted.length, { timeout: 10_000 }).toBe(1)
+    const nodes = Object.values(submitted[0]!)
+    const classes = nodes.map((node) => node.class_type)
+    expect(classes).toContain('MiniMaxH3HybridLoader') // both checkpoints resolved → the b25-49 merge
+    expect(classes.filter((cls) => cls === 'SaveImage')).toHaveLength(1)
+    expect(nodes.filter((node) => node.class_type === 'VAELoader').map((node) => node.inputs.vae_name)).toContain('minimax_h3_t1_image_vae_step1597.safetensors')
+    expect(nodes.find((node) => node.class_type === 'KSamplerSelect')!.inputs.sampler_name).toBe('er_sde')
+    expect(nodes.find((node) => node.class_type === 'BasicScheduler')!.inputs.scheduler).toBe('sgm_uniform')
+    expect(nodes.find((node) => node.class_type === 'BasicScheduler')!.inputs.steps).toBe(8)
+    expect(classes).not.toContain('QwenImageDiffsynthControlnet') // the dead ControlNet-Union path stays dead
+
+    // The take lands through the packet-aware branch: ONE take, one frame
+    // artifact, h3img provenance naming the T=1 family.
+    await expect.poll(async () => {
+      const document = await activeDocument(page)
+      const take = document.chains[0]?.outputs[0]?.takes[0]
+      return take?.metrics?.h3img ? (take.metrics.h3img as Record<string, unknown>).family : null
+    }, { timeout: 30_000 }).toBe('h3img.generate.t1')
+    const document = await activeDocument(page)
+    const landed = document.chains[0]!.outputs[0]!.takes[0]!
+    expect(landed.artifacts).toHaveLength(1)
+    expect((landed.metrics!.h3img as Record<string, unknown>).frames).toBe(1)
+    expect(landed.metrics!.kind).toBe('image')
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
+    await request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
+    // The shared test-home returns to its empty-model-roots state (the
+    // first-run-guidance e2e keys on it) — scratch removed by its own test.
+    await import('node:fs').then((fs) => { fs.rmSync(modelRoot, { recursive: true, force: true }) })
+    await new Promise<void>((resolve) => engine.close(() => resolve()))
+  }
+})
+
+test('image+control generates hand off to the workbench Edit surface with the image anchored (34afx79)', async ({ page, request }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+
+  // Spawn the image chain, then bind a dropped image as its first frame
+  // through the documents API (the input-menu binding, seeded directly).
+  await page.locator('[data-canvas-chip="image"]').click()
+  await page.locator('[data-canvas-prompt]').fill('make it winter, keep the lighthouse')
+  await page.locator('[data-canvas-submit]').click()
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+  await page.keyboard.press('Escape')
+  await dropPng(page, 'edit-handoff-source.png')
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(2, { timeout: 10_000 })
+  const document = await activeDocument(page)
+  const imageChain = document.chains.find((chain) => chain.kind === 'generation')!
+  const sourceOutput = document.chains.find((chain) => chain.kind === 'media')!.outputs[0]!.id
+  await request.post('/api/lan/documents/chains/update', { data: { id: imageChain.id, settings: { ...imageChain.settings, firstFrameOutputId: sourceOutput } } })
+
+  // Reload (the settings patch is external), select the chain, generate: the
+  // canvas stashes the handoff and routes to the workbench — the dated
+  // decision that replaced the ControlNet-Union control surface.
+  await page.reload()
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await page.locator(`[data-canvas-tile="${imageChain.id}"]`).click()
+  await expect(page.locator('[data-canvas-properties]')).toBeVisible()
+  await expect(page.locator('[data-canvas-validation]')).toContainText('Edit surface')
+  await page.locator('[data-canvas-generate]').click()
+  await expect(page.locator('[data-iw-root]')).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('[data-iw-root]')).toHaveAttribute('data-iw-family', 'h3img.edit.freeform')
+  const sourceName = await page.locator('[data-iw-source-name]').textContent()
+  expect(sourceName).toContain('edit-handoff-source.png')
+  await expect(page.locator('[data-iw-intent]')).toHaveValue('make it winter, keep the lighthouse')
+  // The handoff key is consumed exactly once.
+  expect(await page.evaluate(() => window.localStorage.getItem('h3img-canvas-handoff'))).toBeNull()
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
@@ -2130,6 +2302,224 @@ test('a structured submit lands a real job whose engine prompt is the composed b
     // first-run-guidance precondition — the c57938b discipline).
     fsModule.rmSync(modelRoot, { recursive: true, force: true })
     await new Promise<void>((resolve) => engine.close(() => resolve()))
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Model overrides (task euxwdva) — the explicit-pick layer over the
+// selection-inference ladder. The maintainer's immediate use case: a
+// community-merge checkpoint that matches NO selection pattern becomes the
+// video family's checkpoint and rides the REAL submit path end to end.
+/** A minimal VALID safetensors file whose header carries an adaln_t_table
+ *  tensor — exactly what the scan's H3 form detection reads to tag a
+ *  diffusion model 'curve' (server/modelForms.ts reads the header only;
+ *  tensor bytes are never touched). Without the real header the checkpoint
+ *  pick would (correctly) refuse on the no-form rule. */
+function writeH3CurveSafetensors(fsModule: typeof import('node:fs'), file: string) {
+  const header = JSON.stringify({ __metadata__: {}, 'diffusion_model.adaln_t_table': { dtype: 'F32', shape: [64, 8], data_offsets: [0, 2048] } })
+  const length = Buffer.alloc(8)
+  length.writeBigUInt64LE(BigInt(Buffer.byteLength(header)))
+  fsModule.writeFileSync(file, Buffer.concat([length, Buffer.from(header), Buffer.alloc(2048)]))
+}
+
+type OverrideJobRecord = { promptId?: string; manifest?: { models?: Record<string, { name?: string }>; modelOverrides?: Record<string, string> } }
+
+test('a model override reaches the engine graph and the job manifest (fake engine, community merge)', async ({ page, request }) => {
+  const problems = await trackErrors(page)
+  const fsModule = await import('node:fs')
+  const pathModule = await import('node:path')
+  const http = await import('node:http')
+
+  // The shared official H3 set (plain dummy bytes — inference needs no form)
+  // plus the community merge carrying a REAL curve-form header: it matches no
+  // selection pattern, which is the entire point of the override layer.
+  const mergeName = 'TenStrip_10Eros-Max_beta5_int8.safetensors'
+  const modelRoot = pathModule.join(process.cwd(), 'test-home', 'override-models')
+  for (const [kind, files] of Object.entries({
+    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
+    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
+    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
+    loras: ['minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors'],
+  })) {
+    fsModule.mkdirSync(pathModule.join(modelRoot, kind), { recursive: true })
+    for (const file of files as string[]) fsModule.writeFileSync(pathModule.join(modelRoot, kind, file), 'x')
+  }
+  fsModule.mkdirSync(pathModule.join(modelRoot, 'diffusion_models'), { recursive: true })
+  writeH3CurveSafetensors(fsModule, pathModule.join(modelRoot, 'diffusion_models', mergeName))
+
+  const submittedGraphs: string[] = []
+  const engine = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://engine.local')
+    if (url.pathname === '/system_stats') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ system: {}, devices: [] }))
+      return
+    }
+    if (url.pathname === '/object_info') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ MiniMaxH3HybridLoader: {}, KSamplerSelect: {}, BasicScheduler: {}, VAELoader: {} }))
+      return
+    }
+    if (url.pathname === '/prompt' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (chunk) => { body += chunk })
+      req.on('end', () => {
+        submittedGraphs.push(body)
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ prompt_id: 'ov-e2e-1', number: 1, node_errors: {} }))
+      })
+      return
+    }
+    if (url.pathname === '/history/ov-e2e-1') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ 'ov-e2e-1': { prompt: [], outputs: {}, status: { completed: false } } }))
+      return
+    }
+    if (url.pathname === '/queue' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ queue_running: [], queue_pending: [] }))
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  const enginePort = await new Promise<number>((resolve) => engine.listen(0, '127.0.0.1', () => resolve((engine.address() as { port: number }).port)))
+
+  const originalSettings = ((await (await request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
+  try {
+    const listed = await (await request.get('/api/lan/jobs')).json() as { jobs?: Array<Record<string, unknown>> }
+    const stale = (listed.jobs ?? []).filter((job) => job.status === 'queued' || job.status === 'running').map((job) => ({ ...job, status: 'cancelled' }))
+    if (stale.length) await request.post('/api/lan/jobs', { data: { jobs: stale } })
+    await request.post('/api/lan/settings', { data: { settings: {
+      ...originalSettings,
+      comfyUrl: `http://127.0.0.1:${enginePort}`,
+      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: pathModule.join(modelRoot, 'diffusion_models'), text_encoders: pathModule.join(modelRoot, 'text_encoders'), vae: pathModule.join(modelRoot, 'vae'), loras: pathModule.join(modelRoot, 'loras') },
+      modelOverrides: { minimax: { checkpoint: mergeName } },
+    } } })
+    await resetSession(page)
+    await page.goto('/?canvas=1')
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    // The engine chip proves the session adopted the fake engine AND the
+    // override-aware readiness mirror (the resolved stack is complete).
+    await expect(page.locator('[data-canvas-engine]')).toHaveAttribute('data-engine-connected', 'true', { timeout: 15_000 })
+    await page.locator('[data-canvas-prompt]').fill('override probe — the merge must load')
+    await page.locator('[data-canvas-submit]').click()
+    const tile = page.locator('[data-canvas-tile]').first()
+    await expect(tile).toBeVisible({ timeout: 10_000 })
+    await expect(tile).toHaveAttribute('data-tile-status', 'running', { timeout: 20_000 })
+
+    // THE GRAPH: the community merge (no pattern matches it) is the resolved
+    // checkpoint the engine received; the unset slots stay on inference.
+    expect(submittedGraphs.length).toBeGreaterThan(0)
+    const graph = JSON.parse(submittedGraphs[submittedGraphs.length - 1]) as { prompt: Record<string, { class_type: string; inputs: Record<string, unknown> }> }
+    expect(graph.prompt['1'].class_type).toBe('UNETLoader')
+    expect(graph.prompt['1'].inputs.unet_name).toBe(mergeName)
+    expect(graph.prompt['2'].inputs.clip_name).toBe('qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors')
+    expect(graph.prompt['3'].inputs.vae_name).toBe('minimax_h3_video_vae_fp16.safetensors')
+
+    // THE MANIFEST (provenance): the resolved filenames plus which slots were
+    // explicit picks — polled through the storage API the queue writes through.
+    await expect.poll(async () => {
+      const jobs = ((await (await request.get('/api/lan/jobs')).json()) as { jobs: OverrideJobRecord[] }).jobs
+      const job = jobs.find((entry) => entry.promptId === 'ov-e2e-1')
+      return job?.manifest?.models?.diffusion?.name ?? null
+    }, { timeout: 15_000 }).toBe(mergeName)
+    const jobs = ((await (await request.get('/api/lan/jobs')).json()) as { jobs: OverrideJobRecord[] }).jobs
+    const overrideJob = jobs.find((entry) => entry.promptId === 'ov-e2e-1')!
+    expect(overrideJob.manifest?.modelOverrides).toEqual({ checkpoint: mergeName })
+    expect(overrideJob.manifest?.models?.textEncoder?.name).toBe('qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors')
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
+    await resetSession(page).catch(() => undefined)
+    // The shared test-home returns to its EMPTY-model-roots state (the
+    // first-run-guidance precondition — the c57938b discipline).
+    fsModule.rmSync(modelRoot, { recursive: true, force: true })
+    await new Promise<void>((resolve) => engine.close(() => resolve()))
+  }
+})
+
+test('model overrides surface in Settings and the chain properties panel (both surfaces, honest states)', async ({ page, request }) => {
+  const problems = await trackErrors(page)
+  const fsModule = await import('node:fs')
+  const pathModule = await import('node:path')
+
+  const mergeName = 'TenStrip_10Eros-Max_beta5_int8.safetensors'
+  const modelRoot = pathModule.join(process.cwd(), 'test-home', 'override-ui-models')
+  for (const [kind, files] of Object.entries({
+    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
+    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
+    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
+  })) {
+    fsModule.mkdirSync(pathModule.join(modelRoot, kind), { recursive: true })
+    for (const file of files as string[]) fsModule.writeFileSync(pathModule.join(modelRoot, kind, file), 'x')
+  }
+  fsModule.mkdirSync(pathModule.join(modelRoot, 'diffusion_models'), { recursive: true })
+  writeH3CurveSafetensors(fsModule, pathModule.join(modelRoot, 'diffusion_models', mergeName))
+
+  const originalSettings = ((await (await request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
+  try {
+    await request.post('/api/lan/settings', { data: { settings: {
+      ...originalSettings,
+      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: pathModule.join(modelRoot, 'diffusion_models'), text_encoders: pathModule.join(modelRoot, 'text_encoders'), vae: pathModule.join(modelRoot, 'vae') },
+    } } })
+    await resetSession(page)
+    await page.goto('/?canvas=1')
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+
+    // ---- Surface 1: Settings (global overrides) ----
+    await page.locator('[data-canvas-settings-button]').click()
+    const dock = page.locator('[data-canvas-settings-dock]')
+    await expect(dock).toBeVisible()
+    const familyBlock = dock.locator('[data-model-override-family="minimax"]')
+    await expect(familyBlock).toBeVisible({ timeout: 15_000 })
+    const checkpointSelect = familyBlock.locator('[data-model-override-slot="checkpoint"] select')
+    // The AUTO option leads with what auto currently resolves to.
+    await expect.poll(async () => checkpointSelect.locator('option').first().textContent(), { timeout: 15_000 }).toContain('minimax_h3_fl2va_pruned_int8_convrot.safetensors')
+    // The merge is a pickable option; picking it flips the stack report's
+    // FL2VA row to the user's file with the Override verdict.
+    await checkpointSelect.selectOption(mergeName)
+    const fl2vaRow = dock.locator('.h3-stack-list > div').first()
+    await expect(fl2vaRow.locator('small')).toContainText(mergeName)
+    await expect(fl2vaRow.locator('em')).toHaveText('Override')
+    // The ltx23 family honestly exposes only its scan-anchored slots.
+    await expect(dock.locator('[data-model-override-family="ltx23"] [data-model-override-slot="checkpoint"]')).toHaveCount(0)
+    await expect(dock.locator('[data-model-override-family="ltx23"] [data-model-override-slot="textEncoder"]')).toHaveCount(1)
+    // Save persists through the server's tolerant normalize.
+    await dock.locator('button.primary-button', { hasText: 'Save settings' }).click()
+    await expect.poll(async () => {
+      const saved = ((await (await request.get('/api/lan/settings')).json()) as { settings: { modelOverrides?: Record<string, Record<string, string>> } }).settings
+      return saved.modelOverrides?.minimax?.checkpoint ?? null
+    }, { timeout: 15_000 }).toBe(mergeName)
+
+    // ---- Surface 2: the chain properties panel (per-chain overrides) ----
+    await page.locator('[data-canvas-settings-close]').click()
+    await page.locator('[data-canvas-prompt]').fill('override surface probe')
+    await page.locator('[data-canvas-submit]').click()
+    const tile = page.locator('[data-canvas-tile]').first()
+    await expect(tile).toBeVisible({ timeout: 10_000 })
+    const panel = page.locator('[data-canvas-properties]')
+    await expect(panel).toBeVisible()
+    const modelsSection = panel.locator('details[data-canvas-section="models"]')
+    await expect(modelsSection).toBeVisible()
+    // Collapsed by default — 'auto' is the honest default state.
+    await expect(modelsSection).not.toHaveAttribute('open', '')
+    await modelsSection.locator('summary').click()
+    await expect(modelsSection).toHaveAttribute('open', '')
+    const chainSelect = modelsSection.locator('[data-canvas-model-override-select="checkpoint"]')
+    await expect(chainSelect.locator('option').first()).toContainText(/auto/) // the global pick shows as what auto resolves to now
+    await chainSelect.selectOption(mergeName)
+    // The debounced commit persists the pick on the chain's own settings.
+    await expect.poll(async () => {
+      const document = await activeDocument(page)
+      const chain = document.chains.find((entry) => entry.kind === 'generation')
+      return ((chain?.settings as Record<string, unknown>)?.modelOverrides as Record<string, string> | undefined)?.checkpoint ?? null
+    }, { timeout: 15_000 }).toBe(mergeName)
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
+    await resetSession(page).catch(() => undefined)
+    fsModule.rmSync(modelRoot, { recursive: true, force: true })
   }
 })
 
