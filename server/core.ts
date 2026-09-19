@@ -34,7 +34,7 @@ import { mergeEngineProfiles } from './engineProfiles'
 import { checkAllNodePacks, ENGINE_NODE_PACKS, findNodePack, installNodePack, isUsableCheckout, nodePackInstanceState, resolveNodePackTarget, resolveVendorRoot, uninstallNodePack } from './engineNodes'
 import { INVENTORY_MODEL_KINDS, instanceNamesForKind, inventoryFromObjectInfo, mergeModelInventories, parseModelsEndpointList } from './instanceInventory'
 import { h3FormForScannedFile } from './modelForms'
-import { FETCH_ENTRY_IDS, findFetchEntry } from './fetchCatalog'
+import { FETCH_ENTRY_IDS, findFetchEntry, networkFetchPackIds } from './fetchCatalog'
 import { FetchManager, transportForEnvironment } from './fetcher'
 import { createLlmService, type LlmService } from './llm'
 import { createRouterProvider } from './llm/providers/router'
@@ -2967,7 +2967,12 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
           : 'Set the external custom nodes folder (an absolute, existing directory) in the engine settings first, or switch to managed mode with a checkout.'
         if (url.pathname === '/api/lan/engine/nodes' && request.method === 'GET') {
           const instanceStates = await liveNodePackInstanceStates(settings)
-          return sendJson(response, 200, { packs: await checkAllNodePacks(nodePackTarget, resolveVendorRoot(), instanceStates) })
+          // hasNetworkSource (task mjhlt3k, AC-1): a pack with a consented
+          // network fetch entry never needs the local-source input — Fetch…
+          // is the install affordance when the folder is missing.
+          const networkPacks = networkFetchPackIds()
+          const packs = await checkAllNodePacks(nodePackTarget, resolveVendorRoot(), instanceStates)
+          return sendJson(response, 200, { packs: packs.map((pack) => ({ ...pack, hasNetworkSource: networkPacks.has(pack.id) })) })
         }
         if (url.pathname === '/api/lan/engine/nodes/install' && request.method === 'POST') {
           const body = await readJson(request, 10_000)

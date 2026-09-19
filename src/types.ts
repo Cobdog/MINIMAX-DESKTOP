@@ -177,6 +177,34 @@ export type NodePackStatus = NodePackDefinition & {
    *  loaded); 'absent' = the instance does not serve the classes; 'unknown' =
    *  the instance was unreachable / object_info could not be read. */
   instanceState?: 'active' | 'absent' | 'unknown'
+  /** ---- Version awareness (task mjhlt3k — the status board) ---- */
+  /** What the folder itself says about the installed version, when a rung of
+   *  the detection ladder answered (server/packVersioning.ts documents the
+   *  ladder + its limits). managedBy: 'studio' = our marker; 'comfyui' = a
+   *  git checkout or a Comfy-Registry pyproject (ComfyUI-Manager state — a
+   *  manual clone is indistinguishable and gets the same label); 'unknown' =
+   *  a version was readable but nothing attributes the folder. */
+  versionInfo?: {
+    source: 'studio-marker' | 'git-checkout' | 'comfyui-registry' | 'pyproject' | 'none'
+    version?: string
+    remoteUrl?: string
+    managedBy: 'studio' | 'comfyui' | 'unknown'
+  }
+  /** The discovered version against the registry pin: 'at-pin' (equal, or a
+   *  stamped branch-HEAD satisfying a branch pin); 'ahead-of-pin' /
+   *  'behind-pin' (ordered by the folder's own git history, or a semver
+   *  compare against a tag pin); 'differs' (different, direction NOT
+   *  determinable locally); 'unknown' (branch pin vs a sha, mixed shapes,
+   *  or nothing discovered). */
+  versionRelation?: 'at-pin' | 'ahead-of-pin' | 'behind-pin' | 'differs' | 'unknown'
+  /** The AC-4 informational notice for a ComfyUI-managed pack whose version
+   *  differs from the pin — names both versions, says updates happen
+   *  instance-side, and that the studio never modifies the folder. */
+  managedNotice?: string
+  /** True when the pack has a network source in the fetch catalog (every
+   *  user-fetch pack today) — the row's install affordance is then Fetch…,
+   *  and the local-source input never renders (decorated at the route). */
+  hasNetworkSource?: boolean
   note?: string
 }
 
