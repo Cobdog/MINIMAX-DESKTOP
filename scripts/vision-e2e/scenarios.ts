@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
 import { resolve } from 'node:path'
 import Database from 'better-sqlite3'
@@ -320,6 +320,76 @@ export const SCENARIOS: VisionScenario[] = [
           'A thin footer bar: "V cycles · timeline → library → canvas" at the left and a note about transitions being measured choices at the right.',
           'AMPLIFICATION (2026-09-17, cleanup wave): the segment prompt text renders at 9px in dark boxes — SUBTLE, not absent. The capture driver ASSERTS both prompts are in the DOM at screenshot time (the capture would have FAILED otherwise), so both prompt textareas DO carry text: judge "empty" ONLY if a textarea interior is a perfectly uniform field with zero glyph texture; faint low-contrast glyph rows count as filled. Two prior fails here were pixel-verified misreads.',
           'Defects to flag: fewer than five menu options, an option missing its verdict line, the strip cards or menu overlapping each other illegibly, inputs clipped by the panel edge, text unreadable mid-glyph, a pure-white or pure-black dead region covering the panel.',
+        ].join(' '),
+      },
+    ],
+  },
+  {
+    // The LoRA timeline surface (7twfk6o): the properties panel's OWN section
+    // — painted ranges over a clip, the compiled 17n+5 segment layout with
+    // the FLF transition window, and the consent-gated compile button. DOM
+    // truth asserted before the capture (2 painted ranges, 2 compiled
+    // segments, 1 window) so a regression fails loudly, not judge-dependently.
+    id: 'lora-timeline-surface',
+    label: 'LoRA timeline — the paint rail + compiled projection in the properties panel',
+    run: async (page) => {
+      // Two dummy LoRA files so the pickers offer real names (local scan
+      // only; the engine stays offline — the honest blessed state).
+      const loraDir = resolve('test-home', 'lora-timeline-vision', 'loras')
+      mkdirSync(loraDir, { recursive: true })
+      writeFileSync(`${loraDir}/vision-style-rain.safetensors`, 'x')
+      writeFileSync(`${loraDir}/vision-style-neon.safetensors`, 'x')
+      const settingsResponse = await page.request.get('/api/lan/settings')
+      const original = ((await settingsResponse.json()) as { settings: Record<string, unknown> }).settings
+      ;(page as unknown as { __loraVisionSettings?: Record<string, unknown> }).__loraVisionSettings = original
+      await page.request.post('/api/lan/settings', { data: { settings: { ...original, paths: { ...(original.paths as Record<string, string>), loras: loraDir } } } })
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+      await page.goto('/')
+      await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+      await page.locator('[data-canvas-prompt]').fill('the neon market wakes under rain')
+      await page.locator('[data-canvas-submit]').click()
+      const panel = page.locator('[data-canvas-properties]')
+      await expect(panel).toBeVisible({ timeout: 10_000 })
+      const section = panel.locator('[data-canvas-section="lora-timeline"]')
+      await expect(section).toBeVisible()
+      // Paint two ranges over the 5s clip and assign the LoRA sets.
+      await section.locator('[data-canvas-lora-paint]').click()
+      await section.locator('[data-canvas-lora-end]').first().fill('3')
+      await section.locator('[data-canvas-lora-paint]').click()
+      await expect(section.locator('[data-canvas-lora-range]')).toHaveCount(2)
+      await section.locator('[data-canvas-lora-range]').nth(0).locator('[data-canvas-lora-name="0"]').selectOption('vision-style-rain.safetensors')
+      await section.locator('[data-canvas-lora-range]').nth(1).locator('[data-canvas-lora-name="0"]').selectOption('vision-style-neon.safetensors')
+      // The boundary joins through the measured FLF splice.
+      await section.locator('[data-canvas-lora-gap-kind]').first().selectOption('flf')
+      await expect(section.locator('[data-canvas-lora-window]')).toHaveCount(1)
+      // DOM truth at capture: the rail carries both painted blocks, the
+      // compiled layout both segments, the window at the boundary, and the
+      // compile summary names the segment count.
+      if (await section.locator('[data-canvas-lora-block]').count() !== 2) throw new Error('lora-timeline capture: expected 2 painted blocks in the DOM')
+      if (await section.locator('[data-canvas-lora-seg]').count() !== 2) throw new Error('lora-timeline capture: expected 2 compiled segments in the DOM')
+      await expect(section.locator('[data-canvas-lora-compile]')).toContainText('2 segments')
+      // The panel scrolls the section into a comfortable view for the shot.
+      await section.locator('[data-canvas-lora-rail]').scrollIntoViewIfNeeded()
+      await page.waitForTimeout(400)
+    },
+    after: async (page) => {
+      const original = (page as unknown as { __loraVisionSettings?: Record<string, unknown> }).__loraVisionSettings
+      if (original) await page.request.post('/api/lan/settings', { data: { settings: original } }).catch(() => undefined)
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
+      rmSync(resolve('test-home', 'lora-timeline-vision'), { recursive: true, force: true })
+    },
+    checkpoints: [
+      {
+        id: 'lora-timeline-1080p',
+        label: 'LoRA timeline section — painted ranges + the compiled segment projection',
+        rubric: [
+          SHELL_CONTEXT,
+          'The right side of the canvas carries the floating PROPERTIES panel (a tall bordered card with a header naming the chain, a mode chip "text → video", and an × close). Its sections stack vertically: a Prompt area, an "ENGINE — MINIMAX H3" area, then a distinct "LORA TIMELINE" section (uppercase muted label with the hint "paint ranges · 17n+5 grid").',
+          'Inside the LoRA timeline section: a slim horizontal RAIL graphic — an upper lane with TWO adjacent filled blocks (accent-tinted) labeled "vision-style-rain" and "vision-style-neon" (the second block slightly narrower), and BELOW it a thinner compiled-segment lane (two solid blocks) with ONE small dashed-outline WINDOW band straddling their boundary. Small "0s / 2.5s / 5.0s" tick labels sit under the rail. A thin divider may separate the lanes.',
+          'Beneath the rail: a one-line muted note about painted ranges above / compiled segments + transition windows below; TWO range rows (each a bordered box with a "LoRA 1…" dropdown showing vision-style-rain / vision-style-neon, a small strength number input reading "1", "→" span inputs reading "0 → 3" and "3 → 5" with small duration notes, and an × remove button); a "+ paint range" pill; then a TRANSITION row (a small "… →" label, a dropdown reading "FLF continuation splice", a small number input with the 22-frame default ≈ "0.92", and an "s window" note).',
+          'A muted compile summary line reading "2 segments · 5.38s planned (grid-conformed)" (or similar total within 5.3–5.4s), and at the section bottom-right a pill button "compile → 2 segments".',
+          'The engine being OFFLINE (muted chip top-right; possibly a small error toast about ComfyUI being unreachable near the bottom — the honest offline refusal of the launcher auto-submit) is CORRECT, not a defect. Dimmed disabled controls, small muted sub-labels, and the dense dark design language are intentional.',
+          'Defects to flag: only ONE range row or one rail block, no compiled lane under the painted lane, no dashed window at the boundary, a dropdown showing a different LoRA name than the rail block labels, the apply pill reading "— segments" (disabled-looking with a dash), text clipped mid-glyph by the panel edge, or the section overlapping the References section below it.',
         ].join(' '),
       },
     ],

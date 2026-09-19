@@ -35,6 +35,10 @@ export type RenderManifest = {
    *  carries Motion-Context save/load nodes (take-landing persists them as
    *  the take's latent provenance). */
   motionContext?: { folder: string; clipIndex: number }
+  /** The chain's temporal LoRA stack (7twfk6o): the user LoRAs the graph
+   *  chained after the turbo seam, recorded at submit time so take landing
+   *  can state which LoRAs were active on this render. */
+  loraStack?: Array<{ name: string; strength: number }>
   graphVersion: string
   engine: { comfyUrl: string; app: string }
 }

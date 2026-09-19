@@ -7,6 +7,8 @@
  *
  * Block allocation (never reuse an id for a different node class):
  *   1-7      model/encoder/VAE loaders + model-chain wraps (turbo 5, shift 6, preview 7)
+ *   8-9      the LoRA timeline's user-stack loaders (7twfk6o: slot 0 at 8 —
+ *            rides the first-party form adapter when installed — slot 1 at 9)
  *   10-19    conditioning, sampler core, decode, publish
  *   20-28    i2v/FLF loaders, Motion-Context chain, trimmed publish
  *   30/40/50 reference image/video/audio loaders (index-suffixed)
@@ -23,6 +25,8 @@ export const H3 = {
   turboLora: '5',
   sigmaShift: '6',
   previewOverride: '7',
+  loraStack1: '8',
+  loraStack2: '9',
   conditioning: '10',
   firstFrameLoader: '20',
   lastFrameLoader: '21',

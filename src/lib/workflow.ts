@@ -1,6 +1,6 @@
 import type { GenerationOptions, ModelSelection, UploadedFile } from '../types'
 import type { ObjectInfo } from './comfyInfo'
-import { assertNoT1ImageVaeInVideoGraph, createGraphContext, findOptimization, H3, resolveTurboPlan, upscaleEntryFor } from './graph'
+import { assertNoT1ImageVaeInVideoGraph, createGraphContext, findOptimization, FORM_ADAPTER_NODE, H3, resolveTurboPlan, upscaleEntryFor } from './graph'
 import type { ComfyPrompt, Link, TransformOptions } from './graph'
 
 // The graph data model + optimization registry live in ./graph; the type is
@@ -134,6 +134,25 @@ export function buildMiniMaxWorkflow(
     const turboEntry = findOptimization(turboPlan.entryId)
     turboEntry?.transform(prompt, ctx, transformOptions)
   }
+
+  // The LoRA timeline's user stack (7twfk6o, nodes '8'/'9'): 0–2 user LoRAs
+  // chained after the turbo seam — orthogonal to the tier (a quality-tier
+  // render may carry style LoRAs). Slot 0 rides the first-party form
+  // adapter (MiniMaxH3LoraFormLoader) when its pack is installed — always
+  // first among the stack loaders, the image workbench's cross-form-safety
+  // rule: a mismatched-form LoRA through the stock loader is a shape error,
+  // never a silent no-op. Absent/empty stack = zero new nodes, the graph
+  // stays byte-identical to the pre-seam factory output.
+  const loraStack = (options.loraStack ?? []).filter((entry) => entry && typeof entry.name === 'string' && entry.name).slice(0, 2)
+  loraStack.forEach((entry, index) => {
+    const id = index === 0 ? H3.loraStack1 : H3.loraStack2
+    const strength = Math.min(2, Math.max(0, Number.isFinite(entry.strength) ? entry.strength : 1))
+    if (index === 0 && info && (info as Record<string, unknown>)[FORM_ADAPTER_NODE] !== undefined) {
+      ctx.wrapModel('loraStack1', id, { class_type: FORM_ADAPTER_NODE, inputs: { lora_name: entry.name, strength, mode: 'projected (default)', egrid_path: '' } })
+    } else {
+      ctx.wrapModel(index === 0 ? 'loraStack1' : 'loraStack2', id, { class_type: 'LoraLoaderModelOnly', inputs: { lora_name: entry.name, strength_model: strength } })
+    }
+  })
 
   let modelLink: Link = ctx.modelLink()
   if (options.sigmaShift) {

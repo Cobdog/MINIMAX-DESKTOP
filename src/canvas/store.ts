@@ -82,6 +82,7 @@ import {
   type PlanGapKind,
   type PlanSegment,
 } from './plan'
+import { activeLorasOf, compileLoraTimeline, loraTimelineToPlanDocument, readLoraTimelineDoc } from './loraTimeline'
 import { DEFAULT_SETTINGS, type OpKind } from './ops'
 import type { EndpointDirection, EndpointOption, OptionAvailability } from './options'
 import { findH3PreviewOverrideNode } from '../lib/h3Stack'
@@ -288,6 +289,12 @@ type CanvasActions = {
    *  as ONE Motion-Context latent episode (segment N continues N-1's latent;
    *  every job links to its segment chain so takes LAND on the objects). */
   submitPlanEpisode(planId: string, fromSegmentId: string): Promise<{ ok: boolean; message?: string }>
+  /** The LoRA timeline's compile step (7twfk6o, consent-gated — the Apply
+   *  click IS the consent): the chain's painted ranges compile into a plan
+   *  document whose segments carry their LoRA stacks, then every segment
+   *  seeds its chain (created + selected, NEVER submitted). Returns the new
+   *  plan id, or null with the refusal reasons toasted. */
+  applyLoraTimeline(chainId: string): Promise<{ ok: boolean; planId?: string; reasons?: string[] }>
   setSettingsDock(open: boolean): void
   setStudiosDock(dock: { tab: StudiosDockTab } | null): void
   setDiagnosticsDock(open: boolean): void
@@ -604,6 +611,11 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
             ...(remoteFetched && descriptor ? { remoteProvenance: { fetched: true, filename: descriptor.filename, subfolder: descriptor.subfolder ?? null, type: descriptor.type ?? null } } : {}),
             ...(failureReason ? { landingError: failureReason, outputFile: descriptor } : {}),
             ...(motionContext ? { motionContext } : {}),
+            // Which LoRAs were active on this take (7twfk6o): the turbo LoRA
+            // the manifest's models record already names (at its strength) +
+            // the temporal stack recorded at submit — every take states its
+            // own LoRA truth (activeLorasOf, pure + unit-tested).
+            ...activeLorasOf(manifest),
           }
           await documentsApi.appendTake({
             outputId,
@@ -1158,6 +1170,69 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       }
       get().toast('success', `${queued}-segment latent chain queued — motion and audio continue at the latent level; each take lands on its own object.`)
       return { ok: true }
+    },
+
+    applyLoraTimeline: async (chainId) => {
+      const context = chainRenderContext(chainId)
+      const projectId = get().activeProjectId
+      if (!context || !projectId) return { ok: false, reasons: ['The chain is not on an open canvas.'] }
+      const settings = context.settings
+      const compile = compileLoraTimeline(readLoraTimelineDoc(settings.loraTimeline), settings.duration)
+      if (!compile.ok) {
+        get().toast('error', `The LoRA timeline did not compile — ${compile.reasons[0]}`)
+        return { ok: false, reasons: compile.reasons }
+      }
+      const planDocument = loraTimelineToPlanDocument(compile, {
+        prompt: settings.prompt,
+        referenceCharacterIds: settings.referenceCharacterIds,
+        referenceLocationIds: settings.referenceLocationIds,
+      })
+      try {
+        const plan = await documentsApi.upsertPlan({ projectId, document: planDocument as unknown as Record<string, unknown> })
+        // Seed every segment's chain (the Apply click IS the consent — created
+        // + selected, never submitted). The source chain's render shape rides
+        // along; each segment's OWN stack is the whole point.
+        const seeded: Array<{ segmentId: string; chainId: string }> = []
+        for (const segment of compile.segments) {
+          const newChainId = await get().seedChain({
+            prompt: settings.prompt,
+            mediaType: 'video',
+            duration: Number(segment.durationSeconds.toFixed(3)),
+            resolution: settings.resolution,
+            turbo: settings.turbo,
+            turboFamily: settings.turboFamily,
+            steps: settings.steps,
+            refImageSize: settings.refImageSize,
+            clothingPolicy: settings.clothingPolicy,
+            noDialogue: settings.noDialogue,
+            naturalMovement: settings.naturalMovement,
+            referenceCharacterIds: settings.referenceCharacterIds,
+            referenceLocationIds: settings.referenceLocationIds,
+            loraStack: segment.loras.map((entry) => ({ ...entry })),
+          })
+          if (!newChainId) {
+            get().toast('error', `Segment “${segment.title}” could not seed — the plan is saved; seed the rest from the timeline.`)
+            break
+          }
+          seeded.push({ segmentId: segment.id, chainId: newChainId })
+        }
+        if (seeded.length) {
+          await get().updatePlanDocument(plan.id, (current) => ({
+            ...current,
+            segments: current.segments.map((segment) => {
+              const match = seeded.find((entry) => entry.segmentId === segment.id)
+              return match ? { ...segment, chainId: match.chainId } : segment
+            }),
+          }))
+        }
+        set({ timelinePlanId: plan.id, timelineOpen: true })
+        get().toast('success', `Compiled ${compile.segments.length} LoRA segment${compile.segments.length === 1 ? '' : 's'} (${compile.totalSeconds.toFixed(1)}s planned, 17n+5 grid) — seeded as objects. Generate from the timeline.`)
+        return { ok: true, planId: plan.id }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        get().toast('error', `The LoRA timeline could not compile: ${message}`)
+        return { ok: false, reasons: [message] }
+      }
     },
 
     setSettingsDock: (open) => {

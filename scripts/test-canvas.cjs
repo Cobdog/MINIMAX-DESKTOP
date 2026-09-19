@@ -1327,6 +1327,206 @@ console.log('(z) cameraPath — the compile step + the box-text round-trip')
   }
 }
 
+// ---------------------------------------------------------------------------
+// The LoRA timeline's pure layer (7twfk6o, layer 1 — segment granularity):
+// the 17n+5 grid conformance, the transition-window defaults from the measured
+// verdicts, the compiler (ranges → segments; degenerate input refused WITH
+// REASONS; uncovered spans → base segments), the plan-document builder, and
+// the graph seam that chains the per-segment LoRA stacks.
+// ---------------------------------------------------------------------------
+console.log('(aa) LoRA timeline — the compiler, the grid, the measured windows')
+{
+  const lt = loadTs('src/canvas/loraTimeline.ts')
+  const plan = loadTs('src/canvas/plan.ts')
+  const generation = loadTs('src/canvas/generation.ts', { localStorage: localStorageStub, window: { dispatchEvent: () => undefined, addEventListener: () => undefined } })
+  const workflow = loadTs('src/lib/workflow.ts')
+
+  // (1) The grid: nearest 17n+5 inside the 56–345 band (the chain clamp 2–15 s
+  // expressed in frames), ties snapping up like frameCount.
+  eq(lt.conformFrames(48), 56, 'grid: 2.0s snaps UP to the band floor 56f (48 is below the minimum)')
+  eq(lt.conformFrames(56), 56, 'grid: a legal count is its own snap')
+  eq(lt.conformFrames(144), 141, 'grid: 6.0s (144f) snaps to the NEAREST rung 141f (3 away, vs 158 14 away)')
+  eq(lt.conformFrames(156), 158, 'grid: 6.5s (156f) snaps to the nearest rung 158f (2 away, vs 141 15 away)')
+  eq(lt.conformFrames(360), 345, 'grid: 15s clamps to the band ceiling 345f')
+  ok(Math.abs(lt.conformDurationSeconds(6) - 141 / 24) < 1e-9, 'grid: duration conformance is frames/24')
+  // The drift guard: every conformed duration is a fixed point of
+  // workflow.frameCount (the two grid implementations can never diverge).
+  for (let seconds = 2; seconds <= 15; seconds += 0.25) {
+    const frames = lt.conformFrames(seconds * 24)
+    ok(frames % 17 === 5, `grid: ${frames}f ≡ 5 (mod 17) for painted ${seconds}s`)
+    eq(workflow.frameCount(lt.conformDurationSeconds(seconds)), frames, `grid: frameCount(conform(${seconds}s)) === ${frames}f (the shared grid holds)`)
+  }
+  eq(lt.legalBoundarySeconds(0, 15).length, 18, 'grid: 18 legal boundary positions across 0–15s (56..345 step 17)')
+  ok(Math.abs(lt.snapRangeBoundary(6, 0, 12) - 141 / 24) < 1e-9, 'grid: a dragged boundary snaps to the nearest legal position (6s → 5.875s)')
+  ok(lt.snapRangeBoundary(6, 0, 4) === null, 'grid: a 4s span cannot split into two ≥2s legal segments — the drag is REFUSED (null), never clamped degenerate')
+
+  // (2) The measured window defaults (the tranche-1 verdicts).
+  eq(lt.DEFAULT_TRANSITION_WINDOW.cut, 0, 'windows: the hard cut is instantaneous (the measured default)')
+  ok(Math.abs(lt.DEFAULT_TRANSITION_WINDOW.flf - 22 / 24) < 1e-9, 'windows: FLF defaults to the 22-frame Motion-Context continuation window')
+  ok(Math.abs(lt.DEFAULT_TRANSITION_WINDOW.black - 0.75) < 1e-9, 'windows: dip-to-black defaults to the measured 15–18f dip (18f = 0.75s)')
+  eq(lt.DEFAULT_TRANSITION_WINDOW.nle, 0.5, 'windows: the NLE crossfade defaults to the 0.5s post convention')
+  ok(Math.abs(lt.DEFAULT_TRANSITION_WINDOW.bridge - 22 / 24) < 1e-9, 'windows: the bridge carries the FLF-class window (its render stays engine work)')
+
+  // (3) Degenerate input is refused WITH REASONS (every reason user-facing).
+  const range = (id, start, end, loras) => ({ id, start, end, loras: loras ?? [] })
+  const A = { name: 'style-a.safetensors', strength: 0.8 }
+  const B = { name: 'style-b.safetensors', strength: 0.5 }
+  ok(!lt.compileLoraTimeline(lt.newLoraTimelineDoc(), 12).ok, 'refuse: an unpainted clip does not compile')
+  ok(lt.compileLoraTimeline(lt.newLoraTimelineDoc(), 12).reasons[0].includes('Paint at least one'), 'refuse: the empty-set reason is the action to take')
+  ok(!lt.compileLoraTimeline({ ranges: [range('r1', 3, 3)], transitions: [] }, 12).ok, 'refuse: a zero-length range')
+  ok(lt.compileLoraTimeline({ ranges: [range('r1', 3, 3)], transitions: [] }, 12).reasons[0].includes('ends at or before its start'), 'refuse: the point-range reason names the defect')
+  ok(lt.compileLoraTimeline({ ranges: [range('r1', 0, 1.2)], transitions: [] }, 12).reasons[0].includes('Paint it at least 2s'), 'refuse: sub-floor ranges carry the 17n+5 minimum in the reason')
+  ok(!lt.compileLoraTimeline({ ranges: [range('r1', 0, 16)], transitions: [] }, 12).ok, 'refuse: a range past the 15s ceiling')
+  ok(!lt.compileLoraTimeline({ ranges: [range('r1', 0, 5), range('r2', 4, 9)], transitions: [] }, 12).ok, 'refuse: overlapping ranges')
+  ok(lt.compileLoraTimeline({ ranges: [range('r1', 0, 5), range('r2', 4, 9)], transitions: [] }, 12).reasons[0].includes('overlap'), 'refuse: the overlap reason states where')
+  ok(!lt.compileLoraTimeline({ ranges: [range('r1', 6, 14)], transitions: [] }, 12).ok, 'refuse: a range extending past the clip')
+  ok(lt.compileLoraTimeline({ ranges: [range('r1', 0, 5, [A, B, { name: 'c.safetensors', strength: 1 }])], transitions: [] }, 12).reasons.some((reason) => reason.includes('3 LoRAs')), 'refuse: >2 stack entries names the slot cap')
+  ok(lt.compileLoraTimeline({ ranges: [range('r1', 0, 5, [{ name: '', strength: 1 }])], transitions: [] }, 12).reasons.some((reason) => reason.includes('no LoRA file')), 'refuse: an unpicked slot name')
+
+  // (4) The compile: two painted ranges over a 12s clip.
+  const twoRanges = {
+    ranges: [range('r1', 0, 5.5, [A]), range('r2', 5.5, 12, [A, B])],
+    transitions: [],
+  }
+  const compiled = lt.compileLoraTimeline(twoRanges, 12)
+  ok(compiled.ok, 'compile: two clean ranges compile')
+  eq(compiled.segments.map((segment) => segment.frames), [124, 158], 'compile: each segment conforms to the 17n+5 grid (124f, 158f)')
+  ok(Math.abs(compiled.segments[0].durationSeconds - 124 / 24) < 1e-9, 'compile: 5.5s painted conforms to 5.1667s (nearest rung 124f, 8 away vs 141 9 away)')
+  ok(Math.abs(compiled.segments[1].durationSeconds - 158 / 24) < 1e-9, 'compile: 6.5s painted conforms to 6.583s')
+  ok(Math.abs(compiled.totalSeconds - (124 + 158) / 24) < 1e-9, 'compile: the planned total is the conformed sum (may drift off the painted clip in either direction)')
+  eq(compiled.segments[0].range.start, 0, 'compile: the PAINTED range rides verbatim (provenance)')
+  ok(Math.abs(compiled.segments[0].range.end - 5.5) < 1e-9, 'compile: painted end stays 5.5s even though the conformed layout stretches')
+  eq(compiled.segments[0].gapAfter.kind, 'cut', 'compile: an unrecorded boundary joins at the measured default (hard cut)')
+  eq(compiled.segments[0].gapAfter.widthSeconds, 0, 'compile: the hard cut window is zero')
+  eq(compiled.segments[1].title, 'style-a + style-b', 'compile: the title derives from the LoRA set')
+  eq(compiled.segments[0].loras.length, 1, 'compile: the stack rides the segment')
+  ok(compiled.warnings.some((warning) => warning.includes('conforms to')), 'compile: a stretched duration warns honestly')
+
+  // (5) Uncovered spans compile to BASE segments (never silent gaps).
+  const partial = lt.compileLoraTimeline({ ranges: [range('r1', 0, 4, [A])], transitions: [] }, 12)
+  ok(partial.ok, 'base: partial painting compiles')
+  eq(partial.segments.length, 2, 'base: the uncovered tail becomes a base segment')
+  eq(partial.segments[1].loras, [], 'base: the base segment carries no stack')
+  eq(partial.segments[1].title, 'base look', 'base: the base segment is labeled honestly')
+  ok(Math.abs(partial.segments[1].range.start - 4) < 1e-9, 'base: the base segment records its painted span')
+
+  // A sub-floor uncovered span joins the LEFT range — reported, never silent.
+  const absorbed = lt.compileLoraTimeline({ ranges: [range('r1', 0, 5, [A]), range('r2', 5.5, 12, [B])], transitions: [] }, 12)
+  ok(absorbed.ok, 'absorb: a 0.5s uncovered span does not block the compile')
+  eq(absorbed.segments.length, 2, 'absorb: the sub-floor span joins the previous range (no base segment)')
+  ok(Math.abs(absorbed.segments[0].range.end - 5.5) < 1e-9, 'absorb: the left range extends over the span')
+  ok(absorbed.warnings.some((warning) => warning.includes('uncovered span')), 'absorb: the join warns')
+
+  // (6) Recorded transitions: the user's kind + window win; the FLF gap lands
+  // on the plan document (only non-cut gaps persist — a missing gap IS the
+  // cut default per plan.ts's read contract).
+  const flfCompiled = lt.compileLoraTimeline({
+    ranges: [range('r1', 0, 5, [A]), range('r2', 5, 12, [B])],
+    transitions: [{ afterRangeId: 'r1', kind: 'flf', widthSeconds: 1.25 }],
+  }, 12)
+  eq(flfCompiled.segments[0].gapAfter.kind, 'flf', 'transition: the recorded FLF choice wins over the cut default')
+  ok(Math.abs(flfCompiled.segments[0].gapAfter.widthSeconds - 1.25) < 1e-9, 'transition: the user-set window width rides (not the 22f default)')
+  const planDoc = lt.loraTimelineToPlanDocument(flfCompiled, { prompt: 'the drummer boards', referenceCharacterIds: ['lib-ada'], referenceLocationIds: [] })
+  eq(planDoc.segments.length, 2, 'plan: every compiled segment becomes a plan segment')
+  eq(planDoc.segments[0].prompt, 'the drummer boards', 'plan: the source chain\'s prompt is inherited')
+  eq(planDoc.segments[0].referenceCharacterIds, ['lib-ada'], 'plan: reference handoffs are inherited')
+  ok(Math.abs(planDoc.segments[0].loraRange.end - 5) < 1e-9, 'plan: the painted range is recorded (AC4 provenance)')
+  eq(planDoc.segments[0].loraStack, [{ name: 'style-a.safetensors', strength: 0.8 }], 'plan: the per-segment stack is recorded (AC4 provenance)')
+  eq(planDoc.segments[1].loraStack, [{ name: 'style-b.safetensors', strength: 0.5 }], 'plan: each segment carries its OWN stack')
+  eq(planDoc.gaps, [{ afterSegmentId: planDoc.segments[0].id, kind: 'flf' }], 'plan: only non-cut gaps persist (the cut is the missing-gap default)')
+
+  // The plan reader round-trips the provenance tolerantly (foreign data never
+  // crashes; garbage provenance drops to absent, never to a wrong value).
+  const reread = plan.readPlanDocument(planDoc)
+  ok(Math.abs(reread.segments[0].loraRange.end - 5) < 1e-9, 'plan read: loraRange survives the tolerant round-trip')
+  eq(reread.segments[0].loraStack[0].name, 'style-a.safetensors', 'plan read: loraStack survives the tolerant round-trip')
+  const garbage = plan.readPlanDocument({ segments: [{ id: 's1', loraRange: 'nope', loraStack: [{ name: 7 }] }] })
+  ok(garbage.segments[0].loraRange === undefined, 'plan read: garbage provenance drops (absent, never wrong)')
+  ok(garbage.segments[0].loraStack === undefined, 'plan read: a malformed stack drops entirely')
+
+  // (7) The doc reader: tolerant, id-stable, transition-validated.
+  const readDoc = lt.readLoraTimelineDoc({
+    ranges: [
+      { id: 'r1', start: 0, end: 5, loras: [{ name: 'a.safetensors', strength: 0.9 }, { name: 'b.safetensors', strength: 0.4 }, { name: 'c.safetensors', strength: 1 }] },
+      { id: 'r1', start: 6, end: 9 },
+    ],
+    transitions: [{ afterRangeId: 'r1', kind: 'warp' }, { afterRangeId: 'missing', kind: 'flf' }],
+  })
+  eq(readDoc.ranges.length, 2, 'read: ranges survive')
+  eq(readDoc.ranges[1].id, 'r1-2', 'read: duplicate ids are re-suffixed (boundary keys stay unique)')
+  eq(readDoc.ranges[0].loras.length, 2, 'read: a 3-entry stack truncates to the slot cap')
+  eq(readDoc.transitions.length, 0, 'read: unknown kinds and dangling range refs drop')
+  eq(lt.readLoraTimelineDoc(null).ranges.length, 0, 'read: null reads as the empty doc, never a crash')
+
+  // (8) Chain settings: the stack + the authored doc ride the tolerant read
+  // (the per-segment chains seeded by applyLoraTimeline carry their stacks
+  // through exactly this path).
+  const stacked = generation.readChainSettings({ prompt: 'p', loraStack: [{ name: 'a.safetensors', strength: 0.8 }, { name: 'b.safetensors', strength: 1.7 }], loraTimeline: { ranges: [{ id: 'r1', start: 0, end: 5, loras: [{ name: 'a.safetensors', strength: 0.8 }] }], transitions: [] } })
+  eq(stacked.loraStack, [{ name: 'a.safetensors', strength: 0.8 }, { name: 'b.safetensors', strength: 1.7 }], 'settings: the stack round-trips')
+  eq(stacked.loraStack[1].strength, 1.7, 'settings: strengths inside 0–2 stay verbatim')
+  eq(stacked.loraTimeline.ranges[0].loras[0].name, 'a.safetensors', 'settings: the authored timeline doc round-trips')
+  const clamped = generation.readChainSettings({ loraStack: [{ name: 'a.safetensors', strength: 9 }] })
+  eq(clamped.loraStack[0].strength, 2, 'settings: out-of-band strengths clamp at 2')
+  eq(generation.readChainSettings({}).loraTimeline, null, 'settings: no doc reads null')
+
+  // (9) The graph seam: the stack chains LoraLoaderModelOnly after the turbo
+  // seam ('8'/'9'), slot 0 upgrading to the first-party form adapter when its
+  // node reports; ABSENT stack = byte-identical factory output (inertness).
+  const fakeSelection = { fl2va: 'T-fl2va.safetensors', ref2va: 'T-ref2va.safetensors', textEncoder: 'T-qwen.safetensors', videoVae: 'T-vvae.safetensors', audioVae: 'T-avae.safetensors', previewVae: '', fl2vLora: 'T-fl2v-lora.safetensors', ref2vLora: 'T-ref2v-lora.safetensors' }
+  const stackRequest = generation.buildCanvasRenderRequest(
+    generation.readChainSettings({ prompt: 'p', turbo: 'off', loraStack: [A, B] }),
+    { firstFrame: null, lastFrame: null, referenceImages: [], referenceVideos: [], referenceAudios: [] },
+    [],
+  )
+  const stackGraph = generation.planCanvasGraph(stackRequest, fakeSelection)
+  eq(stackGraph['8'].class_type, 'LoraLoaderModelOnly', 'graph: stack slot 0 loads through the stock loader without the adapter pack')
+  eq(stackGraph['8'].inputs.lora_name, 'style-a.safetensors', 'graph: slot 0 carries its LoRA file')
+  ok(Math.abs(stackGraph['8'].inputs.strength_model - 0.8) < 1e-9, 'graph: slot 0 carries its strength')
+  eq(stackGraph['8'].inputs.model.join('.'), '1.0', 'graph: without turbo the stack chains straight off the UNet')
+  eq(stackGraph['9'].class_type, 'LoraLoaderModelOnly', 'graph: stack slot 1 loads through the stock loader')
+  eq(stackGraph['9'].inputs.model.join('.'), '8.0', 'graph: slot 1 consumes slot 0\'s MODEL output (the chain composes)')
+  const bare = generation.planCanvasGraph(generation.buildCanvasRenderRequest(
+    generation.readChainSettings({ prompt: 'p', turbo: 'off' }),
+    { firstFrame: null, lastFrame: null, referenceImages: [], referenceVideos: [], referenceAudios: [] },
+    [],
+  ), fakeSelection)
+  ok(bare['8'] === undefined && bare['9'] === undefined, 'graph: NO stack = no stack loaders (the seam is inert by option-absence)')
+  const turboStackGraph = generation.planCanvasGraph(generation.buildCanvasRenderRequest(
+    generation.readChainSettings({ prompt: 'p', turbo: '8', loraStack: [A] }),
+    { firstFrame: null, lastFrame: null, referenceImages: [], referenceVideos: [], referenceAudios: [] },
+    [],
+  ), fakeSelection)
+  ok(turboStackGraph['5'] !== undefined, 'graph: the turbo tier keeps its own loader (the stack is orthogonal)')
+  eq(turboStackGraph['8'].inputs.model.join('.'), '5.0', 'graph: the stack chains AFTER the turbo seam')
+  const adapted = workflow.buildMiniMaxWorkflow(
+    { mode: 'text', prompt: 'p', width: 1344, height: 768, duration: 6, seed: 1, steps: 30, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', referenceImages: [], referenceVideos: [], referenceAudios: [], filenamePrefix: 'video/t', loraStack: [A] },
+    fakeSelection,
+    {},
+    { MiniMaxH3LoraFormLoader: {} },
+  )
+  eq(adapted['8'].class_type, 'MiniMaxH3LoraFormLoader', 'graph: with the pack installed slot 0 rides the form adapter (cross-form safety, first among stack loaders)')
+  eq(adapted['8'].inputs.lora_name, 'style-a.safetensors', 'graph: the adapter carries the LoRA name')
+
+  // (10) Combined-strength guidance (the workbench pins): warnings, never
+  // silent rewrites.
+  const risky = lt.compileLoraTimeline({ ranges: [range('r1', 0, 6, [{ name: 'a.safetensors', strength: 0.5 }, { name: 'b.safetensors', strength: 0.5 }])], transitions: [] }, 12)
+  ok(risky.ok && risky.warnings.some((warning) => warning.includes('healthy')), 'guidance: combined 1.0 warns above the healthy band')
+  const collapse = lt.compileLoraTimeline({ ranges: [range('r1', 0, 6, [{ name: 'a.safetensors', strength: 0.8 }, { name: 'b.safetensors', strength: 0.5 }]), range('r2', 6, 12, [{ name: 'c.safetensors', strength: 0.6 }, { name: 'd.safetensors', strength: 0.5 }])], transitions: [] }, 12)
+  ok(collapse.warnings.some((warning) => warning.includes('collapse-risk')), 'guidance: combined 1.1 flags the collapse-risk band')
+
+  // (11) Take-metrics provenance (AC4): the manifest's LoRA records become
+  // the take's metrics.loras — turbo (models.turboLora @ loraStrength) + the
+  // temporal stack; nothing active = the metric stays ABSENT.
+  eq(lt.activeLorasOf(null), {}, 'metrics: no manifest → no loras key')
+  eq(lt.activeLorasOf({ models: {}, loraStack: [] }), {}, 'metrics: nothing active → the metric stays absent (never an empty array)')
+  eq(lt.activeLorasOf({ models: { turboLora: { name: 'turbo-8.safetensors', bytes: 1 } }, loraStrength: 0.75, loraStack: [{ name: 'style-a.safetensors', strength: 0.8 }] }),
+    { loras: [{ name: 'turbo-8.safetensors', strength: 0.75 }, { name: 'style-a.safetensors', strength: 0.8 }] },
+    'metrics: the turbo LoRA (at its strength) + the temporal stack both ride')
+  eq(lt.activeLorasOf({ models: { turboLora: { name: 'turbo-8.safetensors' } }, loraStack: [{ name: 'style-a.safetensors', strength: 0.8 }, { malformed: true }] }),
+    { loras: [{ name: 'turbo-8.safetensors', strength: 1 }, { name: 'style-a.safetensors', strength: 0.8 }] },
+    'metrics: a missing strength defaults 1; malformed stack entries drop; garbage never crashes')
+}
+
 phase5Cores()
   .then(() => { console.log(`\ntest-canvas: ${passed} assertions passed`) })
   .catch((error) => { console.error(error); process.exit(1) })
