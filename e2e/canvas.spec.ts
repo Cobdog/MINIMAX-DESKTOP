@@ -2305,6 +2305,224 @@ test('a structured submit lands a real job whose engine prompt is the composed b
   }
 })
 
+// ---------------------------------------------------------------------------
+// Model overrides (task euxwdva) — the explicit-pick layer over the
+// selection-inference ladder. The maintainer's immediate use case: a
+// community-merge checkpoint that matches NO selection pattern becomes the
+// video family's checkpoint and rides the REAL submit path end to end.
+/** A minimal VALID safetensors file whose header carries an adaln_t_table
+ *  tensor — exactly what the scan's H3 form detection reads to tag a
+ *  diffusion model 'curve' (server/modelForms.ts reads the header only;
+ *  tensor bytes are never touched). Without the real header the checkpoint
+ *  pick would (correctly) refuse on the no-form rule. */
+function writeH3CurveSafetensors(fsModule: typeof import('node:fs'), file: string) {
+  const header = JSON.stringify({ __metadata__: {}, 'diffusion_model.adaln_t_table': { dtype: 'F32', shape: [64, 8], data_offsets: [0, 2048] } })
+  const length = Buffer.alloc(8)
+  length.writeBigUInt64LE(BigInt(Buffer.byteLength(header)))
+  fsModule.writeFileSync(file, Buffer.concat([length, Buffer.from(header), Buffer.alloc(2048)]))
+}
+
+type OverrideJobRecord = { promptId?: string; manifest?: { models?: Record<string, { name?: string }>; modelOverrides?: Record<string, string> } }
+
+test('a model override reaches the engine graph and the job manifest (fake engine, community merge)', async ({ page, request }) => {
+  const problems = await trackErrors(page)
+  const fsModule = await import('node:fs')
+  const pathModule = await import('node:path')
+  const http = await import('node:http')
+
+  // The shared official H3 set (plain dummy bytes — inference needs no form)
+  // plus the community merge carrying a REAL curve-form header: it matches no
+  // selection pattern, which is the entire point of the override layer.
+  const mergeName = 'TenStrip_10Eros-Max_beta5_int8.safetensors'
+  const modelRoot = pathModule.join(process.cwd(), 'test-home', 'override-models')
+  for (const [kind, files] of Object.entries({
+    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
+    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
+    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
+    loras: ['minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors'],
+  })) {
+    fsModule.mkdirSync(pathModule.join(modelRoot, kind), { recursive: true })
+    for (const file of files as string[]) fsModule.writeFileSync(pathModule.join(modelRoot, kind, file), 'x')
+  }
+  fsModule.mkdirSync(pathModule.join(modelRoot, 'diffusion_models'), { recursive: true })
+  writeH3CurveSafetensors(fsModule, pathModule.join(modelRoot, 'diffusion_models', mergeName))
+
+  const submittedGraphs: string[] = []
+  const engine = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://engine.local')
+    if (url.pathname === '/system_stats') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ system: {}, devices: [] }))
+      return
+    }
+    if (url.pathname === '/object_info') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ MiniMaxH3HybridLoader: {}, KSamplerSelect: {}, BasicScheduler: {}, VAELoader: {} }))
+      return
+    }
+    if (url.pathname === '/prompt' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (chunk) => { body += chunk })
+      req.on('end', () => {
+        submittedGraphs.push(body)
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ prompt_id: 'ov-e2e-1', number: 1, node_errors: {} }))
+      })
+      return
+    }
+    if (url.pathname === '/history/ov-e2e-1') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ 'ov-e2e-1': { prompt: [], outputs: {}, status: { completed: false } } }))
+      return
+    }
+    if (url.pathname === '/queue' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ queue_running: [], queue_pending: [] }))
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  const enginePort = await new Promise<number>((resolve) => engine.listen(0, '127.0.0.1', () => resolve((engine.address() as { port: number }).port)))
+
+  const originalSettings = ((await (await request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
+  try {
+    const listed = await (await request.get('/api/lan/jobs')).json() as { jobs?: Array<Record<string, unknown>> }
+    const stale = (listed.jobs ?? []).filter((job) => job.status === 'queued' || job.status === 'running').map((job) => ({ ...job, status: 'cancelled' }))
+    if (stale.length) await request.post('/api/lan/jobs', { data: { jobs: stale } })
+    await request.post('/api/lan/settings', { data: { settings: {
+      ...originalSettings,
+      comfyUrl: `http://127.0.0.1:${enginePort}`,
+      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: pathModule.join(modelRoot, 'diffusion_models'), text_encoders: pathModule.join(modelRoot, 'text_encoders'), vae: pathModule.join(modelRoot, 'vae'), loras: pathModule.join(modelRoot, 'loras') },
+      modelOverrides: { minimax: { checkpoint: mergeName } },
+    } } })
+    await resetSession(page)
+    await page.goto('/?canvas=1')
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    // The engine chip proves the session adopted the fake engine AND the
+    // override-aware readiness mirror (the resolved stack is complete).
+    await expect(page.locator('[data-canvas-engine]')).toHaveAttribute('data-engine-connected', 'true', { timeout: 15_000 })
+    await page.locator('[data-canvas-prompt]').fill('override probe — the merge must load')
+    await page.locator('[data-canvas-submit]').click()
+    const tile = page.locator('[data-canvas-tile]').first()
+    await expect(tile).toBeVisible({ timeout: 10_000 })
+    await expect(tile).toHaveAttribute('data-tile-status', 'running', { timeout: 20_000 })
+
+    // THE GRAPH: the community merge (no pattern matches it) is the resolved
+    // checkpoint the engine received; the unset slots stay on inference.
+    expect(submittedGraphs.length).toBeGreaterThan(0)
+    const graph = JSON.parse(submittedGraphs[submittedGraphs.length - 1]) as { prompt: Record<string, { class_type: string; inputs: Record<string, unknown> }> }
+    expect(graph.prompt['1'].class_type).toBe('UNETLoader')
+    expect(graph.prompt['1'].inputs.unet_name).toBe(mergeName)
+    expect(graph.prompt['2'].inputs.clip_name).toBe('qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors')
+    expect(graph.prompt['3'].inputs.vae_name).toBe('minimax_h3_video_vae_fp16.safetensors')
+
+    // THE MANIFEST (provenance): the resolved filenames plus which slots were
+    // explicit picks — polled through the storage API the queue writes through.
+    await expect.poll(async () => {
+      const jobs = ((await (await request.get('/api/lan/jobs')).json()) as { jobs: OverrideJobRecord[] }).jobs
+      const job = jobs.find((entry) => entry.promptId === 'ov-e2e-1')
+      return job?.manifest?.models?.diffusion?.name ?? null
+    }, { timeout: 15_000 }).toBe(mergeName)
+    const jobs = ((await (await request.get('/api/lan/jobs')).json()) as { jobs: OverrideJobRecord[] }).jobs
+    const overrideJob = jobs.find((entry) => entry.promptId === 'ov-e2e-1')!
+    expect(overrideJob.manifest?.modelOverrides).toEqual({ checkpoint: mergeName })
+    expect(overrideJob.manifest?.models?.textEncoder?.name).toBe('qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors')
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
+    await resetSession(page).catch(() => undefined)
+    // The shared test-home returns to its EMPTY-model-roots state (the
+    // first-run-guidance precondition — the c57938b discipline).
+    fsModule.rmSync(modelRoot, { recursive: true, force: true })
+    await new Promise<void>((resolve) => engine.close(() => resolve()))
+  }
+})
+
+test('model overrides surface in Settings and the chain properties panel (both surfaces, honest states)', async ({ page, request }) => {
+  const problems = await trackErrors(page)
+  const fsModule = await import('node:fs')
+  const pathModule = await import('node:path')
+
+  const mergeName = 'TenStrip_10Eros-Max_beta5_int8.safetensors'
+  const modelRoot = pathModule.join(process.cwd(), 'test-home', 'override-ui-models')
+  for (const [kind, files] of Object.entries({
+    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
+    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
+    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
+  })) {
+    fsModule.mkdirSync(pathModule.join(modelRoot, kind), { recursive: true })
+    for (const file of files as string[]) fsModule.writeFileSync(pathModule.join(modelRoot, kind, file), 'x')
+  }
+  fsModule.mkdirSync(pathModule.join(modelRoot, 'diffusion_models'), { recursive: true })
+  writeH3CurveSafetensors(fsModule, pathModule.join(modelRoot, 'diffusion_models', mergeName))
+
+  const originalSettings = ((await (await request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
+  try {
+    await request.post('/api/lan/settings', { data: { settings: {
+      ...originalSettings,
+      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: pathModule.join(modelRoot, 'diffusion_models'), text_encoders: pathModule.join(modelRoot, 'text_encoders'), vae: pathModule.join(modelRoot, 'vae') },
+    } } })
+    await resetSession(page)
+    await page.goto('/?canvas=1')
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+
+    // ---- Surface 1: Settings (global overrides) ----
+    await page.locator('[data-canvas-settings-button]').click()
+    const dock = page.locator('[data-canvas-settings-dock]')
+    await expect(dock).toBeVisible()
+    const familyBlock = dock.locator('[data-model-override-family="minimax"]')
+    await expect(familyBlock).toBeVisible({ timeout: 15_000 })
+    const checkpointSelect = familyBlock.locator('[data-model-override-slot="checkpoint"] select')
+    // The AUTO option leads with what auto currently resolves to.
+    await expect.poll(async () => checkpointSelect.locator('option').first().textContent(), { timeout: 15_000 }).toContain('minimax_h3_fl2va_pruned_int8_convrot.safetensors')
+    // The merge is a pickable option; picking it flips the stack report's
+    // FL2VA row to the user's file with the Override verdict.
+    await checkpointSelect.selectOption(mergeName)
+    const fl2vaRow = dock.locator('.h3-stack-list > div').first()
+    await expect(fl2vaRow.locator('small')).toContainText(mergeName)
+    await expect(fl2vaRow.locator('em')).toHaveText('Override')
+    // The ltx23 family honestly exposes only its scan-anchored slots.
+    await expect(dock.locator('[data-model-override-family="ltx23"] [data-model-override-slot="checkpoint"]')).toHaveCount(0)
+    await expect(dock.locator('[data-model-override-family="ltx23"] [data-model-override-slot="textEncoder"]')).toHaveCount(1)
+    // Save persists through the server's tolerant normalize.
+    await dock.locator('button.primary-button', { hasText: 'Save settings' }).click()
+    await expect.poll(async () => {
+      const saved = ((await (await request.get('/api/lan/settings')).json()) as { settings: { modelOverrides?: Record<string, Record<string, string>> } }).settings
+      return saved.modelOverrides?.minimax?.checkpoint ?? null
+    }, { timeout: 15_000 }).toBe(mergeName)
+
+    // ---- Surface 2: the chain properties panel (per-chain overrides) ----
+    await page.locator('[data-canvas-settings-close]').click()
+    await page.locator('[data-canvas-prompt]').fill('override surface probe')
+    await page.locator('[data-canvas-submit]').click()
+    const tile = page.locator('[data-canvas-tile]').first()
+    await expect(tile).toBeVisible({ timeout: 10_000 })
+    const panel = page.locator('[data-canvas-properties]')
+    await expect(panel).toBeVisible()
+    const modelsSection = panel.locator('details[data-canvas-section="models"]')
+    await expect(modelsSection).toBeVisible()
+    // Collapsed by default — 'auto' is the honest default state.
+    await expect(modelsSection).not.toHaveAttribute('open', '')
+    await modelsSection.locator('summary').click()
+    await expect(modelsSection).toHaveAttribute('open', '')
+    const chainSelect = modelsSection.locator('[data-canvas-model-override-select="checkpoint"]')
+    await expect(chainSelect.locator('option').first()).toContainText(/auto/) // the global pick shows as what auto resolves to now
+    await chainSelect.selectOption(mergeName)
+    // The debounced commit persists the pick on the chain's own settings.
+    await expect.poll(async () => {
+      const document = await activeDocument(page)
+      const chain = document.chains.find((entry) => entry.kind === 'generation')
+      return ((chain?.settings as Record<string, unknown>)?.modelOverrides as Record<string, string> | undefined)?.checkpoint ?? null
+    }, { timeout: 15_000 }).toBe(mergeName)
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
+    await resetSession(page).catch(() => undefined)
+    fsModule.rmSync(modelRoot, { recursive: true, force: true })
+  }
+})
+
 // The camera path editor (y93rk61) — the camera compiler's (src/lib/camera)
 // first consumer surface: the Camera box's "edit path" affordance opens the
 // modal, an authored path compiles through compileCamera, the compiled block

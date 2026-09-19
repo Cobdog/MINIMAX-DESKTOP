@@ -320,6 +320,15 @@ console.log('(l) L4 — selection decides the surface (effectiveMode)')
   eq(read.resolution, '768x1344', 'settings: known resolution kept')
   eq(read.referenceOutputIds, ['a', 'b'], 'settings: non-string reference ids dropped, never a crash')
   eq(generation.readChainSettings({}).mode || 'text', 'text', 'settings: absent settings fall back cleanly')
+  // Model overrides (euxwdva): tolerant read — string slots survive, junk
+  // drops to auto; absent key = the empty (auto) slots, never undefined.
+  const overridesRead = generation.readChainSettings({ modelOverrides: { checkpoint: 'merge.safetensors', textEncoder: 7, vae: '  ', lora: 'x.safetensors' } })
+  eq(overridesRead.modelOverrides.checkpoint, 'merge.safetensors', 'settings: a string override slot survives')
+  eq('textEncoder' in overridesRead.modelOverrides, false, 'settings: a non-string slot drops to auto')
+  eq('vae' in overridesRead.modelOverrides, false, 'settings: a blank slot drops to auto')
+  eq('lora' in overridesRead.modelOverrides, false, 'settings: unknown slot keys are not invented')
+  const noOverrides = generation.readChainSettings({})
+  eq(Object.keys(noOverrides.modelOverrides || {}).length, 0, 'settings: absent modelOverrides reads as the empty (auto) set')
 }
 
 console.log('(m) fork substrates → input refs (§2 outputRef)')

@@ -3,9 +3,10 @@
  *  Ollama fallback), model locations, and output/clip paths. */
 import { useEffect, useState } from 'react'
 import { Eraser, GitBranch, Wand2 } from 'lucide-react'
-import { Activity, AlertCircle, Check, ChevronDown, Cpu, Eye, Folder, FolderOpen, Gauge, HardDrive, LoaderCircle, Power, RefreshCw, Save, Scale, ServerCog, SlidersHorizontal, Sparkles, Stethoscope, Unplug } from 'lucide-react'
+import { Activity, AlertCircle, Check, ChevronDown, Cpu, Eye, Folder, FolderOpen, Gauge, HardDrive, Layers, LoaderCircle, Power, RefreshCw, Save, Scale, ServerCog, SlidersHorizontal, Sparkles, Stethoscope, Unplug } from 'lucide-react'
 import type { AppSettings, ComfyStatus, LlmModelsResult, MediaFile, ModelFile, ModelKind, NodePackStatus, OllamaModel, UpscaleMode } from '../types'
 import { choices, type ObjectInfo } from '../lib/comfyInfo'
+import { inferredOverrideSlotFile, MODEL_FAMILIES, overridePickOutcome, SLOT_LABELS, type ModelOverrideSlotName } from '../lib/modelOverrides'
 import { detectKrea2EditFamilies, detectOptimizations, KREA2_RECIPE_PINS } from '../lib/graph'
 import { detectLtx23Utilities } from '../lib/graph/ltx23'
 import type { Ltx23UtilityKind } from '../lib/graph/ltx23'
@@ -47,6 +48,18 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
   const [ltx23Running, setLtx23Running] = useState(false)
   const defaults = settings.generationDefaults
   const updateDefaults = (patch: Partial<AppSettings['generationDefaults']>) => setSettings({ ...settings, generationDefaults: { ...defaults, ...patch } })
+  // Model overrides (task euxwdva): one pick per family + slot; clearing a
+  // slot (or the last slot of a family) removes the key entirely so saved
+  // settings stay tidy — empty is auto, never an explicit ''.
+  const setModelOverride = (familyId: string, slot: ModelOverrideSlotName, value: string) => {
+    const families: NonNullable<AppSettings['modelOverrides']> = { ...(settings.modelOverrides ?? {}) }
+    const next = { ...(families[familyId] ?? {}) }
+    if (value) next[slot] = value
+    else delete next[slot]
+    if (Object.keys(next).length) families[familyId] = next
+    else delete families[familyId]
+    setSettings({ ...settings, modelOverrides: families })
+  }
   const applyPreset = (preset: 'quality' | 'official-turbo' | 'preview') => {
     const common = { resolution: '1344x768', duration: 5, steps: 30, loraStrength: 1, shiftVideo: 12, upscaleMode: 'off' as const }
     if (preset === 'quality') updateDefaults({ ...common, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', experimentalSampling: false, sigmaShiftMode: 'model', shiftAudio: 3 })
@@ -223,10 +236,41 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
     <FetchBrowser settings={settings} setSettings={setSettings} onAfterFetch={onScan} onAdoptCheckout={(path) => updateEngine({ checkoutPath: path })} focusEntryIds={fetchFocusEntryIds} onFocusConsumed={onFetchFocusConsumed} />
     <section className="settings-section h3-stack-section">
       <div className="settings-heading"><div><Gauge size={19} /><span><strong>H3 engine stack</strong><small>Compares the selected files with the validated official ComfyUI stack.</small></span></div><span className={`health-pill ${h3Report.validated ? 'online' : ''}`}>{h3Report.validated ? 'Validated' : h3Report.ready ? 'Custom' : 'Incomplete'}</span></div>
-      <div className="h3-stack-list">{h3Report.rows.map((row) => <div key={row.label} className={row.validated ? 'validated' : 'custom'}><span>{row.validated ? <Check size={14} /> : <AlertCircle size={14} />}</span><div><strong>{row.label}</strong><small title={row.selected || row.expected}>{row.selected || `Missing · expected ${row.expected}`}</small></div><em>{row.validated ? 'Recommended' : row.selected ? 'Non-standard' : 'Missing'}</em></div>)}</div>
+      <div className="h3-stack-list">{h3Report.rows.map((row) => <div key={row.label} className={row.validated ? 'validated' : 'custom'}><span>{row.validated ? <Check size={14} /> : <AlertCircle size={14} />}</span><div><strong>{row.label}</strong><small title={row.selected || row.expected}>{row.selected || `Missing · expected ${row.expected}`}</small></div><em>{row.override ? 'Override' : row.validated ? 'Recommended' : row.selected ? 'Non-standard' : 'Missing'}</em></div>)}</div>
       <div className="h3-stack-list">{detectedTurboFamilies.length ? detectedTurboFamilies.map(({ entry, detection }) => <div key={entry.id} className="validated"><span><Check size={14} /></span><div><strong>{entry.label}</strong><small title={detection.model ?? entry.ui.installHint}>{detection.model ?? entry.ui.installHint}</small></div><em>{entry.pairing?.steps ?? '?'} steps{entry.pairing?.samplerNode ? ' · larryvrh-ready' : ''}</em></div>) : <div className="custom"><span><AlertCircle size={14} /></span><div><strong>No turbo families detected</strong><small>Install an official or community turbo LoRA into ComfyUI/models/loras, then rescan.</small></div><em>Missing</em></div>}</div>
       {!h3Report.validated && <p className="settings-warning"><AlertCircle size={15} />Some components differ from the validated H3 stack. Generation remains available, but output quality may differ.</p>}
       <div className="diagnostic-action"><span><strong>Fixed quality comparison</strong><small>Queues Native Quality and Turbo 8 at 1344 × 768, 5 seconds, seed 12345, with no upscale.</small></span><button className="secondary-button" disabled={!status.connected || diagnosticRunning || !h3Report.ready} onClick={onRunDiagnostics}>{diagnosticRunning ? <LoaderCircle className="spin" size={15} /> : <Activity size={15} />}{diagnosticRunning ? 'Queuing tests…' : 'Run H3 Quality Test'}</button></div>
+    </section>
+    <section className="settings-section model-overrides-section" aria-label="Model overrides">
+      <div className="settings-heading"><div><Layers size={19} /><span><strong>Model overrides</strong><small>Pin the exact checkpoint, text encoder, or VAE per engine family — for files the name-pattern inference can never find (a community merge, a renamed quant). Auto keeps the inferred pick; a per-chain pick (the chain's properties panel) beats these, which beat auto.</small></span></div></div>
+      <div className="model-override-list">
+        {MODEL_FAMILIES.map((family) => {
+          const current = settings.modelOverrides?.[family.id] ?? {}
+          return <div className="model-override-family" key={family.id} data-model-override-family={family.id}>
+            <div className="model-override-family-head"><strong>{family.label}</strong><small>{family.note}</small></div>
+            {family.slots.map((slot) => {
+              const value = current[slot] ?? ''
+              const kind = family.slotKinds[slot] ?? 'diffusion_models'
+              const candidates = models.filter((model) => model.kind === kind)
+              const autoFile = inferredOverrideSlotFile(family.id, slot, models)
+              const outcome = value ? overridePickOutcome(family.id, slot, value, models) : null
+              return <div className={`model-override-row${outcome?.state === 'refused' ? ' refused' : outcome?.state === 'degraded' ? ' degraded' : ''}`} key={slot} data-model-override-slot={slot}>
+                <div className="model-override-slot"><strong>{SLOT_LABELS[slot]}</strong><small>{candidates.length} {kind.replace(/_/g, ' ')} file{candidates.length === 1 ? '' : 's'} scanned</small></div>
+                <div className="select-wrap">
+                  <select aria-label={`${family.label} — ${SLOT_LABELS[slot]}`} value={value} onChange={(event) => setModelOverride(family.id, slot, event.target.value)}>
+                    <option value="">auto (inferred){autoFile ? ` — ${autoFile}` : ' — nothing detected'}</option>
+                    {candidates.map((model) => <option key={model.name} value={model.name}>{model.name}</option>)}
+                  </select>
+                  <ChevronDown size={15} />
+                </div>
+                {outcome?.state === 'refused' && <p className="model-override-problem" data-model-override-problem role="alert">Refused — {outcome.reason} Clear the pick to render on auto.</p>}
+                {outcome?.state === 'degraded' && <p className="model-override-problem" data-model-override-problem role="status">{outcome.warning}</p>}
+              </div>
+            })}
+          </div>
+        })}
+      </div>
+      <p className="settings-note">Picks are exact scanned filenames. A pick whose file later disappears falls back to auto with a warning at render time; a pick the family cannot load (wrong folder, no detected H3 form) refuses the render with the reason — never a doomed graph.</p>
     </section>
     <section className="settings-section setup-doctor-section">
       <div className="settings-heading"><div><Stethoscope size={19} /><span><strong>Setup doctor</strong><small>Verifies FFmpeg, HTTPS tooling, the engine device, and attention backends — with exact fixes.</small></span></div><button className="secondary-button" onClick={() => void runDoctor()} disabled={doctorRunning}>{doctorRunning ? <LoaderCircle size={16} className="spin" /> : <Stethoscope size={16} />}{doctorRunning ? 'Checking…' : 'Run checks'}</button></div>

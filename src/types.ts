@@ -245,6 +245,12 @@ export type FetchProgress = {
   at: number
 }
 
+/** One family's explicit model picks over the inference ladder (task
+ *  euxwdva). Absent/empty slots are auto — inference, unchanged. The
+ *  resolution contract lives in src/lib/modelOverrides.ts: chain-level
+ *  beats global beats auto; picks are exact scanned filenames. */
+export type ModelOverrideSlots = { checkpoint?: string; textEncoder?: string; vae?: string }
+
 export type AppSettings = {
   comfyUrl: string
   ollamaUrl: string
@@ -254,6 +260,11 @@ export type AppSettings = {
   outputDirectory: string
   ffmpegPath: string
   generationDefaults: GenerationDefaults
+  /** Global model overrides, keyed by engine family id (see
+   *  MODEL_FAMILIES in src/lib/modelOverrides.ts — the server normalizes
+   *  shape-tolerantly without importing the renderer registry). Absent or
+   *  {} = pure inference, the pre-override behavior exactly. */
+  modelOverrides?: Record<string, ModelOverrideSlots>
   /** Chosen GPU tier — drives community quant/resolution guidance. */
   gpuTier?: '8' | '16' | '24' | 'blackwell'
   /** ComfyUI version the bundled graphs were last verified against

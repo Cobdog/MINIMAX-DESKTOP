@@ -17,6 +17,7 @@ import { useEffect, type ReactNode } from 'react'
 import { useStudioSession } from '../hooks/useStudioSession'
 import { useGenerationQueue } from '../hooks/useGenerationQueue'
 import { useLivePreview } from '../lib/useLivePreview'
+import { resolveModels } from '../lib/modelOverrides'
 import { inferSelections } from '../lib/modelSelection'
 import { submitH3DiagnosticPair } from '../lib/h3Diagnostics'
 import { CHARACTER_LIBRARY_EVENT } from '../lib/characterLibrary'
@@ -44,10 +45,11 @@ export function CanvasEngineHost({ children }: { children?: ReactNode }) {
   engineBridge.cancelJob = (job) => void queue.cancelJob(job)
 
   // Mirror the honest engine facts into the canvas store (radar chip, bar,
-  // menus) — model readiness follows the base H3 selection.
+  // menus) — model readiness follows the base H3 selection, with global
+  // model overrides consulted (euxwdva: a valid pick IS the selection).
   useEffect(() => {
     const unsubscribe = useSessionStore.subscribe((state) => {
-      const selection = inferSelections(state.models, 'off')
+      const selection = resolveModels('minimax', inferSelections(state.models, 'off'), state.models, state.settings?.modelOverrides?.minimax).selection
       const ready = Boolean(state.status.connected && selection.fl2va && selection.ref2va && selection.textEncoder && selection.videoVae && selection.audioVae)
       const current = useCanvasStore.getState().engine
       if (current.connected !== state.status.connected || current.modelReady !== ready) {

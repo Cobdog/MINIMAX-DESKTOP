@@ -8,6 +8,7 @@
  * job bookkeeping are testable without an engine.
  */
 import { createId } from './createId'
+import { resolveModels } from './modelOverrides'
 import { buildLtx23UtilityGraph, findLtx23Utility, resolveLtx23Selection, type Ltx23UtilityKind } from './graph/ltx23'
 import type { ComfyPrompt } from './graph'
 import type { ObjectInfo } from './comfyInfo'
@@ -104,6 +105,19 @@ export async function submitLtx23Utility(
     io.notify('error', refusal)
     return { ok: false, message: refusal }
   }
+  // Model overrides (euxwdva): the ltx23 family consults the global Settings
+  // picks through the shared seam — scan-anchored slots only (the checkpoint
+  // resolves engine-side, so the family does not expose it). A wrong-kind
+  // pick refuses here; a vanished file degrades to auto with a visible
+  // warning. Availability detection above stays inference-based: a pick
+  // never fabricates a missing tool's requirements.
+  const resolved = resolveModels('ltx23', resolveLtx23Selection(facts.info, facts.models), facts.models, facts.settings.modelOverrides?.ltx23)
+  const overrideRefusal = resolved.resolution.refusals[0]
+  if (overrideRefusal) {
+    const message = `Model override refused — ${overrideRefusal.slot}: ${overrideRefusal.reason}`
+    io.notify('error', message)
+    return { ok: false, message }
+  }
   const { settings } = facts
   const utility = findLtx23Utility(`ltx23.${request.tool}`)!
   const needsVideo = request.tool !== 'ia2v'
@@ -115,6 +129,7 @@ export async function submitLtx23Utility(
   }
   io.setJobs((current) => [job, ...current])
   io.onJobCreated?.(localId)
+  for (const warning of resolved.resolution.warnings) io.notify('neutral', warning)
   io.notify('neutral', `Preparing the official LTX-2.3 ${utility.label} template graph…`)
   try {
     const seed = request.seed ?? Math.floor(Math.random() * 1_000_000_000)
@@ -132,7 +147,7 @@ export async function submitLtx23Utility(
       video: uploadedVideo,
       image: uploadedImage,
       audio: uploadedAudio,
-    }, resolveLtx23Selection(facts.info, facts.models))
+    }, resolved.selection)
     const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, facts.clientId)
     if (io.cancellationRequests?.current.has(localId)) {
       await window.minimax.cancelPrompt(settings.comfyUrl, response.prompt_id)
