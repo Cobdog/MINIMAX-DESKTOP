@@ -341,6 +341,15 @@ export function PropertiesPanel() {
             composed={draft.prompt}
             llmAvailable={llmAvailable}
             llmStream={llmStream}
+            referenceImageShape={(() => {
+              // The camera compiler's loop-closure contract needs a connected
+              // reference image; text chains have none. The shape is all the
+              // pure compiler reads (imageAspect) — derive it from the chain
+              // resolution for the image-bearing modes.
+              if (mode === 'text') return null
+              const [width, height] = (draft.resolution || '1344x768').split('x').map(Number)
+              return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0 ? { shape: [1, height, width, 3] } : null
+            })()}
             pinSources={{
               characters: libraries.characters.map((character) => ({ id: character.id, name: character.name })),
               assets: assets.map((asset) => ({ id: asset.id, label: asset.label, kind: asset.kind })),
