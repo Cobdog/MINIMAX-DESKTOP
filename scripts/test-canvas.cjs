@@ -1314,6 +1314,17 @@ console.log('(z) cameraPath — the compile step + the box-text round-trip')
   eq(cp.applyCameraMovePreset(defaults, 'orbit').keyframes[2].azimuth, 180, 'presets: the mutation still applies the move (90 → 180)')
   eq(cp.applyCameraMovePreset(defaults, 'nope'), null, 'presets: unknown ids read null')
   ok(cp.CAMERA_MOVE_PRESETS.map((preset) => preset.id).join('|') === 'orbit|rise|fall|closer|away|static', 'presets: exactly the AC\'s six (orbit/rise/fall/closer/away/static)')
+
+  // The freeform detour: compose → parse never drops compiled-block bytes
+  // (the structured editor's no-loss rule holds for the camera language —
+  // the deterministic parse parks them in Concept; the doc is derived state
+  // and re-derives best-effort through the editor).
+  const detourDraft = { ...sp.emptyStructuredDraft(), concept: 'a probe shot', camera: text + ', the camera pushes in' }
+  const detoured = sp.parseStructuredPrompt(sp.composeStructuredPrompt(detourDraft, { duration: 6 }))
+  const detourText = [detoured.concept, detoured.setting, detoured.lighting, detoured.style, detoured.camera].concat(detoured.flow.map((row) => row.text)).join('\n')
+  for (const fragment of ['Compiled camera path — 243 frames at 24 fps', 'physically move the CAMERA', 'Reach the final pose', 'the camera pushes in']) {
+    ok(detourText.includes(fragment), `freeform detour: "${fragment.slice(0, 34)}" survives compose → parse`)
+  }
 }
 
 phase5Cores()
