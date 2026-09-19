@@ -739,14 +739,19 @@ test('external instance: instance-sourced models, live pack chips, install into 
     const krea2editRow = page.locator('.node-pack-row').filter({ hasText: 'comfyui-krea2edit' })
     await expect(krea2editRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'missing')
 
-    // Install krea2edit from the local copy INTO THE EXTERNAL FOLDER through
-    // the UI, then the honest chip: installed, but the instance has not
-    // loaded it — restart to activate.
-    const sourceInput = krea2editRow.locator('input[aria-label="Local source directory for comfyui-krea2edit"]')
-    await sourceInput.scrollIntoViewIfNeeded()
-    await sourceInput.fill(localCopy)
-    await krea2editRow.getByRole('button', { name: /^Install$/ }).click()
-    await expect(krea2editRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'installed — restart engine to activate', { timeout: 15_000 })
+    // Install krea2edit from the local copy INTO THE EXTERNAL FOLDER. The UI
+    // no longer prompts for a path (mjhlt3k AC-1: a network pack's install
+    // affordance is Fetch…, never a local-source dialogue), so the local-copy
+    // contract is exercised through the route — which keeps supporting it —
+    // and the UI asserts the honest badge: installed at the pin, but the
+    // instance has not loaded it — restart to activate.
+    const installed = await page.request.post('/api/lan/engine/nodes/install', { data: { id: 'krea2edit', sourceDirectory: localCopy } })
+    expect(installed.status(), `krea2edit local-copy install must succeed: ${JSON.stringify(await installed.json().catch(() => ({})))}`).toBe(200)
+    // The route-side install changed the folder behind the UI's back — the
+    // board's Refresh button (mjhlt3k AC-2) is the re-resolve trigger.
+    await krea2editRow.locator('[data-node-pack-chip]').scrollIntoViewIfNeeded()
+    await page.locator('[data-node-pack-refresh]').click()
+    await expect(krea2editRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'installed @ pin — restart engine to activate', { timeout: 15_000 })
     expect(existsSync(join(externalDir, 'comfyui-krea2edit', '.studio-node.json'))).toBe(true)
 
     // The maintainer's exact report (9om4bi9 follow-up): a working instance's
@@ -765,20 +770,23 @@ test('external instance: instance-sourced models, live pack chips, install into 
     const vdnRow = page.locator('.node-pack-row').filter({ hasText: 'ComfyUI-VDN-H3' })
     await vdnRow.locator('[data-node-pack-chip]').scrollIntoViewIfNeeded()
     await vdnRow.getByRole('button', { name: /^Install$/ }).click()
-    await expect(vdnRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'installed — restart engine to activate', { timeout: 15_000 })
+    await expect(vdnRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'installed @ pin — restart engine to activate', { timeout: 15_000 })
     expect(existsSync(join(externalDir, 'ComfyUI-VDN-H3', '.studio-node.json'))).toBe(true)
 
     // A pre-existing folder (no studio marker) is reported as PRESENT in the
-    // external target — never silently replaced, never deleted, and the
-    // Install button is disabled with the honest reason (the 9om4bi9
-    // follow-up: this is a working instance's normal state, not a failure).
+    // external target — never silently replaced, never deleted, and the row
+    // offers no install affordance at all with the honest reason (the 9om4bi9
+    // follow-up: this is a working instance's normal state, not a failure;
+    // mjhlt3k: a foreign USER-FETCH row carries neither Fetch… nor Install —
+    // its only install path would be refused over the pre-existing folder).
     mkdirSync(join(externalDir, 'radiance'), { recursive: true })
     writeFileSync(join(externalDir, 'radiance', 'user-file.py'), '# theirs\n')
     await page.locator('[data-canvas-settings-close]').click()
     await page.locator('[data-canvas-settings-button]').click()
     const radianceRow = page.locator('.node-pack-row').filter({ hasText: 'radiance' })
     await expect(radianceRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'present — not studio-managed', { timeout: 15_000 })
-    await expect(radianceRow.getByRole('button', { name: /^Install$/ })).toBeDisabled()
+    await expect(radianceRow.getByRole('button', { name: 'Fetch…' })).toHaveCount(0)
+    await expect(radianceRow.getByRole('button', { name: /^Install$/ })).toHaveCount(0)
     expect(fs.readFileSync(join(externalDir, 'radiance', 'user-file.py'), 'utf8')).toBe('# theirs\n')
 
     expect(problems.filter((entry) => !environmental(entry))).toEqual([])
