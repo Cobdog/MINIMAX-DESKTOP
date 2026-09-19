@@ -3416,12 +3416,19 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
   async function startLanServer() {
     const configuredPort = Number(process.env.MINIMAX_LAN_PORT)
     const port = Number.isInteger(configuredPort) && configuredPort >= 1024 && configuredPort <= 65535 ? configuredPort : 4178
+    // Launcher host bind (task ukyxwfa): MINIMAX_LAN_HOST narrows the listen
+    // address (e.g. 127.0.0.1 = local only). Unset keeps today's behavior —
+    // every interface — byte for byte.
+    const host = process.env.MINIMAX_LAN_HOST && /^[A-Za-z0-9._:-]{1,255}$/.test(process.env.MINIMAX_LAN_HOST) ? process.env.MINIMAX_LAN_HOST : '0.0.0.0'
     // Settings load BEFORE listen: the origin guard's host allowlist (and the
     // whole settings cache) must be warm when the first request arrives, so a
     // custom-hostname setup is never refused by a cold cache.
     await loadSettings()
     lanToken = await loadLanToken()
-    const address = lanAddress()
+    // A loopback bind must not claim a LAN identity: the certificate and the
+    // advertised URLs follow the ACTUAL bind, not the machine's LAN address.
+    const loopback = host === '127.0.0.1' || host === 'localhost' || host === '::1'
+    const address = loopback ? '127.0.0.1' : lanAddress()
     // HTTPS by default (PWA install, and no cleartext tokens on hostile LANs);
     // --no-https / MINIMAX_NO_HTTPS=1 falls back to plain HTTP, as does a
     // missing openssl.
@@ -3434,12 +3441,12 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
         : createHttpServer(handler)
       lanServer = server
       server.once('error', (error) => { lanStatus = { running: false, port, error: error.message, secure: false }; resolvePromise() })
-      server.listen(port, '0.0.0.0', () => {
+      server.listen(port, host, () => {
         // The realtime fabric rides the SAME server (WS upgrade at /ws; SSE
         // v2 through the /api/lan/realtime route below).
         realtimeHub.attach(server)
         const origin = `${certificate ? 'https' : 'http'}://${address}:${port}`
-        lanStatus = { running: true, port, secure: Boolean(certificate), certificateFingerprint: certificate?.fingerprint, url: `${origin}/?mobile=1`, desktopUrl: `${origin}/?desktop=1` }
+        lanStatus = { running: true, port, host, secure: Boolean(certificate), certificateFingerprint: certificate?.fingerprint, url: `${origin}/?mobile=1`, desktopUrl: `${origin}/?desktop=1` }
         logEvent({ kind: 'lan.server', port, secure: Boolean(certificate) })
         // Boot posture: AFTER the server is listening (routes can answer
         // while a slow engine boots), reconcile the managed runtime — adopt
@@ -3502,9 +3509,12 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
       if (lanStatus.running) {
         // Scheme follows the actual listener (HTTPS by default): an http://
         // link under TLS is dead on arrival and teaches users to paste
-        // certificate warnings away.
+        // certificate warnings away. The address follows the actual bind — a
+        // loopback-bound studio must not hand out LAN URLs.
         const scheme = lanStatus.secure ? 'https' : 'http'
-        const origin = `${scheme}://${lanAddress()}:${lanStatus.port ?? 4178}`
+        const boundHost = lanStatus.host ?? '0.0.0.0'
+        const address = boundHost === '127.0.0.1' || boundHost === 'localhost' || boundHost === '::1' ? '127.0.0.1' : lanAddress()
+        const origin = `${scheme}://${address}:${lanStatus.port ?? 4178}`
         lanStatus = { ...lanStatus, url: `${origin}/?mobile=1&token=${lanToken}`, desktopUrl: `${origin}/?desktop=1&token=${lanToken}` }
       }
       return lanStatus

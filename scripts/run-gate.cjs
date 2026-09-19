@@ -104,7 +104,13 @@ const SUITES = [
   { name: 'test:datasets', command: 'pnpm run test:datasets', timeoutMs: 15 * MINUTE, dependents: ['smoke:server', 'e2e', 'vision-capture'] },
   // build:web + build:server directly — typecheck already ran as its own suite
   // (the plain `build` script re-runs typecheck; redundant here).
-  { name: 'build', command: 'pnpm run build:web && pnpm run build:server', timeoutMs: 15 * MINUTE, dependents: ['smoke:server', 'e2e', 'vision-capture'] },
+  { name: 'build', command: 'pnpm run build:web && pnpm run build:server', timeoutMs: 15 * MINUTE, dependents: ['smoke:server', 'e2e', 'vision-capture', 'test:launcher'] },
+  // start.sh launcher (task ukyxwfa): config seed/round-trip, flag parsing,
+  // env precedence, busy-port + missing-deps honesty, dev-vs-prod boot plan,
+  // prompts-configure save, and a real prod boot on a 7000-7099 port. Runs
+  // AFTER build so the boot leg always has dist; POSIX-only (loud NOTE-skip
+  // on the Windows engine leg, which does not run it).
+  { name: 'test:launcher', command: 'pnpm run test:launcher', timeoutMs: 5 * MINUTE },
   { name: 'smoke:server', command: 'pnpm run smoke:server', timeoutMs: 5 * MINUTE },
   // Playwright directly (build is fresh) — scoped to the two projects.
   { name: 'e2e', command: 'pnpm exec playwright test --project=e2e', timeoutMs: 30 * MINUTE },
