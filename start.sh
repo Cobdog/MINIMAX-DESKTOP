@@ -322,6 +322,64 @@ guard_port_free() { # $1 port $2 what $3 config key for the fix hint
   return "$PROBE_STATUS"
 }
 
+# Pull-change detection (maintainer 2026-09-19: "should automatically install
+# and build if it detects that a pull has happened"): compare the newest
+# source mtime against the newest build-output mtime. If any source file
+# (src/ server/ scripts/ index.html vite.config.ts package.json
+# pnpm-lock.yaml) is NEWER than both dist/ and dist-server/ outputs, a pull
+# (or edit) landed after the last build. git-less checkouts work too — it is
+# pure mtimes. Cheap: a bounded find over the source roots.
+newest_mtime() { # $@ roots — prints the newest file mtime, empty if none
+  find "$@" -type f -newer "$SCRIPT_DIR/start.sh" -printf '%T@\n' 2>/dev/null | sort -rn | head -n 1
+}
+build_stale() {
+  [ -f dist/index.html ] && [ -f dist-server/server/index.js ] || return 0 # missing = the existing checks handle it
+  SRC_NEWEST=$(find "$SCRIPT_DIR/src" "$SCRIPT_DIR/server" "$SCRIPT_DIR/scripts" -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.cjs' \) -printf '%T@\n' 2>/dev/null | sort -rn | head -n 1)
+  [ -z "$SRC_NEWEST" ] && return 1
+  for marker in "$SCRIPT_DIR/index.html" "$SCRIPT_DIR/vite.config.ts" "$SCRIPT_DIR/package.json" "$SCRIPT_DIR/pnpm-lock.yaml"; do
+    [ -f "$marker" ] || continue
+    M=$(stat -c '%Y' "$marker" 2>/dev/null || echo '')
+    [ -n "$M" ] && [ "$M" -gt "${SRC_NEWEST%.*}" ] && SRC_NEWEST="$M.0"
+  done
+  DIST_NEWEST=$(find "$SCRIPT_DIR/dist" "$SCRIPT_DIR/dist-server" -type f -printf '%T@\n' 2>/dev/null | sort -rn | head -n 1)
+  [ -z "$DIST_NEWEST" ] && return 0
+  # A source newer than the newest build output = stale build.
+  [ "${SRC_NEWEST%.*}" -gt "${DIST_NEWEST%.*}" ]
+}
+
+check_pull_freshness() {
+  # Dependency drift: a pulled lockfile newer than node_modules = re-install.
+  if [ -d "$SCRIPT_DIR/node_modules" ] && [ -f "$SCRIPT_DIR/pnpm-lock.yaml" ]; then
+    LOCK_MTIME=$(stat -c '%Y' "$SCRIPT_DIR/pnpm-lock.yaml" 2>/dev/null || echo 0)
+    NM_MTIME=$(stat -c '%Y' "$SCRIPT_DIR/node_modules" 2>/dev/null || echo 0)
+    if [ "$LOCK_MTIME" -gt "$NM_MTIME" ]; then
+      echo "$PROG: dependencies changed since the last install (pnpm-lock.yaml is newer than node_modules/) — pulling updated a dependency."
+      AUTO_ACT "pnpm install" "install the updated dependencies" || return 1
+    fi
+  fi
+  # Build staleness: sources newer than the built outputs = a pull landed.
+  if build_stale; then
+    echo "$PROG: sources changed since the last build (a pull or edit landed after dist/ was built)."
+    AUTO_ACT "pnpm build" "rebuild" || return 1
+  fi
+  return 0
+}
+
+AUTO_ACT() { # $1 command, $2 description — run automatically (maintainer's ask); interactive confirm when a TTY, auto-yes otherwise (CI/scripts)
+  local cmd="$1" desc="$2"
+  command -v pnpm >/dev/null 2>&1 || die "pnpm is not on PATH — install it first (https://pnpm.io)"
+  if [ -t 0 ]; then
+    printf 'Run "%s" to %s now? [Y/n] ' "$cmd" "$desc"
+    ANSWER=""
+    read -r ANSWER || true
+    case $ANSWER in n|N|no|No|NO) return 1 ;; esac
+  else
+    echo "$PROG: running '%s' automatically to %s..." "$cmd" "$desc"
+  fi
+  (cd "$SCRIPT_DIR" && $cmd) || die "$cmd failed"
+  return 0
+}
+
 check_node_and_deps() {
   command -v node >/dev/null 2>&1 || die "node is not on PATH — Node 20+ is required"
   [ -d "$SCRIPT_DIR/node_modules" ] && return 0
@@ -668,6 +726,16 @@ check_node_and_deps || {
   [ "$DO_PRINT" = 1 ] && echo "launcher: dry run — boot would fail (dependencies missing)"
   exit 1
 }
+
+# Pull freshness (maintainer 2026-09-19): after deps exist and before any
+# boot, detect a pulled lockfile (re-install) and sources-newer-than-build
+# (rebuild). Skipped entirely in dev mode (the watch pipeline compiles
+# fresh) and in dry runs (side-effect free).
+if [ "$CFG_DEV" != "true" ] && [ "$DO_PRINT" != 1 ]; then
+  check_pull_freshness || {
+    echo "$PROG: refresh declined — booting the EXISTING build/dependencies as-is." >&2
+  }
+fi
 
 guard_port_free "$R_PORT" "LAN" "port" || {
   [ "$DO_PRINT" = 1 ] && echo "launcher: dry run — boot would fail (port busy)"
