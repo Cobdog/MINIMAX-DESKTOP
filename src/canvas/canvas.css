@@ -488,7 +488,11 @@
 .canvas-audio-instrumental { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: var(--text-sm); }
 
 /* ---- Phase 4: the docked Settings panel (§8) ------------------------------------- */
-.canvas-settings-dock { z-index: 60; display: grid; grid-template-rows: auto minmax(0, 1fr); border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); box-shadow: 0 18px 48px rgba(0,0,0,.5); overflow: hidden; }
+/* display needs !important: react-rnd writes `display: inline-block` as an INLINE
+   style on the same element, which otherwise beats this rule — the grid rows never
+   apply, the body never gets constrained by minmax(0,1fr), and the dock becomes a
+   12k-px unscrollable clip (first-boot lock: no scroll, no Close, no engine pick). */
+.canvas-settings-dock { z-index: 60; display: grid !important; grid-template-rows: auto minmax(0, 1fr); border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); box-shadow: 0 18px 48px rgba(0,0,0,.5); overflow: hidden; }
 .canvas-settings-dock .canvas-inspector-header svg { color: var(--accent); flex: none; }
 .canvas-settings-body { min-height: 0; overflow: auto; }
 .canvas-settings-body .standard-page { min-height: auto; padding: 14px 16px 22px; }
