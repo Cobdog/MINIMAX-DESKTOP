@@ -34,6 +34,12 @@ export type CanvasChainSettings = {
    *  through — H3 (default) or the LTX-2.5 general graph (the typed-hole
    *  produce row; the workspace greyed out with the nav model). */
   engine: 'h3' | 'ltx25'
+  /** The image intent's engine (34afx79, 2026-09-19) — the two-slot typed
+   *  hole: H3-1F (the h3image Generate-T=1 family) is wired today; Krea 2
+   *  stills (mf3wfq6, queued) is the second slot and docks into the same
+   *  switch without another rewire. The Z-Image surface this replaced is
+   *  retired (lib/zImageSubmit.ts deleted). */
+  imageEngine: 'h3-1f' | 'krea2'
   /** Audio-engine facts (mediaType 'audio', Phase 4): which engine + its
    *  request options. The audio dock writes them; submitChain reads them —
    *  reruns are settings-stable (invariant 1) for audio too. Fields the
@@ -97,6 +103,16 @@ export type CanvasChainSettings = {
 
 const RESOLUTIONS = ['1344x768', '768x1344', '768x768']
 
+/** The image intent's engine selection (34afx79) — the two-slot seam table
+ *  the properties panel renders. The second slot is a TYPED HOLE: Krea 2
+ *  stills (mf3wfq6) docks into submitChain's imageEngine switch without
+ *  another rewire (the audio-engine precedent — one union, one switch, one
+ *  honest refusal until its core lands). */
+export const IMAGE_ENGINES: Array<{ id: 'h3-1f' | 'krea2'; label: string; note: string }> = [
+  { id: 'h3-1f', label: 'H3 1F (T=1 Fast)', note: 'One latent frame through the Mamad8 T=1 image VAE on the hybrid stack — seconds-class stills.' },
+  { id: 'krea2', label: 'Krea 2 (still images)', note: 'Queued (mf3wfq6) — the stills-only Krea 2 path; not wired yet.' },
+]
+
 /** Defaults mirror the Create workspace's defaults (workspaceDefaults) plus
  *  the project's saved generation defaults — the canvas chain starts where
  *  the old surface would, then diverges per chain. */
@@ -106,6 +122,7 @@ export function chainSettingsDefaults(settings?: AppSettings | null): CanvasChai
     prompt: '',
     mediaType: 'video',
     engine: 'h3',
+    imageEngine: 'h3-1f',
     audio: { engine: 'music3', caption: '', lyrics: '', duration: 60, seed: Math.floor(Math.random() * 1_000_000_000), instrumental: false, model: 'base', bpm: 120 },
     duration: defaults?.duration ?? 6,
     resolution: defaults?.resolution && RESOLUTIONS.includes(defaults.resolution) ? defaults.resolution : '1344x768',
@@ -176,6 +193,7 @@ export function readChainSettings(raw: Record<string, unknown>, settings?: AppSe
     prompt: str(raw.prompt, base.prompt),
     mediaType: raw.mediaType === 'image' ? 'image' : raw.mediaType === 'audio' ? 'audio' : 'video',
     engine: raw.engine === 'ltx25' ? 'ltx25' : 'h3',
+    imageEngine: raw.imageEngine === 'krea2' ? 'krea2' : 'h3-1f',
     audio,
     duration: Math.max(2, Math.min(15, num(raw.duration, base.duration))),
     resolution: RESOLUTIONS.includes(str(raw.resolution, '')) ? str(raw.resolution, base.resolution) : base.resolution,

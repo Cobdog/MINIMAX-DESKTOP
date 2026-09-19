@@ -9,7 +9,7 @@
  */
 import { createId } from '../lib/createId'
 import { extractAllOutputFiles } from '../lib/workflow'
-import { buildH3ImageGraph, detectH3ImgFamilies, findH3ImgFamily, inferH3ImgSelection } from '../lib/graph/h3image'
+import { buildH3ImageGraph, detectH3ImgFamilies, findH3ImgFamily, inferH3ImgSelection, H3IMG_RECIPE_PINS } from '../lib/graph/h3image'
 import { resolveModelOverrides, resolveModels } from '../lib/modelOverrides'
 import { resolveKrea2EditModels } from '../lib/graph/krea2edit'
 import { prepareImage } from '../lib/imageCrop'
@@ -31,6 +31,10 @@ export type WorkbenchSubmitIo = {
   notify(tone: 'error' | 'success' | 'neutral', text: string): void
   setJobs(update: (current: GenerationJob[]) => GenerationJob[]): void
   cancellationRequests?: { current: Set<string> }
+  /** The canvas inline path (34afx79) links its chain the MOMENT the job
+   *  record exists — the h3Submit discipline: the queued ring parks on its
+   *  chain during upload, not only once the manifest relinks it. */
+  onJobCreated?(jobId: string): void
 }
 
 /** One ready-to-upload reference (the session slot resolved to media + its
@@ -51,11 +55,13 @@ export type WorkbenchGenerationRequest = {
 export function buildH3ImgSelection(facts: Pick<WorkbenchSubmitFacts, 'models' | 'settings'>) {
   // Model overrides (euxwdva): the h3image family consults the global
   // Settings picks through the shared seam — a community merge becomes the
-  // FL2VA/Ref2VA/TE/video-VAE pick. Inference itself stays untouched.
+  // FL2VA/Ref2VA/TE/video-VAE pick. Inference itself stays untouched. A
+  // missing settings object (pure-construction callers, the T=1 plan probe)
+  // is tolerated: no overrides to consult is the pre-override behavior.
   return resolveModels('h3image',
     inferH3ImgSelection(facts.models, resolveKrea2EditModels(facts.models)),
     facts.models,
-    facts.settings.modelOverrides?.h3image,
+    facts.settings?.modelOverrides?.h3image,
   ).selection
 }
 
@@ -137,6 +143,7 @@ export async function submitWorkbenchGeneration(
     mediaType: 'image',
   }
   io.setJobs((current) => [job, ...current])
+  io.onJobCreated?.(localId)
   try {
     for (const warning of resolveModelOverrides('h3image', facts.models, facts.settings.modelOverrides?.h3image).warnings) io.notify('neutral', warning)
     io.notify('neutral', 'Uploading references and preparing the graph…')
@@ -148,7 +155,13 @@ export async function submitWorkbenchGeneration(
     const refineFrameUpload = request.refine ? await upload(request.refine.frame, true) : undefined
     if (io.cancellationRequests?.current.has(localId)) throw new Error('Generation cancelled before submission.')
 
-    const tier = request.refine ? 1 : (family.tier ?? request.settings.tier)
+    // The tier is profile-derived where a profile pins it: refine emits one
+    // frame through its own engine, and the T=1 Fast profile generates
+    // exactly one frame BY RECIPE — the session's packet-tier dial (5/9/13)
+    // never reaches the builder for those (34afx79: before this pin the
+    // dial's default tripped the builder's "exactly one frame" guard on
+    // every T=1 submission).
+    const tier = request.refine ? 1 : family.profile === 't1' ? H3IMG_RECIPE_PINS.t1.frames : (family.tier ?? request.settings.tier)
     const contract = request.refine ? request.refine.instruction : sessionContract(request.settings, { sourceAnchored: Boolean(request.source) && (family.kind === 'edit' || family.kind === 'generate-directed') })
     const filenamePrefix = `images/H3IMG_${request.chainId.slice(0, 8)}_${Date.now()}`
     const graph = buildH3ImageGraph(
@@ -158,7 +171,7 @@ export async function submitWorkbenchGeneration(
         width,
         height,
         seed: request.settings.seed,
-        tier: tier as 5 | 9 | 13 | 39,
+        tier,
         refs: request.refine ? [] : graphRefSlots(request.refs, refUploads),
         source: request.refine ? refineFrameUpload?.name : sourceUpload?.name,
         steps: undefined,
