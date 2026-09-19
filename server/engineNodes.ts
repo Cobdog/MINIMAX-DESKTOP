@@ -568,8 +568,17 @@ export async function checkNodePack(pack: NodePackDefinition, target: NodePackTa
   }
   if (folderExists) {
     // The folder exists but WE did not place it (no studio marker). Never a
-    // candidate for silent replacement — reported, the user decides.
-    return { ...base, folderState: 'foreign', note: `${installDirLabel(pack, target)} already exists but was not installed by the studio — remove it yourself first if you want the studio's pinned copy.` }
+    // candidate for replacement or deletion — reported, the user decides.
+    // Bugfix (9om4bi9 follow-up, 2026-09-19): in an EXTERNAL custom nodes
+    // folder this is the NORMAL state of a working instance — its own packs
+    // are already there, and "cannot be installed" was the wrong story. The
+    // note now leads with PRESENCE, availability keeps telling the truth
+    // about the studio's payload (vendored/first-party rows no longer read
+    // as source-less), and the live instance chip says whether it loads.
+    const foreignNote = target.kind === 'external'
+      ? `${installDirLabel(pack, target)} is already present in the external custom nodes folder — placed outside the studio. The studio never replaces, updates, or deletes it; the live status chip reads the connected instance's own node list. Remove it yourself first if you want the studio's pinned, managed copy.`
+      : `${installDirLabel(pack, target)} already exists but was not installed by the studio — remove it yourself first if you want the studio's pinned copy.`
+    return withAvailability({ ...base, folderState: 'foreign' }, pack, vendored, foreignNote)
   }
   return withAvailability({ ...base, folderState: 'missing' }, pack, vendored)
 }
@@ -717,12 +726,18 @@ async function copyPackTree(source: string, destination: string, weightLinks: st
   }
 }
 
-/** Uninstall = delete the folder (the design's own rule). Removing the
- *  marker-only install never touches anything outside the pack's own folder
- *  in its target. */
+/** Uninstall = delete the folder (the design's own rule) — but ONLY a
+ *  marker install. A folder present WITHOUT the studio marker is foreign:
+ *  the studio never deletes what it did not place (the refusal the install
+ *  side has always had, now held by the engine itself instead of relying on
+ *  the UI's installed-gating — the route is callable directly). */
 export async function uninstallNodePack(pack: NodePackDefinition, target: NodePackTarget): Promise<{ removed: boolean; reason?: string }> {
   const installDir = nodePackInstallDir(pack, target)
   if (!existsSync(installDir)) return { removed: false, reason: `${pack.name} is not installed` }
+  const marker = await readInstallMarker(installDir)
+  if (!marker) {
+    return { removed: false, reason: `${pack.name} is present but was not installed by the studio — the studio never deletes a folder it did not place. Remove it yourself if that is what you want.` }
+  }
   await rm(installDir, { recursive: true, force: true })
   await rm(`${installDir}.studio-staging`, { recursive: true, force: true }).catch(() => undefined)
   return { removed: true }

@@ -286,7 +286,7 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
                 setPackFetchFocus([`pack:${pack.id}`])
                 document.querySelector('.fetch-section')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
               }} data-node-pack-fetch={pack.id}>Fetch…</button>}
-              <button type="button" className="secondary-button" disabled={nodePackBusy === pack.id || pack.availability === 'unavailable' || (pack.installMode === 'user-fetch' && !nodePackSource[pack.id]?.trim())} onClick={() => void runNodePackAction(pack.id, () => window.minimax.installEngineNodePack(pack.id, nodePackSource[pack.id]?.trim() || undefined))}>{nodePackBusy === pack.id ? <LoaderCircle size={14} className="spin" /> : null}Install</button>
+              <button type="button" className="secondary-button" title={pack.folderState === 'foreign' ? 'Already present — placed outside the studio; the studio never replaces or deletes it' : undefined} disabled={nodePackBusy === pack.id || pack.availability === 'unavailable' || pack.folderState === 'foreign' || (pack.installMode === 'user-fetch' && !nodePackSource[pack.id]?.trim())} onClick={() => void runNodePackAction(pack.id, () => window.minimax.installEngineNodePack(pack.id, nodePackSource[pack.id]?.trim() || undefined))}>{nodePackBusy === pack.id ? <LoaderCircle size={14} className="spin" /> : null}Install</button>
               <button type="button" className="secondary-button" disabled={!pack.installed || nodePackBusy === pack.id} onClick={() => void runNodePackAction(pack.id, () => window.minimax.uninstallEngineNodePack(pack.id))}>Uninstall</button>
             </div>
           </div>
@@ -295,7 +295,7 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
         {nodePacks === null && <p className="settings-note">Loading node-pack registry…</p>}
       </div>
       {nodePackError && <div className="llm-test-result fail" role="status"><AlertCircle size={14} /><span>{nodePackError}</span></div>}
-      <p className="settings-note">Uninstall deletes the pack's folder from its target. A revision bump reinstalls at the pin; a folder that already exists without the studio's marker is refused, never replaced. "Installed — restart engine to activate" means the files are in place but the running instance has not loaded them yet. Packs without a license are never vendored — they install only from your own local copy or the fetcher below.</p>
+      <p className="settings-note">Uninstall deletes only folders the studio placed (a marker install) — never a pack that was already there: pre-existing folders in the target are reported as "present — not studio-managed", refused for install-over, and never deleted. A revision bump reinstalls at the pin. "Installed — restart engine to activate" means the files are in place but the running instance has not loaded them yet. Packs without a license are never vendored — they install only from your own local copy or the fetcher below.</p>
     </section>
     <FetchBrowser settings={settings} setSettings={setSettings} onAfterFetch={onScan} onAdoptCheckout={(path) => updateEngine({ checkoutPath: path })} focusEntryIds={packFetchFocus ?? fetchFocusEntryIds} onFocusConsumed={() => { setPackFetchFocus(null); onFetchFocusConsumed?.() }} />
     <section className="settings-section h3-stack-section">
@@ -511,10 +511,17 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
  *  folder verdicts say how far behind the instance is. Order matters — an
  *  active instance wins even if the folder verdict is stale; a folder the
  *  studio placed but the instance has not loaded is honestly "restart to
- *  activate"; a foreign folder (no studio marker) is never called installed. */
+ *  activate"; a foreign folder (no studio marker) is never called installed.
+ *  Bugfix (9om4bi9 follow-up): in an EXTERNAL target a pre-existing folder
+ *  is the normal state of a working instance — the chip says PRESENT (not
+ *  managed by the studio), not "foreign" like an anomaly in a checkout. */
 function nodePackChip(pack: NodePackStatus): { label: string; tone: string } {
   if (pack.instanceState === 'active') return { label: 'installed on instance', tone: 'ok' }
-  if (pack.folderState === 'foreign') return { label: 'foreign folder', tone: 'warn' }
+  if (pack.folderState === 'foreign') {
+    return pack.targetKind === 'external'
+      ? { label: 'present — not studio-managed', tone: 'warn' }
+      : { label: 'foreign folder', tone: 'warn' }
+  }
   if (pack.installed) {
     return pack.instanceState === 'absent'
       ? { label: 'installed — restart engine to activate', tone: 'warn' }

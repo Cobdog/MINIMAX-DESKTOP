@@ -356,7 +356,7 @@ export const SCENARIOS: VisionScenario[] = [
       // DOM truth before capture: the four chip states the rubric blesses.
       await expect(page.locator('[data-node-pack-chip="installed on instance"]').first()).toBeAttached({ timeout: 15_000 })
       await expect(page.locator('[data-node-pack-chip="installed — restart engine to activate"]')).toBeAttached()
-      await expect(page.locator('[data-node-pack-chip="foreign folder"]')).toBeAttached()
+      await expect(page.locator('[data-node-pack-chip="present — not studio-managed"]')).toBeAttached()
       await expect(page.locator('[data-node-pack-chip="missing"]').first()).toBeAttached()
       // Pin the node-packs card to the TOP of the dock body before capture
       // (the overrides-scenario lesson: minimal scrolls straddle the fold).
@@ -389,11 +389,12 @@ export const SCENARIOS: VisionScenario[] = [
       },
       {
         id: 'settings-engine-packs-restart-foreign-1080p',
-        label: 'Settings dock — node packs deeper rows: restart-needed + foreign chips',
+        label: 'Settings dock — node packs deeper rows: restart-needed + present-not-managed chips',
         drive: async (page) => {
           // The pack list is long; the honest states live mid-list. Bring the
           // krea2edit row (installed — restart engine to activate) to the top
-          // so it and the radiance row below (foreign folder) share the frame.
+          // so it and the anypaint row below (present — not studio-managed)
+          // share the frame.
           // (Section class is node-packsS-section — a wrong selector here
           // silently captures an identical frame; the first judged bundle
           // caught exactly that, judge fail 2026-09-19.)
@@ -408,9 +409,9 @@ export const SCENARIOS: VisionScenario[] = [
           SHELL_CONTEXT,
           'The same Settings dock, now scrolled WITHIN the "Node packs" list: the visible frame starts at or near the "comfyui-krea2edit" pack row (bold name, an "Apache-2.0" license badge, a "user-fetch" mode tag); rows above sit above the fold (intended scrolling, not clipping; judge only what is in frame).',
           'The comfyui-krea2edit row carries a STATUS CHIP reading exactly "installed — restart engine to activate" (a warning tone — red-leaning amber in this design language, possibly followed by " · " and a short revision hash): the files are placed in the external folder but the running instance has not loaded them — this honest state is CORRECT, not a defect.',
-          'The row DIRECTLY below (the "krea2-anypaint" pack, an "MIT" license badge) carries a STATUS CHIP reading "foreign folder" (the same warning tone — a folder the studio did not place, reported and refused, never silently replaced): also CORRECT.',
+          'The row DIRECTLY below (the "krea2-anypaint" pack, an "MIT" license badge) carries a STATUS CHIP reading "present — not studio-managed" (the same warning tone — a pre-existing folder in the external target: reported as present, never replaced or deleted by the studio, its Install button disabled with that reason): also CORRECT.',
           'Other visible rows read "missing" (muted tone). Pack descriptions and muted repository-URL meta lines sit under each name; the right column holds the small "local repo directory" input plus "Fetch…", "Install" and "Uninstall" buttons (disabled states are intended availability, not defects; the action column may WRAP to two lines on narrow docks — intended).',
-          'Defects to flag: neither the restart chip nor the foreign chip legible, chips overlapping other text, a chip clipped mid-word, the two warning chips mislabeled (e.g. reading "missing"), descriptions overlapping the action column, an action button clipped to a sliver at the card edge.',
+          'Defects to flag: neither the restart chip nor the present-not-managed chip legible, chips overlapping other text, a chip clipped mid-word, the two warning chips mislabeled (e.g. reading "missing"), descriptions overlapping the action column, an action button clipped to a sliver at the card edge.',
         ].join(' '),
       },
     ],

@@ -31,7 +31,7 @@ const assert = require('node:assert/strict')
 
 const REPO = path.join(__dirname, '..')
 const { instanceNamesForKind, inventoryFromObjectInfo, mergeModelInventories, parseModelsEndpointList } = require(path.join(REPO, 'dist-server', 'server', 'instanceInventory.js'))
-const { ENGINE_NODE_PACKS, checkNodePack, installNodePack, nodePackInstanceState, nodePackInstallDir, resolveNodePackTarget, uninstallNodePack } = require(path.join(REPO, 'dist-server', 'server', 'engineNodes.js'))
+const { ENGINE_NODE_PACKS, checkNodePack, installNodePack, nodePackInstanceState, nodePackInstallDir, resolveNodePackTarget, resolveVendorRoot, uninstallNodePack } = require(path.join(REPO, 'dist-server', 'server', 'engineNodes.js'))
 
 let passed = 0
 function ok(condition, label) {
@@ -174,6 +174,35 @@ async function main() {
     ok(fs.readFileSync(path.join(externalDir, foreignPack.name, 'mine.py'), 'utf8') === '# not ours\n', 'the foreign folder\'s bytes are untouched')
     const foreignStatus = await checkNodePack(foreignPack, target, null, 'unknown')
     ok(foreignStatus.folderState === 'foreign' && foreignStatus.installed === false, 'checkNodePack reports the foreign folder state')
+
+    // ---- the maintainer's report (9om4bi9 follow-up): the external folder
+    // already holds the VENDORED and FIRST-PARTY packs (a working instance).
+    // The rows must report PRESENCE honestly — payload availability stays
+    // truthful (the bug: every foreign row read availability 'unavailable',
+    // which disabled Install and read as "cannot be installed") — and the
+    // engine must refuse to DELETE what it did not place.
+    const vendorRoot = resolveVendorRoot()
+    ok(vendorRoot !== null, 'the vendored payload root resolves in this checkout')
+    const secondExternal = path.join(home, 'external-custom-nodes-working-instance')
+    fs.mkdirSync(secondExternal, { recursive: true })
+    const workingTarget = { kind: 'external', customNodesDir: secondExternal }
+    const vdn = ENGINE_NODE_PACKS.find((entry) => entry.id === 'vdn-h3')
+    const formAdapter = ENGINE_NODE_PACKS.find((entry) => entry.id === 'lora-form-adapter')
+    fs.mkdirSync(path.join(secondExternal, vdn.name), { recursive: true })
+    fs.writeFileSync(path.join(secondExternal, vdn.name, 'their_vdn.py'), '# theirs\n')
+    fs.mkdirSync(path.join(secondExternal, formAdapter.name), { recursive: true })
+    fs.writeFileSync(path.join(secondExternal, formAdapter.name, 'their_adapter.py'), '# theirs\n')
+    const vdnForeign = await checkNodePack(vdn, workingTarget, vendorRoot, 'absent')
+    ok(vdnForeign.folderState === 'foreign' && vdnForeign.installed === false, 'a pre-existing VDN folder is foreign/not-managed, never claimed installed')
+    ok(vdnForeign.availability === 'ready', 'a pre-existing VDN folder keeps payload availability READY (not the unavailable that read as "cannot be installed")')
+    ok(/already present/i.test(vdnForeign.note ?? ''), 'the external-target note leads with presence')
+    const adapterForeign = await checkNodePack(formAdapter, workingTarget, vendorRoot, 'unknown')
+    ok(adapterForeign.folderState === 'foreign' && adapterForeign.availability === 'ready', 'a pre-existing form-adapter folder keeps payload availability ready')
+    const vdnInstallRefused = await installNodePack(vdn, { target: workingTarget })
+    ok(vdnInstallRefused.installed === false && /refusing to replace/i.test(vdnInstallRefused.notes.join(' ')), 'installing the vendored VDN OVER the pre-existing folder is refused (payload present — the refusal is the folder discipline, not a missing source)')
+    const vdnUninstallRefused = await uninstallNodePack(vdn, workingTarget)
+    ok(vdnUninstallRefused.removed === false && /never deletes/i.test(vdnUninstallRefused.reason ?? ''), 'uninstall of a marker-less folder is refused by the engine (the discipline held server-side, not just in the UI)')
+    ok(fs.readFileSync(path.join(secondExternal, vdn.name, 'their_vdn.py'), 'utf8') === '# theirs\n' && fs.existsSync(path.join(secondExternal, formAdapter.name, 'their_adapter.py')), 'both pre-existing folders survive every attempt untouched')
 
     const removed = await uninstallNodePack(pack, target)
     ok(removed.removed === true && !fs.existsSync(path.join(externalDir, pack.name)), 'uninstall deletes exactly the pack folder in the external target')
@@ -337,6 +366,16 @@ async function main() {
         ok(byId.get('krea2edit')?.instanceState === 'absent' && byId.get('krea2edit')?.folderState === 'missing', 'a pack the instance does not serve reads absent + missing')
         ok(byId.get('lora-form-adapter')?.targetKind === 'external', 'the rows report the EXTERNAL target when external mode + folder are configured')
 
+        // The maintainer's report (9om4bi9 follow-up): VDN (vendored) and the
+        // form adapter (first-party) must install into a CLEAN external folder
+        // with NO source directory — direct payload placement.
+        const vdnInstall = await api('/api/lan/engine/nodes/install', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'vdn-h3' }) })
+        ok(vdnInstall.status === 200 && vdnInstall.body.pack.installed === true, `the vendored VDN pack installs into the external folder with no source dir (got ${vdnInstall.status}: ${vdnInstall.body.error ?? 'ok'})`)
+        ok(fs.existsSync(path.join(externalDir, 'ComfyUI-VDN-H3', '.studio-node.json')), 'the VDN payload + marker land inside the external folder')
+        const formInstall = await api('/api/lan/engine/nodes/install', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'lora-form-adapter' }) })
+        ok(formInstall.status === 200 && formInstall.body.pack.installed === true, `the first-party form adapter installs into the external folder with no source dir (got ${formInstall.status}: ${formInstall.body.error ?? 'ok'})`)
+        ok(fs.existsSync(path.join(externalDir, 'minimax-lora-form-adapter', '.studio-node.json')), 'the form-adapter payload + marker land inside the external folder')
+
         // Install from a local copy into the external folder through the route.
         const install = await api('/api/lan/engine/nodes/install', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'krea2edit', sourceDirectory: localCopy }) })
         ok(install.status === 200 && install.body.pack.installed === true, 'install into the external folder succeeds through the route')
@@ -348,7 +387,38 @@ async function main() {
         ok(installedRow.installed === true && installedRow.instanceState === 'absent', 'installed-but-not-loaded reads as the restart-needed state (installed + absent)')
         ok(afterById.get('h3-hybrid-loader')?.instanceState === 'active', 'the live verdict keeps coming from the instance, not the folder')
 
-        // Foreign refusal through the route.
+        // Uninstall through the route.
+        const uninstalled = await api('/api/lan/engine/nodes/uninstall', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'krea2edit' }) })
+        ok(uninstalled.status === 200 && uninstalled.body.pack.installed === false, 'uninstall removes the pack from the external folder')
+        ok(!fs.existsSync(path.join(externalDir, 'comfyui-krea2edit')), 'the external folder no longer holds the pack')
+
+        // ---- the maintainer's exact condition (9om4bi9 follow-up): the
+        // external folder ALREADY holds the packs (a working instance) ----
+        // Remove OUR marker installs first so the fixture folders are truly
+        // foreign (the pre-existing scenario, not our own install).
+        for (const packId of ['vdn-h3', 'lora-form-adapter']) {
+          const cleanup = await api('/api/lan/engine/nodes/uninstall', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: packId }) })
+          ok(cleanup.status === 200, `the marker install of ${packId} uninstalls cleanly before the pre-existing fixtures`)
+        }
+        for (const [, folder, file] of [['vdn-h3', 'ComfyUI-VDN-H3', '__init__.py'], ['lora-form-adapter', 'minimax-lora-form-adapter', 'nodes.py']]) {
+          fs.mkdirSync(path.join(externalDir, folder), { recursive: true })
+          fs.writeFileSync(path.join(externalDir, folder, file), '# their own copy\n')
+        }
+        const presentRows = (await api('/api/lan/engine/nodes')).body.packs
+        const vdnRow = presentRows.find((pack) => pack.id === 'vdn-h3')
+        ok(vdnRow.folderState === 'foreign' && vdnRow.installed === false, 'a pre-existing VDN folder reports foreign/not-installed (never claimed as managed)')
+        ok(vdnRow.availability === 'ready', 'a pre-existing VDN folder keeps its payload availability honest (ready — not the source-less "unavailable" that read as "cannot be installed")')
+        ok(/already present/i.test(vdnRow.note ?? ''), 'the note leads with PRESENCE for a pre-existing external folder')
+        const formRow = presentRows.find((pack) => pack.id === 'lora-form-adapter')
+        ok(formRow.folderState === 'foreign' && formRow.availability === 'ready', 'a pre-existing form-adapter folder reports foreign + payload-ready')
+        const presentInstall = await api('/api/lan/engine/nodes/install', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'vdn-h3' }) })
+        ok(presentInstall.status === 400 && /refusing to replace/i.test(presentInstall.body.error), 'installing OVER a pre-existing folder is still refused (the discipline holds)')
+        const presentUninstall = await api('/api/lan/engine/nodes/uninstall', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'vdn-h3' }) })
+        ok(presentUninstall.status === 404 && /never deletes/i.test(presentUninstall.body.error), 'uninstall of a pre-existing (marker-less) folder is refused by the engine — never deleted')
+        ok(fs.readFileSync(path.join(externalDir, 'ComfyUI-VDN-H3', '__init__.py'), 'utf8') === '# their own copy\n', 'the pre-existing VDN bytes are untouched by both attempts')
+        ok(fs.existsSync(path.join(externalDir, 'minimax-lora-form-adapter', 'nodes.py')), 'the pre-existing form-adapter folder is untouched')
+
+        // Foreign refusal through the route (the user-fetch pack).
         const foreignDir = path.join(externalDir, 'radiance')
         fs.mkdirSync(foreignDir, { recursive: true })
         fs.writeFileSync(path.join(foreignDir, 'user-file.py'), '# theirs\n')
@@ -356,11 +426,6 @@ async function main() {
         ok(foreign.status === 400 && /refusing to replace/i.test(foreign.body.error), 'the route refuses a foreign folder in the external target')
         const foreignRow = (await api('/api/lan/engine/nodes')).body.packs.find((pack) => pack.id === 'radiance')
         ok(foreignRow.folderState === 'foreign', 'the foreign state is listed honestly for the Settings chip')
-
-        // Uninstall through the route.
-        const uninstalled = await api('/api/lan/engine/nodes/uninstall', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'krea2edit' }) })
-        ok(uninstalled.status === 200 && uninstalled.body.pack.installed === false, 'uninstall removes the pack from the external folder')
-        ok(!fs.existsSync(path.join(externalDir, 'comfyui-krea2edit')), 'the external folder no longer holds the pack')
       }
     } finally {
       child.kill('SIGINT')
