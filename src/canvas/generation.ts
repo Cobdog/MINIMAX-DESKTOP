@@ -21,6 +21,7 @@ import { composeH3Prompt, resolveRenderReferenceImages } from '../lib/promptPoli
 import { readStructuredDraft, type StructuredPromptDraft } from '../lib/structuredPrompt'
 import type { H3RenderRequest } from '../lib/h3Submit'
 import type { DocumentChain, DocumentTake } from './derive'
+import { readLoraTimelineDoc, type LoraTimelineDoc } from './loraTimeline'
 
 // ---- per-chain generation settings (the unwound workspace singleton) --------
 
@@ -93,6 +94,13 @@ export type CanvasChainSettings = {
   /** The box draft (null in freeform mode; the deterministic parse fills it
    *  on toggle so the switch never loses text). */
   structured: StructuredPromptDraft | null
+  /** The chain's temporal LoRA stack (7twfk6o): 0–2 user LoRAs loaded after
+   *  the turbo seam, orthogonal to the tier (a quality-tier render may still
+   *  carry style LoRAs). Empty = the base look. */
+  loraStack: Array<{ name: string; strength: number }>
+  /** The authored LoRA-timeline doc (painted ranges + boundary transitions)
+   *  this chain compiles into plan segments — null when never painted. */
+  loraTimeline: LoraTimelineDoc | null
   /** Chain-level model overrides (task euxwdva): explicit checkpoint /
    *  text-encoder / VAE picks for THIS chain's engine family, over the
    *  global (Settings) picks, over inference. Empty/absent = auto — the
@@ -146,6 +154,8 @@ export function chainSettingsDefaults(settings?: AppSettings | null): CanvasChai
     timelineGuides: [],
     promptMode: 'freeform',
     structured: null,
+    loraStack: [],
+    loraTimeline: null,
     modelOverrides: {},
   }
 }
@@ -217,6 +227,13 @@ export function readChainSettings(raw: Record<string, unknown>, settings?: AppSe
     timelineGuides: guides,
     promptMode: raw.promptMode === 'structured' ? 'structured' : 'freeform',
     structured: readStructuredDraft(raw.structured),
+    loraStack: (Array.isArray(raw.loraStack)
+      ? raw.loraStack
+          .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
+          .map((entry) => ({ name: typeof entry.name === 'string' ? entry.name : '', strength: Math.min(2, Math.max(0, num(entry.strength, 1))) }))
+          .filter((entry) => entry.name)
+      : []).slice(0, 2),
+    loraTimeline: raw.loraTimeline && typeof raw.loraTimeline === 'object' && !Array.isArray(raw.loraTimeline) ? readLoraTimelineDoc(raw.loraTimeline) as LoraTimelineDoc : null,
     modelOverrides,
   }
 }
@@ -433,6 +450,9 @@ export function buildCanvasRenderRequest(
     turboLoader: settings.turboLoader,
     experimentalSampling: false,
     loraStrength: settings.loraStrength,
+    // The temporal LoRA stack rides every H3 render this chain submits
+    // (7twfk6o) — the graph chains the loaders after the turbo seam.
+    ...(settings.loraStack.length ? { loraStack: settings.loraStack.map((entry) => ({ ...entry })) } : {}),
     sampler: 'res_multistep',
     scheduler: 'simple',
     refImageSize: settings.refImageSize,
@@ -480,6 +500,7 @@ export function planCanvasGraph(request: H3RenderRequest, selection: ModelSelect
     turboLoader: request.turboLoader,
     experimentalSampling: request.experimentalSampling,
     loraStrength: request.loraStrength,
+    ...(request.loraStack?.length ? { loraStack: request.loraStack.map((entry) => ({ ...entry })) } : {}),
     sampler: request.sampler,
     scheduler: request.scheduler,
     refImageSize: request.refImageSize,

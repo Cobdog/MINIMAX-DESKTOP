@@ -512,6 +512,10 @@ export type GenerationOptions = {
   experimentalSampling?: boolean
   previewOverride?: { frames: number; fps: number; nodeType?: string; vaeName?: string; jpegQuality?: number }
   loraStrength?: number
+  /** The LoRA timeline's user stack (7twfk6o): 0–2 LoRAs chained after the
+   *  turbo seam (slot 0 rides the first-party form adapter when installed).
+   *  Absent/empty = no stack loaders (the graph stays factory-identical). */
+  loraStack?: Array<{ name: string; strength: number }>
   sampler: string
   scheduler: string
   refImageSize: 'match' | 'max'

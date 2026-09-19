@@ -34,6 +34,11 @@ export type H3RenderRequest = {
   turboLoader: 'auto' | 'plain'
   experimentalSampling: boolean
   loraStrength: number
+  /** The chain's temporal LoRA stack (7twfk6o): 0–2 user LoRAs the graph
+   *  chains after the turbo seam (slot 0 rides the first-party form adapter
+   *  when installed). Absent/empty = no stack loaders — the graph stays
+   *  byte-identical to the pre-seam factory output. */
+  loraStack?: Array<{ name: string; strength: number }>
   sampler: string
   scheduler: string
   refImageSize: 'match' | 'max'
@@ -238,6 +243,7 @@ export async function submitH3Render(
       referenceAudios: request.referenceAudios.map((item) => item.path),
       timelineGuides: guides.length ? guides.map((guide) => ({ frameIndex: frameIndexForSeconds(guide.seconds) })) : undefined,
       turboLoader: request.turboLoader,
+      ...(request.loraStack?.length ? { loraStack: request.loraStack } : {}),
       chain: request.chain,
     }, facts.selection, { first, last, images, videos, audios, guides: guideUploads }, facts.info)
     const manifest = buildRenderManifest({
@@ -259,6 +265,10 @@ export async function submitH3Render(
     // The saved-clip facts ride the manifest's motionContext record — the
     // take-landing path reads them to persist forkable latent provenance.
     if (request.chain) manifest.motionContext = { folder: request.chain.folder, clipIndex: request.chain.index }
+    // The temporal LoRA stack rides as its own record (7twfk6o) — take
+    // landing copies it into metrics.loras beside the turbo LoRA the models
+    // record already carries, so every take states WHICH LoRAs were active.
+    if (request.loraStack?.length) manifest.loraStack = request.loraStack.map((entry) => ({ ...entry }))
     if (request.manifestExtra) Object.assign(manifest, request.manifestExtra)
     // livePreview rides the submission (the server asks the engine for
     // native sampler previews via extra_data.preview_method); clientId stays

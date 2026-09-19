@@ -35,6 +35,12 @@ import type { ModelOverrideSlots } from '../types'
 import { useSessionStore } from '../state/sessionStore'
 import { STATUS_LABEL } from './derive'
 import { effectiveMode, IMAGE_ENGINES, MODE_LABEL, readChainSettings, type CanvasChainSettings } from './generation'
+import {
+  compileLoraTimeline, DEFAULT_TRANSITION_WINDOW, LORA_COMBINED_COLLAPSE_RISK, LORA_COMBINED_HEALTHY_MAX, LORA_SLOTS,
+  newLoraRange, newLoraTimelineDoc, snapRangeBoundary,
+  type LoraStackEntry, type LoraTimelineDoc,
+} from './loraTimeline'
+import { GAP_KINDS, GAP_LABEL, type PlanGapKind } from './plan'
 import { useCanvasStore } from './store'
 import type { DocumentChain } from './derive'
 
@@ -55,6 +61,260 @@ function useDebouncedCommit<T>(value: T, skip: boolean, commit: (value: T) => vo
     const timer = window.setTimeout(() => commitRef.current(value), delay)
     return () => window.clearTimeout(timer)
   }, [value, skip, delay])
+}
+
+// ---- the LoRA timeline section (7twfk6o; surface decision 2026-09-19: a
+// SEPARATE properties-panel section — the ranges edit ONE chain's temporal
+// LoRA application, the panel already hosts the chain's LoRA seam, and grid
+// snapping makes legal boundary positions discrete enough for an inline
+// rail. The compiled result is a Director Suite plan document, so the
+// timeline projection (V) renders it for free.) -------------------------------
+
+const LORA_RAIL = { pad: 6, width: 308, paintedY: 6, paintedH: 18, layoutY: 38, layoutH: 12, labelsY: 62 }
+
+function LoraTimelineSection(props: {
+  chainId: string
+  duration: number
+  doc: LoraTimelineDoc | null
+  loraNames: string[]
+  formAdapterInstalled: boolean
+  onChange(next: LoraTimelineDoc | null): void
+  /** Persist the panel's full draft before Apply compiles (the compiler reads
+   *  the persisted chain — the generate() precedent). */
+  flush(): Promise<void>
+}) {
+  const { chainId, duration, doc, loraNames, formAdapterInstalled, onChange, flush } = props
+  const [dragRange, setDragRange] = useState<number | null>(null) // the RIGHT range's sorted index whose start is dragged
+  const [applying, setApplying] = useState(false)
+  const [failure, setFailure] = useState<string[]>([])
+  const railRef = useRef<SVGSVGElement | null>(null)
+
+  const timeline = doc ?? newLoraTimelineDoc()
+  const clip = Math.max(2, Math.min(15, duration))
+  const compile = useMemo(() => compileLoraTimeline(timeline, clip), [timeline, clip])
+  const sorted = useMemo(() => timeline.ranges.slice().sort((a, b) => a.start - b.start), [timeline.ranges])
+
+  const xOf = (seconds: number) => LORA_RAIL.pad + (Math.max(0, Math.min(clip, seconds)) / clip) * LORA_RAIL.width
+  const secondsFromClientX = (clientX: number) => {
+    const rail = railRef.current
+    if (!rail) return 0
+    const rect = rail.getBoundingClientRect()
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / Math.max(1, rect.width)))
+    return ratio * clip
+  }
+
+  const paintRange = () => {
+    // The largest uncovered span gets a fresh 3s range (clamped to the span).
+    const spans: Array<{ start: number; end: number }> = []
+    let cursor = 0
+    for (const range of sorted) {
+      if (range.start > cursor + 1e-9) spans.push({ start: cursor, end: range.start })
+      cursor = Math.max(cursor, range.end)
+    }
+    if (cursor < clip - 1e-9) spans.push({ start: cursor, end: clip })
+    spans.sort((a, b) => b.end - b.start - (a.end - a.start))
+    const target = spans[0]
+    if (!target || target.end - target.start < 2) {
+      useCanvasStore.getState().toast('neutral', 'No uncovered span is long enough to paint — drag an existing boundary instead.')
+      return
+    }
+    const start = Number(target.start.toFixed(3))
+    const end = Number(Math.min(target.end, start + 3).toFixed(3))
+    const base = doc ?? newLoraTimelineDoc()
+    onChange({ ...base, ranges: [...base.ranges, newLoraRange(base.ranges.length, start, end)] })
+  }
+
+  const patchRange = (id: string, part: Partial<{ start: number; end: number; loras: LoraStackEntry[] }>) =>
+    onChange({ ...timeline, ranges: timeline.ranges.map((range) => range.id === id ? { ...range, ...part } : range) })
+
+  const dragBoundaryTo = (rightIndex: number, seconds: number) => {
+    const left = sorted[rightIndex - 1]
+    const right = sorted[rightIndex]
+    if (!left || !right) return
+    const snapped = snapRangeBoundary(seconds, left.start, right.end)
+    if (snapped === null) return
+    const position = Number(snapped.toFixed(3))
+    onChange({
+      ...timeline,
+      ranges: timeline.ranges.map((range) => {
+        if (range.id === left.id) return { ...range, end: position }
+        if (range.id === right.id) return { ...range, start: position }
+        return range
+      }),
+    })
+  }
+
+  const setGap = (afterRangeId: string, kind: string, widthSeconds: number) => {
+    const next = timeline.transitions.filter((entry) => entry.afterRangeId !== afterRangeId)
+    if (kind !== 'cut') next.push({ afterRangeId, kind: kind as PlanGapKind, widthSeconds })
+    onChange({ ...timeline, transitions: next })
+  }
+
+  const apply = async () => {
+    if (!compile.ok || applying) return
+    setApplying(true)
+    setFailure([])
+    try {
+      await flush()
+      const result = await useCanvasStore.getState().applyLoraTimeline(chainId)
+      if (!result.ok && result.reasons) setFailure(result.reasons)
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  const loraOptions = [''].concat(loraNames)
+
+  return <section className="canvas-properties-section canvas-lora-timeline" data-canvas-section="lora-timeline">
+    <label>LoRA timeline <span className="canvas-properties-hint">paint ranges · 17n+5 grid</span></label>
+
+    {/* The rail: painted ranges above, the compiled segment layout + transition
+        windows below — the projection IS the review gate. */}
+    <svg
+      className="canvas-lora-rail" data-canvas-lora-rail viewBox="0 0 320 68" role="img"
+      aria-label="LoRA timeline rail — painted ranges and the compiled segment layout"
+      ref={railRef}
+      onPointerMove={(event) => { if (dragRange !== null) dragBoundaryTo(dragRange, secondsFromClientX(event.clientX)) }}
+      onPointerUp={() => setDragRange(null)}
+      onPointerLeave={() => setDragRange(null)}
+    >
+      <rect x={LORA_RAIL.pad} y={LORA_RAIL.paintedY} width={LORA_RAIL.width} height={LORA_RAIL.paintedH} rx={3} className="canvas-lora-rail-base" />
+      {sorted.map((range, index) => {
+        const x = xOf(range.start)
+        const width = Math.max(2, xOf(range.end) - x)
+        return <g key={range.id} data-canvas-lora-block={index} className={range.loras.length ? 'canvas-lora-block painted' : 'canvas-lora-block empty'}>
+          <rect x={x} y={LORA_RAIL.paintedY} width={width} height={LORA_RAIL.paintedH} rx={2} />
+          {width > 34 && <text x={x + 4} y={LORA_RAIL.paintedY + 12}>{range.loras.length ? range.loras.map((lora) => lora.name.split('/').pop()?.replace(/\.safetensors$/i, '')).join('+') : 'base'}</text>}
+          {index > 0 && <rect
+            className="canvas-lora-handle"
+            data-canvas-lora-handle={index}
+            x={x - 3} y={LORA_RAIL.paintedY - 2} width={6} height={LORA_RAIL.paintedH + 4} rx={2}
+            style={{ cursor: 'ew-resize' }}
+            onPointerDown={(event) => {
+              event.preventDefault()
+              setDragRange(index)
+              try { (event.currentTarget as SVGRectElement).setPointerCapture?.(event.pointerId) } catch { /* best-effort capture */ }
+            }}
+          />}
+        </g>
+      })}
+      {compile.ok && <>
+        {compile.segments.map((segment, index) => {
+          const x = xOf(segment.startSeconds)
+          const width = Math.max(1.5, xOf(segment.endSeconds) - x)
+          return <rect key={segment.id} data-canvas-lora-seg={index} className={`canvas-lora-seg${segment.loras.length ? ' painted' : ''}`} x={x} y={LORA_RAIL.layoutY} width={width} height={LORA_RAIL.layoutH} rx={2}>
+            <title>{`${segment.title} · ${segment.durationSeconds.toFixed(2)}s · ${segment.frames} frames`}</title>
+          </rect>
+        })}
+        {compile.segments.map((segment, index) => {
+          if (!segment.gapAfter || segment.gapAfter.widthSeconds <= 0) return null
+          const center = xOf(segment.endSeconds)
+          const halfWidth = Math.max(1.5, (segment.gapAfter.widthSeconds / clip) * LORA_RAIL.width / 2)
+          return <rect key={`${segment.id}-window`} data-canvas-lora-window={index} className="canvas-lora-window" x={center - halfWidth} y={LORA_RAIL.layoutY - 2} width={halfWidth * 2} height={LORA_RAIL.layoutH + 4} rx={2}>
+            <title>{`${GAP_LABEL[segment.gapAfter.kind]} window · ${segment.gapAfter.widthSeconds.toFixed(2)}s`}</title>
+          </rect>
+        })}
+        <text x={LORA_RAIL.pad} y={LORA_RAIL.labelsY} className="canvas-lora-rail-label">0s</text>
+        <text x={LORA_RAIL.pad + LORA_RAIL.width / 2} y={LORA_RAIL.labelsY} textAnchor="middle" className="canvas-lora-rail-label">{(clip / 2).toFixed(1)}s</text>
+        <text x={LORA_RAIL.pad + LORA_RAIL.width} y={LORA_RAIL.labelsY} textAnchor="end" className="canvas-lora-rail-label">{clip.toFixed(1)}s</text>
+      </>}
+    </svg>
+    <p className="canvas-properties-note">painted ranges above · compiled segments + transition windows below · drag boundaries (grid-snapped){formAdapterInstalled ? ' · slot 1 rides the form adapter' : ''}</p>
+
+    {/* Range rows: the LoRA set + strength per painted range. */}
+    <div className="canvas-lora-ranges" data-canvas-lora-ranges>
+      {sorted.map((range, index) => {
+        const combined = range.loras.reduce((sum, lora) => sum + lora.strength, 0)
+        return <div className="canvas-lora-range" data-canvas-lora-range={index} key={range.id}>
+          <div className="canvas-lora-range-slots">
+            {Array.from({ length: LORA_SLOTS }, (_, slot) => {
+              const entry = range.loras[slot]
+              const disabled = slot > 0 && !range.loras[slot - 1]
+              return <span className="canvas-lora-slot" key={slot}>
+                <select
+                  data-canvas-lora-name={slot}
+                  aria-label={`Range ${index + 1} LoRA ${slot + 1}`}
+                  value={entry?.name ?? ''}
+                  disabled={disabled}
+                  onChange={(event) => {
+                    const name = event.target.value
+                    const loras = range.loras.slice(0, LORA_SLOTS)
+                    if (!name) loras.splice(slot, 1)
+                    else if (slot < loras.length) loras[slot] = { name, strength: loras[slot].strength }
+                    else loras.push({ name, strength: 1 })
+                    patchRange(range.id, { loras })
+                  }}
+                >
+                  {loraOptions.map((name) => <option key={name || 'none'} value={name}>{name || `LoRA ${slot + 1}…`}</option>)}
+                </select>
+                {entry && <input
+                  type="number" min={0} max={2} step={0.05}
+                  data-canvas-lora-strength={slot}
+                  aria-label={`Range ${index + 1} LoRA ${slot + 1} strength`}
+                  value={entry.strength}
+                  onChange={(event) => {
+                    const value = Number(event.target.value)
+                    if (!Number.isFinite(value)) return
+                    const loras = range.loras.slice(0, LORA_SLOTS)
+                    loras[slot] = { name: entry.name, strength: Math.min(2, Math.max(0, value)) }
+                    patchRange(range.id, { loras })
+                  }}
+                />}
+              </span>
+            })}
+          </div>
+          <div className="canvas-lora-range-span">
+            <input type="number" min={0} max={clip} step={0.25} data-canvas-lora-start aria-label={`Range ${index + 1} start seconds`} value={range.start}
+              onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) patchRange(range.id, { start: Math.min(clip, Math.max(0, value)) }) }} />
+            <span>→</span>
+            <input type="number" min={0} max={clip} step={0.25} data-canvas-lora-end aria-label={`Range ${index + 1} end seconds`} value={range.end}
+              onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) patchRange(range.id, { end: Math.min(clip, Math.max(0, value)) }) }} />
+            <span className="canvas-lora-range-note">{(range.end - range.start).toFixed(2)}s</span>
+            <button type="button" className="icon-button" aria-label={`Remove range ${index + 1}`} data-canvas-lora-remove onClick={() => onChange({ ...timeline, ranges: timeline.ranges.filter((entry) => entry.id !== range.id), transitions: timeline.transitions.filter((entry) => entry.afterRangeId !== range.id) })}><X size={11} /></button>
+          </div>
+          {range.loras.length === LORA_SLOTS && <p className={`canvas-lora-combined${combined >= LORA_COMBINED_COLLAPSE_RISK ? ' risk' : combined > LORA_COMBINED_HEALTHY_MAX ? ' warn' : ''}`}>combined strength {combined.toFixed(2)} {combined >= LORA_COMBINED_COLLAPSE_RISK ? '· collapse-risk band' : combined > LORA_COMBINED_HEALTHY_MAX ? '· above the healthy band' : '· healthy'}</p>}
+        </div>
+      })}
+      <div className="canvas-lora-toolbar">
+        <button type="button" className="canvas-chip" data-canvas-lora-paint onClick={paintRange}>+ paint range</button>
+        {doc && <button type="button" className="canvas-chip" data-canvas-lora-clear onClick={() => onChange(null)}>clear</button>}
+      </div>
+    </div>
+
+    {/* Boundary transitions: the measured gap kinds + user-settable windows.
+        Only non-cut choices persist (a missing record IS the cut default). */}
+    {compile.ok && compile.segments.length > 1 && <div className="canvas-lora-gaps" data-canvas-lora-gaps>
+      {compile.segments.slice(0, -1).map((segment, index) => {
+        const gap = segment.gapAfter!
+        return <div className="canvas-lora-gap" data-canvas-lora-gap={index} key={segment.id}>
+          <span className="canvas-lora-gap-label" title={`${segment.title} → ${compile.segments[index + 1].title}`}>{segment.title} →</span>
+          <select data-canvas-lora-gap-kind aria-label={`Transition after segment ${index + 1}`} value={gap.kind}
+            onChange={(event) => setGap(segment.rangeId, event.target.value, Math.round(DEFAULT_TRANSITION_WINDOW[event.target.value as keyof typeof DEFAULT_TRANSITION_WINDOW] * 100) / 100)}>
+            {GAP_KINDS.map((kind) => <option key={kind} value={kind}>{GAP_LABEL[kind]}</option>)}
+          </select>
+          <input type="number" min={0} max={3} step={0.05} data-canvas-lora-gap-width aria-label={`Transition window seconds after segment ${index + 1}`}
+            value={gap.widthSeconds} disabled={gap.kind === 'cut'}
+            onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value) && value >= 0) setGap(segment.rangeId, gap.kind, Math.min(3, value)) }} />
+          <span className="canvas-lora-gap-note">s window</span>
+        </div>
+      })}
+    </div>}
+
+    {/* The live compile — the review gate. An unpainted clip shows the intro
+        note (not an error — the user has not authored anything yet); once a
+        range exists, every refusal reason surfaces. */}
+    {compile.ok
+      ? <p className="canvas-properties-note" data-canvas-lora-compile>{compile.segments.length} segment{compile.segments.length === 1 ? '' : 's'} · {compile.totalSeconds.toFixed(2)}s planned (grid-conformed){compile.warnings.length ? ` · ${compile.warnings.length} note${compile.warnings.length === 1 ? '' : 's'}` : ''}</p>
+      : doc
+        ? <ul className="canvas-properties-warning" data-canvas-lora-errors role="alert">{compile.reasons.map((reason, index) => <li key={index} data-canvas-lora-error={index}>{reason}</li>)}</ul>
+        : <p className="canvas-properties-note">Paint LoRA ranges over this clip — the compiler generates one chain per range, grid-conformed (17n+5) and joined by measured transitions. Nothing submits until you generate.</p>}
+    {compile.ok && compile.warnings.length > 0 && <ul className="canvas-lora-warnings" data-canvas-lora-warnings>{compile.warnings.map((warning, index) => <li key={index} data-canvas-lora-warning={index}>{warning}</li>)}</ul>}
+    {failure.length > 0 && <ul className="canvas-properties-warning" role="alert">{failure.map((reason, index) => <li key={index}>{reason}</li>)}</ul>}
+    <div className="canvas-lora-actions">
+      <button type="button" className="canvas-chip primary" data-canvas-lora-apply disabled={!compile.ok || applying} title="Compile the ranges into a Director Suite plan and seed one chain per segment (nothing auto-submits)"
+        onClick={() => void apply()}>{applying ? 'compiling…' : `compile → ${compile.ok ? compile.segments.length : '—'} segments`}</button>
+    </div>
+  </section>
 }
 
 export function PropertiesPanel() {
@@ -511,6 +771,21 @@ export function PropertiesPanel() {
           <button type="button" className="canvas-chip" aria-label="Randomize seed" onClick={() => patch({ seed: Math.floor(Math.random() * 1_000_000_000) })}><Dices size={12} /></button>
         </div>
       </section>
+
+      {/* The LoRA timeline (7twfk6o) — its OWN section (dated decision
+          2026-09-19), disjoint from every other lane's panel work. Video
+          chains only: painting ranges over the clip's duration. */}
+      {draft.mediaType === 'video' && (
+        <LoraTimelineSection
+          chainId={chain.id}
+          duration={draft.duration}
+          doc={draft.loraTimeline}
+          loraNames={models.filter((file) => file.kind === 'loras').map((file) => file.name)}
+          formAdapterInstalled={Boolean(info && (info as Record<string, unknown>)['MiniMaxH3LoraFormLoader'] !== undefined)}
+          onChange={(loraTimeline) => patch({ loraTimeline })}
+          flush={async () => { await setChainSettings(chain.id, draft) }}
+        />
+      )}
 
       <section className="canvas-properties-section" data-canvas-section="references">
         <label>References <span className="canvas-properties-hint">{referenceSlots} of 9 slots</span></label>

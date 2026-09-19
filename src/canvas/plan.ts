@@ -122,6 +122,11 @@ export type PlanSegment = {
   chainId: string | null
   referenceCharacterIds: string[]
   referenceLocationIds: string[]
+  /** LoRA timeline provenance (7twfk6o): the PAINTED range this segment
+   *  compiled from over the source clip (absent on hand-authored segments). */
+  loraRange?: { start: number; end: number }
+  /** The segment's active LoRA set (absent/empty = the base look). */
+  loraStack?: Array<{ name: string; strength: number }>
 }
 
 export type PlanGap = { afterSegmentId: string; kind: PlanGapKind }
@@ -142,6 +147,25 @@ export function newPlanDocument(brief = ''): PlanDocumentData {
 
 const idList = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && Boolean(item)) : [])
 
+/** Tolerant read of a segment's LoRA-timeline provenance (7twfk6o): a
+ *  well-formed painted range + stack ride along; anything else drops to
+ *  absent — never a crash on foreign data. */
+function readLoraProvenance(item: Record<string, unknown>): Pick<PlanSegment, 'loraRange' | 'loraStack'> {
+  const provenance: Pick<PlanSegment, 'loraRange' | 'loraStack'> = {}
+  const range = item.loraRange && typeof item.loraRange === 'object' ? item.loraRange as Record<string, unknown> : null
+  if (range && typeof range.start === 'number' && Number.isFinite(range.start) && typeof range.end === 'number' && Number.isFinite(range.end)) {
+    provenance.loraRange = { start: range.start, end: range.end }
+  }
+  if (Array.isArray(item.loraStack)) {
+    const stack = item.loraStack
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
+      .map((entry) => ({ name: typeof entry.name === 'string' ? entry.name : '', strength: typeof entry.strength === 'number' && Number.isFinite(entry.strength) ? entry.strength : 1 }))
+      .filter((entry) => entry.name)
+    if (stack.length) provenance.loraStack = stack
+  }
+  return provenance
+}
+
 /** Tolerant read of a plan document row's document_json (external data —
  *  absent keys fall back, wrong shapes never crash). */
 export function readPlanDocument(raw: unknown): PlanDocumentData {
@@ -156,6 +180,7 @@ export function readPlanDocument(raw: unknown): PlanDocumentData {
       chainId: typeof item.chainId === 'string' && item.chainId ? item.chainId : null,
       referenceCharacterIds: idList(item.referenceCharacterIds),
       referenceLocationIds: idList(item.referenceLocationIds),
+      ...readLoraProvenance(item),
     }))
     : []
   const segmentIds = new Set(segments.map((segment) => segment.id))

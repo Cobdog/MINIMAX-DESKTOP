@@ -35,6 +35,10 @@ export type RenderManifest = {
    *  carries Motion-Context save/load nodes (take-landing persists them as
    *  the take's latent provenance). */
   motionContext?: { folder: string; clipIndex: number }
+  /** The chain's temporal LoRA stack (7twfk6o): the user LoRAs the graph
+   *  chained after the turbo seam, recorded at submit time so take landing
+   *  can state which LoRAs were active on this render. */
+  loraStack?: Array<{ name: string; strength: number }>
   /** Model overrides (task euxwdva): the slots that rode an explicit pick
    *  (filename per slot). `models` above already records the RESOLVED
    *  filenames; this says which of them were user picks, not inference. */

@@ -2720,3 +2720,195 @@ test('the camera path editor compiles a path into the Camera box; the composed b
   }
 })
 
+// ---------------------------------------------------------------------------
+// The LoRA timeline (7twfk6o, layer 1 — segment granularity): the properties
+// section paints LoRA ranges over the clip, the compiler generates a Director
+// Suite plan (grid-conformed segments carrying their LoRA stacks + the
+// recorded transition), Apply seeds one chain per segment (consent-gated),
+// and each segment's generate reaches a fake engine as a graph whose LoRA
+// loaders are EXACTLY that segment's stack — plus the provenance trail (plan
+// ranges/stacks + the job manifests take-landing reads for metrics.loras).
+test('the LoRA timeline compiles painted ranges into per-LoRA segment chains (fake engine)', async ({ page, request }) => {
+  const problems = await trackErrors(page)
+  const fsModule = await import('node:fs')
+  const pathModule = await import('node:path')
+  const http = await import('node:http')
+
+  // Dummy model files — the shared H3 set plus two STYLE LoRAs the picker
+  // offers (the timeline's raw material).
+  const modelRoot = pathModule.join(process.cwd(), 'test-home', 'lora-timeline-models')
+  for (const [kind, files] of Object.entries({
+    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
+    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
+    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
+    loras: ['e2e-style-rain.safetensors', 'e2e-style-neon.safetensors'],
+  })) {
+    fsModule.mkdirSync(pathModule.join(modelRoot, kind), { recursive: true })
+    for (const file of files as string[]) fsModule.writeFileSync(pathModule.join(modelRoot, kind, file), 'x')
+  }
+
+  const submittedGraphs: string[] = []
+  const engine = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://engine.local')
+    if (url.pathname === '/system_stats') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ system: {}, devices: [] }))
+      return
+    }
+    if (url.pathname === '/object_info') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ MiniMaxH3HybridLoader: {}, KSamplerSelect: {}, BasicScheduler: {}, VAELoader: {} }))
+      return
+    }
+    if (url.pathname === '/prompt' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (chunk) => { body += chunk })
+      req.on('end', () => {
+        submittedGraphs.push(body)
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ prompt_id: `lt-e2e-${submittedGraphs.length}`, number: submittedGraphs.length, node_errors: {} }))
+      })
+      return
+    }
+    if (url.pathname.startsWith('/history/')) {
+      // Still running — the job parks running on its chain (the honest state).
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ nothing: { prompt: [], outputs: {}, status: { completed: false } } }))
+      return
+    }
+    if (url.pathname === '/interrupt' && req.method === 'POST') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ cancelled: true, state: 'canceled' }))
+      return
+    }
+    if (url.pathname === '/queue' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ queue_running: [], queue_pending: [] }))
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  const enginePort = await new Promise<number>((resolve) => engine.listen(0, '127.0.0.1', () => resolve((engine.address() as { port: number }).port)))
+
+  const originalSettings = ((await (await request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
+  try {
+    const listed = await (await request.get('/api/lan/jobs')).json() as { jobs?: Array<Record<string, unknown>> }
+    const stale = (listed.jobs ?? []).filter((job) => job.status === 'queued' || job.status === 'running').map((job) => ({ ...job, status: 'cancelled' }))
+    if (stale.length) await request.post('/api/lan/jobs', { data: { jobs: stale } })
+    await request.post('/api/lan/settings', { data: { settings: {
+      ...originalSettings,
+      comfyUrl: `http://127.0.0.1:${enginePort}`,
+      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: pathModule.join(modelRoot, 'diffusion_models'), text_encoders: pathModule.join(modelRoot, 'text_encoders'), vae: pathModule.join(modelRoot, 'vae'), loras: pathModule.join(modelRoot, 'loras') },
+    } } })
+    await resetSession(page)
+    await page.goto('/?canvas=1')
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    await page.locator('[data-canvas-prompt]').fill('the neon market wakes under rain')
+    await page.locator('[data-canvas-submit]').click()
+    const tile = page.locator('[data-canvas-tile]').first()
+    await expect(tile).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('[data-canvas-engine]')).toHaveAttribute('data-engine-connected', 'true', { timeout: 15_000 })
+    const panel = page.locator('[data-canvas-properties]')
+    await expect(panel).toBeVisible()
+    // The launcher's auto-submit parks running on the chain — harmless here:
+    // the segment graphs are counted from a snapshot taken now, and the
+    // launcher's job carries no loraStack so the manifest poll ignores it.
+    await expect.poll(() => submittedGraphs.length, { timeout: 15_000 }).toBeGreaterThanOrEqual(1)
+    const graphsBefore = submittedGraphs.length
+
+    // ---- the LoRA timeline section: paint two ranges over the 5s clip ----
+    const section = panel.locator('[data-canvas-section="lora-timeline"]')
+    await expect(section).toBeVisible()
+    await section.locator('[data-canvas-lora-paint]').click()
+    await expect(section.locator('[data-canvas-lora-range]')).toHaveCount(1)
+    // Split the clip: range 1 ends at 3s, the second paint takes the tail.
+    await section.locator('[data-canvas-lora-end]').first().fill('3')
+    await section.locator('[data-canvas-lora-paint]').click()
+    await expect(section.locator('[data-canvas-lora-range]')).toHaveCount(2)
+    // The degenerate guard at the surface: a 1s range refuses with the reason.
+    await section.locator('[data-canvas-lora-end]').first().fill('1')
+    await expect(section.locator('[data-canvas-lora-errors]')).toBeVisible()
+    await expect(section.locator('[data-canvas-lora-error="0"]')).toContainText('Paint it at least 2s')
+    await expect(section.locator('[data-canvas-lora-apply]')).toBeDisabled()
+    await section.locator('[data-canvas-lora-end]').first().fill('3')
+    await expect(section.locator('[data-canvas-lora-errors]')).toHaveCount(0)
+    // The compiled projection shows before anything applies (the review gate).
+    await expect(section.locator('[data-canvas-lora-compile]')).toContainText('2 segments')
+    await expect(section.locator('[data-canvas-lora-seg]')).toHaveCount(2)
+    // Paint the LoRA sets: rain over the first range, neon over the second.
+    await section.locator('[data-canvas-lora-range]').nth(0).locator('[data-canvas-lora-name="0"]').selectOption('e2e-style-rain.safetensors')
+    await section.locator('[data-canvas-lora-range]').nth(1).locator('[data-canvas-lora-name="0"]').selectOption('e2e-style-neon.safetensors')
+    // The boundary joins through the measured FLF splice (not the cut default)
+    // — the window visualizes at the edge.
+    await section.locator('[data-canvas-lora-gap-kind]').first().selectOption('flf')
+    await expect(section.locator('[data-canvas-lora-window]')).toHaveCount(1)
+
+    // ---- Apply: the consent-gated compile (plan + seeded chains) ----
+    await section.locator('[data-canvas-lora-apply]').click()
+    const overlay = page.locator('[data-canvas-timeline]')
+    await expect(overlay).toBeVisible({ timeout: 15_000 })
+    await expect(overlay.locator('[data-canvas-segment]')).toHaveCount(2, { timeout: 15_000 })
+
+    // The plan document records the provenance: painted ranges + per-segment
+    // stacks + the FLF gap (AC4).
+    let document = await activeDocument(page)
+    expect(document.plans?.length).toBeGreaterThan(0)
+    const plan = document.plans![document.plans.length - 1].document as {
+      segments: Array<{ id: string; prompt: string; duration: number; chainId: string | null; loraRange?: { start: number; end: number }; loraStack?: Array<{ name: string; strength: number }> }>
+      gaps: Array<{ afterSegmentId: string; kind: string }>
+    }
+    expect(plan.segments.length).toBe(2)
+    expect(plan.segments[0].prompt).toBe('the neon market wakes under rain')
+    expect(plan.segments[0].loraStack).toEqual([{ name: 'e2e-style-rain.safetensors', strength: 1 }])
+    expect(plan.segments[1].loraStack).toEqual([{ name: 'e2e-style-neon.safetensors', strength: 1 }])
+    expect(plan.segments[0].loraRange).toEqual({ start: 0, end: 3 })
+    expect(plan.segments[1].loraRange).toEqual({ start: 3, end: 5 })
+    // Grid-conformed durations (17n+5): 3s → 73f = 3.0417s, 2s → 56f = 2.3333s
+    // (the plan document rounds to 4 decimals — clean JSON numbers).
+    expect(Math.abs(plan.segments[0].duration - 73 / 24)).toBeLessThan(1e-3)
+    expect(Math.abs(plan.segments[1].duration - 56 / 24)).toBeLessThan(1e-3)
+    expect(plan.gaps.length).toBe(1)
+    expect(plan.gaps[0].kind).toBe('flf')
+    expect(plan.gaps[0].afterSegmentId).toBe(plan.segments[0].id)
+    // Every segment seeded its own chain carrying ITS stack (AC2).
+    document = await activeDocument(page)
+    const seeded = plan.segments.map((segment) => document.chains.find((chain) => chain.id === segment.chainId))
+    expect(seeded.every(Boolean)).toBe(true)
+    expect((seeded[0]!.settings.loraStack as Array<{ name: string }>).map((entry) => entry.name)).toEqual(['e2e-style-rain.safetensors'])
+    expect((seeded[1]!.settings.loraStack as Array<{ name: string }>).map((entry) => entry.name)).toEqual(['e2e-style-neon.safetensors'])
+    // The compiled FLF join plugs into the EXISTING latent-episode machinery:
+    // two seeded segments joined by an FLF gap arm the episode trigger (the
+    // Motion-Context render this engine fake cannot execute — readiness is
+    // checked at submit, the arming is the compiler's contract).
+    await expect(overlay.locator('[data-canvas-plan-episode]')).toBeEnabled()
+
+    // ---- per-segment submits: the fake engine receives each stack (AC5) ----
+    await overlay.locator('[data-canvas-segment-generate]').nth(0).click()
+    await overlay.locator('[data-canvas-segment-generate]').nth(1).click()
+    await expect.poll(() => submittedGraphs.length, { timeout: 20_000 }).toBeGreaterThanOrEqual(graphsBefore + 2)
+    const segmentGraphs = submittedGraphs.slice(graphsBefore).map((body) => {
+      const graph = JSON.parse(body) as { prompt: Record<string, { class_type: string; inputs: Record<string, unknown> }> }
+      return Object.values(graph.prompt)
+        .filter((node) => node.class_type === 'LoraLoaderModelOnly' || node.class_type === 'MiniMaxH3LoraFormLoader')
+        .map((node) => `${node.class_type}:${node.inputs.lora_name}@${node.inputs.strength_model ?? node.inputs.strength}`)
+    })
+    expect(segmentGraphs.length).toBe(2)
+    expect(segmentGraphs.some((loaders) => loaders.join('|') === 'LoraLoaderModelOnly:e2e-style-rain.safetensors@1')).toBe(true)
+    expect(segmentGraphs.some((loaders) => loaders.join('|') === 'LoraLoaderModelOnly:e2e-style-neon.safetensors@1')).toBe(true)
+
+    // The provenance record rides the JOB manifests (what take-landing copies
+    // into metrics.loras): each segment's running job carries its stack.
+    await expect.poll(async () => {
+      const jobs = ((await (await request.get('/api/lan/jobs')).json()) as { jobs: Array<{ status: string; manifest?: { loraStack?: Array<{ name: string }> } }> }).jobs
+      return jobs.filter((job) => job.status === 'running' && (job.manifest?.loraStack?.length ?? 0) > 0).length
+    }, { timeout: 15_000 }).toBe(2)
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
+    await resetSession(page).catch(() => undefined)
+    fsModule.rmSync(modelRoot, { recursive: true, force: true })
+    await new Promise<void>((resolve) => engine.close(() => resolve()))
+  }
+})
+
