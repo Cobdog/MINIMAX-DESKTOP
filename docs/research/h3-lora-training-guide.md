@@ -300,3 +300,123 @@ own docs — §2 of the survey; musubi's own 480×832×124 f peak measured here 
 20,074 MiB, which likely explains the conflation), and musubi's released 5–15 s
 duration gate vs DiffSynX's any-grid acceptance (sub-5 s rungs are outside the
 released training range — sidecar warning).
+
+---
+
+## 9. Addendum 2026-09-19 — Fizgig assessment: ADOPT-regardless findings folded into the corpus (task 6niii1p)
+
+> Source: the fresh-release assessment of **shootthesound/Fizgig** ("Krea 2, MiniMax & Klein 9B LoRA-LoKR Studio" — Apache-2.0, independent multi-model trainer, own model implementations, musubi-shaped CLI/TOML surface; NOT a musubi/DiffSynX fork), read 2026-09-19 from its README, docs/ (CLI.md, FINETUNE_HOWDOI.md, REFMOD_HOWDOI.md, release notes), and the full git tree/releases/issues APIs. **Full assessment text: Flux comment `ei6xf7u` on task `6niii1p`.** Method: no GPU, no code, nothing of ours measured — every number below is **[COMM — Fizgig's own A/Bs, self-reported]** unless tagged otherwise. Registry context: Fizgig itself is TRY-OUT-GATED as a third trainer entry (replaces nothing — musubi keeps the default, DiffSynX keeps sub-5 s + control; Fizgig has no controlnet branch at all); the five findings below were adopted into the corpus now regardless, per the maintainer's timing decision (Flux comment `l0r9wgt` on `6niii1p`). The single-rung try-out A/B — Fizgig vs musubi, identical 480×832×39 f rank-16 rung, de-distillation ON in both arms — is the Fizgig try-out A/B (rswg9db), maintainer-timed into the **next GPU testing batch** (not a standalone dispatch); its measured results land back here as a further dated addendum.
+
+### 9.1 Measured H3 block-role map [COMM — Fizgig A/B work, v6.2.0, 2026-09-18]
+
+Their FINETUNE doc plus the v6.2.0 release map the 50 main DiT blocks by role, from
+their own A/B testing (single maintainer, with a credited A/B collaborator):
+
+| Blocks | Role (their claim) | Their recipe use |
+|---|---|---|
+| 0–5 | "deform anatomy and pull the dataset's colour into the render" | excluded in ALL recipes |
+| 20–49 | likeness / identity — across photos + clips + voice | "Default" mode (v6.2.0 renaming) |
+| 6–49 | motion | "More Blocks" mode |
+| 38–48 (README) / 34–49 (fine-tune doc) | voice core | voice-bearing runs |
+
+The 38–48 vs 34–49 split is a discrepancy inside their own docs, recorded as-is
+(unresolved which is the current claim).
+
+Why adopt: §2.1's LoRA target set spans all 50 main blocks identically in all three
+trainers, but **which subset carries which concept was documented nowhere we hold**
+— this is the first dated, measured doctrine of it. Feeds: (a) the trainer-registry
+capability profiles and the sidecar's trainer-selection table; (b) a cheap A/B axis
+for our own ladder (e.g. character rung targeting 20–49 only vs all-50 at the rank-16
+default). It is their measurement on their stack — a strong prior our envelope-style
+rungs can falsify cheaply, not settled law.
+
+### 9.2 Voice durations ride the same 17n+5 grid — over TIME [COMM]
+
+New corpus fact. Our §3.2 grid knowledge is frame-side (video frames = 17n+5 at
+exactly 24 fps); Fizgig's dataset contract requires **voice-item durations of
+literally (17n+5)/24 s, ±25 ms** — audio shares the video temporal grid:
+
+| n | frames (= 17n+5) | voice duration (s) |
+|---|---|---|
+| 1 | 22 | 0.917 |
+| 2 | 39 | 1.625 |
+| 3 | 56 | 2.333 |
+| 4 | 73 | 3.042 |
+| 5 | 90 | 3.750 |
+| 6 | 107 | 4.458 |
+| 7 | 124 | 5.167 |
+
+Architecturally consistent with what we measured (§8 item 6: audio rows are a pure
+function of duration in the single-stream model). Their contract details that bind
+us: 32 kHz stereo or silent; non-conforming files **REFUSED, not fixed**; voice
+items without a .txt caption are **silently skipped** (their footgun — our dataset
+manager must surface, never silently drop). Constraint lands in the dataset
+manager's audio export: snap voice-item durations to the same grid the video cutter
+already enforces.
+
+### 9.3 De-distillation TRIPLE-confirmed as load-bearing (third independent data point)
+
+1. **Our own requirement** — musubi refuses plain flow as a recipe at all; DiffSynX
+   ships DeCFG (`--preset_lora_path` / `--training_cfg_scale 4`) [DOC, §2.3 above].
+2. **The doctrine harvest's Klein-True pin** — the community's answer to Klein-9B's
+   guidance distillation was a full **de-distilled fine-tune** (wikeeyang True-V1,
+   cfg 1.0, 20–30 steps), not more prompting [COMM — per-model-prompt-doctrines.md §2,
+   task `6niii1p` lane 2].
+3. **Fizgig (v5.8.0, 2026-09-15)** — Ostris's frozen `minimax_h3_training_adapter`
+   LoRA (HF ostris/minimax_h3_training_adapter, fl2va/ref2va variants) loaded UNDER
+   the training LoRA on every step, off for previews, never saved into output —
+   **shipped ON BY DEFAULT**, with a README A/B: **50% likeness reached 7 epochs
+   sooner** [COMM — self-reported].
+
+Three independent implementers, one conclusion: guidance-distillation removal is
+load-bearing for this model generation, not a quality nicety — this hardens §1's
+"every real 500+ step run needs a loss method" from strong recommendation to
+triple-attested baseline. Mechanism note: Fizgig/Ostris is **weights-side**
+(de-distilled base under the training LoRA), ours is **loss-side** (DeCFG /
+guidance loss, §2.3) — and the try-out A/B (rswg9db) runs de-distillation ON in
+both arms (Ostris adapter in Fizgig, DeCFG in musubi), so it doubles as the first
+controlled cross-mechanism comparison. The adapter files were already in our corpus
+(§2.3 method 1, source 3 — ostris FL2VA r32 / Ref2VA r16); new here is the measured
+A/B, the default-on policy, and the frozen/never-saved discipline (which mirrors
+musubi's "do not load at inference" rule for DeCFG).
+
+### 9.4 Quantization error calibration for H3-class bases [COMM — Fizgig's measurements, theirs-not-ours]
+
+Their published base-quant error numbers: **int8 ~0.17% / HQQ 4-bit group-8 ~4.8% /
+NF4 ~11%** (their box, their metric; unverified here — a reference tier, not our
+number).
+
+Calibration value: both our proven 24 GB routes ride int8 (DiffSynX int8-convrot
+DiT; musubi pruned int8) — 0.17% says the int8 tier is effectively neutral, i.e.
+quality is not lost at the memory ladder's int8 rungs. NF4 (DiffSynX
+`--quant_options bitsandbytes_nf4`, Inline's 4-bit-only tier, Fizgig's ≤12 GB
+tier) carries a real ~11% error by their measure — worth a warning label in the
+sidecar's memory-tier picker, and consistent with the envelope never needing NF4
+on 24 GB. A/B hygiene (from the assessment): their quant stack is their own
+(int8 Triton kernels, HQQ, TREAD, convrot) — any cross-trainer A/B must hold the
+base quant fixed across arms; rswg9db does (identical rung, de-distill on both).
+
+### 9.5 Watchlist: TREAD token routing as a training-speed technique (arXiv 2501.04765) [COMM — their claim; mechanism paper-cited]
+
+Fizgig runs TREAD token routing DEFAULT-ON for clips: roughly half the video tokens
+skip the intermediate blocks (2→47 per their README — ~46 of 50) during training;
+output is an ordinary LoRA. Neither musubi nor DiffSynX has it. Why it is on our
+watchlist: long-clip step economics are our pain point (124 f = 55.5 s/it DiffSynX /
+34 s/it musubi; 345 f = 60 s/it even at 544×320 — §8 items 2–3), and halving
+token-block visits on long rungs is exactly the shape of relief that would change
+dataset design (more long clips affordable). NOT adopted: it is their
+implementation claim on their stack, unmeasured on ours, and it changes what the
+LoRA sees mid-training — it enters only as a measured arm if the try-out A/B
+(rswg9db) grants Fizgig a registry entry, or as a standalone port investigation if
+long-clip rungs become the binding constraint.
+
+### 9.6 Verdict table
+
+| Finding | Verdict | Where it lands |
+|---|---|---|
+| Block-role map (0–5 anatomy/color damage; 20–49 likeness; 6–49 motion; voice 38–48 or 34–49) | **ADOPT as prior** — their A/B, self-reported, dated 2026-09-18 | §9.1; registry capability profiles; cheap ladder A/B axis |
+| Voice grid = (17n+5)/24 s ±25 ms, 32 kHz stereo-or-silent, refuse-don't-fix, caption-or-skip footgun | **ADOPT** — new corpus fact | §9.2; dataset-manager audio export + silent-drop guard |
+| Ostris adapter default-on; 50% likeness 7 epochs sooner (v5.8.0, 2026-09-15) | **ADOPT** — third independent de-distillation data point | §9.3; hardens §1/§2.3; feeds rswg9db (both arms de-distilled) |
+| Quant error: int8 0.17% / HQQ g8 4.8% / NF4 11% | **ADOPT as calibration** — theirs-not-ours | §9.4; sidecar tier labels; A/B base-quant hygiene |
+| TREAD token routing (arXiv 2501.04765), default-on for clips | **WATCHLIST** — speed technique | §9.5; long-clip rungs; gated on rswg9db / port investigation |
+| Fizgig as a trainer (registry third entry) | **TRY-OUT-GATED** — replaces nothing | the Fizgig try-out A/B (rswg9db); full assessment at Flux `ei6xf7u` on `6niii1p` |

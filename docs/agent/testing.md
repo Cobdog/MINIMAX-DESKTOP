@@ -36,9 +36,10 @@ TMPDIR=/home/agent/tmp-gpu pnpm gate
 
 Runs the entire verification chain in canonical order — `typecheck` →
 `lint` → `license:audit` → unit suites (`test`, `test:registry`,
-`test:h3img`, `test:storage`, `test:realtime`, `test:filmstrip`, `test:llm`,
-`test:engine`, `test:runtime`, `test:fetcher`, `test:instance`, `test:lora-form`,
-`test:poserig`, `test:camera`, `test:datasets`) → `build` → `smoke:server`
+`test:h3img`, `test:storage`, `test:documents`, `test:realtime`,
+`test:filmstrip`, `test:llm`, `test:engine`, `test:runtime`, `test:fetcher`,
+`test:instance`, `test:lora-form`, `test:poserig`, `test:camera`,
+`test:canvas`, `test:benchmarks`, `test:datasets`) → `build` → `smoke:server`
 → e2e → vision-capture — each in its own process, wall-clock timed,
 known-benign output filtered (the filter tally prints so nothing disappears
 silently), one summary table, non-zero exit on any failure. A failed
@@ -127,10 +128,12 @@ fallback).
   noise (`environmental` in e2e/app.spec.ts) — CI has no engine. To simulate
   CI locally: point test-home settings' comfyUrl at a dead port, restore
   after.
-- **Benchmark harness (in flight)**: a committed-suite + candidate-CLI
-  harness ("the snake-oil detector", Flux cp96zdm/cq67hpj) is landing around
-  `benchmarks/` + `scripts/test-benchmarks.cjs`; when it lands it joins the
-  gate chain — update this file and the README when it does.
+- **Benchmark harness (LANDED — cp96zdm/cq67hpj; note updated 2026-09-19,
+  conformance audit u7rxi2e, per this paragraph's own instruction)**: the
+  committed-suite + candidate-CLI harness ("the snake-oil detector") lives at
+  `benchmarks/` + `scripts/test-benchmarks.cjs` and runs in the gate chain
+  (`test:benchmarks`). It enforces the eol-pin invariant on byte-compared
+  artifacts (no i/crlf in the index; LEADERBOARD.md pinned `eol=lf`).
 
 ## Scratch ports
 
