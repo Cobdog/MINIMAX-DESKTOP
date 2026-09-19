@@ -290,6 +290,129 @@ export const SCENARIOS: VisionScenario[] = [
     ],
   },
   {
+    // External-instance integration (task 9om4bi9) — DOM-truth at capture:
+    // the Settings engine + node-packs cards against a fake external
+    // instance: the external custom-nodes folder field, the LIVE chips
+    // (installed-on-instance, restart-needed, foreign, missing), and the
+    // instance-merged model counts.
+    id: 'settings-engine-packs',
+    label: 'Settings dock — external engine + node packs with live statuses',
+    run: async (page) => {
+      const originalSettings = ((await (await page.request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
+      ;(page as unknown as { __visionOriginalSettings?: Record<string, unknown> }).__visionOriginalSettings = originalSettings
+      const objectInfo = {
+        UNETLoader: { input: { required: { unet_name: [['instance-h3-fl2va.safetensors', 'instance-h3-ref2va.safetensors'], {}] } } },
+        MiniMaxH3HybridLoader: { input: { required: {} } },
+        KSamplerSelect: { input: { required: {} } },
+      }
+      const engine = http.createServer((req, res) => {
+        const url = new URL(req.url ?? '/', 'http://engine.local')
+        if (url.pathname === '/system_stats') {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ system: { comfyui_version: 'v0.34.0' }, devices: [] }))
+          return
+        }
+        if (url.pathname === '/object_info') {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify(objectInfo))
+          return
+        }
+        if (url.pathname === '/models/diffusion_models') {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify(['instance-h3-fl2va.safetensors', 'instance-h3-ref2va.safetensors']))
+          return
+        }
+        res.writeHead(404)
+        res.end()
+      })
+      const enginePort = await new Promise<number>((resolvePort) => engine.listen(0, '127.0.0.1', () => resolvePort((engine.address() as { port: number }).port)))
+      ;(page as unknown as { __visionEngine?: http.Server }).__visionEngine = engine
+
+      const externalDir = resolve('test-home/vision-external-nodes')
+      mkdirSync(join(externalDir, 'comfyui-krea2edit'), { recursive: true })
+      // A studio marker (installed-but-not-loaded → the restart chip) and a
+      // foreign folder (no marker → the foreign chip).
+      writeFileSync(join(externalDir, 'comfyui-krea2edit', '.studio-node.json'), `${JSON.stringify({ id: 'krea2edit', revision: '86f886dac23013d88996d3a2e99093ba44d322fb', mode: 'user-fetch', installedAt: Date.now(), source: 'vision' }, null, 2)}\n`)
+      mkdirSync(join(externalDir, 'radiance'), { recursive: true })
+      writeFileSync(join(externalDir, 'radiance', 'user-file.py'), '# theirs\n')
+
+      const modelRoot = resolve('test-home/vision-instance-models')
+      for (const kind of ['diffusion_models', 'text_encoders', 'vae', 'loras', 'vae_approx', 'clip_vision']) mkdirSync(join(modelRoot, kind), { recursive: true })
+      await page.request.post('/api/lan/settings', { data: { settings: {
+        ...originalSettings,
+        comfyUrl: `http://127.0.0.1:${enginePort}`,
+        modelRoot,
+        paths: Object.fromEntries(['diffusion_models', 'text_encoders', 'vae', 'loras', 'vae_approx', 'clip_vision'].map((kind) => [kind, join(modelRoot, kind)])),
+        engine: { ...(originalSettings.engine as Record<string, unknown>), mode: 'external', externalCustomNodesDir: externalDir },
+      } } })
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+      await page.goto('/')
+      await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+      await page.locator('[data-canvas-settings-button]').click()
+      await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible()
+      // DOM truth before capture: the four chip states the rubric blesses.
+      await expect(page.locator('[data-node-pack-chip="installed on instance"]').first()).toBeAttached({ timeout: 15_000 })
+      await expect(page.locator('[data-node-pack-chip="installed — restart engine to activate"]')).toBeAttached()
+      await expect(page.locator('[data-node-pack-chip="foreign folder"]')).toBeAttached()
+      await expect(page.locator('[data-node-pack-chip="missing"]').first()).toBeAttached()
+      // Pin the node-packs card to the TOP of the dock body before capture
+      // (the overrides-scenario lesson: minimal scrolls straddle the fold).
+      await page.evaluate(() => { document.querySelector('.node-packs-section')?.scrollIntoView({ block: 'start' }) })
+      await page.waitForTimeout(400)
+    },
+    after: async (page) => {
+      const original = (page as unknown as { __visionOriginalSettings?: Record<string, unknown> }).__visionOriginalSettings
+      if (original) await page.request.post('/api/lan/settings', { data: { settings: original } }).catch(() => undefined)
+      const engine = (page as unknown as { __visionEngine?: http.Server }).__visionEngine
+      engine?.close()
+      rmSync(resolve('test-home/vision-external-nodes'), { recursive: true, force: true })
+      rmSync(resolve('test-home/vision-instance-models'), { recursive: true, force: true })
+      const close = page.locator('[data-canvas-settings-close]')
+      if (await close.count()) await close.click().catch(() => undefined)
+    },
+    checkpoints: [
+      {
+        id: 'settings-engine-packs-1080p',
+        label: 'Settings dock — node packs card top: live instance chip + missing rows',
+        rubric: [
+          SHELL_CONTEXT,
+          'A floating Settings DOCK panel over the dimmed canvas (header "Settings — docked" with an × close). The body scrolls INSIDE the panel and this capture is taken with the "Node packs" card pinned at the TOP of the visible body; sections above it sit above the fold (intended scrolling, not clipping; judge only what is in frame).',
+          'The "Node packs" card is in frame: title "Node packs" with a branch icon and a sub-line explaining packs install into the engine\'s custom-node folder and that the status chip is LIVE from the connected instance.',
+          'Each pack row is a horizontal strip: a bold pack name, a small license badge (e.g. "Apache-2.0", "GPL-3.0", "NO-LICENSE"), an install-mode tag ("user-fetch" / "first-party"), a STATUS CHIP, a one-line description, a muted meta line with the repository URL and pinned revision, and at the right a small "local repo directory" input plus "Fetch…", "Install" and "Uninstall" buttons (buttons may be disabled — intended availability state, not a defect).',
+          'STATUS CHIPS in THIS frame: at least one row reading "installed on instance" (a green/positive tone — the instance serves that pack\'s node classes with no folder install at all) and most visible rows reading "missing" (a muted tone). The other chip states live further down the list and are captured in the companion checkpoint — their absence here is NOT a defect.',
+          'The engine being a fake local instance is invisible in this capture; no red error banner is expected in this card (the route-level error strip ABSENT is correct).',
+          'Defects to flag: rows with no status chip, two chips overlapping other text, a chip clipped mid-word, the card title truncated, pack descriptions overlapping the action column.',
+        ].join(' '),
+      },
+      {
+        id: 'settings-engine-packs-restart-foreign-1080p',
+        label: 'Settings dock — node packs deeper rows: restart-needed + foreign chips',
+        drive: async (page) => {
+          // The pack list is long; the honest states live mid-list. Bring the
+          // krea2edit row (installed — restart engine to activate) to the top
+          // so it and the radiance row below (foreign folder) share the frame.
+          // (Section class is node-packsS-section — a wrong selector here
+          // silently captures an identical frame; the first judged bundle
+          // caught exactly that, judge fail 2026-09-19.)
+          await page.evaluate(() => {
+            const rows = Array.from(document.querySelectorAll<HTMLElement>('.node-packs-section .node-pack-row'))
+            const target = rows.find((row) => row.textContent?.includes('comfyui-krea2edit'))
+            target?.scrollIntoView({ block: 'start' })
+          })
+          await page.waitForTimeout(400)
+        },
+        rubric: [
+          SHELL_CONTEXT,
+          'The same Settings dock, now scrolled WITHIN the "Node packs" list: the visible frame starts at or near the "comfyui-krea2edit" pack row (bold name, an "Apache-2.0" license badge, a "user-fetch" mode tag); rows above sit above the fold (intended scrolling, not clipping; judge only what is in frame).',
+          'The comfyui-krea2edit row carries a STATUS CHIP reading exactly "installed — restart engine to activate" (an amber/warning tone, possibly followed by " · " and a short revision hash): the files are placed in the external folder but the running instance has not loaded them — this honest state is CORRECT, not a defect.',
+          'Further down the visible rows, a "radiance" pack row carries a STATUS CHIP reading "foreign folder" (amber/warning — a folder the studio did not place, reported and refused, never silently replaced): also CORRECT.',
+          'Other visible rows read "missing" (muted tone). Pack descriptions and muted repository-URL meta lines sit under each name; the right column holds the small "local repo directory" input plus "Fetch…", "Install" and "Uninstall" buttons (disabled states are intended availability, not defects).',
+          'Defects to flag: neither the restart chip nor the foreign chip legible, chips overlapping other text, a chip clipped mid-word, the two amber chips mislabeled (e.g. reading "missing"), descriptions overlapping the action column.',
+        ].join(' '),
+      },
+    ],
+  },
+  {
     id: 'library-empty',
     label: 'Library projection — empty state (V)',
     run: async (page) => {

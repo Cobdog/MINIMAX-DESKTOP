@@ -45,6 +45,11 @@ jobs:
       # the transport mocked throughout — catalog integrity, pin stamping,
       # verification, placement policy, routes. Zero real network in CI.
       - run: pnpm test:fetcher
+      # External-instance integration (task 9om4bi9): instance-sourced model
+      # inventory parsing/merge, the external custom-nodes install target +
+      # foreign refusal, live pack detection, app-relative io defaults, and
+      # the routes against a local fake engine. Zero real network.
+      - run: pnpm test:instance
       # Form-adapter node (task k271ykk): python math/golden suite (numpy
       # installed above) + the server-side detection/registry/catalog tests.
       - run: pnpm test:lora-form

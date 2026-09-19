@@ -1,6 +1,5 @@
 import fs from 'node:fs'
 import http from 'node:http'
-import os from 'node:os'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { WebSocketServer } from 'ws'
@@ -1373,8 +1372,11 @@ test('latent-fork rendering: the Motion-Context graph pins the source clip (prob
   // B1 (latent durability): the engine-side latent file EXISTS under the
   // output directory when the render completes — the landing path resolves
   // the engine-relative path against it and registers the substrate into
-  // the content-addressed blob tree (hashed, evictable, exported).
-  const latentFile = path.join(os.homedir(), 'Documents', 'ComfyUI', 'output', 'h3_context', seeded.chainId!, 'clip_00001.safetensors')
+  // the content-addressed blob tree (hashed, evictable, exported). The
+  // EFFECTIVE output directory is read from the server (the app-relative
+  // default landed with task 9om4bi9 — never hardcode it).
+  const effectiveOutput = ((await (await page.request.get('/api/lan/settings')).json()) as { settings: { outputDirectory: string } }).settings.outputDirectory
+  const latentFile = path.join(effectiveOutput, 'h3_context', seeded.chainId!, 'clip_00001.safetensors')
   fs.mkdirSync(path.dirname(latentFile), { recursive: true })
   fs.writeFileSync(latentFile, `e2e-latent-substrate-${seeded.chainId}`)
   const landed = await page.evaluate(() => (window as unknown as { __canvasScenario(name: string): { ok: boolean; chainId?: string } }).__canvasScenario('complete-mock-latent'))

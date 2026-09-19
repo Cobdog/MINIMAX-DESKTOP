@@ -128,10 +128,14 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
   const [nodePackBusy, setNodePackBusy] = useState<string | null>(null)
   const [nodePackError, setNodePackError] = useState<string | null>(null)
   const [nodePackSource, setNodePackSource] = useState<Record<string, string>>({})
+  /** One-click fetch deep-link from a pack row (task 9om4bi9): focuses the
+   *  FetchBrowser's catalog entry — the same mechanism the canvas menu rows
+   *  use. Consumed by FetchBrowser, then cleared here. */
+  const [packFetchFocus, setPackFetchFocus] = useState<string[] | null>(null)
   const refreshNodePacks = async () => {
     try { setNodePacks((await window.minimax.listEngineNodePacks()).packs) } catch { /* listed on next action; errors surface there */ }
   }
-  useEffect(() => { void refreshNodePacks() }, [settings.engine.checkoutPath])
+  useEffect(() => { void refreshNodePacks() }, [settings.engine.checkoutPath, settings.engine.externalCustomNodesDir, settings.engine.mode])
   const runNodePackAction = async (id: string, action: () => Promise<NodePackStatus>) => {
     setNodePackBusy(id)
     setNodePackError(null)
@@ -161,6 +165,14 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
         <button type="button" className={settings.engine.mode !== 'managed' ? 'tier-selected' : ''} onClick={() => updateEngine({ mode: 'external' })}><strong>External</strong><small>Use the ComfyUI address above — the studio never launches an engine.</small></button>
         <button type="button" className={settings.engine.mode === 'managed' ? 'tier-selected' : ''} onClick={() => updateEngine({ mode: 'managed' })}><strong>Managed</strong><small>The studio starts, configures, and stops its own instance. Ports stay clear of 8188/8189.</small></button>
       </div>
+      {settings.engine.mode === 'external' && <>
+        {/* External-instance integration (task 9om4bi9): the studio does not
+            launch this engine — point it at the instance's own custom_nodes
+            folder and node packs install/clone into it (same pinned-revision
+            and foreign-refusal discipline as the managed checkout). */}
+        <div className="connection-row"><div className="field-group grow"><label htmlFor="external-custom-nodes">External custom nodes folder</label><input id="external-custom-nodes" data-external-custom-nodes value={settings.engine.externalCustomNodesDir} placeholder="/path/to/ComfyUI/custom_nodes — pack installs land here" onChange={(event) => updateEngine({ externalCustomNodesDir: event.target.value })} /></div></div>
+        <p className="settings-note managed-engine-note" data-external-custom-nodes-note>External mode keeps the connection above as the engine. With a custom nodes folder set, the node packs below install into it — from a local copy here, or one consented fetch of the pinned revision (Fetchable items). Model inventory is pulled from the instance itself, so no local model roots are required.</p>
+      </>}
       {settings.engine.mode === 'managed' && <>
         <div className="connection-row"><div className="field-group grow"><label htmlFor="managed-checkout">ComfyUI checkout (existing)</label><input id="managed-checkout" value={settings.engine.checkoutPath} placeholder="/path/to/ComfyUI — must contain main.py" onChange={(event) => updateEngine({ checkoutPath: event.target.value })} /></div></div>
         <p className="settings-note managed-engine-note">No checkout yet? The <strong>Fetchable items</strong> section below can fetch the reference ComfyUI revision (v0.34.0, GPL-3.0, consent-gated) and then nominate it here with one click.</p>
@@ -209,31 +221,38 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
         <p className="settings-note">Start persists the current form, mirrors your model folders into the checkout as extra_model_paths.yaml (weights are never copied), and points the studio at the launched instance. Stopping is graceful-then-forced; the log tail above shows the engine's own output.</p>
       </>}
     </section>
-    <section className="settings-section node-packs-section" aria-label="Managed node packs">
+    <section className="settings-section node-packs-section" aria-label="Node packs">
       <div className="settings-heading">
-        <div><GitBranch size={19} /><span><strong>Node packs</strong><small>Custom nodes the studio can place into the configured checkout's custom_nodes/ — vendored at a pinned revision (license-verified) or fetched from a local copy with your consent. Weights are linked, never copied.</small></span></div>
+        <div><GitBranch size={19} /><span><strong>Node packs</strong><small>Custom nodes the studio can place into the engine's custom-node folder — the managed checkout's custom_nodes/, or the external custom nodes folder above. Vendored at a pinned revision (license-verified), installed from a local copy, or fetched with your consent. Weights are linked, never copied. The status chip is LIVE: it reads the connected instance's own node list.</small></span></div>
       </div>
       <div className="node-pack-list">
-        {(nodePacks ?? []).map((pack) => (
+        {(nodePacks ?? []).map((pack) => {
+          const chip = nodePackChip(pack)
+          return (
           <div className="node-pack-row" key={pack.id}>
             <div className="node-pack-main">
-              <div className="node-pack-title"><strong>{pack.name}</strong><span className={`node-pack-license ${pack.licenseSpdx === 'NO-LICENSE' ? 'warn' : ''}`}>{pack.licenseSpdx}</span><span className="node-pack-mode">{pack.installMode === 'vendor' ? (pack.vendored ? 'vendored' : 'vendor payload missing') : 'user-fetch'}</span>{pack.installed && <span className="node-pack-installed">installed{pack.installedRevision ? ` · ${pack.installedRevision.slice(0, 8)}` : ''}</span>}</div>
+              <div className="node-pack-title"><strong>{pack.name}</strong><span className={`node-pack-license ${pack.licenseSpdx === 'NO-LICENSE' ? 'warn' : ''}`}>{pack.licenseSpdx}</span><span className="node-pack-mode">{pack.installMode === 'vendor' ? (pack.vendored ? 'vendored' : 'vendor payload missing') : pack.installMode === 'first-party' ? 'first-party' : 'user-fetch'}</span><span className={`node-pack-installed ${chip.tone}`} data-node-pack-chip={chip.label}>{chip.label}{pack.installedRevision && chip.label.startsWith('installed') ? ` · ${pack.installedRevision.slice(0, 8)}` : ''}</span></div>
               <small>{pack.description}</small>
               <small className="node-pack-meta">{pack.repoUrl} @ {pack.pinnedRevision.slice(0, 12)}{pack.note ? ` — ${pack.note}` : ''}</small>
             </div>
             <div className="node-pack-actions">
               {pack.installMode === 'user-fetch' && <input className="node-pack-source" placeholder="local repo directory (absolute)" value={nodePackSource[pack.id] ?? ''} onChange={(event) => setNodePackSource({ ...nodePackSource, [pack.id]: event.target.value })} aria-label={`Local source directory for ${pack.name}`} />}
+              {pack.installMode === 'user-fetch' && !pack.installed && <button type="button" className="secondary-button" title={`Fetch the pinned revision of ${pack.name} (consent-gated)`} onClick={() => {
+                setPackFetchFocus([`pack:${pack.id}`])
+                document.querySelector('.fetch-section')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+              }} data-node-pack-fetch={pack.id}>Fetch…</button>}
               <button type="button" className="secondary-button" disabled={nodePackBusy === pack.id || pack.availability === 'unavailable' || (pack.installMode === 'user-fetch' && !nodePackSource[pack.id]?.trim())} onClick={() => void runNodePackAction(pack.id, () => window.minimax.installEngineNodePack(pack.id, nodePackSource[pack.id]?.trim() || undefined))}>{nodePackBusy === pack.id ? <LoaderCircle size={14} className="spin" /> : null}Install</button>
               <button type="button" className="secondary-button" disabled={!pack.installed || nodePackBusy === pack.id} onClick={() => void runNodePackAction(pack.id, () => window.minimax.uninstallEngineNodePack(pack.id))}>Uninstall</button>
             </div>
           </div>
-        ))}
+          )
+        })}
         {nodePacks === null && <p className="settings-note">Loading node-pack registry…</p>}
       </div>
       {nodePackError && <div className="llm-test-result fail" role="status"><AlertCircle size={14} /><span>{nodePackError}</span></div>}
-      <p className="settings-note">Uninstall deletes the pack's custom_nodes/ folder. A revision bump reinstalls at the pin. Packs without a license are never vendored — they install only from your own local copy or the fetcher below.</p>
+      <p className="settings-note">Uninstall deletes the pack's folder from its target. A revision bump reinstalls at the pin; a folder that already exists without the studio's marker is refused, never replaced. "Installed — restart engine to activate" means the files are in place but the running instance has not loaded them yet. Packs without a license are never vendored — they install only from your own local copy or the fetcher below.</p>
     </section>
-    <FetchBrowser settings={settings} setSettings={setSettings} onAfterFetch={onScan} onAdoptCheckout={(path) => updateEngine({ checkoutPath: path })} focusEntryIds={fetchFocusEntryIds} onFocusConsumed={onFetchFocusConsumed} />
+    <FetchBrowser settings={settings} setSettings={setSettings} onAfterFetch={onScan} onAdoptCheckout={(path) => updateEngine({ checkoutPath: path })} focusEntryIds={packFetchFocus ?? fetchFocusEntryIds} onFocusConsumed={() => { setPackFetchFocus(null); onFetchFocusConsumed?.() }} />
     <section className="settings-section h3-stack-section">
       <div className="settings-heading"><div><Gauge size={19} /><span><strong>H3 engine stack</strong><small>Compares the selected files with the validated official ComfyUI stack.</small></span></div><span className={`health-pill ${h3Report.validated ? 'online' : ''}`}>{h3Report.validated ? 'Validated' : h3Report.ready ? 'Custom' : 'Incomplete'}</span></div>
       <div className="h3-stack-list">{h3Report.rows.map((row) => <div key={row.label} className={row.validated ? 'validated' : 'custom'}><span>{row.validated ? <Check size={14} /> : <AlertCircle size={14} />}</span><div><strong>{row.label}</strong><small title={row.selected || row.expected}>{row.selected || `Missing · expected ${row.expected}`}</small></div><em>{row.override ? 'Override' : row.validated ? 'Recommended' : row.selected ? 'Non-standard' : 'Missing'}</em></div>)}</div>
@@ -255,11 +274,11 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
               const autoFile = inferredOverrideSlotFile(family.id, slot, models)
               const outcome = value ? overridePickOutcome(family.id, slot, value, models) : null
               return <div className={`model-override-row${outcome?.state === 'refused' ? ' refused' : outcome?.state === 'degraded' ? ' degraded' : ''}`} key={slot} data-model-override-slot={slot}>
-                <div className="model-override-slot"><strong>{SLOT_LABELS[slot]}</strong><small>{candidates.length} {kind.replace(/_/g, ' ')} file{candidates.length === 1 ? '' : 's'} scanned</small></div>
+                <div className="model-override-slot"><strong>{SLOT_LABELS[slot]}</strong><small>{candidates.length} {kind.replace(/_/g, ' ')} file{candidates.length === 1 ? '' : 's'}{candidates.some((model) => model.source === 'instance') ? ' · includes instance-listed' : ''}</small></div>
                 <div className="select-wrap">
                   <select aria-label={`${family.label} — ${SLOT_LABELS[slot]}`} value={value} onChange={(event) => setModelOverride(family.id, slot, event.target.value)}>
                     <option value="">auto (inferred){autoFile ? ` — ${autoFile}` : ' — nothing detected'}</option>
-                    {candidates.map((model) => <option key={model.name} value={model.name}>{model.name}</option>)}
+                    {candidates.map((model) => <option key={model.name} value={model.name}>{model.name}{model.source === 'instance' || model.source === 'both' ? ' (instance)' : ''}</option>)}
                   </select>
                   <ChevronDown size={15} />
                 </div>
@@ -427,11 +446,29 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
       </div>
       <p className="settings-note">Prompts go directly to the local Ollama server. Embedding and cloud-backed models are excluded.</p>
     </section>
-    <section className="settings-section"><div className="settings-heading"><div><HardDrive size={19} /><span><strong>Model locations</strong><small>Files are indexed in place and are never moved or copied.</small></span></div><button className="secondary-button" onClick={onScan} disabled={scanning}>{scanning ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}{scanning ? 'Scanning…' : 'Rescan'}</button></div><div className="path-table">{pathRows.map((row) => { const count = models.filter((model) => model.kind === row.kind).length; return <div className="path-row" key={row.kind}><div className="path-kind"><Folder size={17} /><span><strong>{row.label}</strong><small>{row.note}</small></span></div><div className="path-input"><input value={settings.paths[row.kind]} onChange={(event) => setSettings({ ...settings, paths: { ...settings.paths, [row.kind]: event.target.value } })} /></div><span className="file-count">{count} files</span></div>})}</div></section>
-    <section className="settings-section"><div className="settings-heading"><div><FolderOpen size={19} /><span><strong>Output & clip tools</strong><small>Completed videos, extracted frames, and editor exports stay local.</small></span></div></div><div className="connection-row"><div className="field-group grow"><label htmlFor="output-path">Output directory</label><input id="output-path" value={settings.outputDirectory} onChange={(event) => setSettings({ ...settings, outputDirectory: event.target.value })} /></div></div><div className="connection-row clip-tool-path"><div className="field-group grow"><label htmlFor="ffmpeg-path">FFmpeg executable</label><input id="ffmpeg-path" value={settings.ffmpegPath} onChange={(event) => setSettings({ ...settings, ffmpegPath: event.target.value })} /></div></div><p className="settings-note">The clip editor uses FFmpeg for frame extraction, trim points, joining, and full-project export.</p></section>
+    <section className="settings-section"><div className="settings-heading"><div><HardDrive size={19} /><span><strong>Model locations</strong><small>Local roots are indexed in place and never moved or copied — and when the engine is connected, its own model listing is merged in (tagged "instance"), so an external instance needs no local roots at all.</small></span></div><button className="secondary-button" onClick={onScan} disabled={scanning}>{scanning ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}{scanning ? 'Scanning…' : 'Rescan'}</button></div><div className="path-table">{pathRows.map((row) => { const kindModels = models.filter((model) => model.kind === row.kind); const instanceCount = kindModels.filter((model) => model.source === 'instance' || model.source === 'both').length; const localCount = kindModels.length - kindModels.filter((model) => model.source === 'instance').length; return <div className="path-row" key={row.kind}><div className="path-kind"><Folder size={17} /><span><strong>{row.label}</strong><small>{row.note}</small></span></div><div className="path-input"><input value={settings.paths[row.kind]} onChange={(event) => setSettings({ ...settings, paths: { ...settings.paths, [row.kind]: event.target.value } })} /></div><span className="file-count" data-model-kind-count={row.kind}>{kindModels.length} files{instanceCount > 0 ? ` · ${instanceCount} instance · ${localCount} local` : ''}</span></div>})}</div></section>
+    <section className="settings-section"><div className="settings-heading"><div><FolderOpen size={19} /><span><strong>Input &amp; output</strong><small>Renders and prepared media stay local, under the app folder by default.</small></span></div></div><div className="connection-row"><div className="field-group grow"><label htmlFor="input-path">Input directory</label><input id="input-path" data-input-path value={settings.inputDirectory} onChange={(event) => setSettings({ ...settings, inputDirectory: event.target.value })} /></div></div><div className="connection-row"><div className="field-group grow"><label htmlFor="output-path">Output directory</label><input id="output-path" value={settings.outputDirectory} onChange={(event) => setSettings({ ...settings, outputDirectory: event.target.value })} /></div></div><div className="connection-row clip-tool-path"><div className="field-group grow"><label htmlFor="ffmpeg-path">FFmpeg executable</label><input id="ffmpeg-path" value={settings.ffmpegPath} onChange={(event) => setSettings({ ...settings, ffmpegPath: event.target.value })} /></div></div><p className="settings-note">Unset, both default under the app's own data folder (<code>&lt;app&gt;/data/input</code>, <code>&lt;app&gt;/data/output</code>) — nothing lands in Documents. An absolute path you set is kept as-is. The clip editor uses FFmpeg for frame extraction, trim points, joining, and full-project export.</p></section>
     <section className="settings-section license-source-section" aria-label="License and source">
       <div className="settings-heading"><div><Scale size={19} /><span><strong>License &amp; source</strong><small>This app is free software — its source belongs to everyone who uses it.</small></span></div></div>
       <p className="settings-note">MiniMax Studio is licensed under the <strong>GNU AGPLv3</strong> (<a href="https://github.com/Cobdog/MINIMAX-DESKTOP/blob/main/LICENSE" target="_blank" rel="noreferrer">full text</a>). The corresponding source lives at <a href="https://github.com/Cobdog/MINIMAX-DESKTOP" target="_blank" rel="noreferrer">github.com/Cobdog/MINIMAX-DESKTOP</a> — if you run a modified copy for others over a network, share your source with them. Third-party components and model-weight licenses are inventoried in <a href="https://github.com/Cobdog/MINIMAX-DESKTOP/blob/main/docs/LICENSES.md" target="_blank" rel="noreferrer">docs/LICENSES.md</a>.</p>
     </section>
   </div>
+}
+
+/** The live chip for one node-pack row (task 9om4bi9): the INSTANCE verdict
+ *  (object_info node classes) is the source of truth for "installed"; the
+ *  folder verdicts say how far behind the instance is. Order matters — an
+ *  active instance wins even if the folder verdict is stale; a folder the
+ *  studio placed but the instance has not loaded is honestly "restart to
+ *  activate"; a foreign folder (no studio marker) is never called installed. */
+function nodePackChip(pack: NodePackStatus): { label: string; tone: string } {
+  if (pack.instanceState === 'active') return { label: 'installed on instance', tone: 'ok' }
+  if (pack.folderState === 'foreign') return { label: 'foreign folder', tone: 'warn' }
+  if (pack.installed) {
+    return pack.instanceState === 'absent'
+      ? { label: 'installed — restart engine to activate', tone: 'warn' }
+      : { label: 'installed', tone: 'ok' }
+  }
+  if (pack.targetKind === 'none') return { label: 'no install target', tone: 'muted' }
+  return { label: 'missing', tone: 'muted' }
 }

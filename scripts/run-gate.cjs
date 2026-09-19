@@ -65,6 +65,11 @@ const SUITES = [
   // verification, pin stamping, placement, routes — transport mocked, zero
   // real network.
   { name: 'test:fetcher', command: 'pnpm run test:fetcher', timeoutMs: 20 * MINUTE },
+  // External-instance integration (task 9om4bi9): instance inventory parsing
+  // + merge, the external custom-nodes install target (path construction,
+  // foreign refusal), live pack detection from object_info, app-relative io
+  // defaults, and the routes against a local fake engine. Zero real network.
+  { name: 'test:instance', command: 'pnpm run test:instance', timeoutMs: 20 * MINUTE },
   // Form-adapter node (task k271ykk): the node package's python suite
   // (centered-fit math, both traps, the kijai golden) + the server-side
   // registry/catalog/detection suites. Needs python3+numpy for the math

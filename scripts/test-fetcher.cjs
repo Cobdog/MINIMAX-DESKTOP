@@ -352,7 +352,7 @@ async function main() {
     const pack = findNodePack('krea2-controlnet')
     const status = (await manager.catalogStatus()).find((entry) => entry.id === 'pack:krea2-controlnet')
     ok(status.state === 'placed' && status.installedRevision === stamped, 'catalog status reports the stamped revision')
-    const packStatus = await checkNodePack(pack, checkout, null)
+    const packStatus = await checkNodePack(pack, { kind: 'checkout', checkout }, null)
     ok(packStatus.installed && !/pinned revision changed/.test(packStatus.note ?? ''), 'a stamped branch pin does NOT read as registry drift in the pack status')
 
     // A sha pin (Larryvrh) must use the pin verbatim — no resolve call.

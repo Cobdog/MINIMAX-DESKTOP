@@ -31,7 +31,8 @@ import { EngineProcess } from './engineProcess'
 import { RuntimeManager, RuntimeConfigError } from './runtime'
 import { ENGINE_PATCH_IDS, revertEnginePatch, ENGINE_PATCHES } from './enginePatch'
 import { mergeEngineProfiles } from './engineProfiles'
-import { checkAllNodePacks, findNodePack, installNodePack, isUsableCheckout, resolveVendorRoot, uninstallNodePack } from './engineNodes'
+import { checkAllNodePacks, ENGINE_NODE_PACKS, findNodePack, installNodePack, isUsableCheckout, nodePackInstanceState, resolveNodePackTarget, resolveVendorRoot, uninstallNodePack } from './engineNodes'
+import { INVENTORY_MODEL_KINDS, instanceNamesForKind, inventoryFromObjectInfo, mergeModelInventories, parseModelsEndpointList } from './instanceInventory'
 import { h3FormForScannedFile } from './modelForms'
 import { FETCH_ENTRY_IDS, findFetchEntry } from './fetchCatalog'
 import { FetchManager, transportForEnvironment } from './fetcher'
@@ -432,8 +433,15 @@ export function createStudioServer(paths: StudioServerPaths) {
   try {
     studioRepo = createStudioRepository(join(dirname(paths.settingsFile), 'studio.db'), {
       // Blob-registration scoping (security hardening 1): the live output
-      // directory joins the studio home as a legal blob source.
-      allowedSourceRoots: () => [join(loadSettingsCached().outputDirectory)],
+      // directory joins the studio home as a legal blob source; the input
+      // directory (task 9om4bi9) joins it — media staged there is servable
+      // and uploadable like any studio-prepared artifact. An empty input
+      // dir contributes NOTHING (join('') would resolve to the CWD — never
+      // a legal blob root).
+      allowedSourceRoots: () => {
+        const settings = loadSettingsCached()
+        return settings.inputDirectory ? [join(settings.outputDirectory), join(settings.inputDirectory)] : [join(settings.outputDirectory)]
+      },
     })
     logEvent({ kind: 'db.ready', file: 'studio.db' })
   } catch (error) {
@@ -536,13 +544,28 @@ export function createStudioServer(paths: StudioServerPaths) {
 
   function defaultSettings(): AppSettings {
     const root = join(paths.documentsDirectory, 'ComfyUI', 'models')
+    // App-relative io defaults (task 9om4bi9, dated decision 2026-09-19):
+    // the APP FOLDER ROOT is the studio home — the directory holding
+    // settings.json (MINIMAX_STUDIO_HOME, default ~/.minimax-studio). It is
+    // the one directory the app owns on every platform (the token and
+    // studio.db already live there), it isolates automatically under test
+    // homes, and — unlike an install-root-relative path — it stays writable
+    // for packaged copies. Output default CHANGES from the old
+    // ~/Documents/ComfyUI/output: migration-safe because an existing
+    // settings.json always carries an absolute outputDirectory, and
+    // normalizeSettings lets raw values win — only first runs (and
+    // shape-invalid values) ever see these defaults. The input default is
+    // new alongside it: <home>/data/input, the studio's staging root for
+    // media it prepares for renders.
+    const home = resolve(dirname(paths.settingsFile))
     return {
       comfyUrl: 'http://127.0.0.1:8188',
       ollamaUrl: 'http://127.0.0.1:11434',
       ollamaModel: 'qwen3:latest',
       modelRoot: root,
       paths: Object.fromEntries(modelKinds.map((kind) => [kind, join(root, kind)])) as Record<ModelKind, string>,
-      outputDirectory: join(paths.documentsDirectory, 'ComfyUI', 'output'),
+      outputDirectory: join(home, 'data', 'output'),
+      inputDirectory: join(home, 'data', 'input'),
       ffmpegPath: existsSync('C:\\FFMPEG\\bin\\ffmpeg.exe') ? 'C:\\FFMPEG\\bin\\ffmpeg.exe' : 'ffmpeg',
       generationDefaults: {
         resolution: '1344x768', duration: 5, turbo: 'off', steps: 30,
@@ -564,7 +587,7 @@ export function createStudioServer(paths: StudioServerPaths) {
       // user switches the mode AND nominates a checkout. Increment 2 adds
       // launch profiles (default/vdn seeds) and an EMPTY patch-consent
       // ledger — no patch may ever apply without a recorded consent.
-      engine: { mode: 'external', checkoutPath: '', pythonPath: '', portPreference: 0, autoStart: false, profile: 'default', profiles: mergeEngineProfiles({}, ENGINE_PATCH_IDS).profiles, patches: {} },
+      engine: { mode: 'external', checkoutPath: '', externalCustomNodesDir: '', pythonPath: '', portPreference: 0, autoStart: false, profile: 'default', profiles: mergeEngineProfiles({}, ENGINE_PATCH_IDS).profiles, patches: {} },
       // Local-first fetcher (task hgjbea2): an EMPTY consent ledger — the
       // network is never touched without a recorded, license-matching
       // consent for a catalog id.
@@ -588,10 +611,12 @@ export function createStudioServer(paths: StudioServerPaths) {
     const problems: string[] = []
     const isAbsoluteOrEmpty = (value: string) => !value || isAbsolute(value)
     if (!isAbsoluteOrEmpty(String(candidate.outputDirectory ?? ''))) problems.push('outputDirectory must be an absolute path.')
+    if (!isAbsoluteOrEmpty(String(candidate.inputDirectory ?? ''))) problems.push('inputDirectory must be an absolute path.')
     const ffmpeg = String(candidate.ffmpegPath ?? '')
     if (ffmpeg && !isAbsolute(ffmpeg) && /[/\\]/.test(ffmpeg)) problems.push('ffmpegPath must be an absolute path (or the bare "ffmpeg" to resolve via PATH).')
     if (!isAbsoluteOrEmpty(String(candidate.engine?.pythonPath ?? ''))) problems.push('engine.pythonPath must be an absolute path.')
     if (!isAbsoluteOrEmpty(String(candidate.engine?.checkoutPath ?? ''))) problems.push('engine.checkoutPath must be an absolute path.')
+    if (!isAbsoluteOrEmpty(String(candidate.engine?.externalCustomNodesDir ?? ''))) problems.push('engine.externalCustomNodesDir must be an absolute path.')
     if (!isAbsoluteOrEmpty(String(candidate.modelRoot ?? ''))) problems.push('modelRoot must be an absolute path.')
     for (const kind of modelKinds) {
       if (!isAbsoluteOrEmpty(String(candidate.paths?.[kind] ?? ''))) problems.push(`paths.${kind} must be an absolute path.`)
@@ -612,9 +637,11 @@ export function createStudioServer(paths: StudioServerPaths) {
     const shapeProblems = settingsPathProblems(raw)
     const sanitized: Partial<AppSettings> = { ...raw }
     if (shapeProblems.some((problem) => problem.startsWith('outputDirectory'))) sanitized.outputDirectory = defaults.outputDirectory
+    if (shapeProblems.some((problem) => problem.startsWith('inputDirectory'))) sanitized.inputDirectory = defaults.inputDirectory
     if (shapeProblems.some((problem) => problem.startsWith('ffmpegPath'))) sanitized.ffmpegPath = defaults.ffmpegPath
     if (shapeProblems.some((problem) => problem.startsWith('engine.pythonPath'))) sanitized.engine = { ...(sanitized.engine ?? defaults.engine), pythonPath: '' }
     if (shapeProblems.some((problem) => problem.startsWith('engine.checkoutPath'))) sanitized.engine = { ...(sanitized.engine ?? defaults.engine), checkoutPath: '' }
+    if (shapeProblems.some((problem) => problem.startsWith('engine.externalCustomNodesDir'))) sanitized.engine = { ...(sanitized.engine ?? defaults.engine), externalCustomNodesDir: '' }
     if (shapeProblems.some((problem) => problem.startsWith('modelRoot'))) sanitized.modelRoot = defaults.modelRoot
     if (shapeProblems.some((problem) => problem.includes(`paths.`))) sanitized.paths = { ...defaults.paths, ...raw.paths }
     if (sanitized.paths) {
@@ -628,6 +655,11 @@ export function createStudioServer(paths: StudioServerPaths) {
       ...sanitized,
       paths: { ...defaults.paths, ...sanitized.paths },
       generationDefaults,
+      // App-relative io defaults (task 9om4bi9): an UNSET (empty) directory
+      // is the default's to fill — only an absolute user value survives here
+      // (existing absolute settings are never rewritten: migration-safe).
+      outputDirectory: stringField(sanitized.outputDirectory, defaults.outputDirectory).trim() || defaults.outputDirectory,
+      inputDirectory: stringField(sanitized.inputDirectory, defaults.inputDirectory).trim() || defaults.inputDirectory,
       llamaCppUrl: stringField(raw.llamaCppUrl, defaults.llamaCppUrl).trim(),
       llamaCppModel: stringField(raw.llamaCppModel, defaults.llamaCppModel).trim(),
       llamaVisionModel: stringField(raw.llamaVisionModel, defaults.llamaVisionModel).trim(),
@@ -638,6 +670,11 @@ export function createStudioServer(paths: StudioServerPaths) {
       engine: {
         mode: sanitized.engine?.mode === 'managed' ? 'managed' : 'external',
         checkoutPath: stringField(sanitized.engine?.checkoutPath, '').trim(),
+        // External-instance custom nodes folder (task 9om4bi9): the install
+        // target for packs when the engine is an instance the studio does
+        // not launch. Absolute-or-empty, normalized like every spawn/write
+        // path.
+        externalCustomNodesDir: stringField(sanitized.engine?.externalCustomNodesDir, '').trim(),
         pythonPath: stringField(sanitized.engine?.pythonPath, '').trim(),
         portPreference: Number.isInteger(raw.engine?.portPreference) && (raw.engine?.portPreference as number) >= 1024 && (raw.engine?.portPreference as number) <= 65535 ? raw.engine?.portPreference as number : 0,
         autoStart: raw.engine?.autoStart === true,
@@ -840,6 +877,42 @@ export function createStudioServer(paths: StudioServerPaths) {
   async function scanModels(settings: AppSettings) {
     const groups = await Promise.all(modelKinds.map((kind) => scanDirectory(settings.paths[kind], kind)))
     return groups.flat().sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  /** Instance-sourced inventory (task 9om4bi9): asks the CONNECTED engine
+   *  what it serves. Preference order per kind: the /models/{kind} route
+   *  (folder truth — files with no loader node included), then the loader
+   *  enums inside a fetched object_info payload. Any failure degrades to an
+   *  empty listing for that kind — the local scan is never blocked by an
+   *  engine hiccup, and object_info is fetched at most once per call. */
+  async function instanceInventoryFor(settings: AppSettings, preloadedObjectInfo?: unknown): Promise<Record<ModelKind, string[]>> {
+    const fromObjectInfo = inventoryFromObjectInfo(preloadedObjectInfo ?? await comfyFetch(settings.comfyUrl, '/object_info').catch((error: unknown) => {
+      logFailure('inventory/object-info', error, undefined, 'debug')
+      return null
+    }))
+    const inventory: Record<ModelKind, string[]> = {
+      diffusion_models: [], text_encoders: [], vae: [], loras: [], vae_approx: [], clip_vision: [],
+    }
+    await Promise.all(INVENTORY_MODEL_KINDS.map(async (kind) => {
+      const body = await comfyFetch(settings.comfyUrl, `/models/${kind}`).catch(() => null)
+      inventory[kind] = instanceNamesForKind(kind, parseModelsEndpointList(body), fromObjectInfo[kind])
+    }))
+    return inventory
+  }
+
+  /** Live instance verdict for every registry pack (task 9om4bi9): one
+   *  object_info read, any-match on the pack's distinctive node classes. An
+   *  unreachable engine answers 'unknown' for all — never an error that
+   *  blocks the pack listing. */
+  async function liveNodePackInstanceStates(settings: AppSettings): Promise<Record<string, 'active' | 'absent' | 'unknown'>> {
+    const info = await comfyFetch(settings.comfyUrl, '/object_info').catch((error: unknown) => {
+      logFailure('engine/nodes-object-info', error, undefined, 'debug')
+      return null
+    })
+    const keys = info && typeof info === 'object' ? Object.keys(info) : null
+    const states: Record<string, 'active' | 'absent' | 'unknown'> = {}
+    for (const pack of ENGINE_NODE_PACKS) states[pack.id] = nodePackInstanceState(pack, keys)
+    return states
   }
 
   /** Permissive source resolution for the Electron bridge: raw paths,
@@ -1376,12 +1449,18 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
             const vaes = comfyChoices(info, 'VAELoader', 'vae_name')
             const ltxUpscaleMissing = ltxUpscaleRequiredNodes.filter((node) => !info[node])
             const ltxNativeMissing = ltxNativeRequiredNodes.filter((node) => !info[node])
+            // Instance-sourced inventory (task 9om4bi9): the engine's own
+            // listing merges with the local-root scan — union by (kind,
+            // name), each row tagged with its source. With zero local roots
+            // configured, an external instance's models still arrive.
+            const instance = await instanceInventoryFor(settings, info)
+            const merged = mergeModelInventories(groups.flat(), instance)
             const ollama = await comfyFetch(settings.ollamaUrl, '/api/tags').catch((error: unknown) => { logFailure('bootstrap/ollama', error, undefined, 'debug'); return { models: [] } }) as { models?: Array<{ name?: string; size?: number; remote_model?: string }> }
             const ollamaModels = (ollama.models ?? []).filter((item) => item.name && !item.remote_model && item.size !== 342).map((item) => item.name as string)
             // Model paths are stripped: the renderer matches by name and kind, and
             // full filesystem paths are a recon leak to anyone who can reach the API.
             // The h3Form tag (when detected) rides along for LoRA×base guidance.
-            const models = groups.flat().map((model) => ({ name: model.name, kind: model.kind, bytes: model.bytes, ...(model.h3Form ? { h3Form: model.h3Form } : {}) }))
+            const models = merged.map((model) => ({ name: model.name, kind: model.kind, bytes: model.bytes, ...(model.h3Form ? { h3Form: model.h3Form } : {}), ...(model.source ? { source: model.source } : {}) }))
             return sendJson(response, 200, { connected: true, latencyMs: Date.now() - started, models, upscalers, ltxModel: latentUpscalers.find((name) => /ltx-2\.5.*spatial.*x2/i.test(name)) ?? '', ltxVae: vaes.find((name) => /ltx-2\.5.*video.*vae/i.test(name)) ?? '', ltxUpscaleReady: ltxUpscaleMissing.length === 0, ltxUpscaleMissing, ltxNativeReady: ltxNativeMissing.length === 0, ltxNativeMissing, ollamaModels, ollamaModel: settings.ollamaModel })
           } catch (error) {
             return sendJson(response, 200, { connected: false, latencyMs: Date.now() - started, models: groups.flat().map((model) => ({ name: model.name, kind: model.kind, bytes: model.bytes, ...(model.h3Form ? { h3Form: model.h3Form } : {}) })), error: error instanceof Error ? error.message : String(error) })
@@ -2801,39 +2880,47 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
         }
         // ---- Vendored node packs (increment 2, AC zzdfklo slice) ------------
         // custom_nodes/ is ComfyUI's sanctioned extension seam: list is
-        // read-only for everyone; install/uninstall act on the configured
-        // checkout (managed or the user's own — their consent, their disk)
-        // and only ever inside custom_nodes/<pack name>.
+        // read-only for everyone; install/uninstall act on the MODE's target
+        // (the managed checkout's custom_nodes/, or the external instance's
+        // configured custom nodes folder — task 9om4bi9) and only ever
+        // inside <target>/<pack name>. Live INSTANCE verdicts ride along:
+        // object_info node classes say whether the connected engine (managed
+        // or external) actually loaded each pack — a pack copied in but not
+        // yet restarted-into reports honestly instead of claiming active.
+        const { target: nodePackTarget } = resolveNodePackTarget(settings.engine)
+        const noTargetError = settings.engine.mode === 'managed'
+          ? 'Set a valid ComfyUI checkout (with main.py) in the managed engine settings first.'
+          : 'Set the external custom nodes folder (an absolute, existing directory) in the engine settings first, or switch to managed mode with a checkout.'
         if (url.pathname === '/api/lan/engine/nodes' && request.method === 'GET') {
-          const checkout = isUsableCheckout(settings.engine.checkoutPath) ? settings.engine.checkoutPath : null
-          return sendJson(response, 200, { packs: await checkAllNodePacks(checkout, resolveVendorRoot()) })
+          const instanceStates = await liveNodePackInstanceStates(settings)
+          return sendJson(response, 200, { packs: await checkAllNodePacks(nodePackTarget, resolveVendorRoot(), instanceStates) })
         }
         if (url.pathname === '/api/lan/engine/nodes/install' && request.method === 'POST') {
           const body = await readJson(request, 10_000)
           const pack = findNodePack(typeof body.id === 'string' ? body.id : '')
           if (!pack) return sendJson(response, 400, { error: 'Unknown node pack id.' })
-          if (!isUsableCheckout(settings.engine.checkoutPath)) {
-            return sendJson(response, 400, { error: 'Set a valid ComfyUI checkout (with main.py) in the managed engine settings first.' })
+          if (!nodePackTarget) {
+            return sendJson(response, 400, { error: noTargetError })
           }
           const sourceDirectory = typeof body.sourceDirectory === 'string' ? body.sourceDirectory : undefined
-          const result = await installNodePack(pack, { checkout: settings.engine.checkoutPath, sourceDirectory })
+          const result = await installNodePack(pack, { target: nodePackTarget, sourceDirectory })
           if (!result.installed && !result.alreadyInstalled) {
             return sendJson(response, 400, { error: result.notes.join(' ') || 'The pack could not be installed.', pack: result.status })
           }
-          logEvent({ kind: 'engine.node-pack-installed', pack: pack.id, revision: pack.pinnedRevision })
+          logEvent({ kind: 'engine.node-pack-installed', pack: pack.id, revision: pack.pinnedRevision, target: nodePackTarget.kind })
           return sendJson(response, 200, { pack: result.status, notes: result.notes })
         }
         if (url.pathname === '/api/lan/engine/nodes/uninstall' && request.method === 'POST') {
           const body = await readJson(request, 10_000)
           const pack = findNodePack(typeof body.id === 'string' ? body.id : '')
           if (!pack) return sendJson(response, 400, { error: 'Unknown node pack id.' })
-          if (!isUsableCheckout(settings.engine.checkoutPath)) {
-            return sendJson(response, 400, { error: 'Set a valid ComfyUI checkout (with main.py) in the managed engine settings first.' })
+          if (!nodePackTarget) {
+            return sendJson(response, 400, { error: noTargetError })
           }
-          const removed = await uninstallNodePack(pack, settings.engine.checkoutPath)
+          const removed = await uninstallNodePack(pack, nodePackTarget)
           if (!removed.removed) return sendJson(response, 404, { error: removed.reason ?? 'The pack is not installed.' })
-          logEvent({ kind: 'engine.node-pack-uninstalled', pack: pack.id })
-          return sendJson(response, 200, { pack: await checkAllNodePacks(settings.engine.checkoutPath, resolveVendorRoot()).then((packs) => packs.find((entry) => entry.id === pack.id)) })
+          logEvent({ kind: 'engine.node-pack-uninstalled', pack: pack.id, target: nodePackTarget.kind })
+          return sendJson(response, 200, { pack: await checkAllNodePacks(nodePackTarget, resolveVendorRoot()).then((packs) => packs.find((entry) => entry.id === pack.id)) })
         }
         // ---- Local-first fetcher (task hgjbea2) --------------------------------
         // The only network-touching routes in the app. catalog is pure
@@ -2945,9 +3032,11 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
           const warnings: string[] = []
           const noteMissing = (label: string, value: string) => { if (value && isAbsolute(value) && !existsSync(value)) warnings.push(`${label} does not exist yet: ${value}`) }
           noteMissing('outputDirectory', raw.outputDirectory)
+          noteMissing('inputDirectory', raw.inputDirectory ?? '')
           noteMissing('ffmpegPath', raw.ffmpegPath ?? '')
           noteMissing('engine.pythonPath', raw.engine?.pythonPath ?? '')
           noteMissing('engine.checkoutPath', raw.engine?.checkoutPath ?? '')
+          noteMissing('engine.externalCustomNodesDir', raw.engine?.externalCustomNodesDir ?? '')
           if (warnings.length) logEvent({ kind: 'settings.missing-paths', count: warnings.length })
           const saved = await saveSettings(normalizeSettings(raw))
           // Leaving managed mode is an explicit user action: stop the engine
