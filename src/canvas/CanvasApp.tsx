@@ -39,6 +39,11 @@ import { CanvasBenchmark } from './Benchmark'
 import './canvas.css'
 
 const benchMode = new URLSearchParams(window.location.search).get('bench') === '1'
+// Settings deep-link (review M2, g5x37k8 2026-09-19): `/?settings=1` boots
+// the canvas with the settings dock OPEN. The datasets and images surfaces
+// link here — one click of reachability from every surface while the real
+// per-surface dock (the spec'd surface-chrome pass) is pending.
+const settingsDeepLink = new URLSearchParams(window.location.search).get('settings') === '1'
 
 export function CanvasApp() {
   const phase = useCanvasStore((state) => state.phase)
@@ -59,6 +64,7 @@ export function CanvasApp() {
 
   useEffect(() => {
     if (!benchMode) void boot()
+    if (settingsDeepLink) useCanvasStore.getState().setSettingsDock(true)
   }, [boot])
 
   // jobsStore → derived tile statuses + completion landing (job events are

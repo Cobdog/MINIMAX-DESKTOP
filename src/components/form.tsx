@@ -8,5 +8,9 @@ export function SelectField({ label, value, options, onChange, disabled }: { lab
 }
 
 export function NumberField({ label, value, min, max, step, onChange, disabled }: { label: string; value: number; min: number; max: number; step?: number; onChange(value: number): void; disabled?: boolean }) {
-  return <div className="field-group"><label>{label}</label><input className="number-input" type="number" value={value} min={min} max={max} step={step} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} /></div>
+  // useId + htmlFor (SelectField's pattern; review minor 2026-09-19): an
+  // id-less input fed the console's "form field without id/name" noise and
+  // left the field unreachable by label for tests and assistive tech.
+  const id = useId()
+  return <div className="field-group"><label htmlFor={id}>{label}</label><input id={id} className="number-input" type="number" value={value} min={min} max={max} step={step} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} /></div>
 }

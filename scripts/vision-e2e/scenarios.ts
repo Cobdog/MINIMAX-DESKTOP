@@ -1413,4 +1413,124 @@ export const SCENARIOS: VisionScenario[] = [
       },
     ],
   },
+  {
+    // Settings UX wave (g5x37k8, review M9/M10/M11/M12) — the dock at its
+    // 420px minimum, a 640px window, and the three-dock cascade. DOM truth
+    // is asserted BEFORE each capture (capture never judges). Narrow
+    // viewpoints open the dock through the ?settings=1 deep-link — the
+    // titlebar overflows below ~1000px and an actionability auto-scroll of
+    // the canvas root was exactly the off-screen-dock bug this wave fixes
+    // (the root is overflow:clip now); the deep-link needs no scroll.
+    id: 'settings-dock-narrow',
+    label: 'Settings dock at the edges — 420px minimum width, a 640px window, and the three-dock cascade (Settings UX wave)',
+    run: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+      await page.setViewportSize({ width: 444, height: 900 })
+      await page.goto('/?settings=1')
+      await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+      await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible()
+    },
+    after: async (page) => {
+      await page.setViewportSize({ width: 1920, height: 1080 })
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
+    },
+    checkpoints: [
+      {
+        id: 'settings-dock-420px-min',
+        label: 'Settings dock at its 420px minimum — node-pack actions wrapped and reachable',
+        drive: async (page) => {
+          // A 444px viewport makes the clamped default exactly the 420px
+          // minimum (deterministic — no resize drag).
+          const vdnRow = page.locator('.node-pack-row').filter({ hasText: 'ComfyUI-VDN-H3' })
+          const install = vdnRow.getByRole('button', { name: /^Install$/ })
+          await install.scrollIntoViewIfNeeded()
+          const box = await install.boundingBox()
+          expect(box, 'Install button has geometry').not.toBeNull()
+          expect(box!.x, 'the dock is at its in-window position (no root scroll)').toBeGreaterThanOrEqual(0)
+          const hit = await page.evaluate(({ x, y }) => {
+            const element = document.elementFromPoint(x, y)
+            return element ? Boolean(element.closest('.node-pack-row')) : false
+          }, { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 })
+          expect(hit, 'the Install button is the top hit at its center (not clipped)').toBe(true)
+          // Guidance floor: the settings prose and path-check notes ≥10px.
+          const noteSize = await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('.settings-note') as HTMLElement).fontSize))
+          expect(noteSize, `settings-note font-size ≥ 10px (got ${noteSize})`).toBeGreaterThanOrEqual(10)
+          await page.waitForTimeout(400)
+        },
+        rubric: [
+          'Context: the SAME dark-theme studio app, but this capture is deliberately a NARROW 444x900 window — the near-minimum case for the floating Settings dock. The dock (a rounded dark panel with a slim grab-handle header reading "Settings — docked" and an × close button INSIDE the header, fully visible) fills almost the whole viewport width at its 420px design minimum, starting at the window\'s left edge with a small margin.',
+          'The visible content is the Settings page: the "Save settings" heading row, the ComfyUI engine section, and — the point of this capture — the NODE PACKS list: each pack row wraps to fit the narrow panel; a row shows its name + license chip + status chip on one line, its description beneath, and its action buttons (Fetch… / Install / Uninstall, secondary-outline style) WRAPPED onto their own line within the row instead of extending past the panel edge. NOTHING may be cut off at the right edge of the dock or the viewport.',
+          'Blessings: dense muted small text (the notes are at least 10px by design), disabled Install buttons while no target folder is set (offline/dimmed is correct), and the narrow window itself are intended.',
+          'Defects to flag: the dock or its content cut off past the LEFT or RIGHT viewport edge, action buttons partially or fully cut off by the dock\'s right edge, text overlapping the panel border.',
+        ].join(' '),
+      },
+      {
+        id: 'settings-dock-640px-window',
+        label: 'Settings dock in a 640px window — clamped fully inside, close button on-screen',
+        drive: async (page) => {
+          await page.setViewportSize({ width: 640, height: 720 })
+          await page.goto('/?settings=1')
+          await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible()
+          const dock = await page.locator('[data-canvas-settings-dock]').boundingBox()
+          const close = await page.locator('[data-canvas-settings-close]').boundingBox()
+          expect(dock, 'dock has geometry').not.toBeNull()
+          expect(close, 'close button has geometry').not.toBeNull()
+          expect(dock!.x, `the dock starts inside the 640px window (got ${dock!.x})`).toBeGreaterThanOrEqual(0)
+          expect(close!.x + close!.width, `close button right edge inside the 640px window (got ${close!.x + close!.width})`).toBeLessThanOrEqual(640)
+          await page.waitForTimeout(400)
+        },
+        rubric: [
+          'Context: the same studio in a 640x720 window — a small laptop half-screen. The Settings dock opens CLAMPED to the viewport: the ENTIRE panel is inside the window — its left border visible near the left edge with a small margin, its header ("Settings — docked" with the × close button) ENTIRELY on-screen, reachable without dragging.',
+          'Blessings: the dock occupies most of the window (correct for a clamped 616px width), dense small text, engine-offline dimming.',
+          'Defects to flag: ANY part of the dock cut off past the left or right viewport edge, the close × off-screen, header controls overlapping.',
+        ].join(' '),
+      },
+      {
+        id: 'settings-dock-stack',
+        label: 'Three docks open — cascaded positions, every header band visible',
+        drive: async (page) => {
+          await page.setViewportSize({ width: 1920, height: 1080 })
+          await page.goto('/')
+          await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+          // Natural order (settings → studios → diagnostics): the 48px
+          // y-steps keep every dock's header band above the next dock's
+          // top, so all three titles are directly visible.
+          await page.locator('[data-canvas-settings-button]').click()
+          await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible()
+          await page.locator('[data-canvas-studios-button]').click()
+          await expect(page.locator('[data-canvas-studios-dock]')).toBeVisible()
+          await page.locator('[data-canvas-diagnostics-button]').click()
+          await expect(page.locator('[data-canvas-diagnostics-dock]')).toBeVisible()
+          const ownerAt = async (x: number, y: number) => page.evaluate(({ x, y }) => {
+            const element = document.elementFromPoint(x, y)
+            const dock = element?.closest('[data-canvas-settings-dock],[data-canvas-studios-dock],[data-canvas-diagnostics-dock]') as HTMLElement | null
+            if (!dock) return ''
+            if (dock.hasAttribute('data-canvas-settings-dock')) return 'settings'
+            if (dock.hasAttribute('data-canvas-studios-dock')) return 'studios'
+            if (dock.hasAttribute('data-canvas-diagnostics-dock')) return 'diagnostics'
+            return ''
+          }, { x, y })
+          const positions: Array<{ x: number; y: number }> = []
+          for (const selector of ['[data-canvas-settings-dock]', '[data-canvas-studios-dock]', '[data-canvas-diagnostics-dock]']) {
+            const box = await page.locator(selector).boundingBox()
+            expect(box, `${selector} has geometry`).not.toBeNull()
+            positions.push({ x: box!.x, y: box!.y })
+          }
+          expect(new Set(positions.map((position) => `${position.x},${position.y}`)).size, 'no two open docks share a position').toBe(3)
+          for (const selector of ['[data-canvas-settings-dock]', '[data-canvas-studios-dock]', '[data-canvas-diagnostics-dock]']) {
+            const icon = await page.locator(`${selector} .canvas-inspector-header svg`).first().boundingBox()
+            expect(icon, `${selector} header icon has geometry`).not.toBeNull()
+            expect(await ownerAt(icon!.x + 2, icon!.y + 2), `${selector}'s header band is the top hit at its icon`).toBeTruthy()
+          }
+          await page.waitForTimeout(400)
+        },
+        rubric: [
+          'Context: the studio at 1920x1080 with THREE floating docks open in the order settings, studios, diagnostics — Settings at the top-left, Studios stepped below-right of it, Diagnostics stepped below-right again. Because each dock\'s header sits ABOVE the next dock\'s top edge, ALL THREE header strips are simultaneously visible down a diagonal: "Settings — docked" (highest, leftmost), "Studios — asset authoring", "Diagnostics — docked" (lowest, most right, fully in front as the most recently opened). Overlapping panel BODIES are expected and fine — only the header bands must each stay visible with their × close buttons.',
+          'Each visible header reads its title with its × close button; bodies show settings sections, the character studio, and the diagnostics report respectively.',
+          'Blessings: docks overlapping each other\'s bodies is intended (floating panels); the newest dock rendering fully in front is intended (raise-on-open).',
+          'Defects to flag: two docks at IDENTICAL positions, a header band (or its ×) completely hidden behind another dock, a dock off-screen, only two docks present when three were opened.',
+        ].join(' '),
+      },
+    ],
+  },
 ]

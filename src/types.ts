@@ -762,7 +762,10 @@ export type DesktopApi = {
   saveComfyOutputImage(url: string, file: { filename: string; subfolder?: string; type?: string }, outputDirectory: string): Promise<{ path: string; name: string }>
   getSettings(): Promise<AppSettings>
   getGpuTelemetry(): Promise<GpuTelemetry>
-  saveSettings(settings: AppSettings): Promise<AppSettings>
+  /** Saves settings server-side. The answer carries the server-normalized
+   *  settings plus any save-warnings (well-formed but nonexistent paths) —
+   *  M4 (review 2026-09-19): the client must surface them, not drop them. */
+  saveSettings(settings: AppSettings): Promise<{ settings: AppSettings; warnings?: string[] }>
   chooseDirectory(initialPath?: string): Promise<string | null>
   chooseMedia(type: MediaKind): Promise<{ path: string; name: string } | null>
   scanModels(settings: AppSettings): Promise<ModelFile[]>

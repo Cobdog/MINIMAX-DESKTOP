@@ -285,6 +285,11 @@ type CanvasState = {
   gapMenu: { planId: string; afterSegmentId: string } | null
   /** Phase 4 (§8): Settings docked as a floating panel (the thin surface). */
   settingsDock: boolean
+  /** Dock stacking counter (review M11, 2026-09-19): a dock that opens or is
+   *  grabbed takes the NEXT z — three open docks no longer stack at the same
+   *  z with DOM order deciding the winner. Each dock keeps its own assigned
+   *  value; only this counter is shared. */
+  dockZ: number
   /** QOL wave (rrxlw2r): the fetch-catalog snapshot feeding the availability
    *  facts' fetch-deep-link targets (loaded on boot, refreshed when the
    *  settings dock opens; null = not loaded — rows degrade to install
@@ -358,6 +363,9 @@ type CanvasActions = {
    *  plan id, or null with the refusal reasons toasted. */
   applyLoraTimeline(chainId: string): Promise<{ ok: boolean; planId?: string; reasons?: string[] }>
   setSettingsDock(open: boolean): void
+  /** Dock stacking (review M11): take the next z for a dock opening or
+   *  being grabbed; returns the value to apply. */
+  raiseDock(): number
   setStudiosDock(dock: { tab: StudiosDockTab } | null): void
   setDiagnosticsDock(open: boolean): void
   setAudioDock(dock: { engine: 'music3' | 'acestep'; chainId?: string } | null): void
@@ -822,6 +830,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     timelinePlanId: null,
     gapMenu: null,
     settingsDock: false,
+    dockZ: 60,
     studiosDock: null,
     diagnosticsDock: false,
     audioDock: null,
@@ -1303,6 +1312,11 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       // States change as the user fetches; re-snapshot on open so the menu's
       // fetch affordances reflect what is actually on disk.
       if (open) void get().refreshFetchCatalog()
+    },
+    raiseDock: () => {
+      const next = get().dockZ + 1
+      set({ dockZ: next })
+      return next
     },
     refreshFetchCatalog: async () => {
       try {

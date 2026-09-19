@@ -8,8 +8,9 @@
  * layer → canvas reference) — both explicit user actions.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Camera, Database, Download, FolderOpen, Layers, LoaderCircle, Pin, Plus, RefreshCw, Search, Sparkles, Trash2, Upload, Video } from 'lucide-react'
+import { Camera, Database, Download, FolderOpen, Layers, LoaderCircle, Pin, Plus, RefreshCw, Search, Settings, Sparkles, Trash2, Upload, Video } from 'lucide-react'
 import { datasetsApi, mediaUrlFor, type AspectEntry, type DashboardPayload, type DatasetSettings, type ExportResultPayload, type LibraryLayer, type LibrarySource } from './api'
+import { authToken } from '../lib/apiClient'
 import { SurfaceSwitcher } from '../surfaces/SurfaceSwitcher'
 import { CropEditor } from './CropEditor'
 import { CaptionPanel } from './CaptionPanel'
@@ -294,6 +295,11 @@ export function DatasetsApp() {
         ))}
       </nav>
       <div className="ds-titlebar-right">
+        {/* Settings reachability (review M2, g5x37k8 2026-09-19): this
+            surface mounts no session host, so the docked panel lives on the
+            canvas — the deep-link opens it there in one click (token kept:
+            a tokened session must not lose its auth crossing surfaces). */}
+        <a className="ds-btn ghost" data-ds-settings-link href={`/?settings=1${authToken() ? `&token=${encodeURIComponent(authToken())}` : ''}`} title="Settings — opens docked on the canvas surface"><Settings size={13} /></a>
         {settings && <span className="ds-trigger" title="Dataset trigger token">trigger: <code>{settings.triggerToken || '(unset)'}</code></span>}
         <span className={`ds-rife ${rifeAvailable ? 'ok' : ''}`} title={rifeAvailable ? 'rife-ncnn-vulkan detected — preferred interpolator' : 'rife-ncnn-vulkan absent — minterpolate fallback (A1 final)'}>{rifeAvailable ? 'RIFE' : 'minterpolate'}</span>
         <button type="button" className="ds-btn ghost" title="Refresh — also clears the error banner (a user-initiated refresh)" onClick={() => void refresh({ clearError: true })}><RefreshCw size={13} /></button>

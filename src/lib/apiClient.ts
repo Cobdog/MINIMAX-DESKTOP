@@ -112,7 +112,10 @@ export function createWebApiClient(): DesktopApi {
       return (await apiFetch<{ settings: AppSettings }>('/api/lan/settings')).settings
     },
     async saveSettings(settings: AppSettings) {
-      return (await postJson<{ settings: AppSettings }>('/api/lan/settings', { settings })).settings
+      // M4 (review 2026-09-19): the whole answer rides back — the server's
+      // save-warnings (nonexistent-but-well-formed paths) used to be dropped
+      // here for a flat success.
+      return postJson<{ settings: AppSettings; warnings?: string[] }>('/api/lan/settings', { settings })
     },
     async getGpuTelemetry() {
       return apiFetch('/api/lan/telemetry')

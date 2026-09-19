@@ -15,7 +15,7 @@
  * through the shared landing loop; nothing here re-implements queueing.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ImagePlus, Layers, LoaderCircle, Lock, Send, Sparkles, Wand2 } from 'lucide-react'
+import { ImagePlus, Layers, LoaderCircle, Lock, Send, Settings, Sparkles, Wand2 } from 'lucide-react'
 import { useStudioSession } from '../hooks/useStudioSession'
 import { useGenerationQueue } from '../hooks/useGenerationQueue'
 import { useLivePreview } from '../lib/useLivePreview'
@@ -554,11 +554,13 @@ function WorkbenchSurface() {
   return (
     <div className="iw-root" data-iw-root data-iw-family={settings.family}>
       <header className="iw-header">
-        {/* App-tour wave (d6iy68r, review M1): the shared registry-driven
-            surface switcher replaces the one-way "canvas" back-link — the
-            same retirement the datasets titlebar got in the QOL wave (one
-            way to reach a surface; Alt+1..9 live here like everywhere). */}
+        {/* Both review waves (union): the registry-driven surface switcher
+            (d6iy68r M1 — Alt+1..9 live, one way to reach a surface) PLUS
+            the settings deep-link (g5x37k8 M2 — this surface has its own
+            session host but no docked settings panel; one click opens the
+            dock on the canvas). */}
         <SurfaceSwitcher />
+        <a className="iw-back" data-iw-settings-link href={`/?settings=1${token ? `&token=${encodeURIComponent(token)}` : ''}`} title="Settings — opens docked on the canvas surface"><Settings size={14} /> settings</a>
         <strong>H3 Image Workbench</strong>
         <span className={`iw-engine ${sessionState.status.connected ? 'ok' : 'warn'}`} data-iw-engine={sessionState.status.connected ? 'on' : 'off'}>
           {sessionState.status.connected ? 'engine online' : 'engine offline'}
