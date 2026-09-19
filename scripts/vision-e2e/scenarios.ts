@@ -706,6 +706,78 @@ export const SCENARIOS: VisionScenario[] = [
   },
 
   {
+    // The camera path editor (y93rk61) — the camera compiler's first
+    // surface: the structured editor's Camera box opens a modal where a path
+    // is authored (keyframes over the timeline, presets, calibration) and
+    // compiled live. Deterministic: fresh session, one seed chain, structured
+    // mode, one rail-inserted keyframe + one preset turn + a playhead scrub.
+    id: 'camera-path-editor',
+    label: 'Camera path editor — the authored-path modal over the canvas',
+    run: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+      await page.goto('/?canvas=1')
+      await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+      await page.locator('[data-canvas-prompt]').fill('a slow orbit around the observatory dome')
+      await page.locator('[data-canvas-submit]').click()
+      await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+      const panel = page.locator('[data-canvas-properties]')
+      await expect(panel).toBeVisible()
+      await panel.locator('[data-canvas-prompt-mode-toggle="structured"]').click()
+      const editor = panel.locator('[data-structured-editor]')
+      await expect(editor).toBeVisible()
+      await editor.locator('[data-structured-input="camera"]').fill('The camera holds a wide establishing frame')
+      // Author: open from the Camera box, add a keyframe on the rail, retune
+      // one azimuth, run the orbit preset, scrub the playhead mid-path.
+      await editor.locator('[data-structured-box="camera"] [data-structured-camera-path-edit]').click()
+      const modal = page.locator('[data-camera-path-editor]')
+      await expect(modal).toBeVisible()
+      const rail = modal.locator('[data-camera-rail]')
+      const railBox = (await rail.boundingBox())!
+      await rail.click({ position: { x: Math.round(railBox.width * 0.4), y: Math.round(railBox.height / 2) } })
+      await modal.locator('[data-camera-keyframe="2"]').click()
+      await modal.locator('[data-camera-field-azimuth]').fill('150')
+      await modal.locator('[data-camera-preset="orbit"]').click()
+      const grip = modal.locator('[data-camera-playhead]')
+      const gripBox = (await grip.boundingBox())!
+      await page.mouse.move(gripBox.x + gripBox.width / 2, gripBox.y + gripBox.height / 2)
+      await page.mouse.down()
+      await page.mouse.move(gripBox.x + 90, gripBox.y + gripBox.height / 2, { steps: 4 })
+      await page.mouse.up()
+      await page.waitForTimeout(300)
+    },
+    after: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
+    },
+    checkpoints: [
+      {
+        id: 'camera-path-editor-1080p',
+        label: 'Camera path editor — the authored-path modal open over the dimmed canvas',
+        // DOM truth at capture: the modal carries the authored path (4
+        // keyframe handles) and the live compiled preview.
+        drive: async (page) => {
+          const modal = page.locator('[data-camera-path-editor]')
+          await expect(modal).toBeVisible()
+          await expect(modal.locator('[data-camera-keyframe]')).toHaveCount(4)
+          await expect(modal.locator('[data-camera-orbit]')).toBeVisible()
+          await expect(modal.locator('[data-camera-timeline]')).toBeVisible()
+          await expect(modal.locator('[data-camera-framing]')).toBeVisible()
+          await expect(modal.locator('[data-camera-compiled]')).toContainText('Compiled camera path — 124 frames at 24 fps')
+          await expect(modal.locator('[data-camera-compiled]')).toContainText('physically move the CAMERA')
+        },
+        rubric: [
+          SHELL_CONTEXT,
+          'GROUND TRUTH FOR THIS CAPTURE: a wide MODAL DIALOG floats centered over the dimmed canvas (the properties panel and its seed tile sit behind the dim). The modal has a slim header reading "Camera path — compiles into the Camera box" with a small camera icon, and a footer with a monospace compiled-preview block plus "cancel" and an accent-filled "apply to Camera box" button.',
+          'MODAL LEFT COLUMN, top to bottom: (1) a small square TOP-DOWN ORBIT VIEW — a subject cross/dot at center, two faint dashed concentric guide circles with tiny "1×"/"2×" labels, a smooth accent-colored orbital path curve weaving around the center, small keyframe dots on the curve, and one brighter accent dot (the playhead camera) with a thin dashed aim line to the center; (2) a small INDICATIVE FRAMING viewport (a rounded outline with a dashed horizon line and an accent-filled subject rectangle whose size reflects the playhead distance) captioned "indicative framing — not a render"; (3) a wide TIMELINE — an accent azimuth curve above a horizontal rail carrying FOUR small keyframe handles (the leftmost filled/darker = the locked anchor) and a thin vertical playhead line with a small grip at top, tick labels "0s" / mid-seconds / the end seconds under the rail.',
+          'MODAL RIGHT COLUMN: labeled selects ("duration profile", "interpolation", "elevation range", "orbit calibration (H3 mirror quirk)"), a small muted note about the chain duration vs the compiler profile, a "one-click moves" row of small pills (orbit +90°, rise +15°, fall −15°, closer ×0.7, away ×1.4, static hold), and a dashed KEYFRAME INSPECTOR box ("keyframe 2 of 4" style heading with a time readout) holding an azimuth number input plus elevation and radius sliders with small number inputs; the locked-anchor variant shows a note instead.',
+          'The FOOTER compiled-preview block shows several lines of small monospace text beginning "Compiled camera path — 124 frames at 24 fps (5.125s):" followed by "From 0.000s to …" choreography prose mentioning "physically move the CAMERA … degrees around the fixed target" — dense engineering prose is the intended content, not a defect.',
+          'Blessings: the modal is wide (~900px) by design; dense small text, muted sub-labels, and dashed borders are the design language; the canvas behind the dim is near-black BY DESIGN (silhouettes suffice); diagnostics notes or a mirror-check paragraph may appear in the right column when the path triggers them; dimmed controls are intended offline states.',
+          'Defects to flag: no orbit view or no timeline inside the modal, zero keyframe handles on the rail, the compiled preview empty or reading "compile blocked", overlapping columns rendering text unreadably, the modal overflowing the viewport edges, a pure-white or pure-black dead region.',
+        ].join(' '),
+      },
+    ],
+  },
+
+  {
     // Canvas Phase 2 (task flyuh6h) — generation on canvas: an ingested media
     // object (real blob-served poster) + the fork edge + the properties panel
     // and contextual bar. Deterministic: fresh session, one drop, one fork.

@@ -2133,3 +2133,200 @@ test('a structured submit lands a real job whose engine prompt is the composed b
   }
 })
 
+// The camera path editor (y93rk61) — the camera compiler's (src/lib/camera)
+// first consumer surface: the Camera box's "edit path" affordance opens the
+// modal, an authored path compiles through compileCamera, the compiled block
+// lands in the box through the never-lossy splice (chips survive), the exact
+// doc persists for the round-trip, and the fake engine receives the composed
+// bytes carrying the choreography.
+test('the camera path editor compiles a path into the Camera box; the composed bytes reach the engine (fake engine)', async ({ page, request }) => {
+  const problems = await trackErrors(page)
+  const fsModule = await import('node:fs')
+  const pathModule = await import('node:path')
+  const http = await import('node:http')
+
+  // Dummy model files — the shared H3 set the t2v ladder resolves.
+  const modelRoot = pathModule.join(process.cwd(), 'test-home', 'camera-models')
+  for (const [kind, files] of Object.entries({
+    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
+    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
+    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
+    loras: ['minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors'],
+  })) {
+    fsModule.mkdirSync(pathModule.join(modelRoot, kind), { recursive: true })
+    for (const file of files as string[]) fsModule.writeFileSync(pathModule.join(modelRoot, kind, file), 'x')
+  }
+
+  const submittedGraphs: string[] = []
+  const engine = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://engine.local')
+    if (url.pathname === '/system_stats') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ system: {}, devices: [] }))
+      return
+    }
+    if (url.pathname === '/object_info') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ MiniMaxH3HybridLoader: {}, KSamplerSelect: {}, BasicScheduler: {}, VAELoader: {} }))
+      return
+    }
+    if (url.pathname === '/prompt' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (chunk) => { body += chunk })
+      req.on('end', () => {
+        submittedGraphs.push(body)
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ prompt_id: 'camera-e2e-1', number: 1, node_errors: {} }))
+      })
+      return
+    }
+    if (url.pathname === '/history/camera-e2e-1') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ 'camera-e2e-1': { prompt: [], outputs: {}, status: { completed: false } } }))
+      return
+    }
+    if (url.pathname === '/interrupt' && req.method === 'POST') {
+      // The stop button's target — cancelling the launcher's auto-submitted
+      // job must actually take (the real contract).
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ cancelled: true, state: 'canceled' }))
+      return
+    }
+    if (url.pathname === '/queue' && req.method === 'GET') {
+      // The server's cancel verdict consults the queue FIRST — report the
+      // probe prompt as running so /interrupt is the path taken.
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ queue_running: [['entry', 'camera-e2e-1']], queue_pending: [] }))
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  const enginePort = await new Promise<number>((resolve) => engine.listen(0, '127.0.0.1', () => resolve((engine.address() as { port: number }).port)))
+
+  const originalSettings = ((await (await request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
+  try {
+    const listed = await (await request.get('/api/lan/jobs')).json() as { jobs?: Array<Record<string, unknown>> }
+    const stale = (listed.jobs ?? []).filter((job) => job.status === 'queued' || job.status === 'running').map((job) => ({ ...job, status: 'cancelled' }))
+    if (stale.length) await request.post('/api/lan/jobs', { data: { jobs: stale } })
+    await request.post('/api/lan/settings', { data: { settings: {
+      ...originalSettings,
+      comfyUrl: `http://127.0.0.1:${enginePort}`,
+      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: pathModule.join(modelRoot, 'diffusion_models'), text_encoders: pathModule.join(modelRoot, 'text_encoders'), vae: pathModule.join(modelRoot, 'vae'), loras: pathModule.join(modelRoot, 'loras') },
+    } } })
+    await resetSession(page)
+    await page.goto('/?canvas=1')
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    await page.locator('[data-canvas-prompt]').fill('camera path editor probe')
+    await page.locator('[data-canvas-submit]').click()
+    const tile = page.locator('[data-canvas-tile]').first()
+    await expect(tile).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('[data-canvas-engine]')).toHaveAttribute('data-engine-connected', 'true', { timeout: 15_000 })
+    const panel = page.locator('[data-canvas-properties]')
+    await expect(panel).toBeVisible()
+    // Cancel the launcher's auto-submitted freeform job so the STRUCTURED
+    // submit is the one under test.
+    const stop = panel.locator('[data-canvas-cancel]')
+    if (await stop.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await stop.click()
+      await expect(panel.locator('[data-canvas-generate]')).toBeVisible({ timeout: 15_000 })
+    }
+
+    await panel.locator('[data-canvas-prompt-mode-toggle="structured"]').click()
+    const editor = panel.locator('[data-structured-editor]')
+    await expect(editor).toBeVisible()
+
+    // ---- open the path editor from the Camera box ----
+    await editor.locator('[data-structured-box="camera"] [data-structured-camera-path-edit]').click()
+    const modal = page.locator('[data-camera-path-editor]')
+    await expect(modal).toBeVisible()
+    // DOM truth: the authoring surfaces + the first-open approximate banner
+    // (no persisted doc, no compiled block — the default doc stands in).
+    await expect(modal.locator('[data-camera-orbit]')).toBeVisible()
+    await expect(modal.locator('[data-camera-timeline]')).toBeVisible()
+    await expect(modal.locator('[data-camera-framing]')).toBeVisible()
+    await expect(modal.locator('[data-camera-approximate]')).toHaveCount(1)
+    await expect(modal.locator('[data-camera-keyframe]')).toHaveCount(3) // DEFAULT_PATH
+    await expect(modal.locator('[data-camera-compiled]')).toContainText('Compiled camera path — 124 frames at 24 fps')
+
+    // ---- author: add a keyframe on the rail, retune one, run a preset ----
+    const rail = modal.locator('[data-camera-rail]')
+    const railBox = (await rail.boundingBox())!
+    await rail.click({ position: { x: Math.round(railBox.width * 0.35), y: Math.round(railBox.height / 2) } })
+    await expect(modal.locator('[data-camera-keyframe]')).toHaveCount(4)
+    await modal.locator('[data-camera-keyframe="2"]').click()
+    await modal.locator('[data-camera-field-azimuth]').fill('130')
+    await modal.locator('[data-camera-preset="orbit"]').click()
+    // The compiled preview updates live (the review gate): the authored
+    // azimuths [0, ~35 (rail-sampled), 130, 180] mirror to signed LEFT
+    // turns — the retuned segment reads ~94-95° and the preset's turn is
+    // exactly 50° (pixel rounding moves the sample within a degree).
+    await expect(modal.locator('[data-camera-compiled]')).toContainText(/move the CAMERA 9[45]\.\d{3} degrees around the fixed target toward the camera's LEFT/)
+    await expect(modal.locator('[data-camera-compiled]')).toContainText('move the CAMERA 50.000 degrees around the fixed target toward the camera\'s LEFT')
+
+    // ---- apply: the compiled block lands in the Camera box ----
+    await modal.locator('[data-camera-apply]').click()
+    await expect(modal).toHaveCount(0)
+    const cameraBox = editor.locator('[data-structured-input="camera"]')
+    await expect(cameraBox).toHaveValue(/Compiled camera path — 124 frames at 24 fps \(5\.125s\):/)
+    await expect(cameraBox).toHaveValue(/physically move the CAMERA/)
+    await expect(cameraBox).toHaveValue(/Reach the final pose/)
+    // The compose preview carries the block into the submitted string.
+    await panel.locator('[data-structured-preview] summary').click()
+    await expect(panel.locator('[data-structured-preview] pre')).toContainText('physically move the CAMERA 50.000 degrees')
+
+    await page.waitForTimeout(1_100) // the debounced settings commit lands
+    let document = await activeDocument(page)
+    let chain = document.chains.find((entry) => entry.kind === 'generation')!
+    const persistedPath = (chain.settings.structured as { cameraPath: { keyframes: Array<{ azimuth: number }>; orbitDirection: string } }).cameraPath
+    expect(persistedPath.keyframes.length).toBe(4)
+    // The HUD (authored) azimuths: anchor, the rail-inserted sample (~35),
+    // the retuned 130, and the preset's mutated 180.
+    expect(persistedPath.keyframes.map((point) => point.azimuth).join(',')).toMatch(/^0,35\.\d+,130,180$/)
+    expect(persistedPath.orbitDirection).toBe('invert H3 orbit')
+    expect(chain.settings.prompt as string).toContain('Compiled camera path — 124 frames')
+
+    // ---- the exact round-trip: re-open restores the authored doc ----
+    await editor.locator('[data-structured-box="camera"] [data-structured-camera-path-edit]').click()
+    await expect(page.locator('[data-camera-path-editor]')).toBeVisible()
+    await expect(page.locator('[data-camera-approximate]')).toHaveCount(0) // exact — no reconstruction
+    await expect(page.locator('[data-camera-keyframe]')).toHaveCount(4)
+    await page.locator('[data-camera-cancel]').click()
+    await expect(page.locator('[data-camera-path-editor]')).toHaveCount(0)
+
+    // ---- never-lossy: chip text after the block survives a re-apply ----
+    await editor.locator('[data-structured-chips="camera"] [data-structured-chip="Push In"]').click()
+    await expect(cameraBox).toHaveValue(/the camera pushes in$/)
+    await editor.locator('[data-structured-box="camera"] [data-structured-camera-path-edit]').click()
+    await page.locator('[data-camera-apply]').click()
+    await expect(cameraBox).toHaveValue(/the camera pushes in$/) // the chip survives
+    await expect(cameraBox).toHaveValue(/Compiled camera path — 124 frames/) // the block re-lands
+
+    // ---- the submit: the composed bytes (block included) reach the engine ----
+    await page.waitForTimeout(1_100) // the commit lands before submit reads it
+    await panel.locator('[data-canvas-generate]').click()
+    await expect(tile).toHaveAttribute('data-tile-status', 'running', { timeout: 20_000 })
+    document = await activeDocument(page)
+    chain = document.chains.find((entry) => entry.kind === 'generation')!
+    const finalCamera = (chain.settings.structured as { camera: string }).camera
+    expect(finalCamera).toContain('the camera pushes in')
+    expect(chain.settings.prompt as string).toContain('physically move the CAMERA 50.000 degrees')
+    expect(submittedGraphs.length).toBeGreaterThan(0)
+    const enginePrompts = submittedGraphs.flatMap((body) => {
+      const graph = JSON.parse(body) as { prompt: Record<string, { inputs: Record<string, unknown> }> }
+      return Object.values(graph.prompt).flatMap((node) => Object.values(node.inputs)).filter((value): value is string => typeof value === 'string')
+    })
+    // The graph the fake engine received carries the compiled choreography
+    // verbatim — the compiler's first bytes in flight.
+    expect(enginePrompts.some((text) => text.includes('Compiled camera path — 124 frames at 24 fps') && text.includes('physically move the CAMERA 50.000 degrees') && text.includes('the camera pushes in'))).toBe(true)
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
+    await resetSession(page).catch(() => undefined)
+    // The shared test-home returns to its EMPTY-model-roots state (the
+    // first-run-guidance precondition — the c57938b discipline).
+    fsModule.rmSync(modelRoot, { recursive: true, force: true })
+    await new Promise<void>((resolve) => engine.close(() => resolve()))
+  }
+})
+
