@@ -103,4 +103,32 @@ matrix.push({ name: 'edit-pose', request: base({ family: 'h3img.edit.pose', sour
 // 9. klein refine — the official-template port (no H3 nodes at all).
 matrix.push({ name: 'refine-klein', request: { family: 'h3img.refine.klein', prompt: 'sharpen the hair and foliage microtexture', width: 1344, height: 768, seed: 90210, refs: [], loras: [], filenamePrefix: 'h3img/test-refine', source: 'frame-2.png', refineInstruction: 'sharpen the hair and foliage microtexture' }, models: H3IMG_MODELS, info: 'klein' })
 
+// 10. The CANVAS INLINE H3-1F still (34afx79) — the image intent's text→still
+//     as the offline plan probe builds it: the store's CANVAS_T1_TEST_SELECTION
+//     (TEST names mirror this exactly), the generated no-refs T=1 contract,
+//     tier pinned to the profile's single frame, stock info (the probe builds
+//     against the live engine's object-info; offline = stock).
+const CANVAS_T1_MODELS = {
+  fl2va: 'TEST-fl2va.safetensors',
+  ref2va: 'TEST-ref2va.safetensors',
+  textEncoder: 'TEST-qwen3vl.safetensors',
+  videoVae: 'TEST-video-vae.safetensors',
+  audioVae: 'TEST-audio-vae.safetensors',
+  t1ImageVae: 'TEST-minimax_h3_t1_image_vae.safetensors',
+  turboLora: 'TEST-fl2v-turbo-8step.safetensors',
+  detailAdapterLora: 'TEST-detail-adapter.safetensors',
+  krea2: null,
+  klein: { unet: '', textEncoder: '', vae: '' },
+}
+const CANVAS_T1_CONTRACT = [
+  'a lighthouse over a black sea, still',
+  '',
+  'Preservation of unspecified traits: Preserve the subject\'s identity and the overall scene; the requested change is a large pose/composition move, so framing may reshape around it (keep-dial 0.55 — the documented band for large moves).',
+  '',
+  'A single still image.',
+  '',
+  'Change nothing else.',
+].join('\n')
+matrix.push({ name: 'canvas-t1-inline', request: { family: 'h3img.generate.t1', prompt: CANVAS_T1_CONTRACT, width: 1344, height: 768, seed: 4242, tier: 1, refs: [], loras: [], filenamePrefix: 'images/H3IMG_plan' }, models: CANVAS_T1_MODELS, info: 'stock' })
+
 module.exports = { H3IMG_MATRIX: matrix, H3IMG_MODELS, H3IMG_CONTRACT: CONTRACT }
