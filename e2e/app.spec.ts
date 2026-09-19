@@ -642,7 +642,7 @@ test('first-run guidance: empty model roots show dismissible onboarding, never a
 // settings are restored in finally so later tests see the clean home.
 test('external instance: instance-sourced models, live pack chips, install into the external custom nodes folder', async ({ page }) => {
   const problems = await trackErrors(page)
-  const { mkdirSync, writeFileSync, existsSync } = await import('node:fs')
+  const { mkdirSync, writeFileSync, existsSync, readFileSync } = await import('node:fs')
   const { join } = await import('node:path')
   const http = await import('node:http')
 
@@ -749,14 +749,37 @@ test('external instance: instance-sourced models, live pack chips, install into 
     await expect(krea2editRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'installed — restart engine to activate', { timeout: 15_000 })
     expect(existsSync(join(externalDir, 'comfyui-krea2edit', '.studio-node.json'))).toBe(true)
 
-    // A foreign folder (no studio marker) is refused and reported, never
-    // silently replaced.
+    // The maintainer's exact report (9om4bi9 follow-up): a working instance's
+    // external folder already holds the form adapter → the row reports
+    // PRESENT with the Install button disabled (not "cannot be installed");
+    // and the vendored VDN pack installs with NO source directory at all.
+    mkdirSync(join(externalDir, 'minimax-lora-form-adapter'), { recursive: true })
+    writeFileSync(join(externalDir, 'minimax-lora-form-adapter', 'nodes.py'), '# theirs\n')
+    await page.locator('[data-canvas-settings-close]').click()
+    await page.locator('[data-canvas-settings-button]').click()
+    const formAdapterRow = page.locator('.node-pack-row').filter({ hasText: 'minimax-lora-form-adapter' })
+    await expect(formAdapterRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'present — not studio-managed', { timeout: 15_000 })
+    await expect(formAdapterRow.getByRole('button', { name: /^Install$/ })).toBeDisabled()
+    expect(readFileSync(join(externalDir, 'minimax-lora-form-adapter', 'nodes.py'), 'utf8')).toBe('# theirs\n')
+
+    const vdnRow = page.locator('.node-pack-row').filter({ hasText: 'ComfyUI-VDN-H3' })
+    await vdnRow.locator('[data-node-pack-chip]').scrollIntoViewIfNeeded()
+    await vdnRow.getByRole('button', { name: /^Install$/ }).click()
+    await expect(vdnRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'installed — restart engine to activate', { timeout: 15_000 })
+    expect(existsSync(join(externalDir, 'ComfyUI-VDN-H3', '.studio-node.json'))).toBe(true)
+
+    // A pre-existing folder (no studio marker) is reported as PRESENT in the
+    // external target — never silently replaced, never deleted, and the
+    // Install button is disabled with the honest reason (the 9om4bi9
+    // follow-up: this is a working instance's normal state, not a failure).
     mkdirSync(join(externalDir, 'radiance'), { recursive: true })
     writeFileSync(join(externalDir, 'radiance', 'user-file.py'), '# theirs\n')
     await page.locator('[data-canvas-settings-close]').click()
     await page.locator('[data-canvas-settings-button]').click()
     const radianceRow = page.locator('.node-pack-row').filter({ hasText: 'radiance' })
-    await expect(radianceRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'foreign folder', { timeout: 15_000 })
+    await expect(radianceRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'present — not studio-managed', { timeout: 15_000 })
+    await expect(radianceRow.getByRole('button', { name: /^Install$/ })).toBeDisabled()
+    expect(fs.readFileSync(join(externalDir, 'radiance', 'user-file.py'), 'utf8')).toBe('# theirs\n')
 
     expect(problems.filter((entry) => !environmental(entry))).toEqual([])
   } finally {
