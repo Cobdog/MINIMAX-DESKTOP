@@ -1,8 +1,11 @@
 # Structured H3 Prompt Editor — spec
 
-Status: DRAFT for maintainer confirmation (the concept dictated by the maintainer
-2026-09-18; this fills the details). Scope: **generation-side only** — the video
-prompt surface, nothing to do with training captions. Written by the lead.
+Status: **SHIPPED** (task fh94g76, closed done 2026-09-18: `src/lib/structuredPrompt.ts`
++ `src/components/StructuredPromptEditor.tsx` + the canvas properties-panel toggle —
+status line corrected 2026-09-19, conformance audit u7rxi2e; it had read "DRAFT for
+maintainer confirmation" since the spec was written). The concept was dictated by the
+maintainer 2026-09-18; this doc filled the details. Scope: **generation-side only** —
+the video prompt surface, nothing to do with training captions. Written by the lead.
 
 ## 0. The idea (the maintainer's words, binding)
 

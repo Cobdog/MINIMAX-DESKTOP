@@ -1,7 +1,9 @@
 # Roadmap — state of play
 
 > **Derived from Flux (project `r2lnrfw`); refreshed 2026-09-17 after the Phase-5b
-> landing (lead).** Flux is the source of truth; this file is the human-readable
+> landing (lead), then again 2026-09-19 by the docs-conformance audit (u7rxi2e) to
+> pick up every merge since (PRs #6–#20) — three "in flight" entries had already
+> landed.** Flux is the source of truth; this file is the human-readable
 > state of play — if it disagrees with the board, the board wins. Task ids are Flux ids.
 
 ## Shipped (verified, CI green at landing)
@@ -99,28 +101,54 @@
   `?datasets=1`; canvas bridge both directions. Gate 23/23 (test:datasets 138
   assertions); vision 12/13 (the one fail pre-existing, flagged to the correctness
   lane); both CI legs green. Spec: docs/specs/dataset-manager-v1.md (BLESSED).
+- **H3 Image Workbench SHIPPED** (jvcrud2 spec+blessing, k9vu6t0 build, PR #12
+  492436d): the blessed spec r2 end-to-end at `?images=1` — packets (5/9/13 +
+  directed 39) + T=1 Fast, compose (9 role+transport slots), the six edit
+  families, opt-in refine (klein/Krea 2), first-party scorer + take-strip
+  picking, burst lane gated on E-IW2, start-frame exit, the Mamad8
+  never-in-video-graphs factory guard. Suite `test:h3img`.
+- **Post-audit cleanup wave SHIPPED** (twmpu4m, PR #8 fe535f1): latent-path
+  naming alignment, menu clamping, the seeding race, the one-canonical-take
+  index (migration 004), honest /free + 400/404 refusals, VDN consolidation.
+- **Design-decision implementations SHIPPED** (2hbv2ib, PR #9 8b5d59f): F6 live
+  progress (the stable server-side clientId + per-prompt `preview_method=taesd`
+  previews decoded through taeh3; percent/label + in-progress frames on the
+  generating tile), fetch-consent origin gating (Option A), settings-GET
+  token contract (Option B). 3a (token-mode default stays open) recorded, not
+  implemented. Mechanism capture: docs/research/comfyui-live-progress-mechanism.md.
+- **Performance wave 1 SHIPPED** (pq7d48a, PR #6 320eb34): hydration cache/ETag
+  (300-object project GET burst p99 439→31 ms), overlay virtualization (zero
+  long tasks at 300 objects), cull coalescing — measured before/after in
+  docs/research/app-performance-profile.md's addendum.
+- **QOL wave SHIPPED** (rrxlw2r): the surface registry + titlebar switcher
+  (Alt+n), one-click fetch affordances, first-run guidance.
+- **Structured H3 Prompt Editor SHIPPED** (fh94g76): the structured ⇄ freeform
+  toggle on the canvas prompt surface — boxes per prompt part, Flow as a
+  first-class timed list, `composeStructuredPrompt` goldens, round-trip
+  no-text-lost. Spec: docs/specs/structured-prompt-editor.md.
+- **Image pathway reroute SHIPPED** (34afx79, PR #18 f1a0a8d): the canvas image
+  intent renders H3-1F (T=1 Fast through the workbench core); Z-Image retired;
+  the Krea 2 stills seam stubbed for mf3wfq6; edit-intent hands off to the
+  workbench. Spec addendum: docs/specs/canvas-ui-v1.md §8.
+- **Model overrides SHIPPED** (euxwdva, PR #19 99cfddb): global (Settings) +
+  per-chain (properties panel) checkpoint/TE/VAE selection over the inference
+  seam; chain > global > auto; wrong-kind refusal.
+- **LoRA timeline SHIPPED** (7twfk6o, PR #20 ee0594c): paint LoRA ranges over a
+  clip; the compiler emits per-LoRA segment chains joined by measured-transition
+  defaults; plan/manifest/take provenance; layer 1 (segment granularity).
+- **Research cadence since 09-17** (all landed in docs/research/): the
+  per-model prompt-doctrine harvest (6niii1p/3449qan — Anima/Klein/Krea 2/H3
+  captioning doctrines + the 8-rule spine; the missing anima fragments row
+  filed as eagkso0), the burst-frame-enhancement survey (ucsnubx, E-IW2 GO),
+  the pan-stitch extension research (4akaet6), the Fizgig ADOPT addendum
+  (6niii1p — block-role map, voice grid, third de-distillation data point),
+  the benchmark harness joining the gate (cp96zdm — `test:benchmarks`).
 
 ## Building (in flight)
 
-- **Design-decision implementations** (2hbv2ib) — the maintainer's 1a/2a/3a/4b
-  calls built: F6 live progress (one stable server-side clientId registered on
-  the shared upstream WS and carried by every submission — targeted engine
-  events reach every client surface; native sampler previews requested per
-  prompt via extra_data.preview_method=taesd and decoded through the taeh3
-  vae_approx weight, fetched via the catalog consent flow into the central
-  home; percent/label + in-progress frames on the generating tile, frames
-  transient), fetch-consent Option A (consent recorded only from the studio's
-  own UI origin — present + same-origin; 403 otherwise), settings-GET Option B
-  (the token-mode 401-without-token contract pinned by tests; open mode
-  unchanged; the SPA editor path proven in both modes). 3a (token-mode
-  default stays open) recorded, not implemented — switch only if the studio
-  leaves the home LAN. Mechanism capture: docs/research/
-  comfyui-live-progress-mechanism.md. PR train.
-- **Post-audit cleanup wave** (twmpu4m) — latent-path naming alignment, menu clamping,
-  the seeding race, the unique-index backstop, honest /free + 400/404 refusals, VDN
-  consolidation, and the four design-decision option papers. PR train.
-- **Performance wave 1** (pq7d48a) — hydration cache/ETag (p99 400ms → <100ms target),
-  overlay virtualization, cull coalescing; before/after via scripts/perf-profile/.
+- **External-instance integration** (9om4bi9) — instance-sourced model inventory,
+  app-relative input/output defaults, node-pack install into an external
+  custom_nodes folder, live pack status in Settings. PR train.
 - **Nits logged for a future polish pass** (5vu57ue) — deliberately deferred, not lost.
 
 ## Queued (specced/planning)
@@ -142,7 +170,6 @@
   combo; the mitigation recipe + calibrated drift-budget thresholds.
 - **Few-shot LoRA training sidecar** (ehzagoc, promoted from deferred) — the in-app
   training pipeline the envelope + guide + dataset manager feed into.
-- **Camera editor** (y93rk61, split from ving89w) — canvas-phase component.
 - **Control-input creation tools** (r2copa7, epic 66xhflw).
 - **Engine integrations**: start-frame factory (xlfl0iv), RefMod factory (y5ipryd),
   VDN chain option (9up52mj), FaceRefine (krzunud), Krea 2 stills (mf3wfq6),

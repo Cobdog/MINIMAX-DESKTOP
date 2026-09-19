@@ -7,15 +7,12 @@ Section-level amendment rights retained throughout the build — the blessing
 starts the work, it does not freeze the doc.** Prior status: DRAFT v0.2.2
 through three adversarial audits (m2sdz9r, 2zkir0u, 5hkenmv — all findings
 applied). Companion: docs/specs/canvas-document-model.md. Flux: 0rtwaj4.
-
-**Status:** DRAFT — section-by-section review with the maintainer. Flux task
-0rtwaj4. v0.2 = post blind-adversarial-audit revision (Flux m2sdz9r): all
-findings applied — union ledger rebuilt, budget numbers marked PROPOSAL,
-inheritance line corrected, structural homes reserved for previously unhoused
-scope. Written against: the LOCK register in `docs/research/ui-pre-brainstorm.md`,
-`docs/research/ui-inventory-and-migration-map.md`, Items 3–4 (forming), the
-research corpus under `docs/research/`, and the Flux decision records. The
-document-model schema (Flux o0xw49r) is co-designed with this spec.
+Written against: the LOCK register in `docs/research/ui-pre-brainstorm.md`,
+`docs/research/ui-inventory-and-migration-map.md`, the research corpus under
+`docs/research/`, and the Flux decision records; the document-model schema
+(Flux o0xw49r) is co-designed with this spec. *(Conformance-audit note
+2026-09-19, u7rxi2e: the pre-blessing DRAFT status block that previously sat
+here was removed as a leftover — the BLESSED block above is authoritative.)*
 
 ---
 
@@ -443,6 +440,12 @@ inherits: delete the retired views + the old shell + the View union, the
 Director Suite (timeline projection + plan documents), and final cleanup.
 
 ## 9. Parked-questions ledger — RECONCILED UNION (per audit L1)
+
+*(Audit note 2026-09-19, u7rxi2e: the row STATUSES below were written at
+DRAFT and were not rewritten at blessing — the BLESSED block directly above
+this table is authoritative: every bundle A/B row was DECIDED as
+recommended; only the rows the blessing header names as non-decided (L7, L13,
+L33-measured) remained open as stated.)*
 
 **[BLESSED 2026-09-15 — maintainer accepted both bundles wholesale via
 structured Q&A: Bundle A (interaction: L1, L3, L8, L9, L18, L19, L20, L24)

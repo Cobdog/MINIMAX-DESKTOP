@@ -38,9 +38,10 @@ disappears silently), and a final summary table. Non-zero exit on any
 failure; a failed `build` skips only its dependents (smoke/e2e/vision).
 
 Order: `typecheck` → `lint` → `license:audit` → `test` → `test:registry` →
-`test:storage` → `test:realtime` → `test:filmstrip` → `test:llm` →
-`test:engine` → `test:runtime` → `test:fetcher` → `test:lora-form` →
-`test:poserig` → `test:camera` → `test:datasets` →
+`test:h3img` → `test:storage` → `test:documents` → `test:realtime` →
+`test:filmstrip` → `test:llm` → `test:engine` → `test:runtime` →
+`test:fetcher` → `test:lora-form` → `test:poserig` → `test:camera` →
+`test:canvas` → `test:benchmarks` → `test:datasets` →
 `build` → `smoke:server` →
 e2e (Playwright) → vision-capture (Playwright). `pnpm test:all` is the same
 chain without the harness niceties. `license:audit` classifies every direct
@@ -140,31 +141,40 @@ separate: `pnpm typecheck`.
 
 ## Capabilities
 
+**Surfaces.** The app boots to the **canvas** — one infinite surface per project
+where media, generations, and plans live as first-class objects, every edit an op
+in a stack, takes compared on a strip, and a timeline projection over the chain
+graph (the Director Suite: plan documents with measured gap transitions). Two more
+surfaces ride beside it in the titlebar switcher (Alt+1..n): the **dataset
+manager** (`?datasets=1`, LoRA training-set prep) and the **H3 image workbench**
+(`?images=1`, multi-image compose/edit/refine). `?canvas=1` is a harmless alias;
+`?mobile=1` still boots the touch companion (unmaintained); dev surfaces live at
+`?proto=` and `?poserig=1`.
+
 **Video generation (MiniMax H3)**
 - Text-to-video, image-to-video (first frame), first+last-frame, and mixed reference generation (up to 9 images / 3 videos / 3 audio) through the FL2VA/Ref2VA models
 - Official ComfyUI H3 graph topology and sampling defaults (`res_multistep` + `simple`), with detected FL2V 4/8-step and Ref2V 4-step turbo LoRAs
 - **Official MiniMax prompt contracts built in**: one-click scaffolds for the three-field base structure and the six-section Ref2VA format (`subject_definitions` … `non_diegetic_music`), timed `[Shot N] At MM:SS.mmm` cut insertions, inline negatives, identity-lock enumeration, and live slot-order warnings that keep `<Picture>/<Video>/<Audio>` mentions matching reference order
 - **Multiframe timeline keyframes**: pin images at exact seconds through chained `MiniMaxH3AddGuide` (official multiframe topology), with frame readouts, in-duration validation, and mirroring guide images into prompt-visible Pictures
-- Guided quality presets — Native Quality, official Turbo 8, Preview — with custom sampling isolated under an explicit Experimental disclosure
+- Guided quality tiers on the canvas — Quality (full-step native) / Fast · 4-step / Fast · 8-step — pinned to the official sampler/scheduler pair; the custom-sampling seam exists in code but has no UI toggle (custom combinations are not equivalent to the published template)
 - A fixed-seed quality diagnostic that queues matching Native and Turbo 8 renders for direct A/B comparison
-- **Character sheets in-model**: Character Studio's sheet generation prefers the H3 ContactSheet + Turnaround LoRA path (five coordinated views in one pass, saved straight into the reference set) with the LTX turntable as fallback; reference discipline warns when a character carries more than four identity pictures (every reference is scaled to a 2048px short edge)
+- **Character sheets in-model**: the studios' sheet generation runs the H3 ContactSheet + Turnaround LoRA path (five coordinated views in one pass, saved straight into the reference set; required — the old LTX turntable fallback was retired with the survey engine)
 - **Graph compatibility**: renders record a graph-family version, and Settings tracks the ComfyUI version the graphs were verified against — warning when the engine updates past it (with the H3 Quality Test as the re-verification path); director's-looseness presets counter H3's strong prompt adherence
-- **Latent scene chaining**: render a Movie Planner scene as one continuous sequence — each segment pins the previous clip's tail as never-denoised conditioning (ComfyUI-H3-Motion-Context), so motion and audio carry across clips at the latent level. Segments cap at 15 s; joins read as true continuation rather than re-synthesis. The Clip Editor's frame-accurate pixel concat remains the manual fallback when you want explicit control
-- **Reproducibility manifests** on every render (seed, model files + sizes, LoRA strength, sampler, graph-version hash) — downloadable per job or exported in bulk
+- **Latent scene chaining (the Director Suite)**: plan a multi-segment sequence as a plan document on the timeline — segments can render as ONE Motion-Context latent episode, each segment pinning the previous clip's tail as never-denoised conditioning so motion and audio carry across at the latent level. Segment frames ride the 17n+5 grid (max 345 f ≈ 15 s); the measured gap menu offers hard cut (default), NLE handoff, and the FLF continuation splice that executes offline; guided dip-to-black and diegetic bridges are labeled honestly as queued engine work. Chain plans can also be seeded segment-by-segment, consent-gated
+- **Reproducibility manifests** on every render (seed, model files + sizes, LoRA strength, sampler, graph-version hash) — recorded on each job and take
 - **Queue hygiene**: a failed render automatically soft-resets the engine (`/free`) and retries once with tiled VAE decoding before surfacing the error
-- Optional verified LTX 2.5 latent 2× post-processing and explicitly experimental RTX/CUDA frame upscaling
-- Non-destructive reference video clipping: preview a source, set in/out points, create a focused 2–15 s reference MP4
+- Optional verified LTX 2.5 latent 2× post-processing, the LBH 2D/3D latent upscalers, and RTX/CUDA frame upscaling as canvas ops
+- Non-destructive trim/clip ops in the canvas op stack (frame-accurate in/out; the destructive "focused reference MP4" export of the old clipper is retired)
 
-**Other providers (separate workspaces, separate state)**
-- LTX-2.5 T2V/I2V with native synchronized audio, the official two-stage Quality preset and single-stage Turbo preset
-- ACE-Step 1.5 music generation with XL SFT/Base checkpoint selection, lyric/instrumental modes, tempo/key/language controls, and FLAC output
-- **MiniMax Music 3**: complete songs up to five minutes — official three-section caption builder (Global Metadata / Vocal Details / Arrangement), lyrics with `[Intro]…[Outro]` structure tags, an LLM-layer caption rewriter following the official skill's rules (llama.cpp router primary, Ollama fallback), tiled low-VRAM audio decode, mp3 V0 output
-- Z-Image Turbo first-frame and standalone still generation with direct I2V handoff
+**Other engines (canvas ops and audio docks — the old per-engine workspaces were retired with the canvas)**
+- LTX-2.5 T2V/I2V as a canvas produce op, with native synchronized audio, the official two-stage Quality preset and single-stage Turbo preset; LTX 2.3 one-graph utility tools (remove subtitles/watermark/object, outpaint, img+audio→video)
+- ACE-Step 1.5 music generation through the audio dock, with XL SFT/Base checkpoint selection, lyric/instrumental modes, tempo/key/language controls, and FLAC output
+- **MiniMax Music 3** through the audio dock: complete songs up to five minutes, lyrics with `[Intro]…[Outro]` structure tags, tiled low-VRAM audio decode, mp3 V0 output (the old three-section caption builder + LLM rewriter were retired with the Music workspace — captions are freeform on the dock)
+- Stills: the image intent renders **H3-1F** (the T=1 Fast profile through the image workbench core), with a Krea 2 stills engine queued; Z-Image Turbo survives inside the asset studios for master references
 
-**Production libraries**
-- Character Studio: Z-Image master references, I2V turntable generation, five-angle frame extraction, reference-set or single-image selection
-- Hair, Wardrobe, Accessories, and Location studios with reusable references
-- Movie Planner: Ollama-assisted scene/shot planning with a conversational copilot, field-level diff review, and undo history
+**Production libraries (the five asset studios, docked on canvas)**
+- Character Studio: Z-Image master references, ContactSheet five-view sheet generation, five-angle frame extraction, reference-set or single-image selection
+- Hair, Wardrobe, Accessories, and Location studios with reusable references; libraries project into the canvas global asset store (copy-never-destroy) and bind onto chains with consent-gated forks
 
 **Prompt library**
 - Search Civitai's public generation metadata through the local server (pinned-host proxy, scoped to the MiniMax H3 base model by default), study its settings, and save entries with attribution into a reusable local library
@@ -177,7 +187,7 @@ separate: `pnpm typecheck`.
 - Landscape/portrait/square output presets with automatic fitting and interactive crop preview
 
 **Every device**
-- The full Studio runs in any modern browser; `?mobile=1` serves the touch-first companion view; both are PWA-installable on phones
+- The full Studio runs in any modern browser; `?mobile=1` serves the touch-first companion view (unmaintained; the mobile manifest makes it PWA-installable on phones)
 - Files arrive by drag-and-drop upload (or file picker) and generated outputs are browsable, previewable, and directly reusable as new inputs
 
 ## Local services
@@ -185,7 +195,7 @@ separate: `pnpm typecheck`.
 **Trust & setup**
 - Setup doctor in Settings: verifies FFmpeg, HTTPS tooling, the engine device, and attention backends, with exact fixes
 - GPU-tier guidance (8/16/24 GB, Blackwell) from the community quant tiers
-- One-time model-license notice covering the MiniMax community license's reported region and commercial-use constraints
+- The server serves HTTPS with a self-signed certificate by default when OpenSSL is available (fingerprint printed at startup; `--no-https` opts out); the model-license notice component from the pre-canvas shell is currently unrouted (tracked for re-mounting on the canvas first run)
 
 - ComfyUI defaults to `http://127.0.0.1:8188`
 - The LLM layer's llama.cpp router address is set in Settings (router mode; leaving it empty keeps the Ollama fallback at `http://127.0.0.1:11434`); the app lists the served text models with family and vision-capability detection and excludes embedding and cloud-backed entries
@@ -198,7 +208,7 @@ MiniMax generation is built from ComfyUI's official T2V/I2V/Ref2V core graph: na
 
 Turbo sampling uses the official sampler/scheduler pair unless custom sampling is explicitly enabled; custom combinations remain marked experimental because they are not equivalent to the published template.
 
-The **LTX 2.5** workspace is a separate provider and never reads or changes MiniMax prompts, inputs, turbo LoRAs, samplers, sigma shifts, or upscale choices. Its Quality preset follows ComfyUI's official two-stage distilled workflow (8-step half-res pass → LTX latent 2× → 3-step refinement); Turbo uses the official fixed 8-step distilled schedule as a single full-resolution stage.
+The **LTX 2.5** engine is a separate provider (a canvas produce op since the workspace retired) and never reads or changes MiniMax prompts, inputs, turbo LoRAs, samplers, sigma shifts, or upscale choices. Its Quality preset follows ComfyUI's official two-stage distilled workflow (8-step half-res pass → LTX latent 2× → 3-step refinement); Turbo uses the official fixed 8-step distilled schedule as a single full-resolution stage.
 
 ## How generation works
 
@@ -215,7 +225,7 @@ For the process model, API surface, and persistence tiers, see [docs/architectur
 
 ## ACE-Step 1.5 setup
 
-The Music workspace submits the native ComfyUI ACE-Step 1.5 graph; it does not call a hosted music service. Install the following files into the configured ComfyUI model folders, then use **Settings → Test connection** and rescan models:
+The audio dock submits the native ComfyUI ACE-Step 1.5 graph; it does not call a hosted music service. Install the following files into the configured ComfyUI model folders, then use **Settings → Test connection** and rescan models:
 
 | ComfyUI folder | Required file |
 | --- | --- |
@@ -240,8 +250,14 @@ Reference downloads and node documentation are maintained by [Comfy-Org's ACE-St
 | [docs/LEARNINGS.md](docs/LEARNINGS.md) | Operational + engineering lessons (testbed ops, measurement doctrine, harness gotchas) |
 | [docs/agent/README.md](docs/agent/README.md) | Agent runbook tree index — runbook / testing / conventions, read on intent |
 | [docs/library/README.md](docs/library/README.md) | Research library — full-copy captures of load-bearing external docs (H3 prompt guides, ComfyUI H3 pages, Motion-Context README) with the source-of-truth check protocol |
-| [docs/specs/canvas-ui-v1.md](docs/specs/canvas-ui-v1.md) | **BLESSED** Canvas UI v1 spec — the authoritative UI direction |
-| [docs/specs/canvas-document-model.md](docs/specs/canvas-document-model.md) | Canvas document model: chains/forks/takes schema spec |
+| [docs/specs/canvas-ui-v1.md](docs/specs/canvas-ui-v1.md) | **BLESSED** Canvas UI v1 spec — the authoritative UI direction (phase addenda through 5b + the image-pathway reroute) |
+| [docs/specs/canvas-document-model.md](docs/specs/canvas-document-model.md) | Canvas document model: chains/forks/takes schema spec (shipped with Phase 0; extended since) |
+| [docs/specs/dataset-manager-v1.md](docs/specs/dataset-manager-v1.md) | **BLESSED** Dataset Manager v1 spec — import/layers/captions/curation/bake/export (the `?datasets=1` surface) |
+| [docs/specs/image-workbench-v1.md](docs/specs/image-workbench-v1.md) | **BLESSED + BUILT** H3 Image Workbench v1 spec — compose/edit/refine images on H3 (the `?images=1` surface) |
+| [docs/specs/structured-prompt-editor.md](docs/specs/structured-prompt-editor.md) | Structured H3 prompt editor spec — boxes per prompt part, Flow list, concat at submit (shipped) |
+| [docs/research/h3-lora-training-guide.md](docs/research/h3-lora-training-guide.md) | H3 LoRA training guide — per-class recipes, dataset technicals, caption formats |
+| [docs/research/h3-lora-training-envelope.md](docs/research/h3-lora-training-envelope.md) | Measured 24 GB training envelope — walls, budget rule, trainer picks, sidecar defaults |
+| [docs/research/per-model-prompt-doctrines.md](docs/research/per-model-prompt-doctrines.md) | Per-model inference-prompt + captioning doctrines (Anima, Klein, Krea 2, H3) |
 | [docs/PROVENANCE.md](docs/PROVENANCE.md) | Fork lineage, AGPLv3 rationale, vendored-ports provenance |
 | [docs/LICENSES.md](docs/LICENSES.md) | Third-party license inventory (deps, vendored, user-fetch, weights), AGPL mechanics, headers policy |
 | [docs/migration.md](docs/migration.md) | The Electron → web migration record (complete) |

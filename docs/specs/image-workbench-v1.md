@@ -1,7 +1,11 @@
 # H3 Image Workbench v1 — spec (r2, post-blind-audit)
 
-Status: DRAFT r2 — blind-audit findings applied (comment 5s9qnjy on jvcrud2) + the
-decision-6 amendment; awaiting maintainer blessing. Written 2026-09-18 by the lead.
+Status: **BLESSED + BUILT.** (Status corrected 2026-09-19, conformance audit u7rxi2e —
+this line had read "DRAFT r2 … awaiting maintainer blessing" since the spec was written;
+the blessing landed the same day: task jvcrud2 closed as "spec + blind audit + blessing
+(the twelve decisions are locked)", and the build shipped as commit 028e392 / PR #12
+"the blessed spec r2 complete", task k9vu6t0.) r2 = blind-audit findings applied
+(comment 5s9qnjy on jvcrud2) + the decision-6 amendment. Written 2026-09-18 by the lead.
 Inputs: the twelve locked decisions + the refine amendment (jvcrud2 record) ·
 research (h3-image-workbench.md, burst-frame-enhancement.md, h3-instruction-based-editing.md
 §4) · app assets (poserig, libraries, identity payloads, form-adapter, Krea 2 edit
