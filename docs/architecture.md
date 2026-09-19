@@ -1,6 +1,6 @@
 # Architecture
 
-> Contributor-oriented overview of MiniMax Studio as a web application. For the migration history, see [migration.md](migration.md). Last verified 2026-09-14 (managed runtime + launch profiles/vendoring/patch tier, the local-first fetcher, optimization registry, LLM layer, QA gate); canvas note added 2026-09-16.
+> Contributor-oriented overview of MiniMax Studio as a web application. For the migration history, see [migration.md](migration.md). Last verified 2026-09-14 (managed runtime + launch profiles/vendoring/patch tier, the local-first fetcher, optimization registry, LLM layer, QA gate); canvas note added 2026-09-16; renderer/API/e2e sections corrected 2026-09-19 after the Phase-5 deletion wave + the surface registry (conformance audit u7rxi2e — they had still described the pre-canvas shell).
 
 ## What this is
 
@@ -58,7 +58,7 @@ The server is authoritative for service URLs, the output directory, and the FFmp
 
 ## API surface
 
-All routes under `/api/lan/` (legacy prefix retained from the mobile-companion era). Representative routes: `bootstrap`, `settings` (GET/POST), `object-info`, `comfy-status` (SSRF-guarded), `prompt`, `history/{id}`, `cancel`, `events` (SSE⇄WS bridge), `ollama` + `ollama/structured` (fallback provider), `llm/{models,generate,prepare,vision,fragments}` (the LLM layer: router-primary provider selection, model-family manifests, layered prompt fragments, vision captioning), `engine/{status,start,stop}` (the managed runtime; start is refused outside managed mode and is idempotent — a repeated start never double-spawns), `fetch/{catalog,consent,start,remove}` (the local-first fetcher — the app's ONLY network-touching routes), `video/{frame,frames,trim,join}`, `outputs/{resolve,save-image}`, `upload` / `upload-media` / `upload-output`, `media` (ComfyUI proxy or output-contained local serving with Range), `telemetry`, `characters`. Full contract table in [migration.md](migration.md).
+All routes under `/api/lan/` (legacy prefix retained from the mobile-companion era). Representative routes: `bootstrap`, `settings` (GET/POST), `object-info`, `comfy-status` (SSRF-guarded), `prompt`, `history/{id}`, `cancel`, `events` (SSE⇄WS bridge), `ollama` + `ollama/structured` (fallback provider), `llm/{models,generate,prepare,vision,fragments}` (the LLM layer: router-primary provider selection, model-family manifests, layered prompt fragments, vision captioning), `engine/{status,start,stop}` (the managed runtime; start is refused outside managed mode and is idempotent — a repeated start never double-spawns), `fetch/{catalog,consent,start,remove}` (the local-first fetcher — the app's ONLY network-touching routes), `documents/*` (the canvas document store: projects/chains/takes/ops/assets/plans, FTS search, archive import/export — `server/documents.ts` + `server/documentArchive.ts`), `datasets/*` (the dataset manager: sources/layers/captions/bake/export — `server/datasets/`), `video/{frame,frames,trim,join}`, `outputs/{resolve,save-image}`, `upload` / `upload-media` / `upload-output`, `media` (ComfyUI proxy or output-contained local serving with Range), `telemetry`, `characters`. Full contract table in [migration.md](migration.md).
 
 Security posture: **open on the LAN by default** (ComfyUI-consistent; a deliberate 2026-09-10 decision), token-gated via `--token` / `MINIMAX_LAN_TOKEN=1` for hostile networks. Input validation everywhere: path containment (`relative()`-based), numeric FFmpeg arguments (concat-directive injection guarded), MIME allowlists and size caps on uploads, SSRF guard on probe-able URLs.
 
@@ -142,36 +142,45 @@ license gate is unchanged and still machine-checked).
 
 ## Renderer structure
 
-`src/App.tsx` (~630 lines) is the composition shell — hook wiring, view routing, and handoffs between workspaces. The domain logic is layered so each feature lands in exactly one place:
+> **Corrected 2026-09-19 (conformance audit u7rxi2e).** This section had
+> described the pre-Phase-5 shell. Since the Phase-5 deletion wave
+> (2026-09-17, task 7mcp11b): `src/App.tsx` and the `View` union are DELETED —
+> `src/main.tsx` resolves a top-level SURFACE through the registry
+> (`src/surfaces/registry.ts`), and **the canvas is the default route**
+> (`?canvas=1` a harmless alias). `src/views/` now holds only `SettingsView`
+> and `DiagnosticsView` (both served as canvas docks: `SettingsDock.tsx`,
+> `DiagnosticsDock.tsx`); the five asset studios ride `StudiosDock.tsx`;
+> `?datasets=1` and `?images=1` are their own surfaces; `?mobile=1` still
+> boots the unmaintained `MobileApp` companion; `?proto=` / `?poserig=1` are
+> dev surfaces. The layer table below is retained for the modules that still
+> exist (hooks/lib/components remain the domain core; canvas replaces the old
+> view tree as the composition surface).
 
-**The canvas surface (2026-09-16):** `?canvas=1` mounts an alternate primary
-surface under construction — `src/canvas/` (`CanvasApp.tsx` + the spatial
-queue/launcher substrate, DOM+CSS-transform tiles with a d3-zoom camera per
-the BLESSED spec [specs/canvas-ui-v1.md](specs/canvas-ui-v1.md)). Phase 1
-(substrate + launcher + spatial queue skeleton, commit 0ee1bcb) and Phase 2
-(generation arrives on canvas as ops + properties-panel bindings, commit
-2ae8ce1) have landed vision-verified; the legacy view tree above remains the
-default surface while the canvas build-out continues (migration map:
-[research/ui-inventory-and-migration-map.md](research/ui-inventory-and-migration-map.md)).
-The prototyped direction lives at `/?proto=bench|stage|score`
-(`src/prototypes/`), kept runnable as design references.
+The domain logic is layered so each feature lands in exactly one place:
+
+**The canvas surface (the app, since Phase 5):** `src/canvas/`
+(`CanvasApp.tsx` + the spatial queue/launcher substrate, DOM+CSS-transform
+tiles with a d3-zoom camera per the BLESSED spec
+[specs/canvas-ui-v1.md](specs/canvas-ui-v1.md), whose §8 addenda carry the
+phase-by-phase record). The prototyped direction lives at
+`/?proto=bench|stage|score` (`src/prototypes/`), kept runnable as design
+references.
 
 | Layer | Modules | What lives there |
 | --- | --- | --- |
-| `src/views/` | `CreateView`, `LibraryView`, `JobsView`, `SettingsView`, `DiagnosticsView` | One component per nav destination + its private helpers (reference pickers, strips, modals) |
+| `src/views/` | `SettingsView`, `DiagnosticsView` (docked on canvas since Phase 5; the other views were deleted by the retirement waves) | Engine/config surfaces + their private helpers |
 | `src/hooks/` | `useStudioSession` | Settings load, model scanning, ComfyUI connection/object-info, LLM model list (router/Ollama), GPU telemetry |
 | | `useGenerationQueue` | Job persistence, guarded history polling, deadline sweep, cancellation |
-| | `useCreateWorkspace` | Every persisted Create field, the character/wardrobe/location libraries, reference binding and ordering, media picking, reset |
-| | `useGenerationFlows` | Submit-side generation for every provider (H3 + upscale validation, LTX 2.5, ACE-Step, the fixed-seed diagnostic pair) |
-| `src/lib/` | `workspace`, `promptPolicies`, `h3Stack`, `jobRecords`, `format` (+ existing workflow builders) | Pure functions: persistence shapes, H3 prompt composition, validated-stack reporting, completion side effects |
-| `src/components/` | `form`, `chrome`, `media` (+ one file per workspace/studio) | Labeled fields, titlebar/nav/notice/badges, video playback and drop widgets |
+| `src/lib/` | `h3Stack`, `h3Submit`, `promptPolicies`/`dialogPolicy`, `jobRecords`/`jobReducer`, `manifest`, `modelOverrides`, `format` (+ the graph factory under `lib/graph/` and the per-engine workflow builders) | Pure functions: validated-stack reporting, submit seams, H3 prompt composition + policies, completion side effects, reproducibility manifests |
+| `src/components/` | `form`, `chrome`, `media` (+ one file per studio/editor, e.g. `CameraPathEditor`, `StructuredPromptEditor`) | Labeled fields, chrome, video playback and drop widgets, the shared editors |
+| `src/canvas/` | `CanvasApp` + store/derive/ops/plan/generation + the docks and overlays | THE composition surface: tiles, op stacks, takes, plans, the properties panel, radar/index/timeline projections |
 
-Adding a feature is a one-file change: a workspace field goes in `useCreateWorkspace` + `PersistedWorkspace`; a new generator goes in `useGenerationFlows` + a graph builder in `lib/`; a new view goes in `src/views/` plus a route in `App.tsx`.
+Adding a feature is a one-file change: a workspace field goes in `useCreateWorkspace` + `PersistedWorkspace`; a new generator goes in `useGenerationFlows` + a graph builder in `lib/`; a new top-level surface appends ONE entry to the surface registry (`src/surfaces/registry.ts`) — the switcher, Alt-accelerator, and route resolution pick it up with no nav edits anywhere else.
 
 ## State & persistence
 
-- **Server-side:** `~/.minimax-studio/settings.json` (atomic writes), LAN token file
-- **Browser localStorage (per browser):** ~20 keys — workspace state, jobs (last 100), movie projects + undo history, clip projects, frame bookmarks, six library collections. Libraries signal changes via `window` CustomEvents; saves route through `persistToLocalStorage` (`src/lib/libraryStorage.ts`) which survives quota exhaustion by scrubbing inline previews
+- **Server-side:** `~/.minimax-studio/settings.json` (atomic writes), LAN token file, and since the canvas phases the **SQLite document store** (`studio.db` — projects/chains/takes/ops/assets/plans with FTS5, tombstones/GC, and the project archive format; `server/documents.ts`)
+- **Browser localStorage (per browser):** workspace state, jobs (last 100), the library collections (character/wardrobe/hair/accessory/location projects, the prompt library, the legacy movie-projects key still carried by job records). Libraries signal changes via `window` CustomEvents; saves route through `persistToLocalStorage` (`src/lib/libraryStorage.ts`) which survives quota exhaustion by scrubbing inline previews
 - **Disk (output directory):** FFmpeg artifacts (reference clips, extracted frames, joined videos, character references) in named subfolders
 
 ## Third-party components & the user-fetch pattern
@@ -244,8 +253,10 @@ pnpm test:fetcher   # local-first fetcher: catalog integrity, consent gating, ve
                     # mismatch, pin stamping, install records, link placement, HTTP transport
                     # (local stub origin), routes — zero real network
 pnpm smoke:server   # boots the built server on a scratch port; verifies routes + guards
-pnpm test:e2e       # builds, then Playwright: 14-view render sweep at 1920x1080
-                    # with console-error tracking + per-view vision screenshots
+pnpm test:e2e       # builds, then Playwright: canvas-centric spec sweep at
+                    # 1920x1080 (e2e/canvas.spec.ts + datasets/images/poserig/
+                    # prototypes specs) with console-error tracking + vision
+                    # screenshots
 pnpm test:vision    # vision phase 1 (capture): screenshot bundle + rubrics under
                     # test-results/vision/<run-id>/ — judging is a subagent step
                     # (scripts/vision-e2e/JUDGE.md), then `pnpm vision:report`

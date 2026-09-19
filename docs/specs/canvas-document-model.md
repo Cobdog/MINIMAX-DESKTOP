@@ -1,6 +1,10 @@
-# Canvas document model — schema spec (DRAFT v0.1, co-designed with canvas-ui-v1 §2)
+# Canvas document model — schema spec (co-designed with canvas-ui-v1 §2)
 
-**Status:** DRAFT — companion to `docs/specs/canvas-ui-v1.md` §2 (the model)
+**Status:** SHIPPED — the schema landed with Canvas Phase 0 (task oiavqh8) and has
+been extended in place since (migrations 001–004; the LoRA-timeline fields on plan
+segments — see the queued addendum noted by the 2026-09-19 conformance audit,
+u7rxi2e — and the one-canonical-take index of migration 004). This status line
+previously read "DRAFT v0.1" from spec time. Companion to `docs/specs/canvas-ui-v1.md` §2 (the model)
 and Flux o0xw49r (the ACs). The schema freeze blockers are closed (F3 global
 asset store + fork-into-project; F5 retention tiers + tombstones + session
 prune; F9 full versioning — all maintainer-decided 2026-09-14/15). F6
