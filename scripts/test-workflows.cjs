@@ -135,6 +135,152 @@ const selectedLtx = inferLtx25Selections([
 ], ['ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors'])
 assert.ok(Object.values(selectedLtx).every(Boolean))
 
+// ---------------------------------------------------------------------------
+// Model overrides (task euxwdva) — the explicit-pick layer over the
+// inference ladder. Failing-without-it: every assertion below that names the
+// community merge or a refusal/degradation outcome fails on the pre-override
+// ladder (inference returns '' or the pattern-matched official file, and no
+// refusal vocabulary exists).
+// ---------------------------------------------------------------------------
+const overridesModule = load('src/lib/modelOverrides.ts')
+const { mergeModelOverrides, resolveModelOverrides, resolveModels, inferredOverrideSlotFile, overridePickOutcome, MODEL_FAMILIES } = overridesModule
+const h3StackModule = load('src/lib/h3Stack.ts')
+const manifestModule = load('src/lib/manifest.ts')
+const mergeName = 'TenStrip_10Eros-Max_beta5_int8.safetensors'
+const overrideScan = [
+  { kind: 'diffusion_models', name: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', h3Form: 'curve' },
+  { kind: 'diffusion_models', name: 'minimax_h3_ref2va_pruned_int8_convrot.safetensors', h3Form: 'curve' },
+  // The maintainer's community merge: H3-shaped (curve form detected at scan
+  // time from tensor shapes) but matching NO selection pattern.
+  { kind: 'diffusion_models', name: mergeName, h3Form: 'curve' },
+  // An H3-family diffusion file with NO detected form — the wrong-kind class.
+  { kind: 'diffusion_models', name: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors' },
+  { kind: 'text_encoders', name: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors' },
+  { kind: 'vae', name: 'minimax_h3_video_vae_fp16.safetensors' },
+  { kind: 'vae', name: 'minimax_h3_audio_vae_fp32.safetensors' },
+  { kind: 'vae', name: 'minimax_h3_t1_image_vae_step1597.safetensors' },
+  { kind: 'diffusion_models', name: 'music3_dit_int8.safetensors' },
+  { kind: 'text_encoders', name: 'music3_text_encoder_bf16.safetensors' },
+  { kind: 'vae', name: 'music3_dav.safetensors' },
+]
+const inferredH3 = () => inferSelections(overrideScan, 'off')
+
+// 1. The override is CONSULTED: a scanned file no pattern matches becomes the
+//    resolved pick — both H3 checkpoint slots (the one user-facing
+//    checkpoint; only the mode's slot loads).
+assert.equal(inferredH3().fl2va, 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'sanity: inference finds the official file, never the merge')
+const mergeResolved = resolveModels('minimax', inferredH3(), overrideScan, { checkpoint: mergeName })
+assert.equal(mergeResolved.selection.fl2va, mergeName, 'the community merge becomes FL2VA via override')
+assert.equal(mergeResolved.selection.ref2va, mergeName, 'the community merge becomes Ref2VA via override')
+assert.equal(mergeResolved.resolution.applied.checkpoint, mergeName)
+assert.equal(mergeResolved.resolution.refusals.length, 0)
+assert.equal(mergeResolved.resolution.warnings.length, 0)
+
+// 2. AUTO UNCHANGED when unset — empty overrides, no key, blank strings: the
+//    selection is byte-identical to inference and every slot reports auto.
+for (const emptyOverrides of [undefined, {}, { checkpoint: '' }, { checkpoint: '   ' }]) {
+  const auto = resolveModels('minimax', inferredH3(), overrideScan, emptyOverrides)
+  assert.equal([auto.selection.fl2va, auto.selection.ref2va, auto.selection.textEncoder, auto.selection.videoVae, auto.selection.audioVae].join('|'),
+    [inferredH3().fl2va, inferredH3().ref2va, inferredH3().textEncoder, inferredH3().videoVae, inferredH3().audioVae].join('|'),
+    `auto selection is inference exactly (${JSON.stringify(emptyOverrides)})`)
+  assert.equal(auto.resolution.slots.checkpoint.state, 'auto')
+  assert.equal(auto.resolution.slots.textEncoder.state, 'auto')
+  assert.equal(auto.resolution.slots.vae.state, 'auto')
+  assert.equal(Object.keys(auto.resolution.applied).length, 0)
+}
+
+// 3. PRECEDENCE: chain > global > auto, per slot.
+const chainOverGlobal = mergeModelOverrides({ checkpoint: 'chain-pick.safetensors' }, { checkpoint: 'global-pick.safetensors', textEncoder: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors' })
+assert.equal(chainOverGlobal.checkpoint, 'chain-pick.safetensors', 'chain beats global')
+assert.equal(chainOverGlobal.textEncoder, 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', 'unset chain slot falls to global')
+const globalOnly = mergeModelOverrides(undefined, { vae: 'minimax_h3_video_vae_fp16.safetensors' })
+assert.equal(globalOnly.vae, 'minimax_h3_video_vae_fp16.safetensors')
+const layered = resolveModels('minimax', inferredH3(), overrideScan, mergeModelOverrides({ textEncoder: 'music3_text_encoder_bf16.safetensors' }, { checkpoint: mergeName }))
+assert.equal(layered.selection.fl2va, mergeName, 'global checkpoint applies under a chain TE pick')
+assert.equal(layered.selection.textEncoder, 'music3_text_encoder_bf16.safetensors', 'chain text-encoder beats global absence')
+
+// 4. WRONG-KIND REFUSALS — the pick exists in the scan but the family
+//    contract rejects it; the submission refuses, the selection stays auto.
+const wrongKind = resolveModelOverrides('minimax', overrideScan, { checkpoint: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors' })
+assert.equal(wrongKind.slots.checkpoint.state, 'refused')
+assert.ok(wrongKind.refusals[0].reason.includes('text encoder'), 'reason names the kind mismatch: ' + wrongKind.refusals[0].reason)
+assert.equal(wrongKind.applied.checkpoint, undefined)
+const wrongKindResolved = resolveModels('minimax', inferredH3(), overrideScan, { checkpoint: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors' })
+assert.equal(wrongKindResolved.selection.fl2va, inferredH3().fl2va, 'a refused pick never reaches the selection')
+const noForm = resolveModelOverrides('minimax', overrideScan, { checkpoint: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors' })
+assert.equal(noForm.slots.checkpoint.state, 'refused')
+assert.ok(noForm.refusals[0].reason.includes('form'), 'reason names the missing H3 form: ' + noForm.refusals[0].reason)
+const t1Vae = resolveModelOverrides('minimax', overrideScan, { vae: 'minimax_h3_t1_image_vae_step1597.safetensors' })
+assert.equal(t1Vae.slots.vae.state, 'refused', 'the T=1 image VAE refuses for the video family')
+assert.ok(t1Vae.refusals[0].reason.includes('T=1'))
+const unexposedSlot = resolveModelOverrides('ltx23', overrideScan, { checkpoint: mergeName })
+assert.equal(unexposedSlot.slots.checkpoint.state, 'refused', 'a slot the family does not expose refuses, never silently drops')
+
+// 5. MISSING-FILE DEGRADATION: the file vanished since it was set — auto with
+//    a visible warning, not a refusal.
+const degraded = resolveModelOverrides('minimax', overrideScan, { checkpoint: 'deleted_merge_v2.safetensors' })
+assert.equal(degraded.slots.checkpoint.state, 'degraded')
+assert.equal(degraded.warnings.length, 1)
+assert.ok(degraded.warnings[0].includes('no longer in the scan'), 'warning states the fallback: ' + degraded.warnings[0])
+assert.equal(degraded.applied.checkpoint, undefined)
+const degradedResolved = resolveModels('minimax', inferredH3(), overrideScan, { checkpoint: 'deleted_merge_v2.safetensors' })
+assert.equal(degradedResolved.selection.fl2va, inferredH3().fl2va, 'degradation falls back to inference')
+
+// 6. CASE CANONICALIZATION: the pick resolves to the SCANNED file's real
+//    name, so a case-drifted pick never outlives its file.
+const caseDrift = resolveModelOverrides('minimax', overrideScan, { checkpoint: 'tenstrip_10eros-max_BETA5_int8.safetensors' })
+assert.equal(caseDrift.slots.checkpoint.state, 'applied')
+assert.equal(caseDrift.slots.checkpoint.file, mergeName)
+
+// 7. PER-FAMILY FIELD MAPPING (one seam, every family).
+const music3Module = load('src/lib/music3Workflow.ts')
+const music3FromScan = music3Module.inferMusic3Selection(overrideScan)
+const music3Override = resolveModels('music3', music3FromScan, overrideScan, { checkpoint: 'music3_dit_int8.safetensors', vae: 'music3_dav.safetensors' })
+assert.equal(music3Override.selection.diffusion, 'music3_dit_int8.safetensors')
+assert.equal(music3Override.selection.vae, 'music3_dav.safetensors')
+const ltx25FromScan = inferLtx25Selections(overrideScan, [])
+const ltx25Override = resolveModels('ltx25', ltx25FromScan, overrideScan, { checkpoint: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors' })
+assert.equal(ltx25Override.selection.diffusion, 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors', 'ltx25 has no form gate — the kind check governs')
+const aceModule = load('src/lib/aceStepWorkflow.ts')
+const aceOverride = resolveModels('acestep', aceModule.inferAceStepSelections(overrideScan), overrideScan, { checkpoint: mergeName })
+assert.equal(aceOverride.selection.base, mergeName, 'acestep checkpoint drives base')
+assert.equal(aceOverride.selection.sft, mergeName, 'acestep checkpoint drives sft (the model choice decides which loads)')
+
+// 8. THE GRAPH carries the override (both render modes' checkpoint slot) and
+//    leaves the auto slots on inference; the manifest records the chosen
+//    files plus which slots were picks.
+for (const mode of ['text', 'reference']) {
+  const graph = buildMiniMaxWorkflow({ mode, width: 352, height: 608, prompt: 'override probe', duration: 5, seed: 7, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', filenamePrefix: 'test', refImageSize: 'match', ...(mode === 'reference' ? { referenceImages: ['ref.png'] } : {}) }, mergeResolved.selection, mode === 'reference' ? { images: [{ name: 'ref.png' }], videos: [], audios: [] } : { images: [], videos: [], audios: [] })
+  assert.equal(graph['1'].inputs.unet_name, mergeName, `${mode} mode loads the merge`)
+  assert.equal(graph['2'].inputs.clip_name, 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', `${mode} mode keeps the auto text encoder`)
+  assert.equal(graph['3'].inputs.vae_name, 'minimax_h3_video_vae_fp16.safetensors', `${mode} mode keeps the auto video VAE`)
+}
+const overrideManifest = manifestModule.buildRenderManifest({ mode: 'text', prompt: 'p', width: 352, height: 608, duration: 5, seed: 7, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', filenamePrefix: 't', referenceImages: [], referenceVideos: [], referenceAudios: [] }, mergeResolved.selection, overrideScan, 'http://engine', buildMiniMaxWorkflow({ mode: 'text', width: 352, height: 608, prompt: 'p', duration: 5, seed: 7, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', filenamePrefix: 't', refImageSize: 'match', referenceImages: [], referenceVideos: [], referenceAudios: [] }, mergeResolved.selection, { images: [], videos: [], audios: [] }))
+assert.equal(overrideManifest.models.diffusion.name, mergeName, 'the manifest carries the chosen checkpoint')
+assert.equal(overrideManifest.models.textEncoder.name, 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', 'the manifest carries the auto slots too')
+
+// 9. The STACK REPORT validates the resolved pick: the override row shows the
+//    user's file, flagged; rows without picks are untouched.
+const plainReport = h3StackModule.h3StackReport(overrideScan)
+assert.equal(plainReport.rows[0].selected, 'minimax_h3_fl2va_pruned_int8_convrot.safetensors')
+assert.equal(plainReport.rows[0].override, false)
+const overrideReport = h3StackModule.h3StackReport(overrideScan, { checkpoint: mergeName })
+assert.equal(overrideReport.rows[0].selected, mergeName, 'the FL2VA row shows the user pick')
+assert.equal(overrideReport.rows[0].override, true)
+assert.equal(overrideReport.rows[0].validated, false, 'a community merge reads Custom, honestly')
+assert.equal(overrideReport.validated, false)
+assert.equal(overrideReport.rows[1].override, false, 'the text-encoder row is untouched by a checkpoint pick')
+
+// 10. The single-pick outcome helper agrees with resolution (one validation
+//     path for the pickers and the ladder) and the auto label helper reports
+//     what auto resolves to.
+assert.equal(overridePickOutcome('minimax', 'checkpoint', mergeName, overrideScan).state, 'applied')
+assert.equal(overridePickOutcome('minimax', 'checkpoint', 'gone.safetensors', overrideScan).state, 'degraded')
+assert.equal(inferredOverrideSlotFile('minimax', 'checkpoint', overrideScan), 'minimax_h3_fl2va_pruned_int8_convrot.safetensors')
+assert.equal(inferredOverrideSlotFile('minimax', 'textEncoder', overrideScan), 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors')
+assert.equal(MODEL_FAMILIES.length, 6)
+
+
 // LTX-2.3 utility inference (task 068xwy3): a DIFFERENT generation from the
 // 2.5 workspace — the 22B dev checkpoint slot resolves through the engine's
 // checkpoint combo list (models/checkpoints is outside the six scanner
@@ -1104,7 +1250,7 @@ function runComposerTests() {
 
 runComposerTests()
 runKernelTests().then(() => {
-  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction (incl. structural execution-error capture: node id/class + sanitized reason + taxonomy label), quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the segmented-inference prompt discipline (temporal-exclusivity guidance constant, timeline-only scoping, single-shot contexts untouched), the H3 no-dialogue emission (ambience bed, silent score field, retained negation, OFF-state inertness), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference), ContactSheet character sheets (topology, LoRA inference, size clamps, views-first attribution), graph-family versioning + looseness presets, the Z-Image ControlNet Union graph (pin names, native canny, aux preprocessors, mask, image-sized latent), the pure error sanitizer (prompt-text redaction bar, comma-clause redaction, technical-message preservation, stack-path extraction, length cap, fallback constant), the failure taxonomy (ordered human-cause buckets over sanitized reasons), and the diagnostic report (canary-proof blob by construction, version shape allow-list, model-scan counts only, failure histogram by bucket, deterministic output, sanitizer self-test verdict)')
+  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction (incl. structural execution-error capture: node id/class + sanitized reason + taxonomy label), quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the segmented-inference prompt discipline (temporal-exclusivity guidance constant, timeline-only scoping, single-shot contexts untouched), the H3 no-dialogue emission (ambience bed, silent score field, retained negation, OFF-state inertness), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference), ContactSheet character sheets (topology, LoRA inference, size clamps, views-first attribution), graph-family versioning + looseness presets, the Z-Image ControlNet Union graph (pin names, native canny, aux preprocessors, mask, image-sized latent), the pure error sanitizer (prompt-text redaction bar, comma-clause redaction, technical-message preservation, stack-path extraction, length cap, fallback constant), the failure taxonomy (ordered human-cause buckets over sanitized reasons), the diagnostic report (canary-proof blob by construction, version shape allow-list, model-scan counts only, failure histogram by bucket, deterministic output, sanitizer self-test verdict), and the model-override layer (community-merge override consulted across both H3 checkpoint slots, auto unchanged when unset, chain>global>auto precedence, wrong-kind/no-form/T1-VAE/unexposed-slot refusals, missing-file degradation to auto with warning, case canonicalization, per-family field mapping, the graph + manifest carrying the resolved picks, and the stack report validating the user pick)')
 }, (error) => {
   console.error(error)
   process.exitCode = 1

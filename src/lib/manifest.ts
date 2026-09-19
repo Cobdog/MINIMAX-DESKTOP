@@ -35,6 +35,10 @@ export type RenderManifest = {
    *  carries Motion-Context save/load nodes (take-landing persists them as
    *  the take's latent provenance). */
   motionContext?: { folder: string; clipIndex: number }
+  /** Model overrides (task euxwdva): the slots that rode an explicit pick
+   *  (filename per slot). `models` above already records the RESOLVED
+   *  filenames; this says which of them were user picks, not inference. */
+  modelOverrides?: Record<string, string>
   graphVersion: string
   engine: { comfyUrl: string; app: string }
 }

@@ -10,6 +10,7 @@
 import { createId } from '../lib/createId'
 import { extractAllOutputFiles } from '../lib/workflow'
 import { buildH3ImageGraph, detectH3ImgFamilies, findH3ImgFamily, inferH3ImgSelection } from '../lib/graph/h3image'
+import { resolveModelOverrides, resolveModels } from '../lib/modelOverrides'
 import { resolveKrea2EditModels } from '../lib/graph/krea2edit'
 import { prepareImage } from '../lib/imageCrop'
 import type { ObjectInfo } from '../lib/comfyInfo'
@@ -47,8 +48,15 @@ export type WorkbenchGenerationRequest = {
   refine?: { engine: 'krea2' | 'klein'; instruction: string; frame: MediaFile; parentTakeId: string }
 }
 
-export function buildH3ImgSelection(facts: Pick<WorkbenchSubmitFacts, 'models'>) {
-  return inferH3ImgSelection(facts.models, resolveKrea2EditModels(facts.models))
+export function buildH3ImgSelection(facts: Pick<WorkbenchSubmitFacts, 'models' | 'settings'>) {
+  // Model overrides (euxwdva): the h3image family consults the global
+  // Settings picks through the shared seam — a community merge becomes the
+  // FL2VA/Ref2VA/TE/video-VAE pick. Inference itself stays untouched.
+  return resolveModels('h3image',
+    inferH3ImgSelection(facts.models, resolveKrea2EditModels(facts.models)),
+    facts.models,
+    facts.settings.modelOverrides?.h3image,
+  ).selection
 }
 
 /** Family availability for the facts (the mode rail's gating). */
@@ -68,6 +76,11 @@ export function validateWorkbenchRequest(request: WorkbenchGenerationRequest, fa
   }
   if (!request.settings.intent.trim() && !request.refine) return 'Describe what you want before generating.'
   if (!facts.connected) return 'Start ComfyUI and verify the server connection in Settings.'
+  // Model overrides (euxwdva): a wrong-kind pick refuses BEFORE availability
+  // guidance — never a doomed graph; a vanished file degrades to auto and
+  // only warns, at submit.
+  const overrideRefusal = resolveModelOverrides('h3image', facts.models, facts.settings.modelOverrides?.h3image).refusals[0]
+  if (overrideRefusal) return `Model override refused — ${overrideRefusal.slot}: ${overrideRefusal.reason}`
   if (request.refs.length > 9) return 'Beyond 9 references is not available in v1 — curate down (the surface states why; RefMod bundling arrives with the RefMod factory).'
   if ((family.kind === 'edit' || family.kind === 'generate-directed') && !request.source) return `${family.label} needs the anchored source image (Picture 1).`
   if (family.kind === 'compose' && request.refs.length === 0) return 'Compose needs at least one reference.'
@@ -125,6 +138,7 @@ export async function submitWorkbenchGeneration(
   }
   io.setJobs((current) => [job, ...current])
   try {
+    for (const warning of resolveModelOverrides('h3image', facts.models, facts.settings.modelOverrides?.h3image).warnings) io.notify('neutral', warning)
     io.notify('neutral', 'Uploading references and preparing the graph…')
     const upload = async (file: MediaFile, fitToOutput = false) => file.kind === 'image' && (fitToOutput || Boolean(file.crop))
       ? window.minimax.uploadImageData(settings.comfyUrl, await prepareImage(file, width, height))

@@ -1,23 +1,35 @@
 /** Detection and reporting for the validated official MiniMax H3 model stack. */
-import type { ModelFile } from '../types'
+import type { ModelFile, ModelOverrideSlots } from '../types'
 import type { ObjectInfo } from './comfyInfo'
+import { resolveModelOverrides, type ModelOverrideSlotName } from './modelOverrides'
 
 export const diagnosticPrompt = 'A woman standing beside a window in soft daylight, natural skin texture, subtle head movement, realistic cinematic photography.'
 
 export const validatedH3Files = [
-  { label: 'FL2VA', kind: 'diffusion_models' as const, expected: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', fallback: /^minimax_h3_fl2va.*\.safetensors$/i },
-  { label: 'Text encoder', kind: 'text_encoders' as const, expected: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', fallback: /^qwen3vl_32b_minimax_h3.*\.safetensors$/i },
-  { label: 'Video VAE', kind: 'vae' as const, expected: 'minimax_h3_video_vae_fp16.safetensors', fallback: /^minimax_h3_video_vae.*\.safetensors$/i },
+  { label: 'FL2VA', kind: 'diffusion_models' as const, expected: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', fallback: /^minimax_h3_fl2va.*\.safetensors$/i, overrideSlot: 'checkpoint' as ModelOverrideSlotName },
+  { label: 'Text encoder', kind: 'text_encoders' as const, expected: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', fallback: /^qwen3vl_32b_minimax_h3.*\.safetensors$/i, overrideSlot: 'textEncoder' as ModelOverrideSlotName },
+  { label: 'Video VAE', kind: 'vae' as const, expected: 'minimax_h3_video_vae_fp16.safetensors', fallback: /^minimax_h3_video_vae.*\.safetensors$/i, overrideSlot: 'vae' as ModelOverrideSlotName },
   { label: 'Audio VAE', kind: 'vae' as const, expected: 'minimax_h3_audio_vae_fp32.safetensors', fallback: /^minimax_h3_audio_vae.*\.safetensors$/i },
   { label: 'Turbo 8', kind: 'loras' as const, expected: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', fallback: /^minimax_h3_fl2v_turbo_8step.*\.safetensors$/i },
 ]
 
-export function h3StackReport(models: ModelFile[]) {
+/** The report validates the RESOLVED selection: with overrides set, the
+ *  affected rows carry the USER'S pick (an applied override replaces the
+ *  pattern-inferred file; a refused/degraded pick falls back to inference
+ *  like the submit path does) and are flagged `override` so the surface can
+ *  say whose choice the row shows. The validated verdict stays "is this the
+ *  exact official file" — an override to a community merge reads Custom,
+ *  honestly. */
+export function h3StackReport(models: ModelFile[], overrides?: ModelOverrideSlots) {
+  const resolution = overrides ? resolveModelOverrides('minimax', models, overrides) : null
   const rows = validatedH3Files.map((definition) => {
     const files = models.filter((model) => model.kind === definition.kind)
     const exact = files.find((model) => model.name.toLowerCase() === definition.expected.toLowerCase())
     const fallback = files.find((model) => definition.fallback.test(model.name))
-    return { ...definition, selected: exact?.name ?? fallback?.name ?? '', validated: Boolean(exact) }
+    const overrideOutcome = resolution && definition.overrideSlot ? resolution.slots[definition.overrideSlot] : null
+    const appliedOverride = overrideOutcome && overrideOutcome.state === 'applied' ? overrideOutcome.file : null
+    const selected = appliedOverride ?? exact?.name ?? fallback?.name ?? ''
+    return { ...definition, selected, validated: Boolean(exact) && selected === exact!.name, override: Boolean(appliedOverride) }
   })
   return { rows, validated: rows.every((row) => row.validated), ready: rows.every((row) => row.selected) }
 }

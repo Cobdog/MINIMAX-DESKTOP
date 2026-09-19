@@ -700,6 +700,28 @@ export function createStudioServer(paths: StudioServerPaths) {
         .map((entry) => entry.trim().toLowerCase().slice(0, 253))
         .filter(Boolean)
         .slice(0, 32),
+      // Model overrides (task euxwdva): shape-tolerant, family-agnostic —
+      // the family registry lives renderer-side (src/lib/modelOverrides.ts);
+      // unknown family keys stay inert there, so the server only guards the
+      // SHAPE: per family, at most the three slot keys, non-empty bounded
+      // strings. Absent/empty = auto (inference) — nothing changes for
+      // existing settings files.
+      modelOverrides: (() => {
+        const slots = ['checkpoint', 'textEncoder', 'vae'] as const
+        const rawOverrides = (raw.modelOverrides && typeof raw.modelOverrides === 'object' ? raw.modelOverrides : {}) as Record<string, unknown>
+        const normalized: Record<string, { checkpoint?: string; textEncoder?: string; vae?: string }> = {}
+        for (const family of Object.keys(rawOverrides).slice(0, 64)) {
+          const rawSlots = (rawOverrides[family] && typeof rawOverrides[family] === 'object' ? rawOverrides[family] : null) as Record<string, unknown> | null
+          if (!rawSlots) continue
+          const familySlots: Record<string, string> = {}
+          for (const slot of slots) {
+            const value = rawSlots[slot]
+            if (typeof value === 'string' && value.trim()) familySlots[slot] = value.trim().slice(0, 512)
+          }
+          if (Object.keys(familySlots).length) normalized[family] = familySlots
+        }
+        return normalized
+      })(),
     }
   }
 

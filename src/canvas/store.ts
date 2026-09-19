@@ -85,6 +85,7 @@ import {
 import { DEFAULT_SETTINGS, type OpKind } from './ops'
 import type { EndpointDirection, EndpointOption, OptionAvailability } from './options'
 import { findH3PreviewOverrideNode } from '../lib/h3Stack'
+import { mergeModelOverrides, resolveModelOverrides, resolveModels, type ModelFamilyId, type OverrideResolution } from '../lib/modelOverrides'
 import { inferLtx25Selections, inferSelections } from '../lib/modelSelection'
 import { submitH3Render, validateH3Render } from '../lib/h3Submit'
 import { submitLtx23Utility, validateLtx23Utility } from '../lib/ltx23UtilitySubmit'
@@ -102,7 +103,7 @@ import { locationReferences, loadLocationProjects } from '../lib/locationLibrary
 import { loadWardrobeProjects } from '../lib/wardrobeLibrary'
 import { useJobsStore } from '../state/jobsStore'
 import { useSessionStore } from '../state/sessionStore'
-import type { AceStepGenerationOptions, FetchEntryStatus, GenerationJob, MediaFile, ModelSelection } from '../types'
+import type { AceStepGenerationOptions, FetchEntryStatus, GenerationJob, MediaFile, ModelOverrideSlots, ModelSelection } from '../types'
 
 /** The camera singleton for this route — attach in Substrate, never subscribe
  *  per-frame in React. */
@@ -145,10 +146,16 @@ function locationReferencesOf(location: ReturnType<typeof loadLocationProjects>[
 }
 
 /** The LTX-2.5 component selection for the current engine (the upscaler
- *  choices come from object-info exactly like the old surface computes it). */
-function ltx25SelectionOf() {
-  const { models, info } = engineFacts()
-  return inferLtx25Selections(models, choices(info, 'LatentUpscaleModelLoader', 'model_name'))
+ *  choices come from object-info exactly like the old surface computes it).
+ *  Model overrides (euxwdva) consult through the shared seam: chain-level
+ *  picks beat the global Settings picks beat inference. */
+function ltx25SelectionOf(chainOverrides?: ModelOverrideSlots) {
+  const { models, info, settings } = engineFacts()
+  return resolveModels('ltx25',
+    inferLtx25Selections(models, choices(info, 'LatentUpscaleModelLoader', 'model_name')),
+    models,
+    mergeModelOverrides(chainOverrides, settings?.modelOverrides?.ltx25),
+  ).selection
 }
 
 /** Motion-Context readiness: all four node classes reported by the engine. */
@@ -157,9 +164,40 @@ function motionContextReady(): boolean {
   return MOTION_CONTEXT_NODES.every((node) => Boolean(info?.[node]))
 }
 
-/** H3 readiness for one turbo tier (the App-root computation, per chain). */
-function selectionFor(turbo: 'off' | '4' | '8', family: string): ModelSelection {
-  return inferSelections(useSessionStore.getState().models, turbo, family || undefined)
+/** The model-override layers for one family as the seam sees them: the
+ *  chain's explicit picks over the global (Settings) picks. */
+function familyOverrides(family: ModelFamilyId, chainOverrides?: ModelOverrideSlots): ModelOverrideSlots {
+  const settings = useSessionStore.getState().settings
+  return mergeModelOverrides(chainOverrides, settings?.modelOverrides?.[family])
+}
+
+/** The override RESOLUTION for a family (refusals block submissions;
+ *  degradations warn) — the honest-UI companion to the resolved selection. */
+function overrideOutcomeFor(family: ModelFamilyId, chainOverrides?: ModelOverrideSlots): OverrideResolution {
+  const { models } = engineFacts()
+  return resolveModelOverrides(family, models, familyOverrides(family, chainOverrides))
+}
+
+/** H3 readiness for one turbo tier (the App-root computation, per chain).
+ *  Overrides apply through the seam — inference itself is untouched. */
+function selectionFor(turbo: 'off' | '4' | '8', family: string, chainOverrides?: ModelOverrideSlots): ModelSelection {
+  const { models } = engineFacts()
+  return resolveModels('minimax',
+    inferSelections(models, turbo, family || undefined),
+    models,
+    familyOverrides('minimax', chainOverrides),
+  ).selection
+}
+
+/** Music 3 / ACE-Step selections with overrides through the same seam. */
+function music3SelectionOf(chainOverrides?: ModelOverrideSlots) {
+  const { models } = engineFacts()
+  return resolveModels('music3', inferMusic3Selection(models), models, familyOverrides('music3', chainOverrides)).selection
+}
+
+function aceSelectionOf(chainOverrides?: ModelOverrideSlots) {
+  const { models } = engineFacts()
+  return resolveModels('acestep', inferAceStepSelections(models), models, familyOverrides('acestep', chainOverrides)).selection
 }
 
 function modelReadyFor(selection: ModelSelection, turbo: 'off' | '4' | '8'): boolean {
@@ -1121,7 +1159,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         const segment = plan.segments[index]
         const context = chainRenderContext(segment.chainId!)
         if (!context) continue
-        const selection = selectionFor(context.settings.turbo, context.settings.turboFamily)
+        const selection = selectionFor(context.settings.turbo, context.settings.turboFamily, context.settings.modelOverrides)
         // The scene-chain convention: segment N saves clip N into the episode
         // folder; N > 0 loads clip N-1 as never-denoised conditioning.
         const chainOption = { index: index - fromIndex, folder: motionContextFolder(episodeKey) }
@@ -1137,6 +1175,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
             info: facts.info,
             clientId: engineBridge.clientId,
             h3PreviewOverrideNode: findH3PreviewOverrideNode(facts.info) || undefined,
+            modelOverrides: overrideOutcomeFor('minimax', context.settings.modelOverrides),
           },
           {
             notify: (tone, text) => get().toast(tone === 'neutral' ? 'neutral' : tone, text),
@@ -1189,12 +1228,12 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       if (engine === 'music3') {
         return validateMusic3(
           { caption, lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'audio/plan' },
-          { connected: facts.connected, selection: inferMusic3Selection(facts.models) },
+          { connected: facts.connected, selection: music3SelectionOf() },
         )
       }
       return validateAceStep(
         { model: 'base', tags: caption, lyrics: '', instrumental: false, duration: 60, seed: 1, bpm: 120, timeSignature: '4', language: 'en', keyScale: 'C major', generateAudioCodes: false, filenamePrefix: 'audio/plan' },
-        { connected: facts.connected, info: facts.info, selection: inferAceStepSelections(facts.models) },
+        { connected: facts.connected, info: facts.info, selection: aceSelectionOf() },
       )
     },
 
@@ -1411,7 +1450,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
           // The canvas link rides the manifest (M1): without it a reload
           // mid-render permanently orphans the landing (chainJobs relink
           // reads manifest.canvas.chainId only).
-          const result = await submitAceStep(options, { settings: facts.settings, connected: facts.connected, info: facts.info, selection: inferAceStepSelections(facts.models), clientId: engineBridge.clientId }, io, { canvas: { chainId, projectId } })
+          const result = await submitAceStep(options, { settings: facts.settings, connected: facts.connected, info: facts.info, selection: aceSelectionOf(settings.modelOverrides), clientId: engineBridge.clientId }, io, { canvas: { chainId, projectId } })
           return result.ok ? { ok: true } : { ok: false, message: result.message }
         }
         const options: Music3GenerationOptions = {
@@ -1422,7 +1461,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
           tiledDecode: true,
           filenamePrefix: `audio/Canvas_Music3_${Date.now()}`,
         }
-        const result = await submitMusic3(options, { settings: facts.settings, connected: facts.connected, info: facts.info, selection: inferMusic3Selection(facts.models), clientId: engineBridge.clientId }, io, { canvas: { chainId, projectId } })
+        const result = await submitMusic3(options, { settings: facts.settings, connected: facts.connected, info: facts.info, selection: music3SelectionOf(settings.modelOverrides), clientId: engineBridge.clientId }, io, { canvas: { chainId, projectId } })
         return result.ok ? { ok: true } : { ok: false, message: result.message }
       }
       // §5.4 engines-as-ops (Phase 3): image INTENT routes the still surface —
@@ -1460,7 +1499,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         )
         return result.ok ? { ok: true } : { ok: false, message: result.message }
       }
-      const selection = selectionFor(settings.turbo, settings.turboFamily)
+      const selection = selectionFor(settings.turbo, settings.turboFamily, settings.modelOverrides)
       const facts = engineFacts()
       if (!facts.settings) return { ok: false, message: 'Studio settings are still loading.' }
       // §5.4 (Phase 4): the LTX-2.5 GENERAL graph as an engine-op — the
@@ -1475,7 +1514,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
             filenamePrefix: `video/Canvas_LTX25_${Date.now()}`,
           },
           firstFrame,
-          { settings: facts.settings, connected: facts.connected, info: facts.info, selection: ltx25SelectionOf(), clientId: engineBridge.clientId },
+          { settings: facts.settings, connected: facts.connected, info: facts.info, selection: ltx25SelectionOf(settings.modelOverrides), clientId: engineBridge.clientId },
           {
             notify: (tone, text) => get().toast(tone === 'neutral' ? 'neutral' : tone, text),
             setJobs: (update) => useJobsStore.getState().setJobs(update),
@@ -1509,6 +1548,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
           info: facts.info,
           clientId: engineBridge.clientId,
           h3PreviewOverrideNode: findH3PreviewOverrideNode(facts.info) || undefined,
+          modelOverrides: overrideOutcomeFor('minimax', settings.modelOverrides),
         },
         {
           notify: (tone, text) => get().toast(tone === 'neutral' ? 'neutral' : tone, text),
@@ -1539,12 +1579,12 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         if (settings.audio.engine === 'acestep') {
           return validateAceStep(
             { model: settings.audio.model, tags: settings.audio.caption, lyrics: settings.audio.lyrics, instrumental: settings.audio.instrumental, duration: settings.audio.duration, seed: settings.audio.seed, bpm: settings.audio.bpm, timeSignature: '4', language: 'en', keyScale: 'C major', generateAudioCodes: false, filenamePrefix: 'audio/plan' },
-            { connected: facts.connected, info: facts.info, selection: inferAceStepSelections(facts.models) },
+            { connected: facts.connected, info: facts.info, selection: aceSelectionOf(settings.modelOverrides) },
           )
         }
         return validateMusic3(
           { caption: settings.audio.caption, lyrics: settings.audio.lyrics, duration: settings.audio.duration, seed: settings.audio.seed, tiledDecode: true, filenamePrefix: 'audio/plan' },
-          { connected: facts.connected, selection: inferMusic3Selection(facts.models) },
+          { connected: facts.connected, selection: music3SelectionOf(settings.modelOverrides) },
         )
       }
       // The still surface (§5.4) validates through its own ladder.
@@ -1564,7 +1604,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         return validateLtx25(
           { mode: 'image', prompt: settings.prompt, width: 1344, height: 768, duration: settings.duration, seed: settings.seed, preset: 'quality', filenamePrefix: 'video/plan' },
           firstFrame,
-          { connected: facts.connected, info: facts.info, selection: ltx25SelectionOf() },
+          { connected: facts.connected, info: facts.info, selection: ltx25SelectionOf(settings.modelOverrides) },
         )
       }
       // The latent-fork gate (Phase 4): honest refusals before the H3 ladder.
@@ -1572,13 +1612,14 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         if (!motionContextReady()) return 'Latent continuation needs the ComfyUI-H3-Motion-Context custom nodes — install them, then refresh the engine.'
         if (context.latentRefusal) return context.latentRefusal
       }
-      const selection = selectionFor(settings.turbo, settings.turboFamily)
+      const selection = selectionFor(settings.turbo, settings.turboFamily, settings.modelOverrides)
       const request = buildCanvasRenderRequest(settings, { firstFrame, lastFrame, referenceImages: referenceMedia, referenceVideos, referenceAudios }, bindings)
       return validateH3Render(request, {
         connected: facts.connected,
         modelReady: facts.settings ? modelReadyFor(selection, settings.turbo) : false,
         selection,
         h3PreviewOverrideNode: findH3PreviewOverrideNode(facts.info) || undefined,
+        modelOverrides: overrideOutcomeFor('minimax', settings.modelOverrides),
       })
     },
 
@@ -2211,9 +2252,10 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       const ltx25Selection = ltx25SelectionOf()
       const ltx25MissingNodes = LTX25_NATIVE_REQUIRED_NODES.filter((node) => !facts.info[node])
       const ltx25ModelsReady = Boolean(ltx25Selection.diffusion && ltx25Selection.textEncoder && ltx25Selection.videoVae && ltx25Selection.audioVae && ltx25Selection.latentUpscaler)
-      // The audio engines (§5.4 Phase 4): detection over the shared infer*.
-      const music3Selection = inferMusic3Selection(facts.models)
-      const aceSelection = inferAceStepSelections(facts.models)
+      // The audio engines (§5.4 Phase 4): detection over the shared infer*,
+      // with global overrides consulted (euxwdva).
+      const music3Selection = music3SelectionOf()
+      const aceSelection = aceSelectionOf()
       return {
         connected: facts.connected,
         h3Ready: modelReadyFor(selection, 'off'),
@@ -2470,6 +2512,9 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
       duration?: number
       resolution?: string
       latentFrom?: { folder: string; clipIndex: number }
+      /** Chain-level model overrides (euxwdva) — merged over the global
+       *  Settings picks exactly like a real chain's would be. */
+      modelOverrides?: ModelOverrideSlots
     }) => {
       const settings = {
         ...chainSettingsDefaults(useSessionStore.getState().settings),
@@ -2491,7 +2536,7 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
         if (audioEngine === 'music3') {
           const validation = validateMusic3(
             { caption: settings.prompt, lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'audio/plan' },
-            { connected: facts.connected, selection: inferMusic3Selection(facts.models) },
+            { connected: facts.connected, selection: music3SelectionOf() },
           )
           const graph = buildMusic3Workflow({ caption: settings.prompt, lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'audio/LTX_plan' }, { diffusion: 'TEST-music3.safetensors', textEncoder: 'TEST-music3-te.safetensors', vae: 'TEST-music3-dav.safetensors' })
           const nodes = Object.values(graph)
@@ -2508,7 +2553,7 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
         }
         const validation = validateAceStep(
           { model: 'base', tags: settings.prompt, lyrics: '', instrumental: false, duration: 60, seed: 1, bpm: 120, timeSignature: '4', language: 'en', keyScale: 'C major', generateAudioCodes: false, filenamePrefix: 'audio/plan' },
-          { connected: facts.connected, info: facts.info, selection: inferAceStepSelections(facts.models) },
+          { connected: facts.connected, info: facts.info, selection: aceSelectionOf() },
         )
         const graph = buildAceStepWorkflow(
           { model: 'base', tags: settings.prompt, lyrics: '', instrumental: false, duration: 60, seed: 1, bpm: 120, timeSignature: '4', language: 'en', keyScale: 'C major', generateAudioCodes: false, filenamePrefix: 'audio/ACE_plan' },
@@ -2585,12 +2630,13 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
       const chainOption = spec.latentFrom ? canvasChainOption('plan', spec.latentFrom) : motionContextReady() ? canvasChainOption('plan', null) : undefined
       const request = buildCanvasRenderRequest(settings, { firstFrame, lastFrame, referenceImages: referenceMedia as MediaFile[], referenceVideos: [], referenceAudios: [] }, bindings, chainOption)
       const facts = engineFacts()
-      const selection = selectionFor(settings.turbo, settings.turboFamily)
+      const selection = selectionFor(settings.turbo, settings.turboFamily, spec.modelOverrides)
       const validation = validateH3Render(request, {
         connected: facts.connected,
         modelReady: facts.settings ? modelReadyFor(selection, settings.turbo) : false,
         selection,
         h3PreviewOverrideNode: findH3PreviewOverrideNode(facts.info) || undefined,
+        modelOverrides: overrideOutcomeFor('minimax', spec.modelOverrides),
       })
       // The graph builds regardless of the engine — construction is pure.
       const fakeSelection: ModelSelection = {

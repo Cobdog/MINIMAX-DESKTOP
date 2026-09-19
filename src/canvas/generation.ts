@@ -11,7 +11,7 @@
  * fork input-spec construction (§2 outputRef substrates). No React, no DOM,
  * no stores — covered by scripts/test-canvas.cjs through the VM harness.
  */
-import type { AppSettings, CharacterProject, GenerationMode, LocationProject, MediaFile, ModelSelection, MovieReferenceBinding, UpscaleMode, WardrobeProject } from '../types'
+import type { AppSettings, CharacterProject, GenerationMode, LocationProject, MediaFile, ModelOverrideSlots, ModelSelection, MovieReferenceBinding, UpscaleMode, WardrobeProject } from '../types'
 import type { ComfyPrompt } from '../lib/graph'
 import { buildMiniMaxWorkflow } from '../lib/workflow'
 import { allocateWorkspaceReferences } from '../lib/promptComposer'
@@ -87,6 +87,12 @@ export type CanvasChainSettings = {
   /** The box draft (null in freeform mode; the deterministic parse fills it
    *  on toggle so the switch never loses text). */
   structured: StructuredPromptDraft | null
+  /** Chain-level model overrides (task euxwdva): explicit checkpoint /
+   *  text-encoder / VAE picks for THIS chain's engine family, over the
+   *  global (Settings) picks, over inference. Empty/absent = auto — the
+   *  chain renders exactly as before. Resolution order and the family slot
+   *  maps: src/lib/modelOverrides.ts (chain > global > auto). */
+  modelOverrides: ModelOverrideSlots
 }
 
 const RESOLUTIONS = ['1344x768', '768x1344', '768x768']
@@ -123,6 +129,7 @@ export function chainSettingsDefaults(settings?: AppSettings | null): CanvasChai
     timelineGuides: [],
     promptMode: 'freeform',
     structured: null,
+    modelOverrides: {},
   }
 }
 
@@ -156,6 +163,14 @@ export function readChainSettings(raw: Record<string, unknown>, settings?: AppSe
   const turbo = raw.turbo === 'off' || raw.turbo === '4' || raw.turbo === '8' ? raw.turbo : base.turbo
   const policy = raw.clothingPolicy === 'wardrobe' || raw.clothingPolicy === 'underwear' || raw.clothingPolicy === 'unrestricted' ? raw.clothingPolicy : base.clothingPolicy
   const upscale = raw.upscaleMode === 'ltx' || raw.upscaleMode === 'rtx' || raw.upscaleMode === 'lbh2d' || raw.upscaleMode === 'lbh3d' ? raw.upscaleMode : 'off'
+  // Model overrides (task euxwdva): per-slot strings only; anything else
+  // (wrong type, empty) drops to auto — external data never crashes the read.
+  const modelOverrides: ModelOverrideSlots = {}
+  const rawOverrides = (raw.modelOverrides && typeof raw.modelOverrides === 'object' ? raw.modelOverrides : {}) as Record<string, unknown>
+  for (const slot of ['checkpoint', 'textEncoder', 'vae'] as const) {
+    const value = rawOverrides[slot]
+    if (typeof value === 'string' && value.trim()) modelOverrides[slot] = value.trim()
+  }
   return {
     ...base,
     prompt: str(raw.prompt, base.prompt),
@@ -184,6 +199,7 @@ export function readChainSettings(raw: Record<string, unknown>, settings?: AppSe
     timelineGuides: guides,
     promptMode: raw.promptMode === 'structured' ? 'structured' : 'freeform',
     structured: readStructuredDraft(raw.structured),
+    modelOverrides,
   }
 }
 

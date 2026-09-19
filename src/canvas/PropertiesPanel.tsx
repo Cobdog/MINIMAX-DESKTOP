@@ -26,10 +26,12 @@ import { SmartPromptEditor, type SmartPromptEditorHandle } from '../components/S
 import { StructuredPromptEditor } from '../components/StructuredPromptEditor'
 import { PromptLibraryBrowser } from '../components/PromptLibraryBrowser'
 import { detectOptimizations } from '../lib/graph'
+import { inferredOverrideSlotFile, modelFamilyInfo, overridePickOutcome, SLOT_LABELS, type ModelFamilyId, type ModelOverrideSlotName } from '../lib/modelOverrides'
 import { guideFrameWarning } from '../lib/workflow'
 import { buildPromptAssistantContext } from '../lib/promptComposer'
 import { composeStructuredPrompt, mergeStructuredDraft, parseFlowRows, parseStructuredPrompt, type StructuredPromptDraft } from '../lib/structuredPrompt'
 import { useLlmStream } from '../lib/useLlmStream'
+import type { ModelOverrideSlots } from '../types'
 import { useSessionStore } from '../state/sessionStore'
 import { STATUS_LABEL } from './derive'
 import { effectiveMode, MODE_LABEL, readChainSettings, type CanvasChainSettings } from './generation'
@@ -187,6 +189,21 @@ export function PropertiesPanel() {
 
   const patch = (part: Partial<CanvasChainSettings>) => setDraft((current) => current ? { ...current, ...part } : current)
   const mode = effectiveMode(draft)
+  // ---- Chain-level model overrides (task euxwdva) ----
+  // The chain's engine decides the family; picks are scan-anchored and ride
+  // chain.settings (settings-vs-results separation: the RESOLVED files ride
+  // the take's manifest). Resolution order: this pick > the global Settings
+  // pick > auto (inference).
+  const modelFamilyId: ModelFamilyId = draft.mediaType === 'audio'
+    ? (draft.audio.engine === 'acestep' ? 'acestep' : 'music3')
+    : draft.engine === 'ltx25' ? 'ltx25' : 'minimax'
+  const modelFamily = modelFamilyInfo(modelFamilyId)!
+  const setChainModelOverride = (slot: ModelOverrideSlotName, value: string) => {
+    const next: ModelOverrideSlots = { ...(draft.modelOverrides ?? {}) }
+    if (value) next[slot] = value
+    else delete next[slot]
+    patch({ modelOverrides: next })
+  }
   const referenceSlots = bindings.length
   const guideWarnings = draft.timelineGuides.map((guide) => guideFrameWarning(guide.seconds, draft.duration)).filter(Boolean) as string[]
 
@@ -449,6 +466,32 @@ export function PropertiesPanel() {
             ))}
           </select>
         </div>
+        {/* Model overrides (euxwdva): collapsed by default — 'auto' (with
+            what auto currently resolves to) is the honest default state.
+            Image chains are excluded: they render through the image
+            workbench, whose model selection is the h3image GLOBAL picks
+            (chain-level slots here would be dead controls on that path). */}
+        {draft.mediaType !== 'image' && <details className="canvas-properties-models" data-canvas-section="models">
+          <summary>models <span className="canvas-properties-hint">{modelFamily.label} · auto (inferred)</span></summary>
+          {modelFamily.slots.map((slot) => {
+            const value = draft.modelOverrides?.[slot] ?? ''
+            const kind = modelFamily.slotKinds[slot] ?? 'diffusion_models'
+            const candidates = models.filter((model) => model.kind === kind)
+            const globalPick = useSessionStore.getState().settings?.modelOverrides?.[modelFamilyId]?.[slot]
+            const autoFile = inferredOverrideSlotFile(modelFamilyId, slot, models)
+            const outcome = value ? overridePickOutcome(modelFamilyId, slot, value, models) : null
+            return <div className="canvas-properties-row" key={slot} data-canvas-model-override={slot}>
+              <label htmlFor={`canvas-model-${slot}`}>{SLOT_LABELS[slot]}</label>
+              <select id={`canvas-model-${slot}`} data-canvas-model-override-select={slot} value={value} onChange={(event) => setChainModelOverride(slot, event.target.value)}>
+                <option value="">{globalPick ? `auto — global: ${globalPick}` : autoFile ? `auto — ${autoFile}` : 'auto — nothing detected'}</option>
+                {candidates.map((model) => <option key={model.name} value={model.name}>{model.name}</option>)}
+              </select>
+              {outcome?.state === 'refused' && <p className="canvas-properties-warning" data-canvas-model-override-problem role="alert">Refused — {outcome.reason}</p>}
+              {outcome?.state === 'degraded' && <p className="canvas-properties-warning" data-canvas-model-override-problem role="status">{outcome.warning}</p>}
+            </div>
+          })}
+          <p className="canvas-properties-note">A pick here beats the global Settings pick, which beats auto inference. Picks are exact scanned filenames; the resolved files ride the take's manifest.</p>
+        </details>}
         <div className="canvas-properties-row">
           <label htmlFor="canvas-duration">seconds</label>
           <input id="canvas-duration" data-canvas-duration type="number" min={2} max={15} step={1} value={draft.duration} onChange={(event) => patch({ duration: Math.max(2, Math.min(15, Number(event.target.value) || 6)) })} />

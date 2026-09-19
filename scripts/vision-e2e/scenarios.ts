@@ -1,6 +1,6 @@
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import Database from 'better-sqlite3'
 import type { Page } from '@playwright/test'
 import { expect } from '@playwright/test'
@@ -209,6 +209,82 @@ export const SCENARIOS: VisionScenario[] = [
           'Below those: the card\'s grid of controls — checkbox rows "Unload models before generating" (checked) and "Thinking by default (freeform)" (unchecked), a "Prompt writing style" dropdown, a "Sticky models (never unload)" input, and a closing note line mentioning that nothing leaves the workstation.',
           'NO model rows: zero model ids/names listed as selectable rows in this card (phantom models with no provider behind them are a bug). A "no models / not reachable" status line is acceptable.',
           'Defects to flag: pill showing a connected state, a filled router address, model rows present, the dock clipped by the viewport edges, overlapping controls, truncated section headers.',
+        ].join(' '),
+      },
+    ],
+  },
+  {
+    // Model overrides (task euxwdva) — DOM-truth at capture: the Settings
+    // override card with a real pick applied (a curve-form community merge),
+    // a degraded pick (its file vanished — warning row), and honest auto
+    // labels showing what inference currently resolves to.
+    id: 'settings-model-overrides',
+    label: 'Settings dock — model overrides card (applied + degraded + auto rows)',
+    run: async (page) => {
+      const originalSettings = ((await (await page.request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
+      ;(page as unknown as { __visionOriginalSettings?: Record<string, unknown> }).__visionOriginalSettings = originalSettings
+      const mergeName = 'TenStrip_10Eros-Max_beta5_int8.safetensors'
+      const modelRoot = resolve('test-home/vision-override-models')
+      for (const [kind, files] of Object.entries({
+        diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
+        text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
+        vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
+      })) {
+        mkdirSync(join(modelRoot, kind), { recursive: true })
+        for (const file of files as string[]) writeFileSync(join(modelRoot, kind, file), 'x')
+      }
+      // A real curve-form header (scan-side form detection reads it) so the
+      // checkpoint pick APPLIES rather than refusing on the no-form rule.
+      const header = JSON.stringify({ __metadata__: {}, 'diffusion_model.adaln_t_table': { dtype: 'F32', shape: [64, 8], data_offsets: [0, 2048] } })
+      const length = Buffer.alloc(8)
+      length.writeBigUInt64LE(BigInt(Buffer.byteLength(header)))
+      writeFileSync(join(modelRoot, 'diffusion_models', mergeName), Buffer.concat([length, Buffer.from(header), Buffer.alloc(2048)]))
+      await page.request.post('/api/lan/settings', { data: { settings: {
+        ...originalSettings,
+        paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: join(modelRoot, 'diffusion_models'), text_encoders: join(modelRoot, 'text_encoders'), vae: join(modelRoot, 'vae') },
+        // checkpoint: APPLIED. vae: names no scanned file — the degraded
+        // warning row. textEncoder: unset — the auto label.
+        modelOverrides: { minimax: { checkpoint: mergeName, vae: 'a_vae_that_was_deleted.safetensors' } },
+      } } })
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+      await page.goto('/')
+      await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+      await page.locator('[data-canvas-settings-button]').click()
+      await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible()
+      const section = page.locator('.model-overrides-section')
+      await expect(section).toBeVisible({ timeout: 15_000 })
+      // DOM truth before capture: the pick applied, the degradation warned.
+      await expect(section.locator('[data-model-override-family="minimax"] [data-model-override-slot="checkpoint"] select')).toHaveValue(mergeName, { timeout: 15_000 })
+      await expect(section.locator('[data-model-override-family="minimax"] [data-model-override-slot="vae"] [data-model-override-problem]')).toBeAttached()
+      // Pin the card to the TOP of the dock body before capture: the
+      // toBeAttached-style checks never scroll, and a minimal scrollIntoView
+      // can leave the contracted content straddling the fold (the first judged
+      // capture overshot past the minimax family — judge fail 2026-09-19).
+      await page.evaluate(() => { document.querySelector('.model-overrides-section')?.scrollIntoView({ block: 'start' }) })
+      await page.waitForTimeout(400)
+    },
+    after: async (page) => {
+      const original = (page as unknown as { __visionOriginalSettings?: Record<string, unknown> }).__visionOriginalSettings
+      if (original) await page.request.post('/api/lan/settings', { data: { settings: original } }).catch(() => undefined)
+      rmSync(resolve('test-home/vision-override-models'), { recursive: true, force: true })
+      const close = page.locator('[data-canvas-settings-close]')
+      if (await close.count()) await close.click().catch(() => undefined)
+    },
+    checkpoints: [
+      {
+        id: 'settings-model-overrides-1080p',
+        label: 'Settings dock — the "Model overrides" card: applied pick, degraded warning, auto label',
+        rubric: [
+          SHELL_CONTEXT,
+          'A floating Settings DOCK panel over the dimmed canvas (header "Settings — docked" with an × close). The body scrolls INSIDE the panel and this capture is taken with the "Model overrides" card pinned at the TOP of the visible body — its title and the FIRST family block are in frame; sections above the card sit above the fold (intended scrolling, not clipping; judge only what is in frame). The titlebar\'s canvas-tab strip may be EMPTY in this capture (the scenario closes every canvas before opening Settings) — no named tab is not a defect here.',
+          'The "Model overrides" card is in frame: a title "Model overrides" with a layers icon and an explanatory sub-line about pinning exact files when name-pattern inference cannot find them (community merges), plus a closing note line about picks being exact scanned filenames.',
+          'Family blocks stack vertically, each with a family name and muted note. The FIRST family reads "MiniMax H3 video" and carries three rows labeled "Checkpoint / diffusion model", "Text encoder", and "VAE", each row a label block plus a dropdown select.',
+          'The checkpoint row\'s select DISPLAYS the picked file "TenStrip_10Eros-Max_beta5_int8.safetensors" (an applied community-merge pick — this is the intended state, not a bug).',
+          'The VAE row shows a small WARNING line beneath its select mentioning that the picked file is no longer in the scan and renders fall back to auto — an amber/warning-colored degraded notice (the honest degradation contract; its presence is CORRECT).',
+          'The text-encoder row\'s select shows an "auto (inferred) — …" option naming the inferred Qwen file, or "auto (inferred) — nothing detected" — either label is correct.',
+          'Later families ("MiniMax H3 image workbench", "LTX-2.5 video", "LTX-2.3 utilities", "MiniMax Music 3", "ACE-Step XL 1.5") may continue below the fold; LTX-2.3 utilities shows ONLY Text encoder + VAE rows (no checkpoint row) — that absence is the intended honest slot exposure, not a defect.',
+          'Native dropdown selects CLIP a long displayed value at the select\'s right edge without an ellipsis (the full text appears when the dropdown opens) — intended native behavior, not a defect. The checkpoint row\'s applied pick "TenStrip_10Eros-Max_beta5_int8.safetensors" is short enough to display fully.',
+          'Defects to flag: rows without selects, two controls overlapping, a select clipped mid-glyph, the card\'s title truncated, a red/refused notice on the checkpoint row (only the amber degraded notice is expected).',
         ].join(' '),
       },
     ],
