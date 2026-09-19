@@ -2487,6 +2487,11 @@ test('the LoRA timeline compiles painted ranges into per-LoRA segment chains (fa
     expect(seeded.every(Boolean)).toBe(true)
     expect((seeded[0]!.settings.loraStack as Array<{ name: string }>).map((entry) => entry.name)).toEqual(['e2e-style-rain.safetensors'])
     expect((seeded[1]!.settings.loraStack as Array<{ name: string }>).map((entry) => entry.name)).toEqual(['e2e-style-neon.safetensors'])
+    // The compiled FLF join plugs into the EXISTING latent-episode machinery:
+    // two seeded segments joined by an FLF gap arm the episode trigger (the
+    // Motion-Context render this engine fake cannot execute — readiness is
+    // checked at submit, the arming is the compiler's contract).
+    await expect(overlay.locator('[data-canvas-plan-episode]')).toBeEnabled()
 
     // ---- per-segment submits: the fake engine receives each stack (AC5) ----
     await overlay.locator('[data-canvas-segment-generate]').nth(0).click()
