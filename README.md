@@ -6,6 +6,38 @@ A local-first **web app** for MiniMax H3 generation through ComfyUI: one small N
 
 ## Quick start
 
+The launcher is the front door — it remembers your configuration and prints
+the active shape of every boot:
+
+```bash
+pnpm install        # once
+./start.sh          # boots with the saved config (first run seeds defaults:
+                    #   port 4178, dev mode ON — dated 2026-09-19, flips to
+                    #   OFF at release time)
+```
+
+```bash
+./start.sh --configure        # TUI for every pre-boot setting — port, token
+                              #   mode (+QR print), data dir, engine URL,
+                              #   HTTPS, bind host, log level; save & run
+./start.sh --configure --dev  # ...plus the dev section: the pnpm dev
+                              #   pipeline (vite HMR + node --watch — not the
+                              #   production build), pino-pretty logs,
+                              #   source-mapped stack traces, vite port
+./start.sh --print            # dry run: resolved config + boot plan, no boot
+./start.sh --set port=4200    # headless single-field save
+```
+
+The launcher stores its config in `.start-config.json` next to the script
+(gitignored; relocate with `MINIMAX_START_CONFIG`). Dev mode boots the dev
+pipeline and pretty-prints the server logs; regular mode boots the built
+server exactly as before. A busy port, missing dependencies, or an invalid
+saved config is reported honestly (with the holding PID when findable — the
+launcher never kills anything) instead of failing obscurely.
+
+<details>
+<summary>The manual chain (what the launcher does for you)</summary>
+
 ```bash
 pnpm install
 pnpm build
@@ -13,15 +45,17 @@ pnpm start:server
 # → http://127.0.0.1:4178  (LAN address printed on startup)
 ```
 
+</details>
+
 **Development:** `pnpm gate` runs the full verification chain (see [Testing](#testing) below). CI runs typecheck/lint/unit/build/smoke/e2e/vision-capture on every push, plus an Engine CI leg on Windows.
 
 Requirements: Node 20+, a local ComfyUI with the MiniMax H3 core nodes, and the H3 model components already on disk. FFmpeg for clip tools. Optional: a local [llama.cpp server in router mode](https://github.com/ggml-org/llama.cpp) for the LLM layer (prompt tailoring, planning, caption rewriting, vision captioning), with local Ollama as the fallback when no router is configured; NVIDIA tooling for GPU telemetry.
 
-Configuration lives in `~/.minimax-studio/` (override with `MINIMAX_STUDIO_HOME`): `settings.json` holds the ComfyUI/Ollama addresses, model folders, and defaults — also editable from the app's Settings page. Default port `4178` (override with `MINIMAX_LAN_PORT`).
+Configuration lives in `~/.minimax-studio/` (override with `MINIMAX_STUDIO_HOME`): `settings.json` holds the ComfyUI/Ollama addresses, model folders, and defaults — also editable from the app's Settings page. Default port `4178` (override with `MINIMAX_LAN_PORT`; the bind host with `MINIMAX_LAN_HOST`, e.g. `127.0.0.1` for local-only). The `--configure` engine-URL field writes straight into `settings.json` — one source of truth.
 
 **Security posture:** open on your LAN by default, exactly like ComfyUI itself — anyone on the same network can use the studio. For hostile networks (café Wi-Fi, shared offices), start with `--token` (or `MINIMAX_LAN_TOKEN=1`) and pass the token as `?token=…`.
 
-`pnpm dev` runs vite HMR on 5173 with `/api` proxied to a server already running on 4178.
+`pnpm dev` runs vite HMR on 5173 with `/api` proxied to a server already running on 4178 (`./start.sh --configure --dev` wraps this pipeline: vite + the watched server + pretty logs in one command, on your configured ports).
 
 ## Testing
 
@@ -42,7 +76,7 @@ Order: `typecheck` → `lint` → `license:audit` → `test` → `test:registry`
 `test:filmstrip` → `test:llm` → `test:engine` → `test:runtime` →
 `test:fetcher` → `test:instance` → `test:lora-form` → `test:poserig` →
 `test:camera` → `test:canvas` → `test:benchmarks` → `test:datasets` →
-`build` → `smoke:server` →
+`build` → `test:launcher` → `smoke:server` →
 e2e (Playwright) → vision-capture (Playwright). `pnpm test:all` is the same
 chain without the harness niceties. `license:audit` classifies every direct
 dependency's SPDX against the AGPLv3 allowlist and enforces the

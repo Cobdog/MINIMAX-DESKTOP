@@ -6,6 +6,9 @@ release/
 .DS_Store
 Thumbs.db
 .flux/
+# Launcher (task ukyxwfa): the saved start.sh configuration is per-checkout,
+# machine-local state — never committed.
+.start-config.json
 dist-server/
 test-home/
 test-results/

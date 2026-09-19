@@ -38,9 +38,14 @@ studio.startLanServer().then(() => {
     process.exit(1)
   }
   const scheme = status.secure ? 'https' : 'http'
+  const boundLoopback = status.host === '127.0.0.1' || status.host === 'localhost' || status.host === '::1'
   console.log(`MiniMax Studio is running.`)
   console.log(`  Open:       ${scheme}://127.0.0.1:${status.port}`)
-  console.log(`  On the LAN: ${scheme}://${studio.lanAddress()}:${status.port}`)
+  if (boundLoopback) {
+    console.log(`  Bind:       ${status.host} — local only, NOT reachable from the LAN`)
+  } else {
+    console.log(`  On the LAN: ${scheme}://${studio.lanAddress()}:${status.port}`)
+  }
   console.log(`  Config:     ${home}`)
   if (status.secure && status.certificateFingerprint) {
     console.log(`  TLS:        self-signed (first visit shows a warning — verify this SHA-256 fingerprint, then trust it):`)
