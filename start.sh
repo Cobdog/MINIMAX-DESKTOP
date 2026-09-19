@@ -105,12 +105,21 @@ function validate(cfg) {
   if (problems.length === 0) {
     if (cfg.dataDir !== "" && !cfg.dataDir.startsWith("/")) problems.push("dataDir: must be an absolute path when set, got " + JSON.stringify(cfg.dataDir));
     if (cfg.engineUrl !== "") {
-      try { const u = new URL(cfg.engineUrl); if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("protocol"); }
+      try { const u = new URL(completeScheme(cfg.engineUrl)); if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("protocol"); }
       catch { problems.push("engineUrl: expected an http(s) URL, got " + JSON.stringify(cfg.engineUrl)); }
     }
     if (cfg.port === cfg.vitePort) problems.push("vitePort: must differ from port (both are " + cfg.port + ")");
   }
   return problems;
+}
+// Scheme completion (mirrors the server completeServiceScheme helper,
+// maintainer question 2026-09-19): `host:port` gets http:// so the URL
+// constructor — and the app SSRF guard — see a real protocol. Applied at
+// every boundary: validate, the engine write, and save normalization.
+function completeScheme(url) {
+  const trimmed = String(url).trim();
+  if (!trimmed) return trimmed;
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : "http://" + trimmed;
 }
 function readRaw(file) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); }
@@ -171,21 +180,24 @@ if (mode === "load") {
   }
   const problems = validate(cfg);
   if (problems.length) fail(2, "invalid configuration (" + file + "): " + problems.join("; "));
+  // Normalize the engine URL at save: scheme-less input is completed here so
+  // the SAVED config is already http(s):// and every later read (boot banner,
+  // app settings write) sees a fully-qualified URL.
+  cfg.engineUrl = completeScheme(String(cfg.engineUrl ?? ""));
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n");
 } else if (mode === "engine") {
   const home = process.argv[2];
   const url = process.argv[3];
   if (url === "") process.exit(0);
-  try { const u = new URL(url); if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("protocol"); }
-  catch { fail(4, "engineUrl must be an http(s) URL, got " + JSON.stringify(url)); }
+  const completed = completeScheme(url);
   const file = path.join(home, "settings.json");
   let settings = {};
   try { settings = JSON.parse(fs.readFileSync(file, "utf8")); }
   catch (error) { if (error.code !== "ENOENT") fail(4, file + " is not valid JSON: " + error.message); }
   if (typeof settings !== "object" || settings === null || Array.isArray(settings)) fail(4, file + " must contain a JSON object");
-  if (settings.comfyUrl === url) process.exit(0);
-  settings.comfyUrl = url;
+  if (settings.comfyUrl === completed) process.exit(0);
+  settings.comfyUrl = completed;
   fs.mkdirSync(home, { recursive: true });
   const staged = file + ".tmp";
   fs.writeFileSync(staged, JSON.stringify(settings, null, 2) + "\n");
@@ -565,8 +577,16 @@ run_configure() { # $1 show_dev (0/1)
     echo "launcher: LAN token regenerated ($R_HOME/lan-access-token.txt)"
   fi
   # A changed non-empty engine URL is written to the app settings (the single
-  # source of truth); empty keeps whatever the app already has.
-  ENGINE_WRITTEN=$(node -e "$LAUNCHER_JS" engine "$R_HOME" "$W_ENGINE_URL") || die "could not update the engine URL"
+  # source of truth); empty keeps whatever the app already has. BUG FIX
+  # (maintainer 2026-09-19: "did not load the config as set previously"):
+  # this used $R_HOME, which still reflects the OLD config's data dir at this
+  # point (config_load + resolve_runtime re-run only AFTER run_configure
+  # returns) — a changed data directory sent the engine URL to the wrong
+  # home. Resolve the JUST-SAVED data dir here instead.
+  ENGINE_HOME=$W_DATA_DIR
+  [ -z "$ENGINE_HOME" ] && ENGINE_HOME=$(node -e 'console.log(require("os").homedir())')/.minimax-studio
+  [ -n "$MINIMAX_STUDIO_HOME" ] && ENGINE_HOME=$MINIMAX_STUDIO_HOME
+  ENGINE_WRITTEN=$(node -e "$LAUNCHER_JS" engine "$ENGINE_HOME" "$W_ENGINE_URL") || die "could not update the engine URL"
   [ -n "$ENGINE_WRITTEN" ] && echo "launcher: engine URL written to $ENGINE_WRITTEN"
 }
 
