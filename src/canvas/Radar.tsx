@@ -110,7 +110,7 @@ export function Radar() {
     <button type="button" className="canvas-index-button" data-canvas-diagnostics-button onClick={() => useCanvasStore.getState().setDiagnosticsDock(true)} title="Diagnostics — the PII-scrubbed report surface, docked">
       <Stethoscope size={12} /> diagnostics
     </button>
-    <button type="button" className="canvas-index-button" data-canvas-settings-button onClick={() => useCanvasStore.getState().setSettingsDock(true)} title="Settings — docked as a floating panel on every surface">
+    <button type="button" className="canvas-index-button" data-canvas-settings-button onClick={() => useCanvasStore.getState().setSettingsDock(true)} title="Settings — docked as a floating panel on the canvas surface (other surfaces link here)">
       <Settings size={12} /> settings
     </button>
     <button type="button" className="canvas-index-button" data-canvas-index-button onClick={() => setIndexOpen(true)}>

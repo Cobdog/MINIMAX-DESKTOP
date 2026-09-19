@@ -7,22 +7,31 @@
  * the shell, and the surface now opens from the titlebar next to Settings.
  * Everything stays on the machine (PII-scrubbed by construction).
  */
+import { useEffect, useState } from 'react'
 import { Rnd } from 'react-rnd'
 import { Stethoscope, X } from 'lucide-react'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 import { DiagnosticsView } from '../views/DiagnosticsView'
+import { dockDefaultGeometry } from './dockGeometry'
 import { useCanvasStore } from './store'
 
 export function DiagnosticsDock() {
   const open = useCanvasStore((state) => state.diagnosticsDock)
   const setDiagnosticsDock = useCanvasStore((state) => state.setDiagnosticsDock)
+  const raiseDock = useCanvasStore((state) => state.raiseDock)
+  // Dock stacking (review M11): raised on open + on any grab; the default
+  // position cascades below Settings and Studios so no dock buries a sibling.
+  const [dockZ, setDockZ] = useState(60)
+  useEffect(() => { if (open) setDockZ(raiseDock()) }, [open, raiseDock])
 
   if (!open) return null
 
   return <Rnd
     className="canvas-settings-dock"
     data-canvas-diagnostics-dock
-    default={{ x: 160, y: 120, width: 760, height: Math.min(720, window.innerHeight - 180) }}
+    style={{ zIndex: dockZ }}
+    onPointerDownCapture={() => setDockZ(raiseDock())}
+    default={dockDefaultGeometry({ x: 480, y: 192, width: 760, height: Math.min(720, window.innerHeight - 180) })}
     minWidth={460}
     minHeight={300}
     bounds="parent"

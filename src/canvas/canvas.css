@@ -4,7 +4,15 @@
    canvas chunk so normal app routes never load a line of it. Density matches
    the studio: dense ramp, 1px lines, dark surfaces, one accent. */
 
-.canvas-root { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; position: relative; height: 100%; min-height: 0; background: var(--bg); color: var(--text); overflow: hidden; }
+/* overflow: clip (g5x37k8, 2026-09-19): `hidden` boxes remain PROGRAMMATICALLY
+   scrollable — at narrow viewports the titlebar overflows the root, and any
+   focus/actionability scroll (Playwright clicks, keyboard focus) slid the
+   entire app sideways, hanging the absolutely-positioned floating docks off
+   the left edge (measured scrollLeft=627 at a 444px window: the dock clamped
+   to x=12 rendered at x=-615). `clip` forbids the scroll entirely — a
+   transform-based infinite canvas has no business being scrollable. The
+   `hidden` line first keeps older engines on the old behavior. */
+.canvas-root { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; position: relative; height: 100%; min-height: 0; background: var(--bg); color: var(--text); overflow: hidden; overflow: clip; }
 .canvas-stage { position: relative; min-height: 0; }
 
 /* ---- titlebar: radar + canvas tabs (§4) -------------------------------- */

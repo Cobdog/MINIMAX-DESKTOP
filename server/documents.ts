@@ -1299,26 +1299,38 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
 
     // workspace → ONE initial project's chain-settings defaults (§6). The old
     // surface keeps reading workspace_state untouched until Phase 5.
+    //
+    // Phantom-seed fix (review M1, g5x37k8 2026-09-19): the project used to
+    // seed UNCONDITIONALLY, so every fresh install grew an "Imported
+    // workspace" card for a workspace that never existed (and the honest
+    // "no other canvases yet" empty state could never appear). The seed now
+    // requires actual legacy WORKSPACE content — jobs to import as chains,
+    // or a saved workspace row with at least one key. Prompt/character
+    // assets are projectless global assets and never justify a workspace.
     const legacyProjectId = 'legacy:project'
     const workspace = db.prepare("SELECT data_json FROM workspace_state WHERE name = 'create'").get() as { data_json: string } | undefined
     const defaults = workspace ? parseJson<Record<string, unknown>>(workspace.data_json, {}) : {}
-    if (!statements.getProject.get(legacyProjectId)) {
-      statements.insertProject.run({
-        id: legacyProjectId,
-        name: 'Imported workspace',
-        schema_version: CANVAS_SCHEMA_VERSION,
-        camera_json: '{}',
-        settings_defaults_json: JSON.stringify(defaults),
-        app_version: appVersion,
-        created_at: now(),
-      })
-      counts.projectsSeeded = 1
-    } else {
-      statements.setProjectSettingsDefaults.run(JSON.stringify(defaults), now(), legacyProjectId)
-    }
-
     // jobs → outputs/takes (completed) / failure outputs (failed)
     const jobs = db.prepare('SELECT * FROM jobs ORDER BY created_at ASC, rowid ASC').all() as Array<Record<string, unknown>>
+    const legacyPrompts = db.prepare('SELECT * FROM saved_prompts WHERE technique = 0').all() as Array<Record<string, unknown>>
+    const workspaceHasContent = Boolean(workspace) && Object.keys(defaults).length > 0
+    const seedLegacyProject = jobs.length > 0 || workspaceHasContent
+    if (seedLegacyProject || statements.getProject.get(legacyProjectId)) {
+      if (!statements.getProject.get(legacyProjectId)) {
+        statements.insertProject.run({
+          id: legacyProjectId,
+          name: 'Imported workspace',
+          schema_version: CANVAS_SCHEMA_VERSION,
+          camera_json: '{}',
+          settings_defaults_json: JSON.stringify(defaults),
+          app_version: appVersion,
+          created_at: now(),
+        })
+        counts.projectsSeeded = 1
+      } else if (seedLegacyProject) {
+        statements.setProjectSettingsDefaults.run(JSON.stringify(defaults), now(), legacyProjectId)
+      }
+    }
     counts.jobsSeen = jobs.length
     const spotChecks: Array<{ relPath: string; hash: string }> = []
     for (const job of jobs) {
@@ -1418,8 +1430,9 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
 
     // prompt library → assets (kind: prompt). Technique corpus entries are
     // bundled app content (seeded server-side) — not user data, not copied
-    // (same precedent as the localStorage migration).
-    for (const prompt of db.prepare('SELECT * FROM saved_prompts WHERE technique = 0').all() as Array<Record<string, unknown>>) {
+    // (same precedent as the localStorage migration). (legacyPrompts is read
+    // above — the phantom-seed gate and this loop share one query.)
+    for (const prompt of legacyPrompts) {
       const id = `legacy:prompt:${str(prompt.id)}`
       const fields = {
         label: str(prompt.label),

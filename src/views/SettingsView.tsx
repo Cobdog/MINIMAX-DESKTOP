@@ -45,7 +45,7 @@ function PathCheckNote({ path }: { path: string }) {
     : <><AlertCircle size={13} /> {detail || 'Path check failed.'}</>}</p>
 }
 
-export function SettingsView({ settings, setSettings, info, models, h3Report, scanning, status, checking, diagnosticRunning, ollamaModels, onRefreshOllama, onScan, onCheck, onSave, onApplyDefaults, onRunDiagnostics, onRunLtxUtility, fetchFocusEntryIds, onFetchFocusConsumed }: { settings: AppSettings; setSettings(value: AppSettings): void; info: ObjectInfo; models: ModelFile[]; h3Report: ReturnType<typeof h3StackReport>; scanning: boolean; status: ComfyStatus; checking: boolean; diagnosticRunning: boolean; ollamaModels: OllamaModel[]; onRefreshOllama(): void; onScan(): void; onCheck(): void; onSave(): void; onApplyDefaults(): void; onRunDiagnostics(): void; onRunLtxUtility?: (options: { tool: Ltx23UtilityKind; input: MediaFile | null; audio?: MediaFile | null; prompt?: string }) => Promise<string | null>; fetchFocusEntryIds?: ReadonlyArray<string>; onFetchFocusConsumed?(): void }) {
+export function SettingsView({ settings, setSettings, info, models, h3Report, scanning, status, checking, diagnosticRunning, ollamaModels, onRefreshOllama, onScan, onCheck, onSave, onRunDiagnostics, onRunLtxUtility, fetchFocusEntryIds, onFetchFocusConsumed }: { settings: AppSettings; setSettings(value: AppSettings): void; info: ObjectInfo; models: ModelFile[]; h3Report: ReturnType<typeof h3StackReport>; scanning: boolean; status: ComfyStatus; checking: boolean; diagnosticRunning: boolean; ollamaModels: OllamaModel[]; onRefreshOllama(): void; onScan(): void; onCheck(): void; onSave(): void | Promise<void>; onRunDiagnostics(): void; onRunLtxUtility?: (options: { tool: Ltx23UtilityKind; input: MediaFile | null; audio?: MediaFile | null; prompt?: string }) => Promise<string | null>; fetchFocusEntryIds?: ReadonlyArray<string>; onFetchFocusConsumed?(): void }) {
   const pathRows: Array<{ kind: ModelKind; label: string; note: string }> = [
     { kind: 'diffusion_models', label: 'Diffusion models', note: 'FL2VA and Ref2VA checkpoints' },
     { kind: 'text_encoders', label: 'Text encoders', note: 'Qwen3-VL MiniMax encoder' },
@@ -93,6 +93,19 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
     if (preset === 'quality') updateDefaults({ ...common, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', experimentalSampling: false, sigmaShiftMode: 'model', shiftAudio: 3 })
     else if (preset === 'official-turbo') updateDefaults({ ...common, turbo: '8', sampler: 'res_multistep', scheduler: 'simple', experimentalSampling: false, sigmaShiftMode: 'model', shiftAudio: 3 })
     else updateDefaults({ ...common, resolution: '864x480', turbo: '8', sampler: 'res_multistep', scheduler: 'simple', experimentalSampling: false, sigmaShiftMode: 'model', shiftAudio: 3 })
+  }
+  // B2 (review 2026-09-19): "Apply to Create" silently replaced user-tuned
+  // values with a hardcoded set — the maintainer's silent-data-loss class.
+  // The defaults object has no "unset" state, so merge-only-unset cannot fit;
+  // the honest shape is an explicit reset that NAMES every delta it will
+  // change (the house window.confirm idiom) and refuses to run silently.
+  const recommendedDeltaNotes = (Object.keys(RECOMMENDED_DEFAULTS) as Array<keyof typeof RECOMMENDED_DEFAULTS>)
+    .filter((key) => defaults[key] !== RECOMMENDED_DEFAULTS[key])
+    .map((key) => `${DEFAULT_FIELD_LABELS[key]}: ${String(defaults[key])} → ${String(RECOMMENDED_DEFAULTS[key])}`)
+  const resetToRecommended = () => {
+    if (!recommendedDeltaNotes.length) return
+    if (!window.confirm(`Reset generation defaults to the recommended set?\n\nThis replaces your tuned values:\n${recommendedDeltaNotes.join('\n')}\n\nExisting canvas chains keep their own settings.`)) return
+    updateDefaults({ ...RECOMMENDED_DEFAULTS })
   }
   const samplerOptions = [...new Set([defaults.sampler, 'res_multistep', 'euler', 'gradient_estimation', 'ipndm', 'deis', 'heun', ...choices(info, 'KSamplerSelect', 'sampler_name')])]
   const schedulerOptions = [...new Set([defaults.scheduler, 'simple', 'beta', 'normal', ...choices(info, 'BasicScheduler', 'scheduler')])]
@@ -144,7 +157,9 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
     setEngineBusy(true)
     setEngineActionError(null)
     try {
-      setSettings(await window.minimax.saveSettings(settings))
+      const saved = await window.minimax.saveSettings(settings)
+      setSettings(saved.settings)
+      bumpPackSaveTick() // the persisted form just changed the pack target too
       await window.minimax.startManagedEngine()
       setSettings(await window.minimax.getSettings()) // comfyUrl re-pointed server-side on success
     } catch (error) {
@@ -180,7 +195,18 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
   const refreshNodePacks = async () => {
     try { setNodePacks((await window.minimax.listEngineNodePacks()).packs) } catch { /* listed on next action; errors surface there */ }
   }
-  useEffect(() => { void refreshNodePacks() }, [settings.engine.checkoutPath, settings.engine.externalCustomNodesDir, settings.engine.mode])
+  // Pack refresh after SAVE (review B1, 2026-09-19): the server resolves the
+  // install target from its OWN persisted settings, which only change when a
+  // save lands — the field deps below fire earlier, while the server still
+  // holds the old values. The tick bumps once the save settles (success OR
+  // failure — the refresh is a cheap GET) so the chips re-resolve without a
+  // field re-edit.
+  const [packSaveTick, setPackSaveTick] = useState(0)
+  const bumpPackSaveTick = () => setPackSaveTick((tick) => tick + 1)
+  useEffect(() => { void refreshNodePacks() }, [settings.engine.checkoutPath, settings.engine.externalCustomNodesDir, settings.engine.mode, packSaveTick])
+  const saveAndRefreshPacks = async () => {
+    try { await onSave() } finally { bumpPackSaveTick() }
+  }
   const runNodePackAction = async (id: string, action: () => Promise<NodePackStatus>) => {
     setNodePackBusy(id)
     setNodePackError(null)
@@ -199,8 +225,14 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
     { id: '24', label: '24 GB', guidance: 'Q5 or pruned INT8 diffusion + INT8 text encoder · 1344×768 · up to 10 s · comfortable queueing. INT8 is the best-tested community tier.' },
     { id: 'blackwell', label: 'Blackwell', guidance: 'NVFP4 diffusion + NVFP4-AWQ text encoder · native resolution/duration headroom · SageAttention and Sol-Attn give the largest speedups here.' },
   ]
-  return <div className="standard-page settings-page"><div className="page-heading"><div><p className="eyebrow">APPLICATION</p><h1>Settings</h1><p>Point the studio at your existing local engine and model folders.</p></div><button className="primary-button" onClick={onSave}><Save size={17} />Save settings</button></div>
-    <section className="settings-section"><div className="settings-heading"><div><Activity size={19} /><span><strong>ComfyUI engine</strong><small>The desktop app communicates only with this local address.</small></span></div><span className={`health-pill ${status.connected ? 'online' : ''}`}>{status.connected ? 'Connected' : 'Offline'}</span></div><div className="connection-row"><div className="field-group grow"><label htmlFor="comfy-url">Server URL</label><input id="comfy-url" value={settings.comfyUrl} onChange={(event) => setSettings({ ...settings, comfyUrl: event.target.value })} /></div><button className="secondary-button test-button" onClick={onCheck} disabled={checking}>{checking ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}Test connection</button></div>{status.connected && status.stats?.devices?.[0] && <div className="device-strip"><Gauge size={17} /><span><strong>{status.stats.devices[0].name ?? 'Compute device'}</strong><small>{status.stats.devices[0].vram_total ? `${formatBytes(status.stats.devices[0].vram_total)} VRAM · ${formatBytes(status.stats.devices[0].vram_free ?? 0)} free` : 'ComfyUI device detected'}</small></span></div>}</section>
+  return <div className="standard-page settings-page"><div className="page-heading"><div><p className="eyebrow">APPLICATION</p><h1>Settings</h1><p>Point the studio at your existing local engine and model folders.</p></div><button className="primary-button" data-save-settings onClick={() => void saveAndRefreshPacks()}><Save size={17} />Save settings</button></div>
+    <section className="settings-section"><div className="settings-heading"><div><Activity size={19} /><span><strong>ComfyUI engine</strong><small>The desktop app communicates only with this local address.</small></span></div><span className={`health-pill ${status.connected ? 'online' : ''}`}>{status.connected ? 'Connected' : 'Offline'}</span></div><div className="connection-row"><div className="field-group grow"><label htmlFor="comfy-url">Server URL</label><input id="comfy-url" value={settings.comfyUrl} onChange={(event) => setSettings({ ...settings, comfyUrl: event.target.value })} /></div><button className="secondary-button test-button" onClick={onCheck} disabled={checking}>{checking ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}Test connection</button></div>
+    {/* M3 (review 2026-09-19): the status route's `error` used to be dead
+        weight — a failed test showed only the stale "Offline" pill with no
+        acknowledgment the test ran or why it failed. Render the reason with
+        the address that was tried. */}
+    {!status.connected && status.error && <div className="llm-test-result fail" role="status" data-comfy-status-error><AlertCircle size={14} /><span>Could not reach {settings.comfyUrl} — {status.error}</span></div>}
+    {status.connected && status.stats?.devices?.[0] && <div className="device-strip"><Gauge size={17} /><span><strong>{status.stats.devices[0].name ?? 'Compute device'}</strong><small>{status.stats.devices[0].vram_total ? `${formatBytes(status.stats.devices[0].vram_total)} VRAM · ${formatBytes(status.stats.devices[0].vram_free ?? 0)} free` : 'ComfyUI device detected'}</small></span></div>}</section>
     <section className="settings-section managed-engine-section" aria-label="Managed engine">
       <div className="settings-heading">
         <div><ServerCog size={19} /><span><strong>Managed engine</strong><small>The studio launches and supervises its own ComfyUI from a checkout you nominate. External mode keeps the connection above.</small></span></div>
@@ -429,7 +461,7 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
       </div>
     </section>
     <section className="settings-section generation-defaults-section">
-      <div className="settings-heading"><div><SlidersHorizontal size={19} /><span><strong>Generation defaults</strong><small>Choose the starting values for the main Create workspace.</small></span></div><button className="secondary-button" onClick={onApplyDefaults}>Apply to Create</button></div>
+      <div className="settings-heading"><div><SlidersHorizontal size={19} /><span><strong>Generation defaults</strong><small>Choose the starting values for the main Create workspace — every NEW chain starts from them.</small></span></div><button className="secondary-button" data-apply-defaults disabled={!recommendedDeltaNotes.length} title={recommendedDeltaNotes.length ? `Sets tuned defaults back to the recommended set — asks first, naming every change (currently: ${recommendedDeltaNotes.length})` : 'Already at the recommended set'} onClick={resetToRecommended}>Reset to recommended</button></div>
       <div className="preset-row" aria-label="Generation presets">
         <button type="button" onClick={() => applyPreset('quality')}><strong>Native Quality</strong><small>1344 × 768 · 30 steps · no upscale</small></button>
         <button type="button" onClick={() => applyPreset('official-turbo')}><strong>Turbo 8</strong><small>Native canvas · official LoRA 1.0</small></button>
@@ -482,8 +514,14 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
         <label className="settings-check"><input type="checkbox" checked={settings.llmThinkingDefault === 'on'} onChange={(event) => setSettings({ ...settings, llmThinkingDefault: event.target.checked ? 'on' : 'off' })} /><span><strong>Thinking by default (freeform)</strong><small>Structured/JSON requests always run thinking-off for speed; this sets the default for freeform enhancement.</small></span></label>
         <SelectField label="Prompt writing style" value={settings.promptContentLevel} onChange={(promptContentLevel) => setSettings({ ...settings, promptContentLevel: promptContentLevel as AppSettings['promptContentLevel'] })} options={[['sfw', 'SFW · concrete visual'], ['suggestive', 'Suggestive · sensual mood'], ['nsfw', 'NSFW · explicit and precise']]} />
         <div className="field-group"><label htmlFor="llm-sticky-models">Sticky models (never unload)</label><input id="llm-sticky-models" value={settings.llamaStickyModels} placeholder="comma-separated ids or substrings" onChange={(event) => setSettings({ ...settings, llamaStickyModels: event.target.value })} /></div>
+        {/* M8 (review 2026-09-19): llamaVisionModel was wired server-side
+            (datasets captioning + vision scenarios) with no UI anywhere —
+            settable only by hand-editing settings.json. The row names the
+            resolution order honestly; the datalist offers the router's
+            vision-capable models when it is reachable. */}
+        <div className="field-group"><label htmlFor="llm-vision-model">Vision model (router)</label><input id="llm-vision-model" data-llm-vision-model value={settings.llamaVisionModel} placeholder="empty = first vision-capable router model" list="llm-vision-model-options" onChange={(event) => setSettings({ ...settings, llamaVisionModel: event.target.value })} /><datalist id="llm-vision-model-options">{(llmList?.models ?? []).filter((model) => model.vision).map((model) => <option key={model.id} value={model.id} />)}</datalist></div>
       </div>
-      <p className="settings-note">Router mode auto-loads the requested model per call and {settings.unloadLlmOnGenerate ? 'unloads non-sticky models before each render' : 'keeps models resident between calls'}. Gemma needs the server started with --jinja. Nothing leaves this workstation.</p>
+      <p className="settings-note">Router mode auto-loads the requested model per call and {settings.unloadLlmOnGenerate ? 'unloads non-sticky models before each render' : 'keeps models resident between calls'}. Gemma needs the server started with --jinja. The vision model serves image and video captioning (the dataset manager) and vision scenarios — empty picks the first vision-capable router model. Nothing leaves this workstation.</p>
     </section>
     <section className="settings-section ollama-section">
       <div className="settings-heading">
@@ -504,6 +542,27 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
       <p className="settings-note">MiniMax Studio is licensed under the <strong>GNU AGPLv3</strong> (<a href="https://github.com/Cobdog/MINIMAX-DESKTOP/blob/main/LICENSE" target="_blank" rel="noreferrer">full text</a>). The corresponding source lives at <a href="https://github.com/Cobdog/MINIMAX-DESKTOP" target="_blank" rel="noreferrer">github.com/Cobdog/MINIMAX-DESKTOP</a> — if you run a modified copy for others over a network, share your source with them. Third-party components and model-weight licenses are inventoried in <a href="https://github.com/Cobdog/MINIMAX-DESKTOP/blob/main/docs/LICENSES.md" target="_blank" rel="noreferrer">docs/LICENSES.md</a>.</p>
     </section>
   </div>
+}
+
+/** The recommended generation-defaults baseline (review B2, 2026-09-19) —
+ *  ONE constant for the reset affordance, replacing the hardcoded set the
+ *  old dock's "Apply to Create" pushed. Duration is unified to 5: the
+ *  Native Quality preset below, the server factory default, and the GPU-tier
+ *  guidance all say 5 — the old copy's 6 was the outlier. Fields NOT listed
+ *  here (reference size, live preview) are never touched by a reset. */
+const RECOMMENDED_DEFAULTS: Partial<AppSettings['generationDefaults']> = {
+  resolution: '1344x768', duration: 5, steps: 30, turbo: 'off', sampler: 'res_multistep',
+  scheduler: 'simple', experimentalSampling: false, sigmaShiftMode: 'model',
+  shiftVideo: 12, shiftAudio: 3, loraStrength: 1, upscaleMode: 'off',
+}
+
+/** Human labels for the delta list the reset confirm names. */
+const DEFAULT_FIELD_LABELS: Record<keyof AppSettings['generationDefaults'], string> = {
+  resolution: 'resolution', duration: 'duration (s)', steps: 'steps', turbo: 'turbo',
+  sampler: 'sampler', scheduler: 'scheduler', experimentalSampling: 'custom sampling',
+  sigmaShiftMode: 'sigma-shift mode', shiftVideo: 'video shift', shiftAudio: 'audio shift',
+  loraStrength: 'LoRA strength', upscaleMode: 'upscale', refImageSize: 'reference image size',
+  livePreview: 'live preview',
 }
 
 /** The live chip for one node-pack row (task 9om4bi9): the INSTANCE verdict

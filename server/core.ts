@@ -624,6 +624,38 @@ export function createStudioServer(paths: StudioServerPaths) {
     return problems
   }
 
+  /** Trim-at-save parity (review M5, 2026-09-19): PathCheckNote trims a
+   *  pasted path before stat-checking it, but the save path kept raw
+   *  whitespace — a trailing newline validated green and then scanned
+   *  nothing. Every path-shaped field is trimmed on the way IN: the POST
+   *  route trims before its shape check (so ' /x' is not misread as a
+   *  relative path) and normalizeSettings trims what it persists (the
+   *  load path also benefits: pre-fix files with padded paths heal on the
+   *  next save). Empty strings stay empty — clearing a row is not a
+   *  default-restore in disguise. */
+  function trimSettingsPaths(raw: Partial<AppSettings>): Partial<AppSettings> {
+    const trimmed: Partial<AppSettings> = { ...raw }
+    if (typeof trimmed.outputDirectory === 'string') trimmed.outputDirectory = trimmed.outputDirectory.trim()
+    if (typeof trimmed.inputDirectory === 'string') trimmed.inputDirectory = trimmed.inputDirectory.trim()
+    if (typeof trimmed.ffmpegPath === 'string') trimmed.ffmpegPath = trimmed.ffmpegPath.trim()
+    if (typeof trimmed.modelRoot === 'string') trimmed.modelRoot = trimmed.modelRoot.trim()
+    if (trimmed.engine && typeof trimmed.engine === 'object') {
+      const engine = { ...trimmed.engine }
+      for (const key of ['pythonPath', 'checkoutPath', 'externalCustomNodesDir'] as const) {
+        if (typeof engine[key] === 'string') engine[key] = engine[key].trim()
+      }
+      trimmed.engine = engine
+    }
+    if (trimmed.paths && typeof trimmed.paths === 'object') {
+      const paths = { ...trimmed.paths }
+      for (const kind of modelKinds) {
+        if (typeof paths[kind] === 'string') paths[kind] = (paths[kind] as string).trim()
+      }
+      trimmed.paths = paths
+    }
+    return trimmed
+  }
+
   function normalizeSettings(raw: Partial<AppSettings>): AppSettings {
     const defaults = defaultSettings()
     const generationDefaults = { ...defaults.generationDefaults, ...raw.generationDefaults }
@@ -653,7 +685,14 @@ export function createStudioServer(paths: StudioServerPaths) {
     return {
       ...defaults,
       ...sanitized,
-      paths: { ...defaults.paths, ...sanitized.paths },
+      // Trim-at-save parity (M5): modelRoot and paths.* keep their raw
+      // whitespace today while the check-time note trims — normalize what is
+      // persisted (empty stays empty; only whitespace heals).
+      modelRoot: typeof sanitized.modelRoot === 'string' ? sanitized.modelRoot.trim() : defaults.modelRoot,
+      paths: Object.fromEntries(modelKinds.map((kind) => {
+        const value = sanitized.paths?.[kind]
+        return [kind, typeof value === 'string' ? value.trim() : defaults.paths[kind]]
+      })) as Record<ModelKind, string>,
       generationDefaults,
       // App-relative io defaults (task 9om4bi9): an UNSET (empty) directory
       // is the default's to fill — only an absolute user value survives here
@@ -3033,7 +3072,10 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
         if (url.pathname === '/api/lan/settings' && request.method === 'GET') return sendJson(response, 200, { settings })
         if (url.pathname === '/api/lan/settings' && request.method === 'POST') {
           const body = await readJson(request, 200_000)
-          const raw = body.settings && typeof body.settings === 'object' ? body.settings as Partial<AppSettings> : null
+          // Trim BEFORE the shape check (M5): ' /models' is a padded absolute
+          // path, not a relative one — refusing it while the inline note
+          // called the trimmed form "found" was the exact mismatch flagged.
+          const raw = body.settings && typeof body.settings === 'object' ? trimSettingsPaths(body.settings as Partial<AppSettings>) : null
           if (!raw || typeof raw.comfyUrl !== 'string' || typeof raw.outputDirectory !== 'string') return sendJson(response, 400, { error: 'A settings object with service URLs is required.' })
           // Security hardening 1: settings are the crown-jewel write (they
           // repoint spawned binaries, the output tree, and every outbound

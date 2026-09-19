@@ -597,7 +597,16 @@ async function main() {
   const homeB = makeHome('b')
   const serverB = await bootServer(homeB, 'B')
   const apiB = client(serverB.port)
-  await apiB.get('/api/lan/documents/bootstrap') // fresh studio: nothing to import
+  const freshBootstrap = await apiB.get('/api/lan/documents/bootstrap') // fresh studio: nothing to import
+  // Phantom-seed regression (review M1, g5x37k8 2026-09-19): a fresh install
+  // with NO legacy data must NOT grow an "Imported workspace" project — the
+  // old unconditional seed handed every new user a Resume card for a
+  // workspace they never had (and made the honest "no other canvases yet"
+  // empty state unreachable). Failing-without-it: projectsSeeded was 1 here.
+  check(freshBootstrap.body.legacyImport.imported === true, 'the legacy import runs (marker set) even with nothing to import')
+  check(freshBootstrap.body.legacyImport.counts.projectsSeeded === 0, `a legacy-free fresh boot seeds NO project (got ${freshBootstrap.body.legacyImport.counts.projectsSeeded})`)
+  const freshProjects = await apiB.get('/api/lan/documents/projects')
+  check(!(freshProjects.body.projects ?? []).some((project) => project.id === 'legacy:project' || /Imported workspace/i.test(String(project.name))), 'no phantom "Imported workspace" on a fresh install')
   const imported = await apiB.post('/api/lan/documents/import', { archiveBase64: archive.toString('base64') })
   check(imported.status === 200, `archive imports into a fresh studio (${JSON.stringify(imported.body).slice(0, 200)})`)
   const importedDoc = await apiB.get(`/api/lan/documents/project?id=${projectId}`)

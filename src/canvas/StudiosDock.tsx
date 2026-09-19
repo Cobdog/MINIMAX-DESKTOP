@@ -27,7 +27,7 @@
  * route's session context (one poller), stores shared D1/D2 — the studios
  * read/write the SAME library stores the canvas projects into canvas_asset.
  */
-import { Suspense, lazy, useContext, useMemo } from 'react'
+import { Suspense, lazy, useContext, useEffect, useMemo, useState } from 'react'
 import { Rnd } from 'react-rnd'
 import { Clapperboard, X } from 'lucide-react'
 import { resolveModelOverrides, resolveModels } from '../lib/modelOverrides'
@@ -40,6 +40,7 @@ import { ErrorBoundary } from '../components/ErrorBoundary'
 import { useSessionStore } from '../state/sessionStore'
 import { useJobsStore } from '../state/jobsStore'
 import { CanvasSessionContext } from './sessionContext'
+import { dockDefaultGeometry } from './dockGeometry'
 import { engineBridge, useCanvasStore, type StudiosDockTab } from './store'
 
 // Heavy studio surfaces stay lazy chunks (the old shell's discipline — the
@@ -64,8 +65,13 @@ export function StudiosDock() {
   const dock = useCanvasStore((state) => state.studiosDock)
   const setStudiosDock = useCanvasStore((state) => state.setStudiosDock)
   const toast = useCanvasStore((state) => state.toast)
+  const raiseDock = useCanvasStore((state) => state.raiseDock)
   const context = useContext(CanvasSessionContext)
   const jobs = useJobsStore((state) => state.jobs)
+  // Dock stacking (review M11): raised on open + on any grab; the default
+  // position cascades below Settings so sibling docks never bury headers.
+  const [dockZ, setDockZ] = useState(60)
+  useEffect(() => { if (dock) setDockZ(raiseDock()) }, [dock, raiseDock])
 
   const notify = (tone: 'error' | 'success' | 'neutral', text: string) => toast(tone, text)
   const setJobs = (update: (current: import('../types').GenerationJob[]) => import('../types').GenerationJob[]) => useJobsStore.getState().setJobs(update)
@@ -93,7 +99,9 @@ export function StudiosDock() {
   return <Rnd
     className="canvas-settings-dock"
     data-canvas-studios-dock
-    default={{ x: 96, y: 84, width: 880, height: Math.min(820, window.innerHeight - 140) }}
+    style={{ zIndex: dockZ }}
+    onPointerDownCapture={() => setDockZ(raiseDock())}
+    default={dockDefaultGeometry({ x: 300, y: 144, width: 880, height: Math.min(820, window.innerHeight - 140) })}
     minWidth={520}
     minHeight={320}
     bounds="parent"
