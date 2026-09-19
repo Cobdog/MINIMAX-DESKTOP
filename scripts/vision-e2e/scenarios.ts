@@ -330,11 +330,14 @@ export const SCENARIOS: VisionScenario[] = [
 
       const externalDir = resolve('test-home/vision-external-nodes')
       mkdirSync(join(externalDir, 'comfyui-krea2edit'), { recursive: true })
-      // A studio marker (installed-but-not-loaded → the restart chip) and a
-      // foreign folder (no marker → the foreign chip).
+      // A studio marker (installed-but-not-loaded → the restart chip) on
+      // krea2edit, and a FOREIGN folder (no marker → the foreign chip) on
+      // krea2-anypaint — the row DIRECTLY below krea2edit in the registry
+      // order, so both honest states share one capture frame (radiance sits
+      // 4 rows further down, below the fold; first judged bundle 2026-09-19).
       writeFileSync(join(externalDir, 'comfyui-krea2edit', '.studio-node.json'), `${JSON.stringify({ id: 'krea2edit', revision: '86f886dac23013d88996d3a2e99093ba44d322fb', mode: 'user-fetch', installedAt: Date.now(), source: 'vision' }, null, 2)}\n`)
-      mkdirSync(join(externalDir, 'radiance'), { recursive: true })
-      writeFileSync(join(externalDir, 'radiance', 'user-file.py'), '# theirs\n')
+      mkdirSync(join(externalDir, 'krea2-anypaint'), { recursive: true })
+      writeFileSync(join(externalDir, 'krea2-anypaint', 'user-file.py'), '# theirs\n')
 
       const modelRoot = resolve('test-home/vision-instance-models')
       for (const kind of ['diffusion_models', 'text_encoders', 'vae', 'loras', 'vae_approx', 'clip_vision']) mkdirSync(join(modelRoot, kind), { recursive: true })
@@ -404,10 +407,10 @@ export const SCENARIOS: VisionScenario[] = [
         rubric: [
           SHELL_CONTEXT,
           'The same Settings dock, now scrolled WITHIN the "Node packs" list: the visible frame starts at or near the "comfyui-krea2edit" pack row (bold name, an "Apache-2.0" license badge, a "user-fetch" mode tag); rows above sit above the fold (intended scrolling, not clipping; judge only what is in frame).',
-          'The comfyui-krea2edit row carries a STATUS CHIP reading exactly "installed — restart engine to activate" (an amber/warning tone, possibly followed by " · " and a short revision hash): the files are placed in the external folder but the running instance has not loaded them — this honest state is CORRECT, not a defect.',
-          'Further down the visible rows, a "radiance" pack row carries a STATUS CHIP reading "foreign folder" (amber/warning — a folder the studio did not place, reported and refused, never silently replaced): also CORRECT.',
-          'Other visible rows read "missing" (muted tone). Pack descriptions and muted repository-URL meta lines sit under each name; the right column holds the small "local repo directory" input plus "Fetch…", "Install" and "Uninstall" buttons (disabled states are intended availability, not defects).',
-          'Defects to flag: neither the restart chip nor the foreign chip legible, chips overlapping other text, a chip clipped mid-word, the two amber chips mislabeled (e.g. reading "missing"), descriptions overlapping the action column.',
+          'The comfyui-krea2edit row carries a STATUS CHIP reading exactly "installed — restart engine to activate" (a warning tone — red-leaning amber in this design language, possibly followed by " · " and a short revision hash): the files are placed in the external folder but the running instance has not loaded them — this honest state is CORRECT, not a defect.',
+          'The row DIRECTLY below (the "krea2-anypaint" pack, an "MIT" license badge) carries a STATUS CHIP reading "foreign folder" (the same warning tone — a folder the studio did not place, reported and refused, never silently replaced): also CORRECT.',
+          'Other visible rows read "missing" (muted tone). Pack descriptions and muted repository-URL meta lines sit under each name; the right column holds the small "local repo directory" input plus "Fetch…", "Install" and "Uninstall" buttons (disabled states are intended availability, not defects; the action column may WRAP to two lines on narrow docks — intended).',
+          'Defects to flag: neither the restart chip nor the foreign chip legible, chips overlapping other text, a chip clipped mid-word, the two warning chips mislabeled (e.g. reading "missing"), descriptions overlapping the action column, an action button clipped to a sliver at the card edge.',
         ].join(' '),
       },
     ],
