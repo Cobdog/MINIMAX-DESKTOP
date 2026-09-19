@@ -146,6 +146,18 @@ function cleanUrl(url: string) {
   return url.trim().replace(/\/+$/, '')
 }
 
+/** Scheme completion for user-typed service addresses (maintainer question
+ *  2026-09-19: "do I need to specify http://?"): `127.0.0.1:8188` parses as
+ *  a bogus protocol in the URL constructor and the SSRF guard then rejects a
+ *  genuinely local address with a confusing message. Normalize at the
+ *  settings boundary instead — scheme-less input gets http:// (a local
+ *  service on https names it explicitly); trailing slashes trimmed. */
+function completeServiceScheme(url: string) {
+  const trimmed = url.trim()
+  if (!trimmed) return trimmed
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed.replace(/\/+$/, '') : `http://${trimmed}`.replace(/\/+$/, '')
+}
+
 
 /** Hard timeout for ComfyUI/Ollama calls: a hung engine socket must not hold
  *  server requests open forever. 60 s because /object_info legitimately runs
@@ -685,6 +697,12 @@ export function createStudioServer(paths: StudioServerPaths) {
     return {
       ...defaults,
       ...sanitized,
+      // Scheme completion for every user-typed service address (see
+      // completeServiceScheme): ComfyUI, Ollama, and the llama.cpp router
+      // all accept `host:port` and get http:// prepended at normalization.
+      comfyUrl: completeServiceScheme(stringField(raw.comfyUrl, defaults.comfyUrl)),
+      ollamaUrl: completeServiceScheme(stringField(raw.ollamaUrl, defaults.ollamaUrl)),
+      llamaCppUrl: completeServiceScheme(stringField(raw.llamaCppUrl, '')),
       // Trim-at-save parity (M5): modelRoot and paths.* keep their raw
       // whitespace today while the check-time note trims — normalize what is
       // persisted (empty stays empty; only whitespace heals).
@@ -699,7 +717,6 @@ export function createStudioServer(paths: StudioServerPaths) {
       // (existing absolute settings are never rewritten: migration-safe).
       outputDirectory: stringField(sanitized.outputDirectory, defaults.outputDirectory).trim() || defaults.outputDirectory,
       inputDirectory: stringField(sanitized.inputDirectory, defaults.inputDirectory).trim() || defaults.inputDirectory,
-      llamaCppUrl: stringField(raw.llamaCppUrl, defaults.llamaCppUrl).trim(),
       llamaCppModel: stringField(raw.llamaCppModel, defaults.llamaCppModel).trim(),
       llamaVisionModel: stringField(raw.llamaVisionModel, defaults.llamaVisionModel).trim(),
       llamaStickyModels: stringField(raw.llamaStickyModels, defaults.llamaStickyModels).trim(),
