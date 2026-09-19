@@ -1310,4 +1310,3 @@ export function createDocumentStore(db: Database.Database, options: DocumentStor
     const legacyProjectId = 'legacy:project'
     const workspace = db.prepare("SELECT data_json FROM workspace_state WHERE name = 'create'").get() as { data_json: string } | undefined
     const defaults = workspace ? parseJson<Record<string, unknown>>(workspace.data_json, {}) : {}
->>>>>>> origin/main
