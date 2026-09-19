@@ -13,6 +13,21 @@ tmpfs is full — this is the machine's recurring failure mode. Run with
 to. CI runners have fresh /tmp; the flake is local-only and never caused by
 your change (verify by looking at what the failing write was).
 
+## Local-only e2e flakes from shared-home accumulation (learned 2026-09-18, fh94g76)
+
+The e2e datasets tests are NOT idempotent against their own accumulation in
+the shared `test-home`: every run of the caption-editor test seeds another
+`e2e-clip` layer set on the same master, and once an OLD 4:3-aspect layer
+becomes the list's `.first()`, the 4:3 chip is already-active (disabled) and
+the click times out. Reproduces on `main`; passes on CI (fresh homes). If
+`datasets.spec.ts` fails locally on an aspect-chip click, clean the
+synthetic fixtures through the app's own API — boot a scratch server on
+`test-home`, `POST /api/lan/datasets/sources/trash` for each `e2e-clip` /
+`vision-clip` source, then `POST /api/lan/datasets/trash/empty` — and
+re-run. Never delete files by hand (the deletion policy). The same class of
+problem applies to ANY e2e test that matches `.first()` over accumulating
+state: suspect the shared home before the diff.
+
 ## The gate
 
 ```bash
