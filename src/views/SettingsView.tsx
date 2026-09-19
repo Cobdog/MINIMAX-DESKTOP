@@ -3,7 +3,7 @@
  *  Ollama fallback), model locations, and output/clip paths. */
 import { useEffect, useState } from 'react'
 import { Eraser, GitBranch, Wand2 } from 'lucide-react'
-import { Activity, AlertCircle, Check, ChevronDown, Cpu, Eye, Folder, FolderOpen, Gauge, HardDrive, Layers, LoaderCircle, Power, RefreshCw, Save, Scale, ServerCog, SlidersHorizontal, Sparkles, Stethoscope, Unplug } from 'lucide-react'
+import { Activity, AlertCircle, Check, ChevronDown, Cpu, Eye, Folder, FolderOpen, Gauge, HardDrive, Info, Layers, LoaderCircle, Power, RefreshCw, Save, Scale, ServerCog, SlidersHorizontal, Sparkles, Stethoscope, Unplug } from 'lucide-react'
 import type { AppSettings, ComfyStatus, LlmModelsResult, MediaFile, ModelFile, ModelKind, NodePackStatus, OllamaModel, UpscaleMode } from '../types'
 import { choices, type ObjectInfo } from '../lib/comfyInfo'
 import { inferredOverrideSlotFile, MODEL_FAMILIES, overridePickOutcome, SLOT_LABELS, type ModelOverrideSlotName } from '../lib/modelOverrides'
@@ -187,6 +187,7 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
   const [nodePacks, setNodePacks] = useState<NodePackStatus[] | null>(null)
   const [nodePackBusy, setNodePackBusy] = useState<string | null>(null)
   const [nodePackError, setNodePackError] = useState<string | null>(null)
+  const [nodePackRefreshing, setNodePackRefreshing] = useState(false)
   const [nodePackSource, setNodePackSource] = useState<Record<string, string>>({})
   /** One-click fetch deep-link from a pack row (task 9om4bi9): focuses the
    *  FetchBrowser's catalog entry — the same mechanism the canvas menu rows
@@ -194,6 +195,20 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
   const [packFetchFocus, setPackFetchFocus] = useState<string[] | null>(null)
   const refreshNodePacks = async () => {
     try { setNodePacks((await window.minimax.listEngineNodePacks()).packs) } catch { /* listed on next action; errors surface there */ }
+  }
+  /** The board's manual Refresh (task mjhlt3k, AC-2): the pack rows re-GET
+   *  (fresh folder scan + live object_info verdicts — the route reads are
+   *  per-request, never cached) and the model inventory re-pulls through the
+   *  bootstrap scan (instance /models + object_info merged with the local
+   *  roots). The auto-refresh effects only fire on settings changes; this is
+   *  the "I changed something behind the studio's back" trigger. */
+  const refreshPackBoard = async () => {
+    setNodePackRefreshing(true)
+    try {
+      await Promise.all([refreshNodePacks(), Promise.resolve(onScan())])
+    } finally {
+      setNodePackRefreshing(false)
+    }
   }
   // Pack refresh after SAVE (review B1, 2026-09-19): the server resolves the
   // install target from its OWN persisted settings, which only change when a
@@ -300,25 +315,35 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
     </section>
     <section className="settings-section node-packs-section" aria-label="Node packs">
       <div className="settings-heading">
-        <div><GitBranch size={19} /><span><strong>Node packs</strong><small>Custom nodes the studio can place into the engine's custom-node folder — the managed checkout's custom_nodes/, or the external custom nodes folder above. Vendored at a pinned revision (license-verified), installed from a local copy, or fetched with your consent. Weights are linked, never copied. The status chip is LIVE: it reads the connected instance's own node list.</small></span></div>
+        <div><GitBranch size={19} /><span><strong>Node packs</strong><small>Custom nodes the studio can place into the engine's custom-node folder — the managed checkout's custom_nodes/, or the external custom nodes folder above (the target is detected from the mode; nothing asks you to point at one). Vendored at a pinned revision (license-verified), fetched with your consent, or installed from the studio's own payload. Weights are linked, never copied. The status badge is version-aware and LIVE: it reads the folder's own markers (studio marker, git checkout, Comfy-Registry pyproject) plus the connected instance's node list.</small></span></div>
+        <button type="button" className="secondary-button" data-node-pack-refresh onClick={() => void refreshPackBoard()} disabled={nodePackRefreshing || scanning} title="Re-pull the instance's model inventory and node list, re-scan the custom-nodes folder, and re-resolve every row">{nodePackRefreshing || scanning ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}Refresh</button>
       </div>
       <div className="node-pack-list">
         {(nodePacks ?? []).map((pack) => {
           const chip = nodePackChip(pack)
+          // AC-1 path-prompt gate: the local-source input exists ONLY for a
+          // pack with no network/payload source (no fetch-catalog entry —
+          // empty in today's registry) that has a usable target and no
+          // folder yet. Everything else installs without a path: payload
+          // rows place directly, network rows go through Fetch… — the
+          // VDN/turbo precedent.
+          const needsLocalSource = pack.installMode === 'user-fetch' && !pack.hasNetworkSource && pack.targetKind !== 'none' && pack.folderState === 'missing' && !pack.installed
+          const versionText = nodePackVersionText(pack)
           return (
           <div className="node-pack-row" key={pack.id}>
             <div className="node-pack-main">
-              <div className="node-pack-title"><strong>{pack.name}</strong><span className={`node-pack-license ${pack.licenseSpdx === 'NO-LICENSE' ? 'warn' : ''}`}>{pack.licenseSpdx}</span><span className="node-pack-mode">{pack.installMode === 'vendor' ? (pack.vendored ? 'vendored' : 'vendor payload missing') : pack.installMode === 'first-party' ? 'first-party' : 'user-fetch'}</span><span className={`node-pack-installed ${chip.tone}`} data-node-pack-chip={chip.label}>{chip.label}{pack.installedRevision && chip.label.startsWith('installed') ? ` · ${pack.installedRevision.slice(0, 8)}` : ''}</span></div>
+              <div className="node-pack-title"><strong>{pack.name}</strong><span className={`node-pack-license ${pack.licenseSpdx === 'NO-LICENSE' ? 'warn' : ''}`}>{pack.licenseSpdx}</span><span className="node-pack-mode">{pack.installMode === 'vendor' ? (pack.vendored ? 'vendored' : 'vendor payload missing') : pack.installMode === 'first-party' ? 'first-party' : 'user-fetch'}</span><span className={`node-pack-installed ${chip.tone}`} data-node-pack-chip={chip.label}>{chip.label}</span>{versionText && <span className="node-pack-version" data-node-pack-version={versionText}>{versionText}</span>}</div>
+              {pack.managedNotice && <small className="node-pack-managed-notice" role="status"><Info size={13} />{pack.managedNotice}</small>}
               <small>{pack.description}</small>
               <small className="node-pack-meta">{pack.repoUrl} @ {pack.pinnedRevision.slice(0, 12)}{pack.note ? ` — ${pack.note}` : ''}</small>
             </div>
             <div className="node-pack-actions">
-              {pack.installMode === 'user-fetch' && <input className="node-pack-source" placeholder="local repo directory (absolute)" value={nodePackSource[pack.id] ?? ''} onChange={(event) => setNodePackSource({ ...nodePackSource, [pack.id]: event.target.value })} aria-label={`Local source directory for ${pack.name}`} />}
-              {pack.installMode === 'user-fetch' && !pack.installed && <button type="button" className="secondary-button" title={`Fetch the pinned revision of ${pack.name} (consent-gated)`} onClick={() => {
+              {needsLocalSource && <input className="node-pack-source" placeholder="local repo directory (absolute)" value={nodePackSource[pack.id] ?? ''} onChange={(event) => setNodePackSource({ ...nodePackSource, [pack.id]: event.target.value })} aria-label={`Local source directory for ${pack.name}`} />}
+              {pack.installMode === 'user-fetch' && pack.hasNetworkSource && pack.targetKind !== 'none' && pack.folderState !== 'foreign' && <button type="button" className="secondary-button" title={pack.versionRelation === 'differs' ? `Refetch the pinned revision of ${pack.name} (consent-gated) — the installed copy differs from the pin` : `Fetch the pinned revision of ${pack.name} (consent-gated)`} onClick={() => {
                 setPackFetchFocus([`pack:${pack.id}`])
                 document.querySelector('.fetch-section')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
               }} data-node-pack-fetch={pack.id}>Fetch…</button>}
-              <button type="button" className="secondary-button" title={pack.folderState === 'foreign' ? 'Already present — placed outside the studio; the studio never replaces or deletes it' : undefined} disabled={nodePackBusy === pack.id || pack.availability === 'unavailable' || pack.folderState === 'foreign' || (pack.installMode === 'user-fetch' && !nodePackSource[pack.id]?.trim())} onClick={() => void runNodePackAction(pack.id, () => window.minimax.installEngineNodePack(pack.id, nodePackSource[pack.id]?.trim() || undefined))}>{nodePackBusy === pack.id ? <LoaderCircle size={14} className="spin" /> : null}Install</button>
+              {(pack.installMode !== 'user-fetch' || needsLocalSource) && <button type="button" className="secondary-button" title={pack.folderState === 'foreign' ? 'Already present — placed outside the studio; the studio never replaces or deletes it' : undefined} disabled={nodePackBusy === pack.id || pack.availability === 'unavailable' || pack.folderState === 'foreign' || (needsLocalSource && !nodePackSource[pack.id]?.trim())} onClick={() => void runNodePackAction(pack.id, () => window.minimax.installEngineNodePack(pack.id, nodePackSource[pack.id]?.trim() || undefined))}>{nodePackBusy === pack.id ? <LoaderCircle size={14} className="spin" /> : null}Install</button>}
               <button type="button" className="secondary-button" disabled={!pack.installed || nodePackBusy === pack.id} onClick={() => void runNodePackAction(pack.id, () => window.minimax.uninstallEngineNodePack(pack.id))}>Uninstall</button>
             </div>
           </div>
@@ -327,7 +352,7 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
         {nodePacks === null && <p className="settings-note">Loading node-pack registry…</p>}
       </div>
       {nodePackError && <div className="llm-test-result fail" role="status"><AlertCircle size={14} /><span>{nodePackError}</span></div>}
-      <p className="settings-note">Uninstall deletes only folders the studio placed (a marker install) — never a pack that was already there: pre-existing folders in the target are reported as "present — not studio-managed", refused for install-over, and never deleted. A revision bump reinstalls at the pin. "Installed — restart engine to activate" means the files are in place but the running instance has not loaded them yet. Packs without a license are never vendored — they install only from your own local copy or the fetcher below.</p>
+      <p className="settings-note">Uninstall deletes only folders the studio placed (a marker install) — never a pack that was already there: pre-existing folders in the target are reported as "present — not studio-managed" (or "managed by ComfyUI" when the folder carries a git checkout or a Comfy-Registry pyproject), refused for install-over, and never deleted. A revision bump refetches at the pin. "Restart to activate" means the files are in place but the running instance has not loaded them yet. Packs without a license are never vendored — they install only through the consent-gated fetcher below.</p>
     </section>
     <FetchBrowser settings={settings} setSettings={setSettings} onAfterFetch={onScan} onAdoptCheckout={(path) => updateEngine({ checkoutPath: path })} focusEntryIds={packFetchFocus ?? fetchFocusEntryIds} onFocusConsumed={() => { setPackFetchFocus(null); onFetchFocusConsumed?.() }} />
     <section className="settings-section h3-stack-section">
@@ -565,27 +590,53 @@ const DEFAULT_FIELD_LABELS: Record<keyof AppSettings['generationDefaults'], stri
   livePreview: 'live preview',
 }
 
-/** The live chip for one node-pack row (task 9om4bi9): the INSTANCE verdict
- *  (object_info node classes) is the source of truth for "installed"; the
- *  folder verdicts say how far behind the instance is. Order matters — an
- *  active instance wins even if the folder verdict is stale; a folder the
- *  studio placed but the instance has not loaded is honestly "restart to
- *  activate"; a foreign folder (no studio marker) is never called installed.
- *  Bugfix (9om4bi9 follow-up): in an EXTERNAL target a pre-existing folder
- *  is the normal state of a working instance — the chip says PRESENT (not
- *  managed by the studio), not "foreign" like an anomaly in a checkout. */
+/** The status badge for one node-pack row (task mjhlt3k — the version-aware
+ *  matrix over the 9om4bi9 presence discipline). Precedence: a FOLDER that
+ *  exists carries the badge (presence + attribution + version — the thing
+ *  the maintainer reads at a glance), with the live instance verdict as a
+ *  "· live" suffix; a folder-less pack served by the connected instance is
+ *  "installed on instance" (version unknowable from here — the instance
+ *  serves the classes but its disk is not ours to read). A studio-marker
+ *  install at the pin is "installed @ pin"; a drifted marker is "outdated"
+ *  (markers only record revisions that WERE the pin — the registry moved).
+ *  A foreign folder carrying a git checkout or a Comfy-Registry pyproject
+ *  is "managed by ComfyUI" (info tone — calm, not an alarm); any other
+ *  foreign folder keeps the honest "present — not studio-managed". */
 function nodePackChip(pack: NodePackStatus): { label: string; tone: string } {
-  if (pack.instanceState === 'active') return { label: 'installed on instance', tone: 'ok' }
-  if (pack.folderState === 'foreign') {
-    return pack.targetKind === 'external'
-      ? { label: 'present — not studio-managed', tone: 'warn' }
-      : { label: 'foreign folder', tone: 'warn' }
-  }
+  const liveSuffix = pack.instanceState === 'active' ? ' · live' : ''
   if (pack.installed) {
+    const atPin = pack.versionRelation !== 'differs'
+    const base = atPin ? 'installed @ pin' : 'outdated'
     return pack.instanceState === 'absent'
-      ? { label: 'installed — restart engine to activate', tone: 'warn' }
-      : { label: 'installed', tone: 'ok' }
+      ? { label: `${base} — restart engine to activate`, tone: 'warn' }
+      : { label: base + liveSuffix, tone: atPin ? 'ok' : 'warn' }
   }
+  if (pack.folderState === 'foreign') {
+    if (pack.versionInfo?.managedBy === 'comfyui') return { label: 'managed by ComfyUI' + liveSuffix, tone: 'info' }
+    return pack.targetKind === 'external'
+      ? { label: 'present — not studio-managed' + liveSuffix, tone: 'warn' }
+      : { label: 'foreign folder' + liveSuffix, tone: 'warn' }
+  }
+  // (A foreign folder already returned above — reaching here means no
+  // folder is present, so the live instance is the only install evidence.)
+  if (pack.instanceState === 'active') return { label: 'installed on instance', tone: 'ok' }
   if (pack.targetKind === 'none') return { label: 'no install target', tone: 'muted' }
   return { label: 'missing', tone: 'muted' }
+}
+
+/** The version string beside the badge (AC-3): the discovered revision (sha
+ *  shortened) or registry version, with its relation to the pin when one
+ *  was determinable. Empty when nothing was discoverable — the honest
+ *  "version unknown" is simply no string. */
+function nodePackVersionText(pack: NodePackStatus): string {
+  const version = pack.versionInfo?.version
+  if (!version) return ''
+  const shown = /^[0-9a-f]{40}$/i.test(version) ? version.slice(0, 12) : version
+  const relation = pack.versionRelation
+  const suffix = relation === 'ahead-of-pin' ? ' · ahead of pin'
+    : relation === 'behind-pin' ? ' · behind pin'
+      : relation === 'differs' ? ' · differs from pin'
+        : relation === 'at-pin' && pack.versionInfo?.managedBy === 'comfyui' ? ' · at pin'
+          : ''
+  return shown + suffix
 }

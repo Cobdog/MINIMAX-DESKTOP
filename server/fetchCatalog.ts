@@ -96,6 +96,18 @@ function shaLike(value: string): boolean {
   return /^[0-9a-f]{40}$/i.test(value)
 }
 
+/** Pack ids with a NETWORK fetch entry in the catalog (task mjhlt3k): every
+ *  user-fetch pack whose pinned revision can be fetched with consent. Rows
+ *  in this set never surface the local-source input — Fetch… is their
+ *  install affordance (the AC-1 path-prompt gate). */
+export function networkFetchPackIds(): Set<string> {
+  const ids = new Set<string>()
+  for (const entry of FETCH_CATALOG) {
+    if (entry.destination.kind === 'node-pack' && !entry.localInstall && entry.packId) ids.add(entry.packId)
+  }
+  return ids
+}
+
 export const FETCH_CATALOG: FetchCatalogEntry[] = [
   nodePackEntry('minimax-h3-turbo'),
   nodePackEntry('h3-hybrid-loader'),

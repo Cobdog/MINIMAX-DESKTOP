@@ -21,7 +21,7 @@
 //       uninstall
 // Run after `pnpm build` (modules load from dist-server; the server needs
 // the web build present).
-const { spawn } = require('node:child_process')
+const { spawn, execSync } = require('node:child_process')
 const fs = require('node:fs')
 const http = require('node:http')
 const net = require('node:net')
@@ -32,6 +32,7 @@ const assert = require('node:assert/strict')
 const REPO = path.join(__dirname, '..')
 const { instanceNamesForKind, inventoryFromObjectInfo, mergeModelInventories, parseModelsEndpointList } = require(path.join(REPO, 'dist-server', 'server', 'instanceInventory.js'))
 const { ENGINE_NODE_PACKS, checkNodePack, installNodePack, nodePackInstanceState, nodePackInstallDir, resolveNodePackTarget, resolveVendorRoot, uninstallNodePack } = require(path.join(REPO, 'dist-server', 'server', 'engineNodes.js'))
+const { compareSemverish, gitOrderRevision, managedNoticeText, parsePyproject, readGitHeadSha, relateVersionToPin } = require(path.join(REPO, 'dist-server', 'server', 'packVersioning.js'))
 
 let passed = 0
 function ok(condition, label) {
@@ -218,6 +219,133 @@ async function main() {
     ok(nodePackInstanceState(hybrid, null) === 'unknown', 'no object_info = unknown, never a false absent')
     ok(ENGINE_NODE_PACKS.every((entry) => Array.isArray(entry.instanceNodeClasses) && entry.instanceNodeClasses.length > 0), 'every registry row carries at least one detection class')
     ok(nodePackInstanceState({ ...hybrid, instanceNodeClasses: [] }, ['X']) === 'unknown', 'a row with no detection classes answers unknown instead of guessing')
+  }
+
+  // ---- (f) version detection ladder + the status matrix (task mjhlt3k) --------
+  // Fixture set: a REAL git repo (A → B on main, C on a side branch off A —
+  // deterministic ordering ground), a packed-refs copy, a detached-HEAD copy,
+  // a plain folder, and an external-target matrix dir holding one fixture
+  // folder per badge state. No network, no engine.
+  const gitEnv = { ...process.env, GIT_AUTHOR_DATE: '2026-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' }
+  const gitHome = makeHome()
+  const gitRepo = path.join(gitHome, 'repo')
+  fs.mkdirSync(gitRepo, { recursive: true })
+  const git = (repo, ...args) => execSync(`git -C ${JSON.stringify(repo)} ${args.join(' ')}`, { env: gitEnv, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+  git(gitRepo, 'init -q -b main')
+  git(gitRepo, '-c user.email=matrix@test -c user.name=matrix commit --allow-empty -q -m A')
+  const shaA = git(gitRepo, 'rev-parse HEAD')
+  git(gitRepo, '-c user.email=matrix@test -c user.name=matrix commit --allow-empty -q -m B')
+  const shaB = git(gitRepo, 'rev-parse HEAD')
+  git(gitRepo, `checkout -q -b side ${shaA}`)
+  git(gitRepo, '-c user.email=matrix@test -c user.name=matrix commit --allow-empty -q -m C')
+  const shaC = git(gitRepo, 'rev-parse HEAD')
+  git(gitRepo, 'checkout -q main')
+  const gitPackedRepo = path.join(gitHome, 'packed')
+  fs.cpSync(gitRepo, gitPackedRepo, { recursive: true })
+  git(gitPackedRepo, 'pack-refs --all')
+  const gitDetachedRepo = path.join(gitHome, 'detached')
+  fs.cpSync(gitRepo, gitDetachedRepo, { recursive: true })
+  git(gitDetachedRepo, `checkout -q ${shaB}`)
+  const plainDir = path.join(gitHome, 'plain')
+  fs.mkdirSync(plainDir, { recursive: true })
+  const matrixDir = path.join(gitHome, 'matrix-custom-nodes')
+  fs.mkdirSync(matrixDir, { recursive: true })
+  const matrixTarget = { kind: 'external', customNodesDir: matrixDir }
+  const krea2editPack = ENGINE_NODE_PACKS.find((entry) => entry.id === 'krea2edit')
+  const fixtures = { gitRepo, gitPackedRefs: path.join(gitPackedRepo, '.git'), gitDetached: path.join(gitDetachedRepo, '.git'), plainDir, matrixDir, shaA, shaB, shaC }
+
+
+  console.log('instance: pack version detection — pure parsers')
+  {
+    ok(compareSemverish('v1.0.0', '1.0.0') === 0 && compareSemverish('1.2.0', '1.10.0') < 0 && compareSemverish('2.0.0', '1.9.9') > 0, 'semverish compare orders versions numerically (v-prefix tolerated, 2 < 10)')
+    ok(compareSemverish('1.0.0', '86f886dac23013d88996e3a2e99093ba44d322fb') === null, 'a sha is not semver-orderable — null, never a guess')
+
+    const py = parsePyproject('[project]\nname = "x"\nversion = "1.4.2"\ndescription = "y"\n\n[tool.comfy]\nPublisherId = "abc"\nDisplayName = "X"\n')
+    ok(py.version === '1.4.2' && py.hasComfySection === true, 'pyproject parsing reads the [project] version and detects the [tool.comfy] registry section')
+    const pyPlain = parsePyproject('[project]\nname = "x"\nversion = "0.3.0"\n')
+    ok(pyPlain.version === '0.3.0' && pyPlain.hasComfySection === false, 'a bare pyproject version parses without a tool.comfy section')
+    const pyBroken = parsePyproject('[project\nthis is ] not toml at all\n')
+    ok(pyBroken.version === undefined && pyBroken.hasComfySection === false, 'exotic pyproject content degrades to nothing found, never a throw')
+
+    const detached = readGitHeadSha(fixtures.gitDetached)
+    ok(/^[0-9a-f]{40}$/.test(detached ?? ''), 'a detached .git/HEAD (raw sha) reads directly')
+    ok(readGitHeadSha(path.join(fixtures.gitPackedRefs)) === null || /^[0-9a-f]{40}$/.test(readGitHeadSha(fixtures.gitPackedRefs) ?? ''), 'packed-refs-only metadata never throws')
+  }
+
+  console.log('instance: git ordering on a crafted checkout')
+  {
+    // The crafted repo: A → B on main, C on a side branch off A.
+    const orderAB = await gitOrderRevision(fixtures.gitRepo, fixtures.shaB, fixtures.shaA)
+    ok(orderAB === 'descendant', `HEAD (B) descends from the pin (A) → ahead (got ${orderAB})`)
+    const orderBA = await gitOrderRevision(fixtures.gitRepo, fixtures.shaA, fixtures.shaB)
+    ok(orderBA === 'ancestor', `an older commit against a newer pin → behind (got ${orderBA})`)
+    const orderUnrelated = await gitOrderRevision(fixtures.gitRepo, fixtures.shaB, fixtures.shaC)
+    ok(orderUnrelated === 'unrelated', 'commits on diverged branches order as unrelated, never guessed')
+    ok(await gitOrderRevision(fixtures.gitRepo, 'main', fixtures.shaA) === 'unknown', 'a non-sha revision answers unknown without spawning git')
+    ok(await gitOrderRevision(fixtures.plainDir, fixtures.shaA, fixtures.shaB) === 'unknown', 'a folder with no git metadata answers unknown')
+  }
+
+  console.log('instance: version relation to the pin')
+  {
+    const relation = await relateVersionToPin(fixtures.shaB, { kind: 'git-checkout', revision: fixtures.shaB }, fixtures.gitRepo)
+    ok(relation === 'at-pin', 'an exact sha match is at-pin before any git spawn')
+    ok(await relateVersionToPin('main', { kind: 'git-checkout', revision: fixtures.shaB }, fixtures.gitRepo) === 'unknown', 'a branch pin vs a detected sha has no local relation — unknown')
+    ok(await relateVersionToPin('v1.0.0', { kind: 'comfyui-registry', version: '1.4.2' }, fixtures.gitRepo) === 'ahead-of-pin', 'a registry semver above a tag pin is ahead-of-pin')
+    ok(await relateVersionToPin('v2.0.0', { kind: 'comfyui-registry', version: '1.4.2' }, fixtures.gitRepo) === 'behind-pin', 'a registry semver below a tag pin is behind-of-pin')
+    ok(await relateVersionToPin('86f886dac23013d88996e3a2e99093ba44d322fb', { kind: 'comfyui-registry', version: '1.4.2' }, fixtures.gitRepo) === 'unknown', 'a registry semver vs a sha pin is honestly unknown')
+    const noticeAhead = managedNoticeText({ ...krea2editPack, pinnedRevision: fixtures.shaA }, { kind: 'git-checkout', revision: fixtures.shaB }, 'ahead-of-pin')
+    ok(/managed by the ComfyUI instance/.test(noticeAhead ?? '') && noticeAhead.includes(fixtures.shaA.slice(0, 12)) && noticeAhead.includes(fixtures.shaB.slice(0, 12)) && /ahead of the pin/.test(noticeAhead ?? '') && /instance side/.test(noticeAhead ?? ''), 'the AC-4 notice names both revisions, the direction, and that updates happen instance-side')
+    const noticeDiffers = managedNoticeText(krea2editPack, { kind: 'git-checkout', revision: '1111111111111111111111111111111111111111' }, 'differs')
+    ok(/not determinable/.test(noticeDiffers ?? ''), 'an unknowable ordering is said out loud, never guessed')
+    ok(managedNoticeText(krea2editPack, { kind: 'comfyui-registry', version: '1.0.0' }, 'at-pin') === undefined, 'no notice when the managed version satisfies the pin')
+  }
+
+  console.log('instance: the checkNodePack status matrix on crafted folders')
+  {
+    // (1) studio-installed @ pin — the marker rung.
+    const pinDir = path.join(fixtures.matrixDir, 'comfyui-krea2edit')
+    fs.mkdirSync(pinDir, { recursive: true })
+    fs.writeFileSync(path.join(pinDir, '.studio-node.json'), `${JSON.stringify({ id: 'krea2edit', revision: krea2editPack.pinnedRevision, mode: 'user-fetch', installedAt: Date.now(), source: 'matrix' }, null, 2)}\n`)
+    const atPin = await checkNodePack(krea2editPack, matrixTarget, null, 'unknown')
+    ok(atPin.installed === true && atPin.versionInfo?.source === 'studio-marker' && atPin.versionInfo?.managedBy === 'studio' && atPin.versionInfo?.version === krea2editPack.pinnedRevision, 'a studio marker reports source studio-marker with the exact revision')
+    ok(atPin.versionRelation === 'at-pin', 'a marker at the pinned revision reports at-pin')
+
+    // (2) studio-installed at an OLD pin — the outdated state.
+    const oldSha = '0123456789abcdef0123456789abcdef01234567'
+    fs.writeFileSync(path.join(pinDir, '.studio-node.json'), `${JSON.stringify({ id: 'krea2edit', revision: oldSha, mode: 'user-fetch', installedAt: Date.now(), source: 'matrix' }, null, 2)}\n`)
+    const outdated = await checkNodePack(krea2editPack, matrixTarget, null, 'unknown')
+    ok(outdated.versionRelation === 'differs' && /pinned revision changed — reinstall to move/.test(outdated.note ?? ''), 'a drifted marker reports differs + the honest reinstall note')
+
+    // (3) foreign + Comfy-Registry pyproject — managed by ComfyUI.
+    const cnrDir = path.join(fixtures.matrixDir, 'comfyui-krea2-controlnet')
+    fs.mkdirSync(cnrDir, { recursive: true })
+    fs.writeFileSync(path.join(cnrDir, 'pyproject.toml'), '[project]\nname = "comfyui-krea2-controlnet"\nversion = "1.4.2"\n\n[tool.comfy]\nPublisherId = "facok"\nDisplayName = "Krea2 ControlNet"\n')
+    const cnr = await checkNodePack(ENGINE_NODE_PACKS.find((entry) => entry.id === 'krea2-controlnet'), matrixTarget, null, 'absent')
+    ok(cnr.folderState === 'foreign' && cnr.versionInfo?.source === 'comfyui-registry' && cnr.versionInfo?.managedBy === 'comfyui' && cnr.versionInfo?.version === '1.4.2', 'a Comfy-Registry pyproject folder reports comfyui-registry @ its version, managed by ComfyUI')
+    ok(cnr.versionRelation === 'unknown' && cnr.managedNotice === undefined, 'a branch pin (main) vs a registry semver claims no relation and raises no notice')
+
+    // (4) foreign git checkout vs a sha pin on the same history — ahead.
+    const gitPack = { ...krea2editPack, pinnedRevision: fixtures.shaA }
+    const gitDir = path.join(fixtures.matrixDir, 'comfyui-krea2edit-git')
+    fs.mkdirSync(gitDir, { recursive: true })
+    fs.cpSync(fixtures.gitRepo, gitDir, { recursive: true })
+    // (The matrix pack's folder name differs — point the pack at it.)
+    const gitPackRenamed = { ...gitPack, name: 'comfyui-krea2edit-git' }
+    const ahead = await checkNodePack(gitPackRenamed, matrixTarget, null, 'active')
+    ok(ahead.folderState === 'foreign' && ahead.versionInfo?.source === 'git-checkout' && ahead.versionInfo?.managedBy === 'comfyui' && ahead.versionInfo?.version === fixtures.shaB, 'a git-checkout folder reports the HEAD sha, managed by ComfyUI')
+    ok(ahead.versionRelation === 'ahead-of-pin', 'HEAD descending from the pin orders ahead-of-pin via the folder\'s own git history')
+    ok(/ahead of the pin/.test(ahead.managedNotice ?? '') && ahead.managedNotice?.includes(fixtures.shaB.slice(0, 12)), 'the managed notice appears with the direction and the installed revision')
+
+    // (5) foreign plain folder — presence without version.
+    const plainDir = path.join(fixtures.matrixDir, 'radiance')
+    fs.mkdirSync(plainDir, { recursive: true })
+    fs.writeFileSync(path.join(plainDir, 'user-file.py'), '# theirs\n')
+    const plain = await checkNodePack(ENGINE_NODE_PACKS.find((entry) => entry.id === 'radiance'), matrixTarget, null, 'unknown')
+    ok(plain.folderState === 'foreign' && plain.versionInfo === undefined && plain.versionRelation === undefined && plain.managedNotice === undefined, 'a plain foreign folder stays version-unknown with no fabricated fields')
+
+    // (6) absent — nothing to detect.
+    const absent = await checkNodePack(ENGINE_NODE_PACKS.find((entry) => entry.id === 'ltxvideo'), matrixTarget, null, 'unknown')
+    ok(absent.folderState === 'missing' && absent.versionInfo === undefined, 'a missing folder stays missing with no version fields')
   }
 
   // ---- (d) app-relative io defaults through the real settings pipeline ---------
@@ -443,6 +571,45 @@ async function main() {
         ok(foreign.status === 400 && /refusing to replace/i.test(foreign.body.error), 'the route refuses a foreign folder in the external target')
         const foreignRow = (await api('/api/lan/engine/nodes')).body.packs.find((pack) => pack.id === 'radiance')
         ok(foreignRow.folderState === 'foreign', 'the foreign state is listed honestly for the Settings chip')
+
+        // ---- the status board (task mjhlt3k): version-aware rows + the
+        // refresh contract + the AC-1 network-source decoration. Fixtures:
+        // a studio marker AT the pin, a Comfy-Registry pyproject folder, a
+        // git-checkout folder (real history, unrelated to the pin → the
+        // honest differs notice), and a folder that appears BETWEEN two
+        // GETs — the per-request re-scan the Refresh button drives.
+        console.log('instance: status board — version fields, notices, refresh, network-source gate')
+        {
+          const markerDir = path.join(externalDir, 'comfyui-krea2edit')
+          fs.mkdirSync(markerDir, { recursive: true })
+          fs.writeFileSync(path.join(markerDir, '.studio-node.json'), `${JSON.stringify({ id: 'krea2edit', revision: '86f886dac23013d88996e3a2e99093ba44d322fb', mode: 'user-fetch', installedAt: Date.now(), source: 'route' }, null, 2)}\n`)
+          const cnrDir = path.join(externalDir, 'comfyui-krea2-controlnet')
+          fs.mkdirSync(cnrDir, { recursive: true })
+          fs.writeFileSync(path.join(cnrDir, 'pyproject.toml'), '[project]\nname = "comfyui-krea2-controlnet"\nversion = "1.4.2"\n\n[tool.comfy]\nPublisherId = "facok"\n')
+          const gitDir = path.join(externalDir, 'ComfyUI-LTXVideo')
+          fs.cpSync(fixtures.gitRepo, gitDir, { recursive: true })
+
+          const board = (await api('/api/lan/engine/nodes')).body.packs
+          const byBoardId = new Map(board.map((pack) => [pack.id, pack]))
+          const markerRow = byBoardId.get('krea2edit')
+          ok(markerRow.installed === true && markerRow.versionInfo?.source === 'studio-marker' && markerRow.versionRelation === 'at-pin' && markerRow.versionInfo.version === markerRow.pinnedRevision, 'a marker at the pin reports studio-marker / at-pin with the revision')
+          const cnrRow = byBoardId.get('krea2-controlnet')
+          ok(cnrRow.folderState === 'foreign' && cnrRow.versionInfo?.source === 'comfyui-registry' && cnrRow.versionInfo?.managedBy === 'comfyui' && cnrRow.versionInfo?.version === '1.4.2', 'a Comfy-Registry pyproject folder reports managed-by-comfyui with its version')
+          const gitRow = byBoardId.get('ltxvideo')
+          ok(gitRow.folderState === 'foreign' && gitRow.versionInfo?.source === 'git-checkout' && gitRow.versionInfo?.version === fixtures.shaB, 'a git-checkout folder reports the HEAD sha as its version')
+          ok(gitRow.versionRelation === 'differs' && /not determinable/.test(gitRow.managedNotice ?? ''), 'a git HEAD unrelated to the sha pin reports differs with the honest not-locally-determinable notice')
+          ok(byBoardId.get('krea2edit')?.hasNetworkSource === true && byBoardId.get('vdn-h3')?.hasNetworkSource === false && byBoardId.get('lora-form-adapter')?.hasNetworkSource === false, 'hasNetworkSource marks fetch-catalog packs (user-fetch yes; vendored and local-install entries no)')
+
+          // The refresh contract: a folder created AFTER the previous GET
+          // appears on the NEXT GET — every read is a fresh folder scan.
+          const anypaintDir = path.join(externalDir, 'krea2-anypaint')
+          fs.mkdirSync(anypaintDir, { recursive: true })
+          fs.writeFileSync(path.join(anypaintDir, 'node.py'), '# theirs\n')
+          const refreshed = (await api('/api/lan/engine/nodes')).body.packs
+          const anypaintRow = refreshed.find((pack) => pack.id === 'krea2-anypaint')
+          ok(anypaintRow.folderState === 'foreign', 'a folder appearing between GETs is picked up by the next read (the refresh the button drives)')
+          ok(refreshed.find((pack) => pack.id === 'lora-form-adapter')?.versionInfo === undefined, 'a plain foreign folder carries no fabricated version fields')
+        }
       }
     } finally {
       child.kill('SIGINT')

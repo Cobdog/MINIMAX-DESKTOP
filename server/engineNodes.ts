@@ -45,6 +45,7 @@ import { existsSync, statSync } from 'node:fs'
 import { copyFile, link, lstat, mkdir, readdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { AppSettings, ModelKind, NodePackDefinition, NodePackStatus } from '../src/types'
+import { detectPackFolderVersion, managedNoticeText, relateVersionToPin, type PackFolderVersion } from './packVersioning'
 
 // ---------------------------------------------------------------------------
 // Registry
@@ -562,7 +563,19 @@ export async function checkNodePack(pack: NodePackDefinition, target: NodePackTa
   const folderExists = existsSync(installDir)
   const marker = folderExists ? await readInstallMarker(installDir) : null
   if (marker) {
-    const status: NodePackStatus = { ...base, installed: true, installedRevision: marker.revision }
+    const status: NodePackStatus = {
+      ...base,
+      installed: true,
+      installedRevision: marker.revision,
+      // Version ladder rung 1 (packVersioning.ts): our own marker — exact.
+      versionInfo: { source: 'studio-marker', version: marker.revision, managedBy: 'studio' },
+      versionRelation: marker.revision === pack.pinnedRevision || isBranchPin(marker.revision, pack.pinnedRevision)
+        ? 'at-pin'
+        // A marker only ever records a revision that WAS the pin (or a
+        // stamped branch HEAD): a drift means the registry pin moved — the
+        // note below carries the exact, honest "reinstall to move" story.
+        : 'differs',
+    }
     const drifted = marker.revision !== pack.pinnedRevision && !isBranchPin(marker.revision, pack.pinnedRevision)
     return withAvailability(status, pack, vendored, drifted ? `pinned revision changed — reinstall to move ${marker.revision.slice(0, 12)} → ${pack.pinnedRevision.slice(0, 12)}.` : undefined)
   }
@@ -578,9 +591,38 @@ export async function checkNodePack(pack: NodePackDefinition, target: NodePackTa
     const foreignNote = target.kind === 'external'
       ? `${installDirLabel(pack, target)} is already present in the external custom nodes folder — placed outside the studio. The studio never replaces, updates, or deletes it; the live status chip reads the connected instance's own node list. Remove it yourself first if you want the studio's pinned, managed copy.`
       : `${installDirLabel(pack, target)} already exists but was not installed by the studio — remove it yourself first if you want the studio's pinned copy.`
-    return withAvailability({ ...base, folderState: 'foreign' }, pack, vendored, foreignNote)
+    // Version ladder rungs 2–4 on the foreign folder (task mjhlt3k): a git
+    // checkout / Comfy-Registry pyproject reads as managed-by-ComfyUI with a
+    // discoverable version; ordering against the pin uses the folder's own
+    // git history when both commits are present (packVersioning.ts).
+    const detected = await detectPackFolderVersion(installDir)
+    const foreignBase = { ...base, folderState: 'foreign' as const }
+    if (!detected) return withAvailability(foreignBase, pack, vendored, foreignNote)
+    const relation = await relateVersionToPin(pack.pinnedRevision, detected, installDir)
+    const notice = managedNoticeText(pack, detected, relation)
+    return withAvailability({
+      ...foreignBase,
+      versionInfo: folderVersionInfo(detected),
+      versionRelation: relation,
+      ...(notice ? { managedNotice: notice } : {}),
+    }, pack, vendored, foreignNote)
   }
   return withAvailability({ ...base, folderState: 'missing' }, pack, vendored)
+}
+
+/** Ladder rungs 2–4 mapped onto the status payload. A git checkout or a
+ *  Comfy-Registry pyproject attributes the folder instance-side (a manual
+ *  clone is indistinguishable from ComfyUI-Manager's git mode and gets the
+ *  same label — the documented limit); a bare pyproject version leaves the
+ *  attribution unknown. */
+function folderVersionInfo(detected: PackFolderVersion): NonNullable<NodePackStatus['versionInfo']> {
+  if (detected.kind === 'git-checkout') {
+    return { source: 'git-checkout', version: detected.revision, managedBy: 'comfyui', ...(detected.remoteUrl ? { remoteUrl: detected.remoteUrl } : {}) }
+  }
+  if (detected.kind === 'comfyui-registry') {
+    return { source: 'comfyui-registry', version: detected.version, managedBy: 'comfyui' }
+  }
+  return { source: 'pyproject', version: detected.version, managedBy: 'unknown' }
 }
 
 function withAvailability(status: NodePackStatus, pack: NodePackDefinition, vendored: boolean, note?: string): NodePackStatus {

@@ -114,8 +114,10 @@ export default defineConfig({
     // deterministic hook-driven interactions + palette-pixel assertions) +
     // the canvas Phase-1 route (task jl4ye8x — launcher/seed/radar/index +
     // the pan/zoom zero-render canary against the production build).
-    // datasets.spec.ts joined with sv14rt0 (the dataset-manager workbench).
-    { name: 'e2e', testMatch: /(app|poserig|canvas|datasets|images|settings)\.spec\.ts/ },
+    // datasets.spec.ts joined with sv14rt0 (the dataset-manager workbench);
+    // nodepacks.spec.ts joined with mjhlt3k (the status board — boots its
+    // own local fake engine, unlike the engine-independent settings spec).
+    { name: 'e2e', testMatch: /(app|poserig|canvas|datasets|images|settings|nodepacks)\.spec\.ts/ },
     { name: 'vision', testMatch: /vision-capture\.spec\.ts/ },
   ],
   webServer: {
