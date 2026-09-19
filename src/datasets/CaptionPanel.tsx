@@ -45,6 +45,19 @@ export function CaptionPanel({ layer, onClose, onChanged }: Props) {
     }
   }, [text])
 
+  // App-tour wave (d6iy68r, review m3): the panel answers Escape — the
+  // inner VLM modal owns the FIRST press while it is open (one press, one
+  // action; the chat input's Enter keeps its own meaning).
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      if (vlmOpen) setVlmOpen(false)
+      else onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [vlmOpen, onClose])
+
   const save = async () => {
     setBusy(true)
     setError(null)

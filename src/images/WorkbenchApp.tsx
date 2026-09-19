@@ -15,7 +15,7 @@
  * through the shared landing loop; nothing here re-implements queueing.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowLeft, ImagePlus, Layers, LoaderCircle, Lock, Send, Sparkles, Wand2 } from 'lucide-react'
+import { ImagePlus, Layers, LoaderCircle, Lock, Send, Sparkles, Wand2 } from 'lucide-react'
 import { useStudioSession } from '../hooks/useStudioSession'
 import { useGenerationQueue } from '../hooks/useGenerationQueue'
 import { useLivePreview } from '../lib/useLivePreview'
@@ -37,6 +37,7 @@ import type { H3ImgRefRole } from '../lib/graph/h3image'
 import { mediaForOutput, buildOutputIndex } from '../canvas/generation'
 import { chainSettingsDefaults } from '../canvas/generation'
 import { CANVAS_EDIT_HANDOFF_KEY, handoffPreviewUrl } from '../canvas/stillIntent'
+import { SurfaceSwitcher } from '../surfaces/SurfaceSwitcher'
 import './workbench.css'
 
 const ROLES: H3ImgRefRole[] = ['subject', 'pose', 'style', 'lighting', 'background', 'freeform']
@@ -553,7 +554,11 @@ function WorkbenchSurface() {
   return (
     <div className="iw-root" data-iw-root data-iw-family={settings.family}>
       <header className="iw-header">
-        <a className="iw-back" href={`/${token ? `?token=${encodeURIComponent(token)}` : ''}`} title="Back to the canvas"><ArrowLeft size={14} /> canvas</a>
+        {/* App-tour wave (d6iy68r, review M1): the shared registry-driven
+            surface switcher replaces the one-way "canvas" back-link — the
+            same retirement the datasets titlebar got in the QOL wave (one
+            way to reach a surface; Alt+1..9 live here like everywhere). */}
+        <SurfaceSwitcher />
         <strong>H3 Image Workbench</strong>
         <span className={`iw-engine ${sessionState.status.connected ? 'ok' : 'warn'}`} data-iw-engine={sessionState.status.connected ? 'on' : 'off'}>
           {sessionState.status.connected ? 'engine online' : 'engine offline'}
@@ -783,7 +788,14 @@ function WorkbenchSurface() {
             <span>semantic overflow <em>experimental</em></span>
           </label>
 
-          <button type="button" className="iw-generate" data-iw-generate disabled={busy || !detectionOf(settings.family)?.available} onClick={() => void generate()}>
+          <button
+            type="button"
+            className="iw-generate"
+            data-iw-generate
+            disabled={busy || !detectionOf(settings.family)?.available}
+            title={detectionOf(settings.family)?.available ? 'Generate' : (detectionOf(settings.family)?.missingModels.join('; ') || detectionOf(settings.family)?.missingNodes.join('; ') || 'unavailable')}
+            onClick={() => void generate()}
+          >
             {busy ? <LoaderCircle className="spin" size={13} /> : <Sparkles size={13} />}
             Generate {family?.profile === 't1' ? '(T=1 fast — structurally soft)' : `(${family?.kind === 'generate-directed' ? 39 : settings.tier}-frame packet)`}
           </button>

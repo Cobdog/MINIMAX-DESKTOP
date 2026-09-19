@@ -130,7 +130,7 @@ export function LibraryOverlay() {
           data-canvas-library-input
           placeholder="Search completed outputs across the session…"
           onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => { if (event.key === 'Escape') setLibraryOpen(false) }}
+          onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setLibraryOpen(false) } }}
         />
         <div className="canvas-library-filters" role="group" aria-label="Filter by kind">
           {(['all', 'video', 'image', 'audio'] as const).map((kind) => (

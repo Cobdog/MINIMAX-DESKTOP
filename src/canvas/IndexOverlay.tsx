@@ -150,7 +150,7 @@ export function IndexOverlay() {
             if (event.key === 'ArrowDown') { event.preventDefault(); setCursor((value) => Math.min(value + 1, rows.length - 1)) }
             if (event.key === 'ArrowUp') { event.preventDefault(); setCursor((value) => Math.max(value - 1, 0)) }
             if (event.key === 'Enter') { event.preventDefault(); const row = rows[cursor]; if (row) void activate(row) }
-            if (event.key === 'Escape') setIndexOpen(false)
+            if (event.key === 'Escape') { event.stopPropagation(); setIndexOpen(false) }
           }}
         />
         {ftsPending && <span className="canvas-index-pending">searching…</span>}

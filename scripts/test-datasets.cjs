@@ -303,6 +303,18 @@ async function main() {
     const refusedStill = await api.post('/api/lan/datasets/ingest/reference', { path: clips.stillTiny })
     check(refusedStill.body.refusal?.verdict === 'refuse' && /256²/.test(refusedStill.body.refusal.reason) && /SPEC-inferred/.test(refusedStill.body.refusal.reason), 'stills hard floor refuses and SAYS the floors are spec-inferred (honesty)')
 
+    // App-tour wave (d6iy68r, review M2): the probe-state TERMINUS. A refused
+    // source never probes (no layers, no bakes ever attach to it) — its state
+    // settles at ingest. Before the fix these sat 'pending' forever, so the
+    // client's 1.5 s library poll never ended. No sleep here: terminal means
+    // IMMEDIATELY, in the same tick as the ingest response.
+    const terminusLibrary = await api.get('/api/lan/datasets/library')
+    const terminusRow = (name) => terminusLibrary.body.sources.find((source) => source.name === name)
+    const tinyRow = terminusRow('tiny-144x96.mp4')
+    check(tinyRow?.probeState === 'done', `a refused VIDEO settles its probe state at ingest (got '${tinyRow?.probeState}') — it never probes, so 'pending' would be forever`)
+    const stillTinyRow = terminusRow('still-200.png')
+    check(stillTinyRow?.probeState === 'done', `a refused STILL settles at ingest too (got '${stillTinyRow?.probeState}')`)
+
     // Async decode probe: pending → done; required pre-bake.
     await new Promise((resolve) => setTimeout(resolve, 3500))
     const libraryAfter = await api.get('/api/lan/datasets/library')
@@ -598,6 +610,13 @@ async function main() {
     // =====================================================================
     const stillImport = await api.post('/api/lan/datasets/ingest/reference', { path: clips.still })
     const stillSourceId = stillImport.body.source.id
+    // App-tour wave (d6iy68r, review M2): an ingested STILL reaches terminal
+    // probe state IMMEDIATELY (its facts were probed at ingest; one frame) —
+    // the async decode probe is a video-only concern. No sleep precedes this
+    // read: 'pending' here is the forever-poll bug.
+    const stillLibrary = await api.get('/api/lan/datasets/library')
+    const stillRow = stillLibrary.body.sources.find((source) => source.id === stillSourceId)
+    check(stillRow?.probeState === 'done' && stillRow?.decodedFrames === 1, `an ingested STILL is terminal at once (state '${stillRow?.probeState}', frames ${stillRow?.decodedFrames}) — no async probe, no forever-poll`)
     const stillBytesBefore = sha256File(clips.still)
     const stillTrashed = await api.post('/api/lan/datasets/sources/trash', { sourceId: stillSourceId })
     check(stillTrashed.status === 200 && stillTrashed.body.layersAffected === 0, 'referenced-source trash reports the blast radius')

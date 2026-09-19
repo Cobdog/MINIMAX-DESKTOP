@@ -132,6 +132,25 @@ test('the workbench boots at ?images=1 with the seeded packet take on the pick s
   expect(problemsAfterBoot).toEqual([])
 })
 
+test('the workbench carries the shared surface switcher — Alt+2/Alt+3 live (the surface contract)', async ({ page, request }) => {
+  const problems = await trackErrors(page)
+  await seedSession(request)
+  await page.goto('/?images=1')
+  await expect(page.locator('[data-iw-mode-rail]')).toBeVisible({ timeout: 15_000 })
+  // The registry-driven switcher renders in the workbench header like on
+  // every registered surface (app-tour wave d6iy68r, review M1 — before the
+  // fix this surface was the one place Alt+1..9 was dead and datasets was
+  // unreachable except by URL).
+  const imagesPill = page.locator('[data-surface-switcher] [data-surface="images"]')
+  await expect(imagesPill).toBeVisible()
+  await expect(imagesPill).toHaveAttribute('aria-current', 'page')
+  await page.keyboard.press('Alt+2')
+  await expect(page.locator('[data-ds-root]')).toBeVisible({ timeout: 15_000 })
+  await page.keyboard.press('Alt+3')
+  await expect(page.locator('[data-iw-mode-rail]')).toBeVisible({ timeout: 15_000 })
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
 test('manual pick on the take strip overrides the scorer (the canonical frame pointer)', async ({ page, request }) => {
   const problems = await trackErrors(page)
   const seeded = await seedSession(request)
@@ -162,6 +181,11 @@ test('the refine affordance is opt-in with engine-pairing honesty; the burst lan
   await expect(page.locator('[data-iw-refine-tap="klein"]')).toBeDisabled()
   await expect(page.locator('[data-iw-refine-tap="krea2"]')).toBeDisabled()
   await expect(page.locator('.iw-engine-note')).toContainText(/unavailable/i)
+  // The primary Generate CTA names its reason too (app-tour wave d6iy68r,
+  // review M7 — the refine-tap title pattern, never a silent dead button).
+  const generate = page.locator('[data-iw-generate]')
+  await expect(generate).toBeDisabled()
+  await expect(generate).toHaveAttribute('title', /unavailable/i)
   // The burst lane ships behind the E-IW2 gate + experiment flag.
   const burst = page.locator('[data-iw-burst-fuse]')
   await expect(burst).toBeDisabled()

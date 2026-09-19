@@ -49,14 +49,20 @@ export function DatasetsApp() {
   const fileInput = useRef<HTMLInputElement | null>(null)
   const galleryRef = useRef<HTMLDivElement | null>(null)
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options?: { clearError?: boolean }) => {
     try {
       const [payload, bootstrap] = await Promise.all([datasetsApi.library(), datasetsApi.bootstrap()])
       setLibrary(payload)
       setAspects(bootstrap.aspects)
       setSettings(bootstrap.settings)
       setRifeAvailable(bootstrap.rifeAvailable)
-      setError(null)
+      // App-tour wave (d6iy68r, review M3, decided 2026-09-19): a successful
+      // refresh NEVER clears the error banner on its own. The background
+      // poll re-runs this every 1.5 s while a video probe is pending —
+      // wiping action failures before a human can read them. Errors dismiss
+      // explicitly (×), are replaced by a newer error, or clear when the
+      // USER asks for a refresh (the titlebar button) / starts an action.
+      if (options?.clearError) setError(null)
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : String(refreshError))
     }
@@ -71,8 +77,12 @@ export function DatasetsApp() {
   }, [refresh])
 
   // Poll pending decode probes until they land (the async §2.2 probe).
+  // App-tour wave (d6iy68r, review M2): only VIDEO probes are async work —
+  // images and refused sources settle at ingest server-side, so they never
+  // count as pending here (mirrors the probe-flag render below) and the
+  // poll has a terminus.
   useEffect(() => {
-    const pending = library?.sources.some((source) => source.probeState === 'pending' || source.probeState === 'probing')
+    const pending = library?.sources.some((source) => source.kind === 'video' && (source.probeState === 'pending' || source.probeState === 'probing'))
     if (!pending) return
     const timer = window.setTimeout(() => void refresh(), 1500)
     return () => window.clearTimeout(timer)
@@ -286,7 +296,7 @@ export function DatasetsApp() {
       <div className="ds-titlebar-right">
         {settings && <span className="ds-trigger" title="Dataset trigger token">trigger: <code>{settings.triggerToken || '(unset)'}</code></span>}
         <span className={`ds-rife ${rifeAvailable ? 'ok' : ''}`} title={rifeAvailable ? 'rife-ncnn-vulkan detected — preferred interpolator' : 'rife-ncnn-vulkan absent — minterpolate fallback (A1 final)'}>{rifeAvailable ? 'RIFE' : 'minterpolate'}</span>
-        <button type="button" className="ds-btn ghost" onClick={() => void refresh()}><RefreshCw size={13} /></button>
+        <button type="button" className="ds-btn ghost" title="Refresh — also clears the error banner (a user-initiated refresh)" onClick={() => void refresh({ clearError: true })}><RefreshCw size={13} /></button>
       </div>
     </header>
 
@@ -533,7 +543,10 @@ function MasterCard(props: {
           : <img src={mediaUrlFor(source.id)} alt="" className="ds-poster-media" />}
       <span className="ds-master-kind"><Video size={11} /> {source.kind}</span>
       {source.health === 'changed' && <span className="ds-master-flag warn">CHANGED</span>}
-      {floor && <span className="ds-master-flag warn">{floor}</span>}
+      {/* App-tour wave (d6iy68r, review M6): the chip carries the server's
+          full refusal/warn reason (the same honesty the crop editor gives
+          at crop-time) — never a bare label again. */}
+      {floor && <span className="ds-master-flag warn" title={source.floor.reason ?? undefined}>{floor}</span>}
       {source.probeState !== 'done' && source.kind === 'video' && <span className="ds-master-flag">{source.probeState === 'failed' ? 'probe failed' : 'probing…'}</span>}
     </div>
     <div className="ds-master-info">
@@ -700,7 +713,7 @@ function ExportWizard(props: {
       </div>
       <div className="ds-field">
         <label>Destination folder</label>
-        <input value={folder} onChange={(event) => setFolder(event.target.value)} placeholder="dataset-export-2026-09-17 (relative names land inside the studio output directory; every destination must stay inside it)" />
+        <input value={folder} onChange={(event) => setFolder(event.target.value)} placeholder={`dataset-export-${new Date().toISOString().slice(0, 10)} (relative names land inside the studio output directory; every destination must stay inside it)`} />
       </div>
       <div className="ds-field">
         <label>Grid target (optional — default: the largest 17n+5 that fits each trim with +2 headroom)</label>

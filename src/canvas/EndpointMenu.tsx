@@ -82,7 +82,7 @@ export function EndpointMenu() {
       aria-label={menu.direction === 'consume' ? 'Consume-from options' : 'Produce-into options'}
       style={{ left: naturalLeft, top: clampedTop ?? naturalTop }}
       onClick={(event) => event.stopPropagation()}
-      onKeyDown={(event) => { if (event.key === 'Escape') setEndpointMenu(null) }}
+      onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setEndpointMenu(null) } }}
     >
       <header>
         <strong>{context.tile?.title ?? menu.chainId.slice(0, 8)}</strong>

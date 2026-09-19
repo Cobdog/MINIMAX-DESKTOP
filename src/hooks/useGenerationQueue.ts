@@ -99,6 +99,12 @@ export function useGenerationQueue(options: {
     persistJobs(() => {
       // The submit graph is for in-memory retry only — never persisted.
       const persistable = jobsRef.current.slice(0, 100).map((job) => { const rest = { ...job }; delete rest.graph; return rest })
+      // App-tour wave (d6iy68r, review m2): an empty list has nothing to
+      // upsert — never POST it. On every fresh boot the storage-boot flip
+      // fired this with jobs: [] , the server's "1 to 100 jobs" upsert
+      // contract rejected it with a console 400, and the catch mirrored []
+      // to localStorage as bogus "degraded mode".
+      if (!persistable.length) return
       void saveServerJobs(persistable).catch(() => {
         // Degraded mode: mirror to the legacy store so a boot while the API
         // is unreachable still finds the history (the boot loader reads it
