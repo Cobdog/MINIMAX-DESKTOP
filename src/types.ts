@@ -60,6 +60,12 @@ export type ManagedEngineConfig = {
   mode: EngineMode
   /** Absolute path to an existing ComfyUI checkout (must contain main.py). */
   checkoutPath: string
+  /** External-instance mode (task 9om4bi9): absolute path to the CUSTOM NODES
+   *  folder of an instance the studio does NOT launch — packs install into
+   *  `<dir>/<pack name>` and availability is checked against the live
+   *  instance's object_info. Empty = not configured (external mode then has
+   *  no install target). */
+  externalCustomNodesDir: string
   /** Python executable for the checkout ('' → python3/python by platform). */
   pythonPath: string
   /** Preferred port; 0 = auto-allocate scanning upward from 8191, clear of
@@ -136,18 +142,41 @@ export type NodePackDefinition = {
   /** First-party payload directory (first-party mode only), relative to the
    *  repo's custom-nodes/ root. */
   firstPartyDir?: string
+  /** Distinctive node CLASS_IDS the pack registers (task 9om4bi9 — live
+   *  instance detection): when ANY of these appear in the connected
+   *  instance's object_info, the pack is INSTALLED on that instance. Verified
+   *  against the vendored payload / canonical install / an upstream read
+   *  (see engineNodes.ts rows for per-pack provenance). */
+  instanceNodeClasses: string[]
 }
 
-/** Availability of one registry entry against a concrete checkout. */
+/** Availability of one registry entry against a concrete install target
+ *  (the managed checkout's custom_nodes/, or the external instance's custom
+ *  nodes folder) plus the LIVE instance verdict. */
 export type NodePackStatus = NodePackDefinition & {
   /** The installable payload is present in this install (vendor + first-party modes). */
   vendored: boolean
-  /** The pack is present in the checkout's custom_nodes/. */
+  /** The pack is present in the target's custom-node folder (studio marker). */
   installed: boolean
   /** Revision recorded at install time (studio marker), when installed. */
   installedRevision?: string
   /** How the pack could be installed right now. */
   availability: 'ready' | 'needs-source' | 'unavailable'
+  /** ---- Live-instance detection (task 9om4bi9) ---- */
+  /** The target the filesystem verdicts below were computed against:
+   *  'checkout' = the managed checkout's custom_nodes/, 'external' = the
+   *  configured external custom nodes folder, 'none' = no usable target. */
+  targetKind?: 'checkout' | 'external' | 'none'
+  /** Folder presence in the target, beyond the studio-marker verdict:
+   *  'foreign' = the folder exists WITHOUT our marker (refused, reported);
+   *  'missing' = no folder at all. Omitted when the marker verdict already
+   *  says it ('installed'). */
+  folderState?: 'foreign' | 'missing'
+  /** object_info verdict from the CONNECTED instance: 'active' = at least one
+   *  instanceNodeClasses entry is live on the instance (installed AND
+   *  loaded); 'absent' = the instance does not serve the classes; 'unknown' =
+   *  the instance was unreachable / object_info could not be read. */
+  instanceState?: 'active' | 'absent' | 'unknown'
   note?: string
 }
 
@@ -258,6 +287,11 @@ export type AppSettings = {
   modelRoot: string
   paths: Record<ModelKind, string>
   outputDirectory: string
+  /** Studio-side input/staging root (task 9om4bi9): where media the app
+   *  prepares for renders lives (uploads to the engine are streamed from
+   *  here; the folder is also a legal blob/media source root). Unset
+   *  default is app-relative: <studio home>/data/input. */
+  inputDirectory: string
   ffmpegPath: string
   generationDefaults: GenerationDefaults
   /** Global model overrides, keyed by engine family id (see
@@ -401,6 +435,12 @@ export type ModelFile = {
    *  'full-width-adaln'. Undefined = not H3-shaped / not readable. See
    *  server/modelForms.ts. */
   h3Form?: string
+  /** Inventory provenance (task 9om4bi9): 'instance' = listed by the
+   *  connected engine's own model endpoints (object_info enums or /models),
+   *  'local' = found on a configured local root, 'both' = the same file is
+   *  visible from both sides. Instance rows carry the engine-relative name
+   *  (subpaths included) — exactly what the graph loaders accept. */
+  source?: 'instance' | 'local' | 'both'
 }
 
 export type MediaFile = {

@@ -61,7 +61,9 @@ export function FirstRunNotice() {
         The studio's model folders are empty. Point <em>Settings → Model locations</em> at an existing
         ComfyUI install's models folders (files are indexed in place, never moved — a managed engine
         mirrors them into its checkout as extra_model_paths.yaml), or fetch what you need from the
-        consent-gated fetcher below.
+        consent-gated fetcher below. When the engine is connected, its own model listing is merged in
+        automatically — an external instance needs no local roots at all. Input and output default
+        under the app's own data folder (<em>&lt;app&gt;/data/input</em>, <em>&lt;app&gt;/data/output</em>) — nothing lands in Documents.
       </span>
       <div className="canvas-first-run-actions">
         <button type="button" onClick={openSettings}>Open settings — model locations</button>

@@ -719,12 +719,12 @@ async function main() {
     const { vendorRoot: fixtureRoot } = makeFixtureVendorRoot()
     const checkout = makeCheckout()
     const entry = fixturePackEntry()
-    const listed = await checkNodePack(entry, checkout, fixtureRoot)
+    const listed = await checkNodePack(entry, { kind: 'checkout', checkout }, fixtureRoot)
     ok(listed.availability === 'ready' && listed.installed === false && listed.vendored === true, 'a vendored pack with its payload present reports ready + not installed')
 
-    const install = await installNodePack(entry, { checkout, vendorRoot: fixtureRoot })
+    const install = await installNodePack(entry, { target: { kind: 'checkout', checkout }, vendorRoot: fixtureRoot })
     ok(install.installed === true, 'install succeeds into the checkout custom_nodes/')
-    const installedDir = nodePackInstallDir(checkout, entry)
+    const installedDir = nodePackInstallDir(entry, { kind: 'checkout', checkout })
     ok(fs.existsSync(path.join(installedDir, '__init__.py')), 'pack code lands in custom_nodes/<name>')
     ok(!fs.existsSync(path.join(installedDir, '__pycache__')), 'junk dirs (__pycache__) are skipped')
     const weightLink = path.join(installedDir, 'weights', 'tiny.safetensors')
@@ -735,50 +735,50 @@ async function main() {
     const marker = JSON.parse(fs.readFileSync(path.join(installedDir, '.studio-node.json'), 'utf8'))
     ok(marker.id === 'fixture-pack' && marker.revision === 'rev1', 'the studio marker records id + pinned revision')
 
-    const again = await installNodePack(entry, { checkout, vendorRoot: fixtureRoot })
+    const again = await installNodePack(entry, { target: { kind: 'checkout', checkout }, vendorRoot: fixtureRoot })
     ok(again.installed === true && again.alreadyInstalled === true, 're-install at the same pin is a no-op (alreadyInstalled)')
 
     // Version bump = delete + reinstall at the pin (never a merge).
     const bumped = { ...entry, pinnedRevision: 'rev2' }
-    const reinstalled = await installNodePack(bumped, { checkout, vendorRoot: fixtureRoot })
+    const reinstalled = await installNodePack(bumped, { target: { kind: 'checkout', checkout }, vendorRoot: fixtureRoot })
     ok(reinstalled.installed === true && reinstalled.notes.some((note) => note.includes('rev1')), 'a revision bump reinstalls (delete + fresh install at the pin)')
     ok(JSON.parse(fs.readFileSync(path.join(installedDir, '.studio-node.json'), 'utf8')).revision === 'rev2', 'the marker moves to the new pin')
     ok(fs.lstatSync(weightLink).isSymbolicLink() || fs.statSync(weightLink).ino === fs.statSync(sourceWeight).ino, 'weights stay linked across the reinstall')
 
     // Uninstall = delete folder; the vendored payload itself is untouched.
-    const removed = await uninstallNodePack(bumped, checkout)
+    const removed = await uninstallNodePack(bumped, { kind: 'checkout', checkout })
     ok(removed.removed === true && !fs.existsSync(installedDir), 'uninstall deletes the pack folder')
     ok(fs.existsSync(sourceWeight), 'the vendored payload is untouched by uninstall')
-    ok((await uninstallNodePack(bumped, checkout)).removed === false, 'uninstalling a missing pack reports honestly')
+    ok((await uninstallNodePack(bumped, { kind: 'checkout', checkout })).removed === false, 'uninstalling a missing pack reports honestly')
 
     // A foreign custom_nodes/<name> (no studio marker) is refused, untouched.
     fs.mkdirSync(installedDir, { recursive: true })
     fs.writeFileSync(path.join(installedDir, '__init__.py'), '# user installed this by hand\n')
-    const foreign = await installNodePack(entry, { checkout, vendorRoot: fixtureRoot })
+    const foreign = await installNodePack(entry, { target: { kind: 'checkout', checkout }, vendorRoot: fixtureRoot })
     ok(foreign.installed === false && foreign.notes.some((note) => note.includes('not installed by the studio')), 'a foreign custom_nodes/<name> is refused, never replaced')
     ok(fs.readFileSync(path.join(installedDir, '__init__.py'), 'utf8').includes('by hand'), 'the foreign install is byte-for-byte untouched')
 
     // User-fetch mode: needs a local source directory (the network fetcher
     // is a later increment); relative paths and bad checkouts are refused.
     const userFetchEntry = { ...fixturePackEntry(), installMode: 'user-fetch', id: 'fixture-fetch', name: 'fixture-fetch', vendorDir: undefined }
-    const needsSource = await installNodePack(userFetchEntry, { checkout, vendorRoot: fixtureRoot })
+    const needsSource = await installNodePack(userFetchEntry, { target: { kind: 'checkout', checkout }, vendorRoot: fixtureRoot })
     ok(needsSource.installed === false && needsSource.notes.some((note) => note.includes('local directory')), 'user-fetch without a source directory is refused with the reason')
-    const fetched = await installNodePack(userFetchEntry, { checkout, vendorRoot: fixtureRoot, sourceDirectory: path.join(fixtureRoot, 'fixture-pack') })
-    ok(fetched.installed === true && fs.existsSync(path.join(nodePackInstallDir(checkout, userFetchEntry), '__init__.py')), 'user-fetch installs from a nominated local copy')
-    const fetchedStatus = await checkNodePack(userFetchEntry, checkout, fixtureRoot)
+    const fetched = await installNodePack(userFetchEntry, { target: { kind: 'checkout', checkout }, vendorRoot: fixtureRoot, sourceDirectory: path.join(fixtureRoot, 'fixture-pack') })
+    ok(fetched.installed === true && fs.existsSync(path.join(nodePackInstallDir(userFetchEntry, { kind: 'checkout', checkout }), '__init__.py')), 'user-fetch installs from a nominated local copy')
+    const fetchedStatus = await checkNodePack(userFetchEntry, { kind: 'checkout', checkout }, fixtureRoot)
     ok(fetchedStatus.availability === 'needs-source' && (fetchedStatus.note ?? '').includes('user-fetch'), 'user-fetch availability is surfaced with its note')
-    const relative = await installNodePack({ ...userFetchEntry, id: 'fixture-fetch-2', name: 'fixture-fetch-2' }, { checkout, sourceDirectory: 'relative/path', vendorRoot: fixtureRoot })
+    const relative = await installNodePack({ ...userFetchEntry, id: 'fixture-fetch-2', name: 'fixture-fetch-2' }, { target: { kind: 'checkout', checkout }, sourceDirectory: 'relative/path', vendorRoot: fixtureRoot })
     ok(relative.installed === false, 'a relative source directory is refused')
-    const badCheckoutInstall = await installNodePack(entry, { checkout: '/definitely/not/a/checkout', vendorRoot: fixtureRoot })
+    const badCheckoutInstall = await installNodePack(entry, { target: { kind: 'checkout', checkout: '/definitely/not/a/checkout' }, vendorRoot: fixtureRoot })
     ok(badCheckoutInstall.installed === false && badCheckoutInstall.notes.some((note) => note.includes('main.py')), 'install into a non-checkout is refused')
     ok(isUsableCheckout('/definitely/not/here') === false && isUsableCheckout(checkout) === true, 'checkout validation answers both ways')
 
     // The REAL vendored payload installs offline from vendor/nodes.
     const real = findNodePack('vdn-h3')
-    const realInstall = await installNodePack(real, { checkout, vendorRoot })
-    ok(realInstall.installed === true && fs.existsSync(path.join(nodePackInstallDir(checkout, real), 'vdn_h3', 'nodes.py')), 'the real vendored VDN payload installs from vendor/nodes (no network)')
-    ok(!fs.existsSync(path.join(nodePackInstallDir(checkout, real), 'assets')), 'the vendored payload carries no demo media (assets/ excluded at vendor time)')
-    await uninstallNodePack(real, checkout)
+    const realInstall = await installNodePack(real, { target: { kind: 'checkout', checkout }, vendorRoot })
+    ok(realInstall.installed === true && fs.existsSync(path.join(nodePackInstallDir(real, { kind: 'checkout', checkout }), 'vdn_h3', 'nodes.py')), 'the real vendored VDN payload installs from vendor/nodes (no network)')
+    ok(!fs.existsSync(path.join(nodePackInstallDir(real, { kind: 'checkout', checkout }), 'assets')), 'the vendored payload carries no demo media (assets/ excluded at vendor time)')
+    await uninstallNodePack(real, { kind: 'checkout', checkout })
   }
 
   // ---- (k) consent patch manager (increment 2) ------------------------------------

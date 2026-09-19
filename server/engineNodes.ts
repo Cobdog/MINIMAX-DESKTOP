@@ -32,8 +32,16 @@
  * invariant for pack-carried weights and for any weight the studio places
  * into a model root: symlink → junction (dirs, Windows) → hardlink (files,
  * same volume) → REFUSE with a reason. Never a byte-for-byte copy.
+ *
+ * External-instance targets (task 9om4bi9): the same registry and the same
+ * install discipline apply when the studio talks to an instance it does NOT
+ * launch — the user points it at that instance's custom_nodes folder and
+ * packs install into <folder>/<pack name> with identical staging, marker,
+ * and foreign-refusal rules. Availability additionally consults the LIVE
+ * instance (object_info node classes), so a pack installed-but-not-yet-
+ * restarted is reported honestly instead of claimed active.
  */
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { copyFile, link, lstat, mkdir, readdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { AppSettings, ModelKind, NodePackDefinition, NodePackStatus } from '../src/types'
@@ -90,6 +98,10 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     installMode: 'vendor',
     vendorDir: 'ComfyUI-VDN-H3',
     homepage: 'https://github.com/Saganaki22/ComfyUI-VDN-H3',
+    // NODE_CLASS_MAPPINGS read from the vendored payload (vendor/nodes/
+    // ComfyUI-VDN-H3, 2026-09-19). The separately-named 24GB variant install
+    // registers *_24GB-suffixed classes — detection is by OUR pinned pack.
+    instanceNodeClasses: ['ApplyVDNH3', 'ApplyVDNH3Advanced'],
   },
   {
     id: 'lora-form-adapter',
@@ -102,6 +114,8 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     installMode: 'first-party',
     firstPartyDir: 'minimax-lora-form-adapter',
     homepage: 'https://github.com/Cobdog/MINIMAX-DESKTOP/tree/main/custom-nodes/minimax-lora-form-adapter',
+    // Our own nodes.py (custom-nodes/minimax-lora-form-adapter).
+    instanceNodeClasses: ['MiniMaxH3LoraFormLoader'],
   },
   {
     id: 'minimax-h3-turbo',
@@ -112,6 +126,9 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     licenseSpdx: 'Apache-2.0',
     installMode: 'user-fetch',
     homepage: 'https://github.com/Larryvrh/ComfyUI-MiniMax-H3-Turbo',
+    // NODE_CLASS_MAPPINGS read from the canonical shared install's copy of
+    // the pack (2026-09-19); the optimization registry detects this pair.
+    instanceNodeClasses: ['MiniMaxH3TurboLoRA', 'MiniMaxH3TurboSampler'],
   },
   {
     // H3 Image Workbench (k9vu6t0, spec §4/§10 — decision 10: the hybrid
@@ -127,6 +144,9 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     licenseNote: 'MIT (LICENSE.txt in the repo, read from the canonical shared install at this rev, 2026-09-18). Vendor-eligible; user-fetch until a vendoring increment is wanted (the Larryvrh posture).',
     installMode: 'user-fetch',
     homepage: 'https://github.com/scottmudge/ComfyUI_MinimaxH3HybridLoader',
+    // Single class — verified from the canonical shared install's nodes.py
+    // and exercised by the H3-1F e2e object_info stub.
+    instanceNodeClasses: ['MiniMaxH3HybridLoader'],
   },
   {
     id: 'krea2-controlnet',
@@ -138,6 +158,8 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     licenseNote: 'No license file in the upstream repo — redistribution not permitted; user-fetch only, never vendored (docs/research/krea2-edit-mode.md).',
     installMode: 'user-fetch',
     homepage: 'https://github.com/facok/comfyui-krea2-controlnet',
+    // NODE_CLASS_MAPPINGS read from the canonical shared install (2026-09-19).
+    instanceNodeClasses: ['Krea2ControlLoRALoader', 'Krea2ControlApply', 'Krea2ControlImageEncode'],
   },
   {
     id: 'h3-audio-t8',
@@ -149,6 +171,11 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     licenseNote: 'LICENSE file is an SPDX notice, not full text (docs/LICENSES.md §3, API-verified 2026-09-14). GPL-3.0 is combining-compatible with our AGPLv3, but vendoring third-party GPL code couples our releases to a contributor set we do not control — user-fetch only.',
     installMode: 'user-fetch',
     homepage: 'https://github.com/T8mars/comfyui-minimax-h3-audio-T8',
+    // Upstream read 2026-09-19 (h3_t8/nodes.py): the pack uses the newer
+    // extension API, and node ids like MiniMaxH3AudioConditioningT8 appear
+    // inside define_schema() calls. Research flags T8 node names as in-flux;
+    // this one class is the stable detection hook (any-match).
+    instanceNodeClasses: ['MiniMaxH3AudioConditioningT8'],
   },
   {
     id: 'krea2edit',
@@ -160,6 +187,9 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     licenseNote: 'Apache-2.0 (LICENSE file + GitHub API license record, verified 2026-09-14). Nodes only — the LoRA weights are a separate Krea-2-licensed fetch. Solo-maintained with a v2 retrain in progress: pinned by SHA; expect re-verification at v2.',
     installMode: 'user-fetch',
     homepage: 'https://github.com/lbouaraba/comfyui-krea2edit',
+    // Verified from the canonical shared install (2026-09-19) and mirrored
+    // by KREA2EDIT_NODES in src/lib/graph/krea2edit.ts.
+    instanceNodeClasses: ['Krea2EditModelPatch', 'Krea2EditGroundedEncode'],
   },
   {
     id: 'krea2-anypaint',
@@ -171,6 +201,9 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     licenseNote: 'MIT (LICENSE file, verified 2026-09-14); reference-attention/K-V-cache code adapted from ComfyUI-Rebels-Krea2-Outpaint and ComfyUI-Krea2-Ostris-Edit per its NOTICE. The LoRA is a separate Krea-2-licensed fetch.',
     installMode: 'user-fetch',
     homepage: 'https://github.com/alexw5702-afk/krea2-anypaint',
+    // Verified from the canonical shared install (2026-09-19); mirrored by
+    // ANYPAINT_NODES in src/lib/graph/krea2edit.ts.
+    instanceNodeClasses: ['Krea2AnyPaintPrepare', 'Krea2AnyPaintEncode', 'Krea2AnyPaintModelPatch'],
   },
   // ---- LTX-2.3 utility packs (task 068xwy3, verdict keep-utilities-only) --
   {
@@ -183,6 +216,9 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     licenseNote: 'The repo ships the LTX-2 Community License Agreement (LICENSE file, read from a fresh clone 2026-09-15 — the same terms as the LTX-2.3 weights). A custom permissive-with-conditions license, not SPDX-listed: user-fetch, never vendored. The node INPUT schemas ported in src/lib/graph/ltx23.ts were verified against this exact revision.',
     installMode: 'user-fetch',
     homepage: 'https://github.com/Lightricks/ComfyUI-LTXVideo',
+    // LTXVIDEO_NODES in src/lib/graph/ltx23.ts — INPUT schemas ported and
+    // verified against the pinned revision.
+    instanceNodeClasses: ['LTXICLoRALoaderModelOnly', 'LTXAddVideoICLoRAGuide', 'LTXVSetAudioRefTokens', 'LTXVTiledVAEDecode', 'LTXFloatToInt'],
   },
   {
     id: 'kjnodes',
@@ -194,6 +230,9 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     licenseNote: 'GPL-3.0 (full LICENSE text, read from a fresh clone 2026-09-15). Same fetchable-but-flagged policy as T8mars: GPL-3.0 combines with our AGPLv3 but we never vendor or redistribute it — the user fetches their own copy through the consent flow. We use three nodes out of the pack.',
     installMode: 'user-fetch',
     homepage: 'https://github.com/kijai/ComfyUI-KJNodes',
+    // The three nodes we use (KJNODES_USED in src/lib/graph/ltx23.ts). The
+    // pack registers hundreds more — any-match keeps detection cheap.
+    instanceNodeClasses: ['GetImageSizeAndCount', 'ImagePadKJ', 'VAELoaderKJ'],
   },
   {
     id: 'radiance',
@@ -205,6 +244,8 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     licenseNote: 'GPL-3.0 (GitHub API license record, verified 2026-09-15). Fetchable-but-flagged like every GPL pack: user-fetch only, never vendored; one node used.',
     installMode: 'user-fetch',
     homepage: 'https://github.com/fxtdstudios/radiance',
+    // RADIANCE_NODES in src/lib/graph/ltx23.ts — the one load-bearing node.
+    instanceNodeClasses: ['Float32ColorCorrect'],
   },
   // -- segmented inference for H3 (task lxmtgss deep-read → task p8oyfy1) --
   {
@@ -225,6 +266,9 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
       + 'increment is wanted.',
     installMode: 'user-fetch',
     homepage: 'https://github.com/supElement/ComfyUI_MinimaxH3_AutoContext',
+    // Three-node pack per docs/research/autocontext-deepread.md §module map
+    // (code-read 2026-09-16).
+    instanceNodeClasses: ['Minimax_H3_AutoContext_parameter', 'Minimax_H3_AutoContext_Sampler', 'Minimax_H3_Seam_Correction'],
   },
 ]
 
@@ -246,9 +290,62 @@ export function isWeightFile(file: string): boolean {
   return WEIGHT_EXTENSIONS.has(file.slice(file.lastIndexOf('.')).toLowerCase())
 }
 
-/** Where a pack installs: the checkout's custom_nodes/<name>. */
-export function nodePackInstallDir(checkout: string, pack: NodePackDefinition): string {
-  return join(resolve(checkout), 'custom_nodes', pack.name)
+/** Where a pack installs (task 9om4bi9): either the managed checkout's
+ *  custom_nodes/<name>, or — for an instance the studio does not launch —
+ *  <external custom nodes folder>/<name>. Both are ComfyUI's sanctioned
+ *  extension seam; only the parent differs. */
+export type NodePackTarget =
+  | { kind: 'checkout'; checkout: string }
+  | { kind: 'external'; customNodesDir: string }
+
+/** The shape an EXTERNAL install target must have: an absolute, existing
+ *  directory. Deliberately NOT isUsableCheckout — the user points the studio
+ *  at the custom_nodes folder itself (which may live on a share or beside an
+ *  install we cannot see the root of); demanding main.py there would be a
+ *  category error. */
+export function isUsableCustomNodesDir(directoryPath: string): boolean {
+  if (!directoryPath.trim()) return false
+  const candidate = resolve(directoryPath)
+  if (!isAbsolute(candidate) || !existsSync(candidate)) return false
+  try {
+    return statSync(candidate).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/** Where a pack installs for a given target. */
+export function nodePackInstallDir(pack: NodePackDefinition, target: NodePackTarget): string {
+  return target.kind === 'checkout'
+    ? join(resolve(target.checkout), 'custom_nodes', pack.name)
+    : join(resolve(target.customNodesDir), pack.name)
+}
+
+/** The custom-nodes ROOT of a target (…/custom_nodes for a checkout, the
+ *  folder itself for an external target) — pack-ckpt placements (weights
+ *  inside an arbitrary pack folder) resolve against this. */
+export function nodePackCustomNodesRoot(target: NodePackTarget): string {
+  return target.kind === 'checkout' ? join(resolve(target.checkout), 'custom_nodes') : resolve(target.customNodesDir)
+}
+
+/** The install target implied by the engine settings (task 9om4bi9): managed
+ *  mode installs into the checkout's custom_nodes/; external mode prefers the
+ *  configured external custom nodes folder. LEGACY FALLBACK: an external-mode
+ *  studio with a usable checkoutPath and NO external folder keeps installing
+ *  into that checkout — the pre-9om4bi9 behavior, never silently dropped
+ *  (fetcher installs and existing settings files relied on it). A configured
+ *  external folder always wins over a stale checkout in external mode. */
+export function resolveNodePackTarget(engine: { mode: string; checkoutPath: string; externalCustomNodesDir?: string }): { target: NodePackTarget | null; targetKind: 'checkout' | 'external' | 'none' } {
+  if (engine.mode === 'managed') {
+    return isUsableCheckout(engine.checkoutPath)
+      ? { target: { kind: 'checkout', checkout: engine.checkoutPath }, targetKind: 'checkout' }
+      : { target: null, targetKind: 'none' }
+  }
+  const directory = engine.externalCustomNodesDir ?? ''
+  if (isUsableCustomNodesDir(directory)) return { target: { kind: 'external', customNodesDir: directory }, targetKind: 'external' }
+  return isUsableCheckout(engine.checkoutPath)
+    ? { target: { kind: 'checkout', checkout: engine.checkoutPath }, targetKind: 'checkout' }
+    : { target: null, targetKind: 'none' }
 }
 
 /** The vendored payload root: env override first, then a walk up from this
@@ -408,14 +505,41 @@ function isBranchPin(markerRevision: string, pinnedRevision: string): boolean {
 /** Revision recorded in the studio marker of an installed pack, when it is
  *  (the fetcher's catalog status reads this; branch pins report the stamped
  *  fetch-time SHA). */
-export async function nodePackInstalledRevision(pack: NodePackDefinition, checkout: string | null): Promise<string | null> {
-  if (!checkout || !isUsableCheckout(checkout)) return null
-  const installDir = nodePackInstallDir(checkout, pack)
+export async function nodePackInstalledRevision(pack: NodePackDefinition, target: NodePackTarget | null): Promise<string | null> {
+  if (!target) return null
+  const installDir = nodePackInstallDir(pack, target)
   if (!existsSync(installDir)) return null
   return (await readInstallMarker(installDir))?.revision ?? null
 }
 
-export async function checkNodePack(pack: NodePackDefinition, checkout: string | null, vendorRoot: string | null): Promise<NodePackStatus> {
+/** Live-instance verdict from the CONNECTED engine's object_info keys
+ *  (task 9om4bi9): 'active' when any registered class id is served (the
+ *  pack is installed AND the instance loaded it), 'absent' when the instance
+ *  answered but serves none of them, 'unknown' when there was no object_info
+ *  to ask (engine offline / request failed). */
+export function nodePackInstanceState(pack: NodePackDefinition, objectInfoKeys: string[] | null): 'active' | 'absent' | 'unknown' {
+  if (!objectInfoKeys) return 'unknown'
+  if (pack.instanceNodeClasses.length === 0) return 'unknown'
+  return objectInfoKeys.some((nodeClass) => pack.instanceNodeClasses.includes(nodeClass)) ? 'active' : 'absent'
+}
+
+/** True when the target itself is usable for the operations below. */
+function isUsableTarget(target: NodePackTarget): boolean {
+  return target.kind === 'checkout' ? isUsableCheckout(target.checkout) : isUsableCustomNodesDir(target.customNodesDir)
+}
+
+function targetLabel(target: NodePackTarget): string {
+  return target.kind === 'checkout'
+    ? 'a valid ComfyUI checkout (with main.py) is required before packs can be installed there.'
+    : 'a valid external custom nodes folder (an absolute, existing directory) is required before packs can be installed there.'
+}
+
+/** Relative label of the install dir inside its target, for notes. */
+function installDirLabel(pack: NodePackDefinition, target: NodePackTarget): string {
+  return target.kind === 'checkout' ? `custom_nodes/${pack.name}` : `${pack.name}`
+}
+
+export async function checkNodePack(pack: NodePackDefinition, target: NodePackTarget | null, vendorRoot: string | null, instanceState?: NodePackStatus['instanceState']): Promise<NodePackStatus> {
   const vendored = pack.installMode === 'vendor'
     ? Boolean(pack.vendorDir && vendorRoot && existsSync(join(vendorRoot, pack.vendorDir)))
     : pack.installMode === 'first-party'
@@ -426,11 +550,15 @@ export async function checkNodePack(pack: NodePackDefinition, checkout: string |
     vendored,
     installed: false,
     availability: 'unavailable',
+    targetKind: target ? target.kind : 'none',
+    ...(instanceState ? { instanceState } : {}),
   }
-  if (!checkout || !isUsableCheckout(checkout)) {
-    return { ...base, note: 'a valid ComfyUI checkout (with main.py) is required before packs can be installed.' }
+  if (!target || !isUsableTarget(target)) {
+    return { ...base, note: target?.kind === 'external'
+      ? targetLabel(target)
+      : 'a valid ComfyUI checkout (with main.py) is required before packs can be installed.' }
   }
-  const installDir = nodePackInstallDir(checkout, pack)
+  const installDir = nodePackInstallDir(pack, target)
   const folderExists = existsSync(installDir)
   const marker = folderExists ? await readInstallMarker(installDir) : null
   if (marker) {
@@ -441,9 +569,9 @@ export async function checkNodePack(pack: NodePackDefinition, checkout: string |
   if (folderExists) {
     // The folder exists but WE did not place it (no studio marker). Never a
     // candidate for silent replacement — reported, the user decides.
-    return { ...base, note: `custom_nodes/${pack.name} already exists but was not installed by the studio — remove it yourself first if you want the studio's pinned copy.` }
+    return { ...base, folderState: 'foreign', note: `${installDirLabel(pack, target)} already exists but was not installed by the studio — remove it yourself first if you want the studio's pinned copy.` }
   }
-  return withAvailability(base, pack, vendored)
+  return withAvailability({ ...base, folderState: 'missing' }, pack, vendored)
 }
 
 function withAvailability(status: NodePackStatus, pack: NodePackDefinition, vendored: boolean, note?: string): NodePackStatus {
@@ -462,7 +590,9 @@ function withAvailability(status: NodePackStatus, pack: NodePackDefinition, vend
 }
 
 export type InstallNodePackOptions = {
-  checkout: string
+  /** The install target (task 9om4bi9): the managed checkout OR the external
+   *  custom nodes folder. */
+  target: NodePackTarget
   /** Local directory holding the pack's files (user-fetch mode: the user's
    *  nominated copy, or the fetcher's extracted archive). */
   sourceDirectory?: string
@@ -476,18 +606,20 @@ export type InstallNodePackOptions = {
 
 export type InstallNodePackResult = { status: NodePackStatus; installed: boolean; alreadyInstalled?: boolean; notes: string[] }
 
-/** Installs (or reinstalls-at-pin) one pack into the checkout's
- *  custom_nodes/. Code files are copied; weight files are LINKED (never
+/** Installs (or reinstalls-at-pin) one pack into the target's custom-node
+ *  folder (the managed checkout's custom_nodes/, or the external custom
+ *  nodes folder). Code files are copied; weight files are LINKED (never
  *  copied); a marker records id + pinned revision so a version bump is a
- *  delete-and-reinstall rather than a merge. A foreign custom_nodes/<name>
- *  (present without our marker) is refused, never replaced. The install is
- *  staged-then-renamed: a mid-copy failure leaves no half pack behind. */
+ *  delete-and-reinstall rather than a merge. A foreign <name> folder
+ *  (present without our marker) is refused, never replaced — in EITHER
+ *  target. The install is staged-then-renamed: a mid-copy failure leaves no
+ *  half pack behind. */
 export async function installNodePack(pack: NodePackDefinition, options: InstallNodePackOptions): Promise<InstallNodePackResult> {
   const notes: string[] = []
-  const checkout = resolve(options.checkout)
+  const { target } = options
   const vendorRoot = options.vendorRoot !== undefined ? options.vendorRoot : resolveVendorRoot()
-  if (!isUsableCheckout(checkout)) {
-    return { status: await checkNodePack(pack, checkout, vendorRoot), installed: false, notes: ['a valid ComfyUI checkout (with main.py) is required before packs can be installed.'] }
+  if (!isUsableTarget(target)) {
+    return { status: await checkNodePack(pack, target, vendorRoot), installed: false, notes: [targetLabel(target)] }
   }
   let sourceRoot: string | null = null
   let sourceLabel = ''
@@ -495,7 +627,7 @@ export async function installNodePack(pack: NodePackDefinition, options: Install
     sourceRoot = pack.vendorDir && vendorRoot ? join(vendorRoot, pack.vendorDir) : null
     sourceLabel = 'vendored payload'
     if (!sourceRoot || !existsSync(sourceRoot)) {
-      return { status: await checkNodePack(pack, checkout, vendorRoot), installed: false, notes: ['the vendored payload is not present in this install.'] }
+      return { status: await checkNodePack(pack, target, vendorRoot), installed: false, notes: ['the vendored payload is not present in this install.'] }
     }
   } else if (pack.installMode === 'first-party') {
     // OUR OWN code: install from the studio's custom-nodes payload — no
@@ -503,35 +635,35 @@ export async function installNodePack(pack: NodePackDefinition, options: Install
     sourceRoot = firstPartyPayloadDir(pack)
     sourceLabel = 'first-party payload (custom-nodes)'
     if (!sourceRoot) {
-      return { status: await checkNodePack(pack, checkout, vendorRoot), installed: false, notes: ['the first-party payload is not present in this install (custom-nodes not found).'] }
+      return { status: await checkNodePack(pack, target, vendorRoot), installed: false, notes: ['the first-party payload is not present in this install (custom-nodes not found).'] }
     }
   } else {
     const nominated = options.sourceDirectory?.trim() ?? ''
     if (!nominated || !isAbsolute(nominated) || !existsSync(resolve(nominated))) {
-      return { status: await checkNodePack(pack, checkout, vendorRoot), installed: false, notes: ['user-fetch packs install from an absolute local directory holding the repository (network fetcher lands in a later increment).'] }
+      return { status: await checkNodePack(pack, target, vendorRoot), installed: false, notes: ['user-fetch packs install from an absolute local directory holding the repository — or one consented fetch through the Fetchable items section, which downloads the pinned revision for you.'] }
     }
     sourceRoot = resolve(nominated)
     sourceLabel = `local copy (${sourceRoot})`
   }
 
-  const installDir = nodePackInstallDir(checkout, pack)
+  const installDir = nodePackInstallDir(pack, target)
   const existingMarker = existsSync(installDir) ? await readInstallMarker(installDir) : null
   if (existsSync(installDir) && !existingMarker) {
-    return { status: await checkNodePack(pack, checkout, vendorRoot), installed: false, notes: [`custom_nodes/${pack.name} already exists but was not installed by the studio — refusing to replace it. Remove it first if you want the pinned copy.`] }
+    return { status: await checkNodePack(pack, target, vendorRoot), installed: false, notes: [`${installDirLabel(pack, target)} already exists but was not installed by the studio — refusing to replace it. Remove it first if you want the pinned copy.`] }
   }
   if (existingMarker && existingMarker.revision === pack.pinnedRevision) {
-    return { status: await checkNodePack(pack, checkout, vendorRoot), installed: true, alreadyInstalled: true, notes: [`${pack.name} is already installed at the pinned revision ${pack.pinnedRevision.slice(0, 12)}.`] }
+    return { status: await checkNodePack(pack, target, vendorRoot), installed: true, alreadyInstalled: true, notes: [`${pack.name} is already installed at the pinned revision ${pack.pinnedRevision.slice(0, 12)}.`] }
   }
   if (existingMarker && isBranchPin(existingMarker.revision, pack.pinnedRevision)) {
     // Branch pin already stamped at a resolved SHA: nothing to move. (The
     // fetcher stamps HEAD at fetch time; a later fetch re-stamps.)
-    return { status: await checkNodePack(pack, checkout, vendorRoot), installed: true, alreadyInstalled: true, notes: [`${pack.name} is already installed at the fetched revision ${existingMarker.revision.slice(0, 12)} (branch pin ${pack.pinnedRevision}).`] }
+    return { status: await checkNodePack(pack, target, vendorRoot), installed: true, alreadyInstalled: true, notes: [`${pack.name} is already installed at the fetched revision ${existingMarker.revision.slice(0, 12)} (branch pin ${pack.pinnedRevision}).`] }
   }
   if (existingMarker) {
     // Version bump: uninstall the old copy, then reinstall at the pin —
     // never merge two revisions of a pack into one folder.
     notes.push(`revision changed (${existingMarker.revision.slice(0, 12)} → ${installRevision(pack, options)}): reinstalling at the pin.`)
-    await uninstallNodePack(pack, checkout)
+    await uninstallNodePack(pack, target)
   }
 
   await mkdir(dirname(installDir), { recursive: true })
@@ -547,10 +679,10 @@ export async function installNodePack(pack: NodePackDefinition, options: Install
   } catch (installFailure) {
     // The staged tree never became the installed one — discard it whole.
     await rm(staged, { recursive: true, force: true }).catch(() => undefined)
-    const status = await checkNodePack(pack, checkout, vendorRoot)
+    const status = await checkNodePack(pack, target, vendorRoot)
     return { status, installed: false, notes: [installFailure instanceof Error ? installFailure.message : String(installFailure)] }
   }
-  return { status: await checkNodePack(pack, checkout, vendorRoot), installed: true, notes }
+  return { status: await checkNodePack(pack, target, vendorRoot), installed: true, notes }
 }
 
 /** Copies the pack tree: code files byte-for-byte, weight files as links
@@ -586,9 +718,10 @@ async function copyPackTree(source: string, destination: string, weightLinks: st
 }
 
 /** Uninstall = delete the folder (the design's own rule). Removing the
- *  marker-only install never touches anything outside custom_nodes/<name>. */
-export async function uninstallNodePack(pack: NodePackDefinition, checkout: string): Promise<{ removed: boolean; reason?: string }> {
-  const installDir = nodePackInstallDir(checkout, pack)
+ *  marker-only install never touches anything outside the pack's own folder
+ *  in its target. */
+export async function uninstallNodePack(pack: NodePackDefinition, target: NodePackTarget): Promise<{ removed: boolean; reason?: string }> {
+  const installDir = nodePackInstallDir(pack, target)
   if (!existsSync(installDir)) return { removed: false, reason: `${pack.name} is not installed` }
   await rm(installDir, { recursive: true, force: true })
   await rm(`${installDir}.studio-staging`, { recursive: true, force: true }).catch(() => undefined)
@@ -596,7 +729,8 @@ export async function uninstallNodePack(pack: NodePackDefinition, checkout: stri
 }
 
 /** Availability for every entry in one call (the Settings surface + the
- *  nodes route). */
-export async function checkAllNodePacks(checkout: string | null, vendorRoot: string | null): Promise<NodePackStatus[]> {
-  return Promise.all(ENGINE_NODE_PACKS.map((pack) => checkNodePack(pack, checkout, vendorRoot)))
+ *  nodes route). instanceStates carries the live object_info verdict per
+ *  pack id when the caller has one (the route decorates the fs verdicts). */
+export async function checkAllNodePacks(target: NodePackTarget | null, vendorRoot: string | null, instanceStates?: Record<string, NodePackStatus['instanceState']>): Promise<NodePackStatus[]> {
+  return Promise.all(ENGINE_NODE_PACKS.map((pack) => checkNodePack(pack, target, vendorRoot, instanceStates?.[pack.id])))
 }

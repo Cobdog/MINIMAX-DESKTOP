@@ -631,3 +631,136 @@ test('first-run guidance: empty model roots show dismissible onboarding, never a
   await expect(page.locator('[data-canvas-first-run]')).toHaveCount(0)
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
+
+// External-instance integration (task 9om4bi9): with the engine pointed at a
+// fake EXTERNAL instance (serving a crafted object_info + /models listing),
+// the Settings surface must show the merged inventory — instance-tagged model
+// rows with NO local roots configured — the external custom-nodes folder, the
+// LIVE pack chips read from the instance, an install that lands inside the
+// external folder, and the honest restart-needed chip afterwards. The fake
+// engine speaks the verified contract (the canvas suite's harness pattern);
+// settings are restored in finally so later tests see the clean home.
+test('external instance: instance-sourced models, live pack chips, install into the external custom nodes folder', async ({ page }) => {
+  const problems = await trackErrors(page)
+  const { mkdirSync, writeFileSync, existsSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const http = await import('node:http')
+
+  const objectInfo = {
+    UNETLoader: { input: { required: { unet_name: [['instance-h3-fl2va.safetensors', 'instance-h3-ref2va.safetensors'], {}] } } },
+    CLIPLoader: { input: { required: { clip_name: ['x.safetensors', { options: ['instance-encoder.safetensors'] }] } } },
+    VAELoader: { input: { required: { vae_name: [['instance-vae.safetensors'], {}] } } },
+    LoraLoader: { input: { required: { lora_name: [['instance-lora.safetensors'], {}] } } },
+    MiniMaxH3HybridLoader: { input: { required: { ckpt_name: [['instance-h3-fl2va.safetensors'], {}] } } },
+    KSamplerSelect: { input: { required: {} } },
+  }
+  const engine = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://engine.local')
+    if (url.pathname === '/system_stats') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ system: { comfyui_version: 'v0.34.0' }, devices: [] }))
+      return
+    }
+    if (url.pathname === '/object_info') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(objectInfo))
+      return
+    }
+    if (url.pathname === '/models') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(['diffusion_models', 'text_encoders', 'vae', 'loras']))
+      return
+    }
+    if (url.pathname === '/models/diffusion_models') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(['instance-h3-fl2va.safetensors', 'instance-h3-ref2va.safetensors']))
+      return
+    }
+    if (url.pathname === '/models/vae') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(['instance-vae.safetensors']))
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  const enginePort = await new Promise<number>((resolve) => engine.listen(0, '127.0.0.1', () => resolve((engine.address() as { port: number }).port)))
+
+  // Empty local roots (the external case needs none), an external custom
+  // nodes folder, and a local repo copy to install krea2edit from.
+  const home = join(process.cwd(), 'test-home')
+  const modelRoot = join(home, 'e2e-instance-models')
+  for (const kind of ['diffusion_models', 'text_encoders', 'vae', 'loras', 'vae_approx', 'clip_vision']) mkdirSync(join(modelRoot, kind), { recursive: true })
+  const externalDir = join(home, 'e2e-external-nodes')
+  mkdirSync(externalDir, { recursive: true })
+  const localCopy = join(home, 'e2e-krea2edit-copy')
+  mkdirSync(localCopy, { recursive: true })
+  writeFileSync(join(localCopy, '__init__.py'), '# krea2edit e2e\n')
+
+  const originalSettings = ((await (await page.request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
+  try {
+    const applied = await page.request.post('/api/lan/settings', { data: { settings: {
+      ...originalSettings,
+      comfyUrl: `http://127.0.0.1:${enginePort}`,
+      modelRoot,
+      paths: Object.fromEntries(['diffusion_models', 'text_encoders', 'vae', 'loras', 'vae_approx', 'clip_vision'].map((kind) => [kind, join(modelRoot, kind)])),
+      engine: { ...(originalSettings.engine as Record<string, unknown>), mode: 'external', externalCustomNodesDir: externalDir },
+    } } })
+    expect(applied.status(), `settings POST must succeed: ${JSON.stringify(await applied.json().catch(() => ({})))}`).toBe(200)
+    // Shared-home hygiene (the testing.md accumulation lesson): a previous
+    // run may have left comfyui-krea2edit installed in the fixture folder —
+    // reset it through the app's own uninstall API so the "missing" state is
+    // deterministic. 404 = already gone; both fine.
+    await page.request.post('/api/lan/engine/nodes/uninstall', { data: { id: 'krea2edit' } }).catch(() => undefined)
+    await resetSession(page)
+    await page.goto('/')
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    await page.locator('[data-canvas-settings-button]').click()
+    await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible()
+
+    // External mode surfaces the custom-nodes folder; io defaults are
+    // app-relative (the e2e home IS the app folder for this server).
+    const externalInput = page.locator('[data-external-custom-nodes]')
+    await expect(externalInput).toBeVisible()
+    await expect(externalInput).toHaveValue(externalDir)
+    await expect(page.locator('[data-input-path]')).toHaveValue(/[\\/]data[\\/]input$/)
+    await expect(page.locator('#output-path')).toHaveValue(/[\\/]data[\\/]output$/)
+
+    // The merged inventory: instance rows with zero local files.
+    const diffusionCount = page.locator('[data-model-kind-count="diffusion_models"]')
+    await expect(diffusionCount).toBeVisible({ timeout: 20_000 })
+    await expect(diffusionCount).toContainText('2 files · 2 instance · 0 local')
+
+    // Live chips from the instance's own node list: the hybrid loader pack is
+    // INSTALLED ON INSTANCE (its class is served) with no folder install at
+    // all; krea2edit is missing (the instance serves none of its classes).
+    const hybridRow = page.locator('.node-pack-row').filter({ hasText: 'ComfyUI_MinimaxH3HybridLoader' })
+    await expect(hybridRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'installed on instance', { timeout: 15_000 })
+    const krea2editRow = page.locator('.node-pack-row').filter({ hasText: 'comfyui-krea2edit' })
+    await expect(krea2editRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'missing')
+
+    // Install krea2edit from the local copy INTO THE EXTERNAL FOLDER through
+    // the UI, then the honest chip: installed, but the instance has not
+    // loaded it — restart to activate.
+    const sourceInput = krea2editRow.locator('input[aria-label="Local source directory for comfyui-krea2edit"]')
+    await sourceInput.scrollIntoViewIfNeeded()
+    await sourceInput.fill(localCopy)
+    await krea2editRow.getByRole('button', { name: /^Install$/ }).click()
+    await expect(krea2editRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'installed — restart engine to activate', { timeout: 15_000 })
+    expect(existsSync(join(externalDir, 'comfyui-krea2edit', '.studio-node.json'))).toBe(true)
+
+    // A foreign folder (no studio marker) is refused and reported, never
+    // silently replaced.
+    mkdirSync(join(externalDir, 'radiance'), { recursive: true })
+    writeFileSync(join(externalDir, 'radiance', 'user-file.py'), '# theirs\n')
+    await page.locator('[data-canvas-settings-close]').click()
+    await page.locator('[data-canvas-settings-button]').click()
+    const radianceRow = page.locator('.node-pack-row').filter({ hasText: 'radiance' })
+    await expect(radianceRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'foreign folder', { timeout: 15_000 })
+
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    await page.request.post('/api/lan/settings', { data: { settings: originalSettings } })
+    engine.close()
+  }
+})

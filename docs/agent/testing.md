@@ -38,8 +38,8 @@ Runs the entire verification chain in canonical order — `typecheck` →
 `lint` → `license:audit` → unit suites (`test`, `test:registry`,
 `test:h3img`, `test:storage`, `test:documents`, `test:realtime`,
 `test:filmstrip`, `test:llm`, `test:engine`, `test:runtime`, `test:fetcher`,
-`test:lora-form`, `test:poserig`, `test:camera`, `test:canvas`,
-`test:benchmarks`, `test:datasets`) → `build` → `smoke:server`
+`test:instance`, `test:lora-form`, `test:poserig`, `test:camera`,
+`test:canvas`, `test:benchmarks`, `test:datasets`) → `build` → `smoke:server`
 → e2e → vision-capture — each in its own process, wall-clock timed,
 known-benign output filtered (the filter tally prints so nothing disappears
 silently), one summary table, non-zero exit on any failure. A failed
@@ -67,6 +67,13 @@ same chain without the harness niceties. Individual suites run directly
   table, trigger validation, aspect mirror/hard-stops) loaded straight from
   dist-server.
 - `test:camera` needs no Python (goldens are committed).
+- `test:instance` (9om4bi9) covers the external-instance integration:
+  instance inventory parsing against crafted object_info + /models payloads,
+  the external custom-nodes install target (path construction + foreign
+  refusal), live pack detection, the app-relative io defaults through the
+  real settings pipeline, and the routes against a local fake engine. The
+  route sections self-skip without the web build (the Windows-leg NOTE
+  pattern).
 
 ## VM-harness pitfalls (scripts/test-*.cjs)
 

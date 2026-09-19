@@ -44,7 +44,7 @@ import type { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { isAbsolute, join, resolve } from 'node:path'
 import type { AppSettings, FetchCatalogEntry, FetchEntryStatus, FetchPin, FetchProgress } from '../src/types'
-import { findNodePack, installNodePack, isUsableCheckout, linkNeverCopy, nodePackInstalledRevision, uninstallNodePack } from './engineNodes'
+import { findNodePack, installNodePack, isUsableCheckout, linkNeverCopy, nodePackCustomNodesRoot, nodePackInstalledRevision, nodePackInstallDir, resolveNodePackTarget, uninstallNodePack, type NodePackTarget } from './engineNodes'
 import { FETCH_CATALOG, fetchModelRootPath, findFetchEntry, globToRegExp, modelRootTargetPath } from './fetchCatalog'
 
 // ---------------------------------------------------------------------------
@@ -522,14 +522,14 @@ export class FetchManager {
   /** Catalog + live machine state. NO network — presence is detected from
    *  install records, exact destination paths, detectGlob scans and the
    *  fetch cache. */
-  async catalogStatus(checkoutOverride?: string | null): Promise<FetchEntryStatus[]> {
+  async catalogStatus(): Promise<FetchEntryStatus[]> {
     const settings = await this.options.loadSettings()
-    const checkout = checkoutOverride !== undefined ? checkoutOverride : (isUsableCheckout(settings.engine.checkoutPath) ? settings.engine.checkoutPath : null)
+    const target = resolveNodePackTarget(settings.engine).target
     const state = await this.readState()
-    return Promise.all(FETCH_CATALOG.map(async (entry) => this.statusFor(entry, settings, checkout, state)))
+    return Promise.all(FETCH_CATALOG.map(async (entry) => this.statusFor(entry, settings, target, state)))
   }
 
-  private async statusFor(entry: FetchCatalogEntry, settings: AppSettings, checkout: string | null, state: FetchStateFile): Promise<FetchEntryStatus> {
+  private async statusFor(entry: FetchCatalogEntry, settings: AppSettings, target: NodePackTarget | null, state: FetchStateFile): Promise<FetchEntryStatus> {
     const flight = this.inFlight.get(entry.id)
     const base: FetchEntryStatus = { ...entry, state: 'absent', ...(flight ? { inFlight: true } : {}) }
     const record = state.installs[entry.id]
@@ -546,8 +546,8 @@ export class FetchManager {
     if (entry.destination.kind === 'node-pack') {
       const pack = findNodePack(entry.destination.packId)
       if (!pack) return { ...base, note: 'unknown node-pack registry entry' }
-      if (!checkout) return { ...base, note: 'a valid ComfyUI checkout is required first (managed engine settings).' }
-      const revision = await nodePackInstalledRevision(pack, checkout)
+      if (!target) return { ...base, note: 'an install target is required first (a managed checkout, or the external custom nodes folder in engine settings).' }
+      const revision = await nodePackInstalledRevision(pack, target)
       if (revision) return { ...base, state: 'present', installedRevision: revision }
       return base
     }
@@ -564,9 +564,9 @@ export class FetchManager {
         if (detected) return { ...base, state: 'present', note: `detected an existing local file: ${detected}.` }
       }
     }
-    if (entry.destination.kind === 'pack-ckpt' && entry.files && checkout) {
+    if (entry.destination.kind === 'pack-ckpt' && entry.files && target) {
       const destination = entry.destination
-      const every = (await Promise.all(entry.files.map((file) => existsSync(join(checkout, 'custom_nodes', destination.packDirectory, destination.relativePath, file.path.slice(file.path.replace(/\\/g, '/').lastIndexOf('/') + 1)))))).every(Boolean)
+      const every = (await Promise.all(entry.files.map((file) => existsSync(join(nodePackCustomNodesRoot(target), destination.packDirectory, destination.relativePath, file.path.slice(file.path.replace(/\\/g, '/').lastIndexOf('/') + 1)))))).every(Boolean)
       if (every) return { ...base, state: 'present' }
     }
     if (await this.cacheComplete(entry)) return { ...base, state: 'cached' }
@@ -606,9 +606,15 @@ export class FetchManager {
     const settings = await this.options.loadSettings()
     const consent = this.consentState(entry, settings)
     if (!consent.ok) return { started: false, id: entry.id, reason: consent.reason }
-    const checkout = isUsableCheckout(settings.engine.checkoutPath) ? settings.engine.checkoutPath : null
-    if ((entry.destination.kind === 'node-pack' || entry.destination.kind === 'pack-ckpt') && !checkout) {
-      return { started: false, id: entry.id, reason: 'A valid ComfyUI checkout (with main.py) must be configured in the managed engine settings first.' }
+    // Install target follows the engine MODE (task 9om4bi9): the managed
+    // checkout's custom_nodes/, or — for an instance the studio does not
+    // launch — the configured external custom nodes folder. Pack fetches
+    // (node-pack, pack-ckpt) need one; weights and engine checkouts do not.
+    const { target } = resolveNodePackTarget(settings.engine)
+    if ((entry.destination.kind === 'node-pack' || entry.destination.kind === 'pack-ckpt') && !target) {
+      return { started: false, id: entry.id, reason: settings.engine.mode === 'managed'
+        ? 'A valid ComfyUI checkout (with main.py) must be configured in the managed engine settings first.'
+        : 'The external custom nodes folder (an absolute, existing directory) must be configured in the engine settings first.' }
     }
     if (entry.destination.kind === 'model-root') {
       const root = fetchModelRootPath(entry.destination.root, settings)
@@ -622,7 +628,7 @@ export class FetchManager {
     }
     // Fire-and-forget: progress rides the event fabric; the route returns
     // immediately so a multi-GB download never holds a request open.
-    void this.runFetch(entry, settings, checkout ?? null, startOptions).catch((error: unknown) => {
+    void this.runFetch(entry, settings, target, startOptions).catch((error: unknown) => {
       this.options.logFailure('fetcher/run', error, { entry: entry.id }, 'error')
     })
     return { started: true, id: entry.id }
@@ -633,7 +639,7 @@ export class FetchManager {
     return join(this.cacheRoot, 'engine', label.replace(/[^a-z0-9._-]+/gi, '_'))
   }
 
-  private async runFetch(entry: FetchCatalogEntry, settings: AppSettings, checkout: string | null, startOptions: { destinationDir?: string }): Promise<void> {
+  private async runFetch(entry: FetchCatalogEntry, settings: AppSettings, target: NodePackTarget | null, startOptions: { destinationDir?: string }): Promise<void> {
     const totalBytes = entry.files?.reduce((sum, file) => sum + (file.sizeBytes ?? 0), 0)
     try {
       // FIRST-PARTY packs (task k271ykk, localInstall entries): the payload
@@ -644,8 +650,8 @@ export class FetchManager {
       if (entry.localInstall) {
         this.emit({ id: entry.id, phase: 'placing', message: 'installing the studio\'s own payload (no network)' })
         const pack = entry.destination.kind === 'node-pack' ? findNodePack(entry.destination.packId) : null
-        if (!pack || !checkout) throw new Error('the node-pack registry entry or the configured checkout disappeared mid-install')
-        const installed = await installNodePack(pack, { checkout })
+        if (!pack || !target) throw new Error('the node-pack registry entry or the configured install target disappeared mid-install')
+        const installed = await installNodePack(pack, { target })
         if (!installed.installed && !installed.alreadyInstalled) throw new Error(`the pack install refused: ${installed.notes.join(' ')}`)
         const record: FetchInstallRecord = {
           at: Date.now(),
@@ -653,7 +659,7 @@ export class FetchManager {
           pinKind: entry.source.revision.kind,
           sourceLabel: `first-party payload (custom-nodes)@${pack.pinnedRevision}`,
           files: [],
-          placed: [{ path: join(resolve(checkout), 'custom_nodes', pack.name), kind: 'tree' }],
+          placed: [{ path: nodePackInstallDir(pack, target), kind: 'tree' }],
           licenseSpdx: entry.licenseSpdx,
           licenseAcknowledged: true,
           verified: 'none',
@@ -699,7 +705,7 @@ export class FetchManager {
         }
         record.verified = allSha ? 'sha256' : allSize ? 'size' : 'none'
         this.emit({ id: entry.id, phase: 'placing', message: entry.destination.kind === 'pack-ckpt' ? 'linking into the pack ckpt tree' : 'linking into the model root' })
-        await this.placeHfEntry(entry, settings, checkout, record)
+        await this.placeHfEntry(entry, settings, target, record)
       } else if (entry.source.kind === 'git') {
         const archivePath = join(this.cacheDir(entry.id), 'archive.tar.gz')
         this.emit({ id: entry.id, phase: 'downloading', file: 'repository archive', totalBytes: entry.sizeBytes })
@@ -711,13 +717,13 @@ export class FetchManager {
         this.emit({ id: entry.id, phase: 'placing', message: 'extracting the repository archive' })
         if (entry.destination.kind === 'node-pack') {
           const pack = findNodePack(entry.destination.packId)
-          if (!pack || !checkout) throw new Error('the node-pack registry entry or the configured checkout disappeared mid-fetch')
+          if (!pack || !target) throw new Error('the node-pack registry entry or the configured install target disappeared mid-fetch')
           const treeDir = join(this.cacheDir(entry.id), 'tree')
           await rm(treeDir, { recursive: true, force: true }).catch(() => undefined)
           await extractTarGz(archivePath, treeDir)
-          const installed = await installNodePack(pack, { checkout, sourceDirectory: treeDir, resolvedRevision: revision })
+          const installed = await installNodePack(pack, { target, sourceDirectory: treeDir, resolvedRevision: revision })
           if (!installed.installed && !installed.alreadyInstalled) throw new Error(`the pack install refused: ${installed.notes.join(' ')}`)
-          record.placed.push({ path: join(checkout, 'custom_nodes', pack.name), kind: 'tree' })
+          record.placed.push({ path: nodePackInstallDir(pack, target), kind: 'tree' })
         } else if (entry.destination.kind === 'engine-checkout') {
           const destination = resolve(startOptions.destinationDir?.trim() || this.defaultEngineCheckoutDir(entry))
           await mkdir(destination, { recursive: true })
@@ -761,7 +767,7 @@ export class FetchManager {
    *  pack would have auto-downloaded into, so its first offline use finds
    *  them). A foreign file at the destination fails the fetch rather than
    *  overwriting anything. */
-  private async placeHfEntry(entry: FetchCatalogEntry, settings: AppSettings, checkout: string | null, record: FetchInstallRecord): Promise<void> {
+  private async placeHfEntry(entry: FetchCatalogEntry, settings: AppSettings, target: NodePackTarget | null, record: FetchInstallRecord): Promise<void> {
     if (!entry.files) throw new Error('placement requires files')
     if (entry.destination.kind === 'model-root') {
       const destination = entry.destination
@@ -779,16 +785,16 @@ export class FetchManager {
     }
     if (entry.destination.kind === 'pack-ckpt') {
       const destination = entry.destination
-      if (!checkout) throw new Error('a configured ComfyUI checkout is required to place preprocessor weights')
-      const packRoot = join(resolve(checkout), 'custom_nodes', destination.packDirectory)
-      if (!existsSync(packRoot)) throw new Error(`custom_nodes/${destination.packDirectory} is not installed — install that pack first (the studio never creates files inside a pack it did not place)`)
+      if (!target) throw new Error('a configured install target (managed checkout or external custom nodes folder) is required to place preprocessor weights')
+      const packRoot = join(nodePackCustomNodesRoot(target), destination.packDirectory)
+      if (!existsSync(packRoot)) throw new Error(`${destination.packDirectory} is not installed in the target — install that pack first (the studio never creates files inside a pack it did not place)`)
       for (const file of entry.files) {
         const cached = join(this.cacheDir(entry.id), 'files', file.path)
         const basename = file.path.slice(file.path.replace(/\\/g, '/').lastIndexOf('/') + 1)
         const linkPath = join(packRoot, destination.relativePath, basename)
         await mkdir(resolve(linkPath, '..'), { recursive: true })
         const linked = await linkNeverCopy(cached, linkPath)
-        if (!linked.ok) throw new Error(`weight ${file.path} could not be linked into custom_nodes/${destination.packDirectory} (${linked.reason}) — refusing to place the rest`)
+        if (!linked.ok) throw new Error(`weight ${file.path} could not be linked into ${destination.packDirectory} (${linked.reason}) — refusing to place the rest`)
         record.placed.push({ path: linkPath, kind: linked.kind })
       }
       return
@@ -813,9 +819,10 @@ export class FetchManager {
       if (entry.destination.kind === 'node-pack') {
         const settings = await this.options.loadSettings()
         const pack = findNodePack(entry.destination.packId)
-        if (pack && isUsableCheckout(settings.engine.checkoutPath)) {
-          const removed = await uninstallNodePack(pack, settings.engine.checkoutPath)
-          return removed.removed ? { removed: true, notes: [`deleted custom_nodes/${pack.name}`] } : { removed: false, reason: removed.reason, notes: [] }
+        const { target } = resolveNodePackTarget(settings.engine)
+        if (pack && target) {
+          const removed = await uninstallNodePack(pack, target)
+          return removed.removed ? { removed: true, notes: [`deleted ${pack.name} from the ${target.kind === 'checkout' ? 'checkout\'s custom_nodes' : 'external custom nodes folder'}`] } : { removed: false, reason: removed.reason, notes: [] }
         }
       }
       return { removed: false, reason: 'This item has no studio fetch record.', notes: [] }
