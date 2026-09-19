@@ -570,6 +570,142 @@ export const SCENARIOS: VisionScenario[] = [
   },
 
   {
+    // The structured H3 prompt editor (fh94g76): the properties panel's
+    // structured mode with every box populated — the toggle, collapsible
+    // boxes, subject card, flow beats with time ranges, the <d> dialogue
+    // helper, and the compose preview. DOM truth asserted BEFORE capture.
+    id: 'structured-prompt-editor',
+    label: 'Structured H3 prompt editor — populated boxes on the properties panel',
+    run: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+      await page.goto('/?canvas=1')
+      await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+      await page.locator('[data-canvas-prompt]').fill('a night watchman closes the observatory')
+      await page.locator('[data-canvas-submit]').click()
+      await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+      const panel = page.locator('[data-canvas-properties]')
+      await expect(panel).toBeVisible()
+      // DOM truth at capture: the toggle flips to structured and EVERY box
+      // renders populated (asserted BEFORE the screenshot fires).
+      await panel.locator('[data-canvas-prompt-mode-toggle="structured"]').click()
+      const editor = panel.locator('[data-structured-editor]')
+      await expect(editor).toBeVisible()
+      await expect(panel.locator('[data-canvas-prompt-mode]')).toHaveAttribute('data-canvas-prompt-mode', 'structured')
+      await editor.locator('[data-structured-input="style"]').fill('Cinematic')
+      await editor.locator('[data-structured-input="concept"]').fill('a night watchman closes the observatory')
+      await editor.locator('[data-structured-subject-add]').click()
+      await editor.locator('[data-structured-subject-name]').last().fill('Idris')
+      await editor.locator('[data-structured-subject-appearance]').last().fill('a weathered keeper in a wool coat')
+      await editor.locator('[data-structured-subject-wardrobe]').last().fill('a heavy brass-buttoned coat')
+      await editor.locator('[data-structured-subject-features]').last().fill('a scar through one eyebrow')
+      await editor.locator('[data-structured-input="setting"]').fill('a mountain observatory under clearing storm clouds')
+      await editor.locator('[data-structured-input="lighting"]').fill('Cold moonlight through the dome slit')
+      await editor.locator('[data-structured-input="camera"]').fill('The camera tracks him at slow speed')
+      await editor.locator('[data-structured-flow-add]').click()
+      await editor.locator('[data-structured-flow-from]').last().fill('0')
+      await editor.locator('[data-structured-flow-to]').last().fill('3')
+      await editor.locator('[data-structured-flow-text]').last().fill('he locks each dome and pockets the keys')
+      await editor.locator('[data-structured-flow-add]').click()
+      await editor.locator('[data-structured-flow-from]').last().fill('3')
+      await editor.locator('[data-structured-flow-to]').last().fill('6')
+      await editor.locator('[data-structured-flow-text]').last().fill('he pauses at the rail as the clouds break')
+      await editor.locator('[data-structured-input="audio-soundscape"]').fill('Wind drops to a low moan; keys jingle once.')
+      await editor.locator('[data-structured-dialogue-line]').fill('Almost dawn.')
+      await editor.locator('[data-structured-dialogue-add]').click()
+      await panel.locator('[data-structured-preview] summary').click()
+      for (const box of ['concept', 'subjects', 'setting', 'lighting', 'style', 'camera', 'flow', 'audio']) {
+        await expect(editor.locator(`[data-structured-box="${box}"]`)).toBeVisible()
+      }
+      await expect(editor.locator('[data-structured-flow-row]')).toHaveCount(2)
+      await expect(editor.locator('[data-structured-subject]')).toHaveCount(1)
+      await expect(panel.locator('[data-structured-preview] pre')).toContainText('integrated_multimodal_description:')
+      await page.waitForTimeout(400)
+    },
+    after: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
+    },
+    checkpoints: [
+      {
+        id: 'structured-prompt-editor-top-1080p',
+        label: 'Structured editor — panel scrolled to TOP: the toggle + Concept/Subjects/Setting/Lighting boxes',
+        // The panel scrolls internally; this checkpoint captures the TOP —
+        // DOM truth: the scroller's offset is pinned at 0 before capture.
+        drive: async (page) => {
+          const panel = page.locator('[data-canvas-properties]')
+          await expect(panel).toBeVisible()
+          // The scroller is the Rnd PANEL ROOT itself (overflow-hidden but
+          // programmatically scrollable — the body's own overflow never
+          // engages because its grid row is unconstrained).
+          await panel.evaluate((element) => { element.scrollTop = 0 })
+          await expect.poll(async () => panel.evaluate((element) => element.scrollTop)).toBe(0)
+          await expect(page.locator('[data-canvas-prompt-mode]')).toHaveAttribute('data-canvas-prompt-mode', 'structured')
+          await expect(page.locator('[data-structured-box="concept"]')).toBeVisible()
+        },
+        rubric: [
+          SHELL_CONTEXT,
+          'GROUND TRUTH FOR THIS CAPTURE: the properties panel is scrolled to its TOP — the FIRST thing visible inside the panel body is the "Prompt // presets" label, IMMEDIATELY followed by the segmented freeform/structured toggle. If you can read the words "freeform" and "structured" as two adjoining small buttons near the top of the panel, the toggle clause PASSES — read carefully before judging it missing.',
+          'ONE seed tile on the canvas (dark rounded card, head/tail endpoint dots). The panel header carries the object title + a "text → video" mode pill.',
+          'The segmented toggle: "structured" is ACTIVE (accent-highlighted, brighter than the muted "freeform").',
+          'Below the toggle, the STRUCTURED EDITOR: a vertical stack of small bordered box sections, each with a collapsible header (a chevron icon, a bold label like Concept / Subjects / Setting / Lighting, a muted hint). In view from the top: Concept, Subjects, Setting, Lighting (and possibly Style).',
+          'Populated content visible: the Concept box\'s textarea contains watchman/observatory prose; the Subjects box shows ONE dashed subject card with a name input reading "Idris", an appearance textarea about a weathered keeper in a wool coat, and wardrobe/features inputs; the Setting and Lighting boxes show readable prose (lighting mentions moonlight); the Style box (its own section, when in view) reads "Cinematic".',
+          'Per-box assist buttons ("distill" / "enhance") appear DIMMED — no local LLM in tests, CORRECT. Chip rows (small rounded pills like "a busy city street", "golden hour") may render under the Setting/Lighting boxes.',
+          'Blessings: dense small text and muted sub-labels are the design language; dimmed disabled controls are intended offline states; boxes further down (Style, Camera, Flow, Audio, Engine, References…) sit BELOW the panel\'s internal fold — their absence from THIS capture is NOT a defect (a second checkpoint covers them); the bottom bar shows the generate surface.',
+          'Defects to flag: the toggle truly absent from the panel top, no box sections at all, empty textareas where populated content is described above, the subject card lacking its input fields, overlapping boxes rendering text unreadably, a pure-white or pure-black dead region.',
+        ].join(' '),
+      },
+      {
+        id: 'structured-prompt-editor-flow-1080p',
+        label: 'Structured editor — panel scrolled DOWN to the Flow box: the beat/shot list',
+        // The timeline made FIRST-CLASS: the Flow box pinned at the visible
+        // top. The Audio box may extend below the fold (the next checkpoint
+        // covers it) — two tall beat textareas + the flow header fill most of
+        // the ~680px panel viewport on their own.
+        drive: async (page) => {
+          const panel = page.locator('[data-canvas-properties]')
+          await expect(panel).toBeVisible()
+          // FORCE the scroll on the panel ROOT (the real scroller — see the
+          // top checkpoint's note); scrollIntoViewIfNeeded is a no-op for
+          // internally-clipped content.
+          await panel.locator('[data-structured-box="flow"]').evaluate((element) => element.scrollIntoView({ block: 'start' }))
+          await expect.poll(async () => panel.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+          await expect(page.locator('[data-structured-flow-row]').first()).toBeVisible()
+          await expect(page.locator('[data-structured-flow-row]')).toHaveCount(2)
+        },
+        rubric: [
+          SHELL_CONTEXT,
+          'GROUND TRUTH FOR THIS CAPTURE: the properties panel is scrolled DOWN so the FLOW box sits at the top of the visible panel area. The freeform/structured toggle and the Concept/Subjects boxes are ABOVE the fold — their absence from THIS capture is NOT a defect (the first checkpoint covers them).',
+          'The FLOW box (its header reads "Flow" with a hint about the timeline / beats with time ranges): TWO dashed beat rows, each with TWO small side-by-side number inputs separated by a "→" (a "0 → 3" pair and a "3 → 6" pair), a textarea of readable beat prose (locking domes and pocketing keys / pausing at the rail as the clouds break), and a compact horizontal cluster of tiny ↑ ↓ copy trash icon buttons at the row\'s edge. A "+ beat" pill and dimmed "distill"/"enhance" buttons sit under the rows (dimmed = no local LLM in tests, CORRECT).',
+          'The AUDIO box header may begin below the Flow rows; its sub-fields may be cut off by the panel fold — that is NOT a defect for THIS capture (the next checkpoint covers Audio fully).',
+          'Blessings: dense small text and muted sub-labels are the design language; the beat-row icon buttons render as a compact horizontal cluster (not a column — intended); sections below (Audio details, Engine, References…) may sit below the fold — absence is NOT a defect; the bottom bar shows the generate surface.',
+          'Defects to flag: no flow rows at all, flow rows missing their number inputs or the "→" separator, empty beat textareas, overlapping rows rendering text unreadably, a pure-white or pure-black dead region.',
+        ].join(' '),
+      },
+      {
+        id: 'structured-prompt-editor-audio-1080p',
+        label: 'Structured editor — panel scrolled to the Audio box + the compose preview',
+        // The audio box + the distill pill + the OPEN compose preview — the
+        // exact-string contract visible at the panel's foot.
+        drive: async (page) => {
+          const panel = page.locator('[data-canvas-properties]')
+          await expect(panel).toBeVisible()
+          await panel.locator('[data-structured-box="audio"]').evaluate((element) => element.scrollIntoView({ block: 'start' }))
+          await expect.poll(async () => panel.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+          await expect(page.locator('[data-structured-input="audio-soundscape"]')).toBeVisible()
+          await expect(page.locator('[data-structured-preview] pre')).toContainText('integrated_multimodal_description:')
+        },
+        rubric: [
+          SHELL_CONTEXT,
+          'GROUND TRUTH FOR THIS CAPTURE: the properties panel is scrolled DOWN so the AUDIO box sits at the top of the visible panel area. Everything above it (the toggle, Concept/Subjects/Setting/Lighting/Style/Camera/Flow) is ABOVE the fold — its absence from THIS capture is NOT a defect (earlier checkpoints cover it).',
+          'The AUDIO box: three labeled sub-fields — "soundscape" (a small uppercase label with a "→ overall_soundscape" note; its textarea is filled with readable prose about wind and keys), "music" (with a "→ non_diegetic_music" note), and "dialogue" whose textarea contains a readable <d>[English] Almost dawn.</d> fragment. Under the dialogue field: a compact helper row — a small language select, a one-line text input, and a "+ <d>" button. Chip pills (e.g. "room tone", "rain") may render under the soundscape field.',
+          'Below the Audio box: a right-aligned muted "distill into boxes…" pill (may be dimmed — CORRECT offline) and an OPEN "compose preview" block (dashed border; its summary line reads "compose preview — this exact string is submitted") showing monospace composed text that begins "integrated_multimodal_description: [Shot 1] Cinematic,".',
+          'Blessings: dense small text and muted sub-labels are the design language; dimmed controls are intended offline states; sections below (Engine, References, Identity, Guides, Takes) may sit below the fold — absence is NOT a defect; the bottom bar shows the generate surface.',
+          'Defects to flag: the Audio box missing any of its three labeled sub-fields, the soundscape or dialogue textareas empty, the helper row absent, the compose preview absent or empty, overlapping sections rendering text unreadably, a pure-white or pure-black dead region.',
+        ].join(' '),
+      },
+    ],
+  },
+
+  {
     // Canvas Phase 2 (task flyuh6h) — generation on canvas: an ingested media
     // object (real blob-served poster) + the fork edge + the properties panel
     // and contextual bar. Deterministic: fresh session, one drop, one fork.
