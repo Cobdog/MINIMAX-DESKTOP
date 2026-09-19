@@ -15,7 +15,7 @@
  * through the shared landing loop; nothing here re-implements queueing.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowLeft, ImagePlus, Layers, LoaderCircle, Lock, Send, Sparkles, Wand2 } from 'lucide-react'
+import { ArrowLeft, ImagePlus, Layers, LoaderCircle, Lock, Send, Settings, Sparkles, Wand2 } from 'lucide-react'
 import { useStudioSession } from '../hooks/useStudioSession'
 import { useGenerationQueue } from '../hooks/useGenerationQueue'
 import { useLivePreview } from '../lib/useLivePreview'
@@ -554,6 +554,10 @@ function WorkbenchSurface() {
     <div className="iw-root" data-iw-root data-iw-family={settings.family}>
       <header className="iw-header">
         <a className="iw-back" href={`/${token ? `?token=${encodeURIComponent(token)}` : ''}`} title="Back to the canvas"><ArrowLeft size={14} /> canvas</a>
+        {/* Settings reachability (review M2, g5x37k8 2026-09-19): this
+            surface has its own session host but no docked settings panel —
+            the deep-link opens the dock on the canvas in one click. */}
+        <a className="iw-back" data-iw-settings-link href={`/?settings=1${token ? `&token=${encodeURIComponent(token)}` : ''}`} title="Settings — opens docked on the canvas surface"><Settings size={14} /> settings</a>
         <strong>H3 Image Workbench</strong>
         <span className={`iw-engine ${sessionState.status.connected ? 'ok' : 'warn'}`} data-iw-engine={sessionState.status.connected ? 'on' : 'off'}>
           {sessionState.status.connected ? 'engine online' : 'engine offline'}

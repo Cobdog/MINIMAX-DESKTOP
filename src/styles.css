@@ -1362,7 +1362,7 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .device-strip { display: flex; align-items: center; gap: 9px; margin:0 17px var(--space-4); padding: 10px; border-radius: 8px; background:var(--color-surface-sunken); color: var(--accent); }
 .device-strip span { display: grid; }
 .device-strip strong { color: #d7dfda; font-size:var(--text-base); }
-.device-strip small { color: var(--muted-2); font-size:var(--text-sm); }
+.device-strip small { color: var(--muted-2); font-size:var(--text-base); }
 .model-path-list { display: grid; }
 .path-table { display: grid; }
 .path-row { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap:var(--space-3); align-items: center; min-width: 0; padding:var(--space-3) 17px; }
@@ -1370,32 +1370,36 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .path-kind { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--muted); }
 .path-kind > span { display: grid; min-width: 0; }
 .path-kind strong { color: #d8dfdb; font-size:var(--text-base); }
-.path-kind small { color: var(--muted-2); font-size:var(--text-xs); }
+.path-kind small { color: var(--muted-2); font-size:var(--text-base); }
 .path-input { display: flex; min-width: 0; }
 .path-kind > svg { flex: 0 0 auto; }
 .path-kind span { display: grid; min-width: 0; }
 .path-kind strong { color: #d9e0dc; font-size:var(--text-base); }
-.path-kind small { color: var(--muted-2); font-size:var(--text-xs); }
+.path-kind small { color: var(--muted-2); font-size:var(--text-base); }
 .path-input { display: flex; min-width: 0; }
 .path-input input { flex: 1; min-width: 0; height: 36px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px 0 0 8px; background:var(--color-surface-sunken); color: var(--text); font-size:var(--text-base); }
 .path-input button { display: grid; place-items: center; width: 38px; border: 1px solid var(--line); border-left: 0; border-radius: 0 8px 8px 0; background: var(--surface-3); color: var(--muted); cursor: pointer; }
 .path-input button:hover { color: var(--accent); }
-.file-count { justify-self: end; color: var(--muted-2); font-size:var(--text-sm); white-space: nowrap; }
+.file-count { justify-self: end; color: var(--muted-2); font-size:var(--text-base); white-space: nowrap; }
 .ollama-grid { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto; align-items: end; gap:var(--space-3); padding:var(--space-4) 17px var(--space-2); }
-.settings-note { margin: 0; padding:0 17px var(--space-4); color: var(--muted-2); font-size:var(--text-sm); line-height: 1.5; }
+/* Guidance-text floor (review M12, g5x37k8 2026-09-19): the settings
+   surface's onboarding prose ran at 7–9px (the token ramp stays dense
+   app-wide by design, but THESE notes are a first-time user's only
+   guidance). The floor for the settings surface is ≥10px. */
+.settings-note { margin: 0; padding:0 17px var(--space-4); color: var(--muted-2); font-size:var(--text-md); line-height: 1.5; }
 .generation-defaults-section { overflow: hidden; }
 .preset-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:var(--space-2); padding:14px 17px var(--space-1); }
 .preset-row button { display: grid; gap: 3px; min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--text); text-align: left; cursor: pointer; }
 .preset-row button:hover { border-color: var(--line-strong); background: var(--surface-3); }
 .preset-row button:focus-visible { outline: var(--focus-ring-width) solid var(--focus-ring-color); outline-offset: 2px; }
 .preset-row strong { font-size:var(--text-md); }
-.preset-row small { overflow: hidden; color: var(--muted-2); font-size:var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
+.preset-row small { overflow: hidden; color: var(--muted-2); font-size:var(--text-base); text-overflow: ellipsis; white-space: nowrap; }
 .generation-defaults-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:var(--space-3); padding: 14px 17px; }
 .settings-check { display: flex; align-items: center; gap: 9px; min-height: 38px; align-self: end; color: var(--text); cursor: pointer; }
 .settings-check input { width: 16px; height: 16px; flex: 0 0 auto; accent-color: var(--accent); }
 .settings-check span { display: grid; min-width: 0; }
 .settings-check strong { font-size:var(--text-base); }
-.settings-check small { color: var(--muted-2); font-size:var(--text-sm); line-height: 1.35; }
+.settings-check small { color: var(--muted-2); font-size:var(--text-base); line-height: 1.35; }
 .settings-warning { display: flex; align-items: center; gap: 7px; margin:0 17px var(--space-3); color: var(--warning); font-size:var(--text-base); }
 .h3-stack-list { display: grid; }
 .h3-stack-list > div { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap:var(--space-2); min-width: 0; padding: 10px 17px; border-bottom: 1px solid var(--line); }
@@ -1403,20 +1407,20 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .h3-stack-list > div.validated > span { color: var(--accent); }
 .h3-stack-list > div > div { display: grid; min-width: 0; }
 .h3-stack-list strong { font-size:var(--text-base); }
-.h3-stack-list small { overflow: hidden; color: var(--muted-2); font-size:var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
-.h3-stack-list em { color: var(--warning); font-size:var(--text-xs); font-style: normal; font-weight: 700; text-transform: uppercase; }
+.h3-stack-list small { overflow: hidden; color: var(--muted-2); font-size:var(--text-base); text-overflow: ellipsis; white-space: nowrap; }
+.h3-stack-list em { color: var(--warning); font-size:var(--text-base); font-style: normal; font-weight: 700; text-transform: uppercase; }
 .h3-stack-list .validated em { color: var(--accent); }
 .model-override-list { display: grid; }
 .model-override-family { border-bottom: 1px solid var(--line); padding: 10px 17px 12px; }
 .model-override-family:last-child { border-bottom: none; }
 .model-override-family-head { display: grid; margin-bottom: 6px; }
 .model-override-family-head strong { font-size: var(--text-base); }
-.model-override-family-head small { color: var(--muted-2); font-size: var(--text-xs); line-height: 1.4; margin-top: 2px; }
+.model-override-family-head small { color: var(--muted-2); font-size: var(--text-base); line-height: 1.4; margin-top: 2px; }
 .model-override-row { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: var(--space-3); align-items: center; min-width: 0; padding: 6px 0; }
 .model-override-slot { display: grid; min-width: 0; }
 .model-override-slot strong { font-size: var(--text-base); }
-.model-override-slot small { overflow: hidden; color: var(--muted-2); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
-.model-override-problem { grid-column: 1 / -1; margin: 0; font-size: var(--text-xs); line-height: 1.4; }
+.model-override-slot small { overflow: hidden; color: var(--muted-2); font-size: var(--text-base); text-overflow: ellipsis; white-space: nowrap; }
+.model-override-problem { grid-column: 1 / -1; margin: 0; font-size: var(--text-base); line-height: 1.4; }
 .model-override-row.refused .model-override-problem { color: var(--danger, var(--warning)); }
 .model-override-row.degraded .model-override-problem { color: var(--warning); }
 .diagnostic-action { display: flex; align-items: center; justify-content: space-between; gap:var(--space-4); padding: 13px 17px; }
@@ -1429,7 +1433,7 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .experimental-settings > summary::-webkit-details-marker { display: none; }
 .experimental-settings > summary > span { display: grid; flex: 1; min-width: 0; }
 .experimental-settings summary strong { color: var(--text); font-size:var(--text-base); }
-.experimental-settings summary small { color: var(--muted); font-size:var(--text-xs); }
+.experimental-settings summary small { color: var(--muted); font-size:var(--text-base); }
 .experimental-settings > summary > svg:last-child { transition: transform .15s ease; }
 .experimental-settings[open] > summary > svg:last-child { transform: rotate(180deg); }
 .experimental-settings .generation-defaults-grid { border-top:1px solid color-mix(in srgb, var(--warning) 15%, transparent); }
@@ -2442,7 +2446,7 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 /* Token-streaming preview: the hook paints plain text directly into this
    element (never React state), so it needs only containment + scroll. */
 .llm-stream-preview { margin-top: 2px; padding: 10px 11px; max-height: 180px; overflow-y: auto; border: 1px dashed color-mix(in srgb, var(--accent) 32%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--accent) 3%, transparent); color: var(--text); font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-.llm-test-result { display: flex; align-items: center; gap: 7px; margin: 0 17px; padding: 8px 10px; border-radius: 8px; font-size: var(--text-sm); }
+.llm-test-result { display: flex; align-items: center; gap: 7px; margin: 0 17px; padding: 8px 10px; border-radius: 8px; font-size: var(--text-base); }
 .llm-test-result.ok { color: var(--accent); background: var(--accent-soft); }
 .llm-test-result.fail { color: var(--danger); background: color-mix(in srgb, var(--danger) 7%, transparent); }
 /* Managed engine runtime (increment 1): the runtime's own log tail + the
@@ -2457,9 +2461,15 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .profile-env-row { margin: 0; }
 .profile-patch-consent { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 10px 17px 0; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--accent) 4%, transparent); }
 .node-pack-list { display: grid; gap: 9px; padding: 12px 17px 0; }
-.node-pack-row { display: flex; gap: 13px; align-items: flex-start; padding: 11px 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+/* Narrow-dock wrap (review M9, g5x37k8 2026-09-19): at the dock's 420px
+   minimum the actions column's min-content (source input + Fetch/Install/
+   Uninstall) is wider than the row — the row overflowed the clipped dock
+   body and the buttons were unreachable (elementFromPoint hit the page).
+   The row now wraps: actions drop below the description instead of past
+   the panel edge. */
+.node-pack-row { display: flex; flex-wrap: wrap; gap: 13px; align-items: flex-start; padding: 11px 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
 .node-pack-main { display: grid; gap: 5px; min-width: 0; flex: 1; }
-.node-pack-main small { color: var(--muted-2); font-size: var(--text-sm); line-height: 1.45; }
+.node-pack-main small { color: var(--muted-2); font-size: var(--text-base); line-height: 1.45; }
 .node-pack-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .node-pack-license { padding: 2px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
 .node-pack-license.warn { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
@@ -2483,7 +2493,7 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .fetch-group + .fetch-group { margin-top: 14px; }
 .fetch-group-heading { display: grid; gap: 2px; padding-top: 8px; }
 .fetch-group-heading strong { font-size: var(--text-sm); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
-.fetch-group-heading small { color: var(--muted-2); font-size: var(--text-xs); line-height: 1.4; }
+.fetch-group-heading small { color: var(--muted-2); font-size: var(--text-base); line-height: 1.4; }
 .fetch-group .node-pack-list { padding: 4px 0 0; }
 .fetch-row .fetch-state-placed, .fetch-row .fetch-state-present { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
 /* QOL wave (rrxlw2r): the deep-link landing — entries an unavailable canvas
@@ -2517,7 +2527,7 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 .llm-family-badge.family-gemma { background: color-mix(in srgb, #d97757 16%, transparent); color: #eb9a7d; }
 .llm-family-badge.family-qwen { background: color-mix(in srgb, #a855f7 16%, transparent); color: #c98af9; }
 .llm-family-badge.family-llama { background: color-mix(in srgb, #0ea5e9 16%, transparent); color: #67d3f8; }
-.llm-model-name { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); }
+.llm-model-name { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-base); }
 .llm-model-flags { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .llm-model-flags em { display: inline-flex; align-items: center; gap: 3px; font-style: normal; font-size: 11px; color: var(--muted-2); }
 .llm-model-flags em.llm-model-active { color: var(--accent); font-weight: 700; }
@@ -2538,7 +2548,7 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 
 /* Directory-path feedback (maintainer flag 2026-09-19): inline validation
    under Settings' directory fields. */
-.path-input .path-check, .field-group .path-check { margin: 4px 0 0; font-size: var(--text-2xs, 12px); display: flex; align-items: center; gap: 5px; }
+.path-input .path-check, .field-group .path-check { margin: 4px 0 0; font-size: var(--text-base, 12px); display: flex; align-items: center; gap: 5px; }
 .path-check.ok { color: var(--color-ok, #3fb950); }
 .path-check.missing, .path-check.file, .path-check.error { color: var(--warning, #d29922); }
 .path-check.checking { color: var(--muted-2, #888); }

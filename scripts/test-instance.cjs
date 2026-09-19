@@ -325,6 +325,23 @@ async function main() {
         const saved = await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...fresh, outputDirectory: keptOutput, inputDirectory: keptInput } }) })
         ok(saved.status === 200 && saved.body.settings.outputDirectory === keptOutput && saved.body.settings.inputDirectory === keptInput, 'absolute io directories round-trip untouched (migration-safe)')
 
+        // Trim-at-save parity (review M5, g5x37k8 2026-09-19): the inline
+        // PathCheckNote trims a pasted path before stat-checking it; the save
+        // path must trim the SAME fields or a trailing newline validates
+        // green and then scans nothing. Failing-without-it: the round-trip
+        // kept the raw whitespace (and a leading-space path was refused as
+        // "relative" while the note called the trimmed form found).
+        const root = path.join(home, 'models-root')
+        const paddedPaths = await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: {
+          ...fresh,
+          modelRoot: `${root}\n`,
+          paths: { ...fresh.paths, loras: `${path.join(root, 'loras')}\n`, vae: `  ${path.join(root, 'vae')}  ` },
+        } }) })
+        ok(paddedPaths.status === 200, `padded model roots save instead of being misread as relative (got ${paddedPaths.status}: ${JSON.stringify(paddedPaths.body).slice(0, 160)})`)
+        ok(paddedPaths.body.settings.modelRoot === root, `modelRoot round-trips trimmed (got ${JSON.stringify(paddedPaths.body.settings.modelRoot)})`)
+        ok(paddedPaths.body.settings.paths.loras === path.join(root, 'loras'), `paths.loras round-trips trimmed — trailing newline healed (got ${JSON.stringify(paddedPaths.body.settings.paths.loras)})`)
+        ok(paddedPaths.body.settings.paths.vae === path.join(root, 'vae'), `paths.vae round-trips trimmed — padded spaces healed (got ${JSON.stringify(paddedPaths.body.settings.paths.vae)})`)
+
         // Relative io dirs are refused at the write boundary.
         const relativeIo = await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...fresh, inputDirectory: 'relative/input' } }) })
         ok(relativeIo.status === 400 && /inputDirectory must be an absolute path/.test(relativeIo.body.error), 'a relative inputDirectory is refused loudly')
