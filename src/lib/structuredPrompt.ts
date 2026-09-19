@@ -13,6 +13,7 @@
  * the VM test harness loads it directly, like camera/derive.
  */
 import type { GenerationMode } from '../types'
+import type { CameraPathDoc } from './cameraPath'
 
 // ---------------------------------------------------------------------------
 // The draft model
@@ -58,6 +59,11 @@ export type StructuredPromptDraft = {
   camera: string
   flow: StructuredFlowRow[]
   audio: StructuredAudioBox
+  /** The camera-path editor's authored document (y93rk61) — the exact
+   *  round-trip state behind the compiled camera block in `camera`. Inert
+   *  on its own: compose reads only `camera` (the compiled text); the doc
+   *  deep-validates at the editor boundary (readCameraPathDoc). */
+  cameraPath?: CameraPathDoc | null
 }
 
 export type StructuredBoxId = 'concept' | 'subjects' | 'setting' | 'lighting' | 'style' | 'camera' | 'flow' | 'audio'
@@ -86,6 +92,7 @@ export function emptyStructuredDraft(): StructuredPromptDraft {
     concept: '', subjects: [], setting: '', lighting: '', style: '', camera: '',
     flow: [],
     audio: { soundscape: '', music: '', dialogue: '' },
+    cameraPath: null,
   }
 }
 
@@ -360,6 +367,7 @@ export function mergeStructuredDraft(current: StructuredPromptDraft, incoming: S
       music: joinText(current.audio.music, incoming.audio.music),
       dialogue: joinText(current.audio.dialogue, incoming.audio.dialogue),
     },
+    cameraPath: current.cameraPath ?? incoming.cameraPath ?? null,
   }
 }
 
@@ -403,6 +411,9 @@ export function readStructuredDraft(raw: unknown): StructuredPromptDraft | null 
     camera: str(value.camera),
     flow: Array.isArray(value.flow) ? value.flow.map(row).filter((entry): entry is StructuredFlowRow => entry !== null) : [],
     audio: { soundscape: str(audio.soundscape), music: str(audio.music), dialogue: str(audio.dialogue) },
+    // Shallow preserve only (an object, not an array): the doc is inert until
+    // the camera editor opens, where readCameraPathDoc deep-validates it.
+    cameraPath: value.cameraPath && typeof value.cameraPath === 'object' && !Array.isArray(value.cameraPath) ? (value.cameraPath as CameraPathDoc) : null,
   }
 }
 
