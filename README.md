@@ -39,7 +39,7 @@ failure; a failed `build` skips only its dependents (smoke/e2e/vision).
 
 Order: `typecheck` → `lint` → `license:audit` → `test` → `test:registry` →
 `test:storage` → `test:realtime` → `test:filmstrip` → `test:llm` →
-`test:engine` → `test:runtime` → `test:fetcher` → `test:lora-form` →
+`test:engine` → `test:runtime` → `test:fetcher` → `test:instance` → `test:lora-form` →
 `test:poserig` → `test:camera` → `test:datasets` →
 `build` → `smoke:server` →
 e2e (Playwright) → vision-capture (Playwright). `pnpm test:all` is the same
@@ -49,7 +49,14 @@ never-vendor-what-we-can't-ship registry invariant (see
 [docs/LICENSES.md](docs/LICENSES.md)). `test:fetcher` covers the local-first
 fetcher with the transport mocked throughout — consent gating, catalog
 integrity, sha/size verification, pin stamping, link placement and the
-fetch routes; no test ever touches the network. `test:lora-form` runs the
+fetch routes; no test ever touches the network. `test:instance` covers the
+external-instance integration — the instance-sourced model inventory
+(object_info loader enums plus the /models endpoints, merged with local
+roots and tagged by source), the external custom-nodes install target (path
+construction, foreign-folder refusal, live pack detection from the
+instance's own node list), the app-relative input/output defaults
+(unset-vs-set through the real settings pipeline), and the routes against a
+local fake engine. `test:lora-form` runs the
 first-party form-adapter node's python suite (the full-width→pruned adaln
 projection: centered-fit math with both traps as tests, the kijai golden,
 form detection; needs `python3` + `numpy` — skips loudly without python,
