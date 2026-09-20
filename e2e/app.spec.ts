@@ -765,7 +765,7 @@ test('external instance: instance-sourced models, live pack chips, install into 
     await expect(radianceRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'present — not studio-managed', { timeout: 15_000 })
     await expect(radianceRow.getByRole('button', { name: 'Fetch…' })).toHaveCount(0)
     await expect(radianceRow.getByRole('button', { name: /^Install$/ })).toHaveCount(0)
-    expect(fs.readFileSync(join(externalDir, 'radiance', 'user-file.py'), 'utf8')).toBe('# theirs\n')
+    expect(fs.readFileSync(join(externalDir, 'comfyui-minimax-h3-audio-T8', 'user-file.py'), 'utf8')).toBe('# theirs\n')
 
     expect(problems.filter((entry) => !environmental(entry))).toEqual([])
   } finally {
