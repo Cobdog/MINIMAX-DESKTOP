@@ -3,6 +3,13 @@
 **Status:** decision input, researched 2026-09-14 (agent report, lead-reviewed). Full
 citation set in the agent's report (Flux 0rtwaj4 comment); headlines here.
 
+> **ADDENDUM 2026-09-20 — VERDICT SUPERSEDED.** The maintainer's Phase-0 verdict
+> overrules this document's KEEP-UTILITIES-ONLY outcome: **LTX is entirely removed**
+> (engines, utility graphs, packs, surfaces — PR #33, restore map in
+> [../audit/removals-phase0.md](../audit/removals-phase0.md)). Nothing here
+> survives into the current app; git history is the archive. The head-to-head
+> research below remains accurate as ecosystem record.
+
 ## Verdict: KEEP-UTILITIES-ONLY
 
 Retire the general LTX-2.5 generation workspace; keep the LTX engine path as

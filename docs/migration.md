@@ -1,6 +1,11 @@
 # Web Migration Design — Stripping Electron
 
 > Status: **COMPLETE (2026-09-10).** Phases A (stabilization), B1 (API), B2 (bridge), C (extraction), and D (decommission) all landed. This document is now the record of what was decided and why; the current architecture lives in [architecture.md](architecture.md).
+>
+> **Dated note (2026-09-20):** historical record — surfaces it mentions that no
+> longer exist: `MobileApp` (`?mobile=1`), Z-Image machinery, LTX, the asset
+> studios. All removed by Phase 0 (PR #33; restore map in
+> [audit/removals-phase0.md](audit/removals-phase0.md)).
 
 ## Goal
 

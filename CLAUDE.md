@@ -1,7 +1,7 @@
 <!-- FLUX:START -->
 ## Flux Task Management
 
-This repo is tracked by Flux. Project: **MINIMAX-DESKTOP** (`r2lnrfw`). All work MUST belong to exactly one project_id (`r2lnrfw`); do NOT guess or invent ids. Track all work as tasks; update status as you progress; close tasks immediately when complete — through the done-gate (`complete_task`) with an evidence summary citing commit(s)/CI/artifacts.
+This repo is tracked by Flux. Project: **Monoka-dev** (`r2lnrfw`) — renamed 2026-09-20; the id is unchanged and the LOCAL FOLDER deliberately stays `MINIMAX-DESKTOP` (renaming it breaks Claude Code session history — never "fix" this). All work MUST belong to exactly one project_id (`r2lnrfw`); do NOT guess or invent ids. Track all work as tasks; update status as you progress; close tasks immediately when complete — through the done-gate (`complete_task`) with an evidence summary citing commit(s)/CI/artifacts.
 
 - **Agent attribution (required):** in EVERY `mcp__flux__*` call, pass `agent_name="<your agent_id>"` — the SubagentStart identity hook (`~/.claude/hooks/flux-identity.sh`) injects it at launch; copy that exact value. Call `resume(project_id="r2lnrfw", agent_name?)` at the start of every session: active/interrupted sessions, focus task, stale/blocked tasks, **unacknowledged directives**, suggested next work.
 - Task mentions are always "Task Name (id)". Board columns/types/tags are config-driven — `get_project_schema(project_id="r2lnrfw")` on a cold start. Full Flux conventions: [docs/agent/conventions.md](docs/agent/conventions.md).

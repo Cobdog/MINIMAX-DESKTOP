@@ -13,6 +13,12 @@ Written against: the LOCK register in `docs/research/ui-pre-brainstorm.md`,
 (Flux o0xw49r) is co-designed with this spec. *(Conformance-audit note
 2026-09-19, u7rxi2e: the pre-blessing DRAFT status block that previously sat
 here was removed as a leftover — the BLESSED block above is authoritative.)*
+*(Phase-0 note 2026-09-20: the removals wave landed after this spec's phase
+addenda — the five asset studios, `StudiosDock`, and the `?mobile=1` companion
+are REMOVED (docs/audit/removals-phase0.md), superseding the "Phase 6 macro
+work" holding-pen plan; the asset-library spine they rode is kept pending the
+remediation plan's D1 ratification. The remediation program's wave-3 redesigns
+will supersede further sections — see docs/audit/remediation-plan.md.)*
 
 ---
 

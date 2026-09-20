@@ -1,7 +1,8 @@
 # Roadmap — state of play
 
 > **Derived from Flux (project `r2lnrfw`); refreshed 2026-09-20 by the doc-hygiene
-> fork at the maintainer's pre-compaction request.** Flux is the source of truth;
+> fork at the maintainer's pre-compaction request, then again post-merge by the
+> session-closing cohesion check (881p9ik).** Flux is the source of truth;
 > this file is the human-readable state of play — if it disagrees with the board,
 > the board wins. Task ids are Flux ids.
 
@@ -13,13 +14,26 @@ fail." The response is a full audit + remediation program, with the maintainer's
 stated stakes: remediate, or the project gets scrapped and restarted fresh.
 
 **Where it stands**: three section-assigned audits complete (UX/IA, generation
-pipeline + realtime, external-instance + node friction); the consolidated
-remediation plan landed (PR #31, `docs/audit/remediation-plan.md` — 36 deduplicated
-findings, four waves, six `[REC]` decision points awaiting the maintainer).
+pipeline + realtime, external-instance + node friction) plus the adversarial
+direction audit (cygbkeq, report on its task record); the consolidated remediation
+plan landed (PR #31, `docs/audit/remediation-plan.md` — 36 deduplicated findings,
+four waves, six `[REC]` decision points awaiting the maintainer). **The critical-path
+fixes and Phase 0 removals have MERGED**: PR #32 (tmz8vh7 — the T=1 wedge fixed at
+both seams) and PR #33 (z8bc21p — LTX + Z-Image + original-build cruft out, −12,953
+lines, manifest at `docs/audit/removals-phase0.md`). Main is at `665ed96`; 33 PRs
+merged lifetime. **The maintainer is reading the direction-audit report and ruling
+on the plan's decision points — no wave dispatches until that approval lands.**
 
-**In flight**: critical-path fixes (tmz8vh7 — the T=1 misroute on video generation +
-the node-sidebar scroll) and Phase 0 removals (z8bc21p — LTX + Z-Image fully
-removed, the original-build cruft survey, the manual model-location surface dies).
+**The rename, locked (2026-09-20)**: the app is **MONOKA** and the aesthetic is
+**shibui** (sumi base, washi neutrals, vermillion seal-accent, wood-warm chrome;
+font/icon criteria on the epic) — directives `55857485` + `2561df9e` on 4lphxv8.
+The GitHub repo is now **Cobdog/Monoka-dev** (origin repointed; the LOCAL FOLDER
+deliberately stays MINIMAX-DESKTOP — renaming it breaks Claude Code). The
+public-repo strategy (directive `262db65f`): Cobdog/Monoka exists PRIVATE as a
+stub; Monoka-dev stays the messy working repo and curates into it later. The full
+app/doc/git rename sweep executes as ONE atomic pass during remediation (wave 2–3
+timing) — the in-app and catalog URLs still naming `Cobdog/MINIMAX-DESKTOP`
+(they redirect) are that sweep's scope, not staleness to fix piecemeal.
 
 **The four waves** (the plan carries the detail):
 - **W1 — unblock rendering**: the maintainer's exact first-session journey as the
@@ -103,10 +117,20 @@ realtime core, landing machinery) with the debt concentrated at the seams.*
 - **Override layer completed** (rq0lsax PR #28 + epdvxd4 PR #30): instance-source
   form arm, the three checkpoint lanes (fl2va/ref2va/merged), the VAE trio
   (video/audio/image) + the workflow-population audit as a standing test.
+- **Critical-path fixes** (tmz8vh7, PR #32): the T=1 wedge — legacy VAE picks
+  route by decoder class at both seams, the server heals stored wedges at load,
+  the inverse image/reference misroute refuses honestly, the remaining three
+  dock scroll locks fixed.
+- **Phase 0 removals** (z8bc21p, PR #33): LTX and Z-Image fully removed; the
+  mobile companion, the five asset studios, and 447 dead CSS class families out
+  (styles.css 274 KB → 60 KB); the manual model-path surface cut (read-only
+  inventory + refresh); manifest with restore paths at
+  `docs/audit/removals-phase0.md`; e2e 101 passed on the merged tree.
 
 ## Queued (the plan's waves carry the real order)
 
-- **Wave 1 dispatch** — after the in-flight fixes/removals land.
+- **Wave 1 dispatch** — after the maintainer approves the plan (the fixes and
+  removals it waited on have landed).
 - **Control Center + Workbench spec rounds** — post-foundation, full design
   treatment (brainstorm → spec → blind audit → blessing).
 - Pre-program queue (re-scoped by the plan where relevant): the training sidecar

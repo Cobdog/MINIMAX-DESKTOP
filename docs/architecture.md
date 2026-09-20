@@ -1,6 +1,15 @@
 # Architecture
 
 > Contributor-oriented overview of MiniMax Studio as a web application. For the migration history, see [migration.md](migration.md). Last verified 2026-09-14 (managed runtime + launch profiles/vendoring/patch tier, the local-first fetcher, optimization registry, LLM layer, QA gate); canvas note added 2026-09-16; renderer/API/e2e sections corrected 2026-09-19 after the Phase-5 deletion wave + the surface registry (conformance audit u7rxi2e — they had still described the pre-canvas shell).
+>
+> **Dated note (2026-09-20, Phase 0 removals — PR #33):** LTX (engines, utility
+> graphs, the upscale registry entry and graph ids 60–70), Z-Image, the `?mobile=1`
+> companion (`MobileApp` + its `/api/lan/characters` sync), and the five asset
+> studios + `StudiosDock` are REMOVED; the manual model-path settings surface is
+> cut (registry-only, read-only inventory). Sections below still describing those
+> are pre-removal and awaiting the remediation doc refresh. Restore map:
+> [audit/removals-phase0.md](audit/removals-phase0.md); the four-wave rebuild:
+> [audit/remediation-plan.md](audit/remediation-plan.md).
 
 ## What this is
 

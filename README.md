@@ -181,6 +181,14 @@ separate: `pnpm typecheck`.
 
 ## Capabilities
 
+> **Dated note (2026-09-20, Phase 0 removals — PR #33):** the sections below were
+> written before the removals and still describe surfaces that no longer exist: the
+> `?mobile=1` touch companion, the five asset studios (Character/Hair/Wardrobe/
+> Accessories/Location), the LTX engines and utility tools, and Z-Image. What remains
+> current: the canvas, the dataset manager, the H3 image workbench, H3 video/music
+> generation, ACE-Step audio, the prompt library, and the LLM layer. Restore map:
+> [docs/audit/removals-phase0.md](docs/audit/removals-phase0.md).
+
 **Surfaces.** The app boots to the **canvas** — one infinite surface per project
 where media, generations, and plans live as first-class objects, every edit an op
 in a stack, takes compared on a strip, and a timeline projection over the chain
@@ -244,14 +252,18 @@ Both engine addresses, every model directory, and the ComfyUI output directory c
 
 ## Workflow compatibility
 
-> **REMEDIATION IN PROGRESS (2026-09-20, epic 4lphx8):** the foundation is under a
+> **REMEDIATION IN PROGRESS (2026-09-20, epic 4lphxv8):** the foundation is under a
 > full audit-and-remediation program — see [docs/audit/remediation-plan.md](docs/audit/remediation-plan.md).
-> **LTX and Z-Image are being fully removed** (Phase 0, in flight): any LTX/Z-Image
-> capability text below is historical pending that landing. The settled architecture:
-> models and nodes are discovered exclusively through the connected ComfyUI instance's
-> registry (instance-invisible = nonexistent); the destination is a workshop of three
-> surfaces — wiring (canvas), control (control center, post-foundation), creation
-> (workbench, post-foundation).
+> **Phase 0 removals have LANDED** (PR #33, 2026-09-20): LTX and Z-Image are fully
+> removed, along with the five asset studios, the `?mobile=1` companion, and the manual
+> model-path surface — see [docs/audit/removals-phase0.md](docs/audit/removals-phase0.md)
+> for what died and the restore paths. Any capability text in this README that still
+> names those surfaces (above and below this note) is pre-removal historical pending
+> the remediation doc refresh. The settled architecture: models and nodes are
+> discovered exclusively through the connected ComfyUI instance's registry
+> (instance-invisible = nonexistent); the destination is a workshop of three surfaces —
+> wiring (canvas), control (control center, post-foundation), creation (workbench,
+> post-foundation).
 
 MiniMax generation is built from ComfyUI's official T2V/I2V/Ref2V core graph: native H3 conditioning, `RandomNoise`, `BasicGuider`, `res_multistep`, `simple`, joint video/audio latent decoding, and `CreateVideo`/`SaveVideo`. The app prefers the official pruned INT8 ConvRot diffusion safetensors, NVFP4-AWQ text encoder, FP16 video VAE, and FP32 audio VAE when multiple matching files exist. Live preview and LTX/RTX upscaling are separate output branches and do not alter the base H3 sampling path.
 
@@ -334,4 +346,4 @@ Reference downloads and node documentation are maintained by [Comfy-Org's ACE-St
 
 **GNU AGPLv3** — see [LICENSE](LICENSE). Copyleft in both directions: use it, host it, build on it, but share your source. The fork lineage and licensing rationale are documented in [docs/PROVENANCE.md](docs/PROVENANCE.md), and the complete third-party inventory (dependencies, vendored packs, user-fetch components, model-weight licenses) lives in [docs/LICENSES.md](docs/LICENSES.md). Content-neutral by design: no filters, no gating, no telemetry — what people create is their business, not the tool's.
 
-**Source offer (AGPL §13).** The server serves the web app over HTTP, so network-interaction terms apply. The canonical source is this repository — <https://github.com/Cobdog/MINIMAX-DESKTOP>. If you run a modified copy for others over a network, offer them your Corresponding Source (a link to your fork satisfies this); the in-app notice in Settings → License & source carries the same link.
+**Source offer (AGPL §13).** The server serves the web app over HTTP, so network-interaction terms apply. The canonical source is this repository — <https://github.com/Cobdog/Monoka-dev> (repo renamed 2026-09-20; the previous `Cobdog/MINIMAX-DESKTOP` URL redirects). If you run a modified copy for others over a network, offer them your Corresponding Source (a link to your fork satisfies this); the in-app notice in Settings → License & source carries the same link.
