@@ -1,6 +1,3 @@
-#!/usr/bin/env node
-'use strict'
-
 /** Form-adapter suite (task k271ykk) — the LoRA form-compatibility node.
  *
  * Two halves:
@@ -12,7 +9,7 @@
  *      fixture. python3 missing → loud SKIP; python3 present but numpy
  *      missing → FAIL with the install hint (the trap test is the point of
  *      the task — it must never silently not run on a capable machine).
- *  (b) SERVER SIDE (against dist-server, like test-fetcher/test-runtime):
+ *  (b) SERVER SIDE (against dist-server, like the fetcher/runtime suites):
  *      - server/modelForms.ts: safetensors header reads + the full
  *        detection matrix (model curve/full/non-H3 × lora full-width/curve/
  *        adaln-free/prefixed/diffusers), compat verdicts, guidance text;
@@ -23,14 +20,25 @@
  *        flag, and the fetch engine's LOCAL INSTALL path — a transport that
  *        THROWS if touched proves the network is never used for this entry;
  *      - scan-time tagging: h3FormForScannedFile over synthetic checkpoints.
- */
+ *
+ * Vitest port (task z7ogmig, 2026-09-20) of scripts/test-lora-form.cjs:
+ * assertion bodies carry over verbatim; the python SKIP/FAIL guards became
+ * conditional test registration (the numpy-missing case stays a hard FAIL);
+ * the linear main() became one test per section. */
+import { test } from 'vitest'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+
+const require = createRequire(import.meta.url)
+const __dirname = require('node:path').dirname(fileURLToPath(import.meta.url))
+
 const { spawnSync } = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const assert = require('node:assert/strict')
 
-const REPO = path.join(__dirname, '..')
+const REPO = path.resolve(__dirname, '..')
 const NODE_PKG = path.join(REPO, 'custom-nodes', 'minimax-lora-form-adapter')
 
 let passed = 0
@@ -43,26 +51,30 @@ function ok(condition, label) {
 // ---------------------------------------------------------------------------
 // (a) Python bridge — the node's own suite
 // ---------------------------------------------------------------------------
-console.log('lora-form: python node suite (math + traps + kijai golden)')
-{
-  const python = process.platform === 'win32' ? 'python' : 'python3'
-  const probe = spawnSync(python, ['-c', 'import numpy'], { encoding: 'utf8' })
-  if (probe.error && probe.error.code === 'ENOENT') {
-    console.log(`  SKIP - ${python} not found on PATH; the node's math/golden suite did not run here (CI installs python3+numpy and runs it in full)`)
-  } else if (probe.status !== 0) {
-    console.error(`  FAIL - ${python} is available but numpy is not — install it (pip install numpy) so the projection-math suite actually runs`)
-    process.exit(1)
-  } else {
-    const run = spawnSync(python, ['-m', 'unittest', 'discover', '-s', path.join(NODE_PKG, 'tests')], {
-      cwd: NODE_PKG,
-      encoding: 'utf8',
-      timeout: 120_000,
-    })
-    const tail = (run.stdout + run.stderr).trim().split('\n').filter(Boolean).slice(-3).join(' | ')
-    ok(run.status === 0, `the node's unittest suite passes (${tail})`)
-    ok(/Ran \d+ tests/.test(run.stdout + run.stderr), 'unittest reported a test count')
-  }
+const PYTHON = process.platform === 'win32' ? 'python' : 'python3'
+const PYTHON_PROBE = spawnSync(PYTHON, ['-c', 'import numpy'], { encoding: 'utf8' })
+const PYTHON_MISSING = Boolean(PYTHON_PROBE.error && PYTHON_PROBE.error.code === 'ENOENT')
+const PYTHON_WITHOUT_NUMPY = !PYTHON_MISSING && PYTHON_PROBE.status !== 0
+if (PYTHON_MISSING) {
+  console.log(`  SKIP - ${PYTHON} not found on PATH; the node's math/golden suite did not run here (CI installs python3+numpy and runs it in full)`)
 }
+
+test('(a) python bridge — the node package\'s own unittest suite (math + traps + kijai golden)', () => {
+  if (PYTHON_MISSING) return
+  if (PYTHON_WITHOUT_NUMPY) {
+    console.error(`  FAIL - ${PYTHON} is available but numpy is not — install it (pip install numpy) so the projection-math suite actually runs`)
+    assert.ok(false, `${PYTHON} is available but numpy is not — install it (pip install numpy) so the projection-math suite actually runs`)
+  }
+  console.log('lora-form: python node suite (math + traps + kijai golden)')
+  const run = spawnSync(PYTHON, ['-m', 'unittest', 'discover', '-s', path.join(NODE_PKG, 'tests')], {
+    cwd: NODE_PKG,
+    encoding: 'utf8',
+    timeout: 120_000,
+  })
+  const tail = (run.stdout + run.stderr).trim().split('\n').filter(Boolean).slice(-3).join(' | ')
+  ok(run.status === 0, `the node's unittest suite passes (${tail})`)
+  ok(/Ran \d+ tests/.test(run.stdout + run.stderr), 'unittest reported a test count')
+})
 
 // ---------------------------------------------------------------------------
 // Shared helpers for the server-side halves
@@ -107,14 +119,8 @@ function makeCheckout() {
 }
 
 // ---------------------------------------------------------------------------
-// Server-side halves (async)
-// ---------------------------------------------------------------------------
-async function main() {
-// ---------------------------------------------------------------------------
-// (b1) Detection matrix — model side, from header shapes (never names)
-// ---------------------------------------------------------------------------
-console.log('lora-form: model-side detection matrix')
-{
+test('(b1) model-side detection matrix — from header shapes, never names', async () => {
+  console.log('lora-form: model-side detection matrix')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lora-form-models-'))
   const curve = path.join(dir, 'some-random-name.safetensors')
   writeSafetensors(curve, {
@@ -143,13 +149,11 @@ console.log('lora-form: model-side detection matrix')
   ok(detectH3ModelForm(await readSafetensorsHeader(hybrid)) === 'curve', 'the hybrid class (table present, no name signal) ⇒ curve')
   ok(detectH3ModelForm(await readSafetensorsHeader(other)) === null, 'non-H3 shapes ⇒ null')
   ok((await readSafetensorsHeader(junk)) === null && detectH3ModelForm(null) === null, 'junk files degrade to null, never throw')
-}
+})
 
 // ---------------------------------------------------------------------------
-// (b2) Detection matrix — LoRA side + compat verdicts + guidance
-// ---------------------------------------------------------------------------
-console.log('lora-form: lora-side detection + compat + guidance')
-{
+test('(b2) lora-side detection matrix + compat verdicts + guidance', async () => {
+  console.log('lora-form: lora-side detection + compat + guidance')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lora-form-loras-'))
   const fullWidth = path.join(dir, 'full-width.safetensors')
   writeSafetensors(fullWidth, {
@@ -204,13 +208,11 @@ console.log('lora-form: lora-side detection + compat + guidance')
   ok((await h3FormForScannedFile(fullWidth, 'diffusion_models')) === undefined, 'a LoRA-shaped header is not a diffusion-model form')
   ok((await h3FormForScannedFile(junkPath, 'loras')) === undefined, 'unreadable files carry no tag')
   ok((await h3FormForScannedFile(path.join(dir, 'plain.pt'), 'loras')) === undefined, 'non-safetensors files carry no tag')
-}
+})
 
 // ---------------------------------------------------------------------------
-// (c) First-party node pack: registry + install from custom-nodes
-// ---------------------------------------------------------------------------
-console.log('lora-form: first-party node pack (registry + install)')
-{
+test('(c) first-party node pack: registry + install from custom-nodes', async () => {
+  console.log('lora-form: first-party node pack (registry + install)')
   const pack = findNodePack('lora-form-adapter')
   ok(pack !== null, 'the lora-form-adapter registry entry exists')
   ok(pack.installMode === 'first-party' && pack.licenseSpdx === 'MIT', 'first-party mode, MIT (our own code)')
@@ -238,13 +240,11 @@ console.log('lora-form: first-party node pack (registry + install)')
   const removed = await uninstallNodePack(pack, { kind: 'checkout', checkout })
   ok(removed.removed && !fs.existsSync(installedDir), 'uninstall deletes the folder')
   ok(ENGINE_NODE_PACKS.filter((entry) => entry.installMode === 'first-party').every((entry) => entry.licenseSpdx === 'MIT' || entry.licenseSpdx === 'Apache-2.0'), 'first-party packs stay permissive (audit discipline mirrored)')
-}
+})
 
 // ---------------------------------------------------------------------------
-// (d) Fetch-catalog entry + the local-install path (transport never touched)
-// ---------------------------------------------------------------------------
-console.log('lora-form: fetch catalog entry + consent-gated LOCAL install')
-{
+test('(d) fetch-catalog entry + the local-install path (transport never touched)', async () => {
+  console.log('lora-form: fetch catalog entry + consent-gated LOCAL install')
   const entry = findFetchEntry('pack:lora-form-adapter')
   ok(entry !== null && entry.localInstall === true, 'the catalog entry exists and is marked localInstall')
   const pack = findNodePack('lora-form-adapter')
@@ -298,12 +298,5 @@ console.log('lora-form: fetch catalog entry + consent-gated LOCAL install')
   ok(!events.some((event) => String(event.kind).startsWith('failure:')), `no failures logged during the local install (${events.map((event) => event.kind).join(', ')})`)
   const record = JSON.parse(fs.readFileSync(path.join(home, 'fetcher', 'fetch-state.json'), 'utf8')).installs['pack:lora-form-adapter']
   ok(record && /first-party payload/.test(record.sourceLabel), `the install record names the local payload (${record?.sourceLabel})`)
-}
-
-console.log(`\nPASS: lora-form adapter suite (${passed} assertions) — python node suite (math fidelity incl. the centered/uncentered + bias traps, kijai golden at cos 0.9968/1.000000, detection matrix, key hygiene), server-side detection matrix from header shapes, compat verdicts + guidance, first-party pack install from custom-nodes, and the consent-gated local-install fetch path with a never-touch transport`)
-}
-
-main().catch((error) => {
-  console.error(`\nFAIL: lora-form adapter suite — ${error instanceof Error ? error.stack : String(error)}`)
-  process.exit(1)
+  console.log(`\nPASS: lora-form adapter suite (${passed} assertions) — python node suite (math fidelity incl. the centered/uncentered + bias traps, kijai golden at cos 0.9968/1.000000, detection matrix, key hygiene), server-side detection matrix from header shapes, compat verdicts + guidance, first-party pack install from custom-nodes, and the consent-gated local-install fetch path with a never-touch transport`)
 })

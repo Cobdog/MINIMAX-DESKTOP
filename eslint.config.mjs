@@ -11,7 +11,11 @@ export default tseslint.config(
   { ignores: ['dist', 'dist-electron', 'dist-server', 'release', 'node_modules', '.claude/worktrees'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
-  { files: ['scripts/**/*.cjs'], languageOptions: { globals: { ...globals.node, WebSocket: 'readonly', fetch: 'readonly' } }, rules: { '@typescript-eslint/no-require-imports': 'off' } },
+  { files: ['scripts/**/*.cjs', 'tests/lib/**/*.cjs'], languageOptions: { globals: { ...globals.node, WebSocket: 'readonly', fetch: 'readonly' } }, rules: { '@typescript-eslint/no-require-imports': 'off' } },
+  // Vitest suites (z7ogmig, 2026-09-20): ESM files whose ported cjs bodies
+  // keep their require() lines through a createRequire shim — same node
+  // globals as the scripts/*.cjs suites.
+  { files: ['tests/**/*.test.js'], languageOptions: { globals: { ...globals.node, WebSocket: 'readonly', fetch: 'readonly' } }, rules: { '@typescript-eslint/no-require-imports': 'off' } },
   // Perf-profile harness (task eebh7ah): node .mjs modules with top-level
   // await; same node globals as the .cjs suites. harness.js is the IN-PAGE
   // browser instrument (installed via navigate initScript) — browser globals.

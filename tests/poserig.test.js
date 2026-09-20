@@ -27,12 +27,22 @@
 //   (n) AP-10K quadruped — 17-keypoint layout, AnimalPose render ops
 //       (17 lines, no dots), estimator-dict export, rig invariants
 //   (o) goldens — canonical preset fingerprints + the AP-10K rest pose vs
-//       the committed fixture (UPDATE=1 node scripts/test-poserig.cjs
-//       regenerates)
+//       the committed fixture (UPDATE=1 pnpm test:poserig regenerates)
+//
+// Vitest port (task z7ogmig, 2026-09-20) of scripts/test-poserig.cjs:
+// assertion bodies carry over verbatim; the linear sections became one test
+// each; the fixture stays in scripts/fixtures with an anchored path.
+import { test } from 'vitest'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+
+const require = createRequire(import.meta.url)
+const __dirname = require('node:path').dirname(fileURLToPath(import.meta.url))
+
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { loadTs } = require('./lib/ts-vm.cjs')
+const { loadTs } = require('../scripts/lib/ts-vm.cjs')
 
 let passed = 0
 function ok(condition, label) {
@@ -68,8 +78,7 @@ const HUMAN = templateMod.HUMAN_TEMPLATE
 const v3 = ik.v3
 const vdist = ik.vdist
 
-console.log('(a) analytic two-bone IK')
-{
+test('(a) analytic two-bone IK', () => {
   const root = v3(0, 1, 0)
   // Reachable target: exact hit, lengths exact.
   const target = v3(0.3, 0.7, 0.1)
@@ -92,10 +101,9 @@ console.log('(a) analytic two-bone IK')
   // Degenerate: target on the root never yields NaN.
   const degenerate = ik.solveTwoBone(root, root, 0.4, 0.3, v3(0, -1, 0))
   ok(Number.isFinite(degenerate.mid.x + degenerate.end.x), 'two-bone: degenerate target stays finite')
-}
+})
 
-console.log('(b) FABRIK spine chain')
-{
+test('(b) FABRIK spine chain', () => {
   const chain = [v3(0, 1.0, 0), v3(0, 1.16, 0.01), v3(0, 1.38, 0.01)]
   const target = v3(0.12, 1.32, 0.06)
   const result = ik.solveFabrik(chain, target)
@@ -111,10 +119,9 @@ console.log('(b) FABRIK spine chain')
   const far = ik.solveFabrik(chain, v3(3, 3, 3))
   const total = rest1 + rest2
   close(vdist(far.points[0], far.points[2]), total, 1e-6, 'FABRIK: far target fully extends without stretching')
-}
+})
 
-console.log('(c) the 17n+5 grid')
-{
+test('(c) the 17n+5 grid', () => {
   for (let seconds = 1; seconds <= 15; seconds += 0.5) {
     const frames = model.frameCount(seconds)
     eq((frames - 5) % 17, 0, `frameCount(${seconds}) = ${frames} is on 17n+5`)
@@ -135,10 +142,9 @@ console.log('(c) the 17n+5 grid')
   eq(model.MAX_TOTAL_FRAMES, 345, 'rig authoring clips at the largest 17n+5 ≤ 360 = 345')
   const capped = model.createTimeline(HUMAN, 15)
   eq(capped.totalFrames, 345, '15 s timeline is clipped to 345 frames (≤15 s invariant)')
-}
+})
 
-console.log('(d) timeline keyframes + interpolation')
-{
+test('(d) timeline keyframes + interpolation', () => {
   const template = HUMAN
   const poseA = presets.presetToPose(presets.PRESETS[0], template)
   const poseB = presets.presetToPose(presets.PRESETS.find((p) => p.id === 'victory'), template)
@@ -163,10 +169,9 @@ console.log('(d) timeline keyframes + interpolation')
   eq(refused.keyframes.map((k) => k.frame), [5, 56], 'move onto occupied frame is refused (no silent merge)')
   const deleted = model.deleteKeyframe(refused, 56)
   eq(deleted.keyframes.map((k) => k.frame), [5], 'delete keyframe removes it')
-}
+})
 
-console.log('(e) orthographic projection')
-{
+test('(e) orthographic projection', () => {
   const view = { yaw: 0, pitch: 0 }
   const basis = projection.viewBasis(view)
   close(basis.right.x, 1, 1e-9, 'yaw 0: right = +x')
@@ -184,10 +189,9 @@ console.log('(e) orthographic projection')
   // Pitch clamp keeps the basis non-degenerate.
   const steep = projection.viewBasis({ yaw: 0, pitch: 1.5 })
   ok(Math.abs(steep.right.x) + Math.abs(steep.right.z) > 1e-6, 'pitch clamped before degeneracy')
-}
+})
 
-console.log('(f) poseSpec — the §3 palette verbatim')
-{
+test('(f) poseSpec — the §3 palette verbatim', () => {
   eq(spec.POSE_PALETTE.length, 18, 'palette has 18 colors')
   eq(
     spec.POSE_PALETTE.map((c) => `${c[0]},${c[1]},${c[2]}`).join(' '),
@@ -211,10 +215,9 @@ console.log('(f) poseSpec — the §3 palette verbatim')
   eq(spec.BODY_LIMB_SEQ.length, 17, '17 limbs')
   eq(spec.HAND_EDGES.length, 20, '20 hand edges')
   eq(spec.KP.total, 134, '134 keypoints total')
-}
+})
 
-console.log('(g) drawPose — op list + geometry')
-{
+test('(g) drawPose — op list + geometry', () => {
   const pose = presets.presetToPose(presets.PRESETS[0], HUMAN)
   const renderer = model.makeRenderer(HUMAN, { yaw: 0, pitch: 0.12 }, { width: 512, height: 512 })
   const kp = renderer(pose)
@@ -268,10 +271,9 @@ console.log('(g) drawPose — op list + geometry')
   eq(withLinks.find((op) => op.kind === 'line' && op.color[0] === 255 && op.color[1] === 128 && op.color[2] === 128)?.width, 1, 'face links are 1-px light pink (flagged spec-text variant)')
   // Fingerprint determinism.
   eq(draw.opsFingerprint(ops), draw.opsFingerprint(draw.buildDrawOps(kp)), 'fingerprint stable across calls')
-}
+})
 
-console.log('(h) rig — constraints under manipulation')
-{
+test('(h) rig — constraints under manipulation', () => {
   const template = HUMAN
   for (const preset of presets.PRESETS) {
     const pose = presets.presetToPose(preset, template)
@@ -307,10 +309,9 @@ console.log('(h) rig — constraints under manipulation')
   ok(Math.abs(rot.lElbow.x - before.lElbow.x) > 0.1, `subtree rotation moves the elbow (Δx ${(rot.lElbow.x - before.lElbow.x).toFixed(3)})`)
   eq(rot.rWrist.x, before.rWrist.x, 'subtree rotation leaves the other arm untouched')
   eq(rot.midHip.x, before.midHip.x, 'subtree rotation leaves the root untouched')
-}
+})
 
-console.log('(i) 134-keypoint derivation')
-{
+test('(i) 134-keypoint derivation', () => {
   const pose = presets.presetToPose(presets.PRESETS[0], HUMAN)
   const kp = HUMAN.deriveKeypoints(pose)
   eq(kp.body.length, 18, 'body 18')
@@ -337,10 +338,9 @@ console.log('(i) 134-keypoint derivation')
   ok(kp.feet.slice(3).every((p) => vdist(p, ankleR) < 0.16), 'right foot points near the right ankle')
   // Foot order: left triple first (COCO-WholeBody).
   ok(vdist(kp.feet[3], ankleR) < vdist(kp.feet[3], ankleL), 'foot index 3 belongs to the RIGHT ankle')
-}
+})
 
-console.log('(j) keypoint JSON round-trip')
-{
+test('(j) keypoint JSON round-trip', () => {
   const template = HUMAN
   const pose = presets.presetToPose(presets.PRESETS.find((p) => p.id === 'walking'), template)
   const canvas = { width: 480, height: 832 }
@@ -379,20 +379,18 @@ console.log('(j) keypoint JSON round-trip')
   const maxDrift = Math.max(...bodyIds.map((id) => Math.abs(imported[id].y - pose[id].y)))
   ok(maxDrift < 0.4, `flat-lift import keeps the body near the source — depth lost by design (max drift ${maxDrift.toFixed(3)})`)
   ok(model.poseBoneLengthError(template, imported) <= 0.02, 'imported pose satisfies bone-length constraints')
-}
+})
 
-console.log('(k) server-render bridge (E-FC0.5)')
-{
+test('(k) server-render bridge (E-FC0.5)', () => {
   eq(model.SERVER_RENDER_BRIDGE.enabled, false, 'bridge flag OFF by default (version-pinned)')
   assert.throws(() => model.buildServerBridgePayload([]), /version-pinned OFF/, 'payload builder throws loudly while OFF')
   const graphSpec = model.serverBridgeGraphSpec()
   eq(graphSpec.class_type, 'SDPoseDrawKeypoints', 'bridge graph targets the native node')
   eq(graphSpec.inputs.draw_feet, true, 'bridge graph pins draw_feet=true (node default is FALSE)')
   eq(graphSpec.inputs.stick_width, 4, 'bridge graph pins stick_width=4')
-}
+})
 
-console.log('(l) template registry — E-FC1 verdict applied')
-{
+test('(l) template registry — E-FC1 verdict applied', () => {
   const shipped = templateMod.TEMPLATES.filter((t) => t.status === 'shipped')
   const pending = templateMod.TEMPLATES.filter((t) => t.status === 'pending')
   eq(templateMod.DEFAULT_TEMPLATE_ID, 'human-134', 'default template stays human-134 (AP-10K is NON-default)')
@@ -416,10 +414,9 @@ console.log('(l) template registry — E-FC1 verdict applied')
   eq(templateMod.templateById('human-134').label, 'Human (DWPose 134)', 'templateById resolves')
   ok(templateMod.templateById('nope') === undefined, 'unknown id → undefined')
   eq(presets.PRESETS.length, 8, 'eight preset archetypes ship')
-}
+})
 
-console.log('(n) AP-10K quadruped template — layout, render ops, export format')
-{
+test('(n) AP-10K quadruped template — layout, render ops, export format', () => {
   const ap10k = templateMod.AP10K_TEMPLATE
   const names = spec.AP10K_KEYPOINT_NAMES
   eq(names.length, 17, 'AP-10K name table: 17 keypoints')
@@ -484,11 +481,10 @@ console.log('(n) AP-10K quadruped template — layout, render ops, export format
   const mirrored = rigMod.mirrorPose(ap10k, posed)
   ok(Math.abs(mirrored.lFrontPaw.x - -posed.rFrontPaw.x) < 1e-9, 'mirror swaps L/R (lFrontPaw ← rFrontPaw)')
   eq(rigMod.mirrorPose(ap10k, mirrored), posed, 'mirror is an involution')
-}
+})
 
-console.log('(o) golden fingerprints (canonical poses + AP-10K rest)')
-{
-  const fixturePath = path.join(__dirname, 'fixtures', 'poserig-goldens.json')
+test('(o) golden fingerprints (canonical poses + AP-10K rest)', () => {
+  const fixturePath = path.resolve(__dirname, '..', 'scripts', 'fixtures', 'poserig-goldens.json')
   const canonical = presets.PRESETS.map((preset) => {
     const pose = presets.presetToPose(preset, HUMAN)
     const renderer = model.makeRenderer(HUMAN, { yaw: 0, pitch: 0.12 }, { width: 512, height: 512 })
@@ -500,7 +496,7 @@ console.log('(o) golden fingerprints (canonical poses + AP-10K rest)')
   const ap10kRenderer = model.makeRenderer(templateMod.AP10K_TEMPLATE, { yaw: 0, pitch: 0.12 }, { width: 512, height: 512 })
   canonical.push({ id: 'ap10k-rest', fingerprint: draw.opsFingerprint(draw.buildDrawOps(ap10kRenderer(ap10kRest))) })
   if (process.env.UPDATE === '1' || !fs.existsSync(fixturePath)) {
-    fs.writeFileSync(fixturePath, `${JSON.stringify({ note: 'canonical pose render fingerprints — regenerate with UPDATE=1 node scripts/test-poserig.cjs', poses: canonical }, null, 2)}\n`)
+    fs.writeFileSync(fixturePath, `${JSON.stringify({ note: 'canonical pose render fingerprints — regenerate with UPDATE=1 pnpm test:poserig', poses: canonical }, null, 2)}\n`)
     console.log(`  wrote golden fixture: ${fixturePath}`)
     passed += 1
     console.log('  ok - goldens regenerated')
@@ -512,6 +508,5 @@ console.log('(o) golden fingerprints (canonical poses + AP-10K rest)')
       eq(canonical[i].fingerprint, golden.poses[i].fingerprint, `golden ${canonical[i].id}: render fingerprint identical`)
     }
   }
-}
-
-console.log(`\nposerig: ${passed} assertions passed`)
+  console.log(`\nposerig: ${passed} assertions passed`)
+})

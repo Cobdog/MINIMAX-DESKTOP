@@ -1,11 +1,11 @@
 'use strict'
 /** Shared golden-matrix definition for the H3 image workbench probes in
- * scripts/test-h3img.cjs — the h3img counterpart of lib/registry-matrix.cjs
+ * tests/h3img.test.js — the h3img counterpart of lib/registry-matrix.cjs
  * and lib/krea2edit-matrix.cjs.
  *
  * Every entry names a buildH3ImageGraph invocation whose CURRENT output is
  * snapshotted into scripts/fixtures/h3img-golden.json by
- * `node scripts/test-h3img.cjs --update-golden`. The test rebuilds each
+ * `pnpm test:h3img:update`. The test rebuilds each
  * config and requires canonical equality — a family change is a golden
  * diff, reviewed like any contract change.
  *
