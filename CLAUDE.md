@@ -32,7 +32,7 @@ Documenting important findings is an agent obligation, not an option.
 When about to do X, read the matching file FIRST:
 
 - **Touch the GPU / 8189 testbed / any engine-dependent test** → [docs/agent/runbook.md](docs/agent/runbook.md)
-- **Run, extend, or debug the test suites / CI** → [docs/agent/testing.md](docs/agent/testing.md)
+- **Run, extend, or debug the test suites / CI** → [docs/agent/testing.md](docs/agent/testing.md) — the unit suites are **vitest** (`tests/*.test.js`, one parallel run; `pnpm test:watch` for the TDD loop); new tests go there under the port-allocator discipline, never as fresh standalone scripts
 - **Commit, vendor/port third-party code, or write a research doc** → [docs/agent/conventions.md](docs/agent/conventions.md)
 - **Rely on an external-doc fact (H3 prompting, ComfyUI node behavior, chaining) for non-trivial work** → the research library [docs/library/README.md](docs/library/README.md) — run its SOURCE-OF-TRUTH CHECK (three questions) before treating a captured fact as current
 

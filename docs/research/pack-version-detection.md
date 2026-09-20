@@ -2,7 +2,7 @@
 
 Task: Node-pack status board (mjhlt3k) · Date: 2026-09-19 ·
 METHOD: external-doc read (docs.comfy.org, ComfyUI-Manager README) + code-read
-of this repo's install machinery; fixture-measured in `scripts/test-instance.cjs`
+of this repo's install machinery; fixture-measured in `scripts/test-instance.cjs` (now `tests/instance.test.js` after the vitest migration, 2026-09-20)
 section (f). No upstream source trees were vendored or copied.
 
 ## The question
