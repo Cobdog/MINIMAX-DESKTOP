@@ -71,7 +71,8 @@
   iterator spreads (`[...map.entries()]`, `[...new Set()]`) silently no-op;
   use regex `exec` loops and `Array.from`. Cross-realm arrays fail
   `deepEqual` — compare `.join('|')` strings. Relative-import modules need
-  the two-file loader pattern. (`scripts/test-*.cjs` harness.)
+  the two-file loader pattern. (VM harness; vitest-era suites in
+  `tests/*.test.js`.)
 - **Vision judgment cache trap:** the Read tool's image→CDN upload dedupes by
   filename — re-reading a regenerated screenshot returns the CACHED first
   upload. Hence run-id-prefixed screenshot filenames (fresh names = fresh

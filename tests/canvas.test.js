@@ -17,8 +17,20 @@
 //       bezier geometry + culling bbox
 //   (j) attention — radar counts, worst-first (failed > stale), calm state
 //   (k) seedSpawnPoint — the spatial-queue contract c point
+//
+// Vitest port (task z7ogmig, 2026-09-20) of scripts/test-canvas.cjs:
+// assertion bodies carry over verbatim; the linear sections became one test
+// each, in file order (tests run sequentially within the file, so the
+// cross-section module-state flow is unchanged); the original's async tail
+// (h3OneFrameSubmitRun → phase5Cores → summary) became the final two async
+// tests in the same order.
+import { test } from 'vitest'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
+
 const assert = require('node:assert/strict')
-const { loadTs } = require('./lib/ts-vm.cjs')
+const { loadTs } = require('../scripts/lib/ts-vm.cjs')
 
 let passed = 0
 function ok(condition, label) {
@@ -40,8 +52,7 @@ function close(a, b, tol, label) {
 const cameraMod = loadTs('src/canvas/camera.ts')
 const derive = loadTs('src/canvas/derive.ts')
 
-console.log('(a) camera store discipline')
-{
+test('(a) camera store discipline', () => {
   const store = cameraMod.createCamera({ x: 10, y: 20, k: 1 })
   eq(store.get(), { x: 10, y: 20, k: 1 }, 'store: initial state')
   let notifications = 0
@@ -60,10 +71,9 @@ console.log('(a) camera store discipline')
   const afterUnsubscribe = notifications
   store.set({ x: 50, y: 50, k: 1 })
   eq(notifications, afterUnsubscribe, 'store: unsubscribed listeners stop firing')
-}
+})
 
-console.log('(b) semantic-zoom bands as data')
-{
+test('(b) semantic-zoom bands as data', () => {
   eq(cameraMod.ZOOM_BANDS.map((band) => band.id), ['far', 'mid', 'near'], 'bands: the three §3 bands in order')
   eq(cameraMod.bandFor(0.2), 'far', 'bands: deep zoom-out is far')
   eq(cameraMod.bandFor(0.449), 'far', 'bands: just below the far/mid threshold')
@@ -71,10 +81,9 @@ console.log('(b) semantic-zoom bands as data')
   eq(cameraMod.bandFor(1.0), 'mid', 'bands: 100% is mid')
   eq(cameraMod.bandFor(1.05), 'near', 'bands: just past mid ceiling is near')
   eq(cameraMod.bandFor(4), 'near', 'bands: deep zoom-in is near')
-}
+})
 
-console.log('(c) coordinate transforms')
-{
+test('(c) coordinate transforms', () => {
   const camera = { x: 100, y: -40, k: 0.5 }
   const world = cameraMod.screenToWorld(300, 60, camera)
   close(world.x, 400, 1e-9, 'screenToWorld: x = (sx - tx)/k')
@@ -86,10 +95,9 @@ console.log('(c) coordinate transforms')
   const anchored = cameraMod.worldToScreen(world.x, world.y, zoomed)
   close(anchored.x, 300, 1e-6, 'zoomAbout: the anchor point stays fixed')
   close(anchored.y, 60, 1e-6, 'zoomAbout: the anchor point stays fixed (y)')
-}
+})
 
-console.log('(d) viewport + margin culling')
-{
+test('(d) viewport + margin culling', () => {
   const camera = { x: 0, y: 0, k: 1 }
   const rect = cameraMod.visibleWorldRect(camera, 1920, 1080, 600)
   close(rect.x, -600, 1e-9, 'cull rect: margin extends left')
@@ -107,10 +115,9 @@ console.log('(d) viewport + margin culling')
   eq(cameraMod.visibleTileIds([], camera, 1920, 1080, 600), [], 'culling: no tiles yields no ids')
   const tiny = { x: 940, y: 500, w: 2, h: 2 }
   eq(cameraMod.visibleTileIds([{ id: 'center', ...tiny }], camera, 1920, 1080, 0), ['center'], 'culling: zero margin still keeps on-screen tiles')
-}
+})
 
-console.log('(e) cameraForRect (zoom-to-attention / fit)')
-{
+test('(e) cameraForRect (zoom-to-attention / fit)', () => {
   const rect = { x: 0, y: 0, w: 2400, h: 500 }
   const fitted = cameraMod.cameraForRect(rect, 1920, 1080, { fit: true, paddingPx: 200 })
   ok(fitted.k < 1, 'fit: a rect wider than the viewport zooms out')
@@ -121,10 +128,9 @@ console.log('(e) cameraForRect (zoom-to-attention / fit)')
   close(huge.k, cameraMod.CAMERA_MIN_K, 0, 'fit: an absurd rect clamps at MIN_K instead of degenerating')
   const attention = cameraMod.cameraForRect({ x: 5000, y: 2000, w: 320, h: 296 }, 1920, 1080, { k: 1 })
   close(attention.x, 960 - 5160, 1e-9, 'cameraForRect at k=1 centers the tile')
-}
+})
 
-console.log('(f) parseViewBlob')
-{
+test('(f) parseViewBlob', () => {
   const empty = cameraMod.parseViewBlob(undefined)
   ok(Number.isFinite(empty.camera.x + empty.camera.y + empty.camera.k), 'blob: missing blob yields a finite default camera')
   ok(empty.layout === undefined, 'blob: no layout when absent')
@@ -135,10 +141,9 @@ console.log('(f) parseViewBlob')
   ok(Number.isFinite(garbage.camera.k), 'blob: garbage never crashes')
   const junkLayout = cameraMod.parseViewBlob({ layout: { bad: { x: 'left' }, partial: { x: 5, y: 6 } } })
   ok(junkLayout.layout && junkLayout.layout.partial && junkLayout.layout.bad === undefined, 'blob: invalid entries drop, valid ones survive')
-}
+})
 
-console.log('(g) tileStatus — the §4 priority ladder')
-{
+test('(g) tileStatus — the §4 priority ladder', () => {
   const fresh = { stale: false }
   eq(derive.tileStatus(fresh, null, false), 'idle', 'status: no job, not stale → idle')
   eq(derive.tileStatus(fresh, { id: 'j', status: 'queued', progress: 0 }, false), 'queued-gpu', 'status: queued job → queued-for-GPU (L26)')
@@ -163,7 +168,7 @@ console.log('(g) tileStatus — the §4 priority ladder')
     const dismissedTiles = derive.deriveTiles(erroredDoc, [{ id: 'job-e', status: 'completed', progress: 100 }], { 'chain-e': 'job-e' }, undefined, new Set(['chain-e']))
     eq(dismissedTiles[0].status, 'idle', 'errored landing: dismissable like any other failure')
   }
-}
+})
 
 /** Minimal document fixture builder. */
 function fixture() {
@@ -194,8 +199,7 @@ function fixture() {
   }
 }
 
-console.log('(h) deriveTiles')
-{
+test('(h) deriveTiles', () => {
   const document = fixture()
   const tiles = derive.deriveTiles(document, [], {}, undefined)
   eq(tiles.length, 3, 'tiles: one tile per chain')
@@ -235,10 +239,9 @@ console.log('(h) deriveTiles')
   const orphanTiles = derive.deriveTiles(orphan, [], {}, undefined)
   ok(orphanTiles[0].x >= derive.TILE_W * 0 || orphanTiles[0].x === orphanTiles[0].x, 'placement: orphaned ref does not crash')
   eq(orphanTiles[0].refOutputs, ['out-1'], 'placement: orphaned ref still records its reference')
-}
+})
 
-console.log('(i) derived edges + paths')
-{
+test('(i) derived edges + paths', () => {
   const document = fixture()
   const tiles = derive.deriveTiles(document, [], {}, undefined)
   const edges = derive.deriveEdges(document, tiles)
@@ -254,10 +257,9 @@ console.log('(i) derived edges + paths')
   close(rect.w, 400, 1e-9, 'edges: bbox width')
   const noEdges = derive.deriveEdges(document, tiles.filter((tile) => tile.id !== 'fork-1'))
   eq(noEdges.length, 0, 'edges: no edge when the consumer tile is absent')
-}
+})
 
-console.log('(j) attention (radar)')
-{
+test('(j) attention (radar)', () => {
   const document = fixture()
   const tiles = derive.deriveTiles(document, [], {}, undefined)
   const calm = derive.attention(tiles)
@@ -268,10 +270,9 @@ console.log('(j) attention (radar)')
   eq(escalated.counts.needsAttention, 2, 'attention: failed + stale both count (different chains)')
   eq(escalated.worst.weight, 2, 'attention: failed outranks stale (worst-first)')
   eq(escalated.worst.tileId, 'media-1', 'attention: worst names the failing tile')
-}
+})
 
-console.log('(k) seedSpawnPoint (spatial-queue contract c) + spawn anti-overlap')
-{
+test('(k) seedSpawnPoint (spatial-queue contract c) + spawn anti-overlap', () => {
   const camera = { x: 0, y: 0, k: 1 }
   const spawn = derive.seedSpawnPoint(camera, 1920, 1080)
   const screen = cameraMod.worldToScreen(spawn.x + derive.TILE_W / 2, spawn.y, camera)
@@ -284,8 +285,7 @@ console.log('(k) seedSpawnPoint (spatial-queue contract c) + spawn anti-overlap'
   const column = Array.from({ length: 4 }, (_, index) => ({ x: spawn.x, y: spawn.y + index * (derive.TILE_H_MEDIA + 60), w: derive.TILE_W, h: derive.TILE_H_MEDIA }))
   const fourth = derive.avoidOverlap(spawn, column)
   ok(fourth.y >= spawn.y + 4 * (derive.TILE_H_MEDIA + 60) - 1, 'spawn: stacks down the column until free')
-}
-
+})
 
 // ---- Phase 2 (task flyuh6h): generation-as-a-projection pure modules -------
 const localStorageStub = {
@@ -305,8 +305,7 @@ const take = (id, overrides) => ({ id, outputId: 'out-1', jobId: null, artifacts
 const output = (id, chainId, takes) => ({ id, chainId, substratesAvailable: ['decoded'], createdAt: 1, canonicalTakeId: takes.find((t) => !t.supersededBy)?.id ?? null, takes })
 const chainOf = (id, overrides) => ({ id, projectId: 'p1', kind: 'generation', inputSpec: {}, settings: {}, lockState: 'unlocked', hopCount: 0, driftMetrics: null, stale: false, createdAt: 1, outputs: [], ops: [], identity: null, ...overrides })
 
-console.log('(l) L4 — selection decides the surface (effectiveMode)')
-{
+test('(l) L4 — selection decides the surface (effectiveMode)', () => {
   eq(generation.effectiveMode({ firstFrameOutputId: null, lastFrameOutputId: null, referenceOutputIds: [], referenceCharacterIds: [], referenceLocationIds: [], referenceAssetIds: [] }), 'text', 'L4: nothing + prompt = text-to-video')
   eq(generation.effectiveMode({ firstFrameOutputId: 'o1', lastFrameOutputId: null, referenceOutputIds: [], referenceCharacterIds: [], referenceLocationIds: [], referenceAssetIds: [] }), 'image', 'L4: a selected image output = image-to-video')
   eq(generation.effectiveMode({ firstFrameOutputId: 'o1', lastFrameOutputId: 'o2', referenceOutputIds: [], referenceCharacterIds: [], referenceLocationIds: [], referenceAssetIds: [] }), 'frames', 'L4: first + last = frames')
@@ -335,10 +334,9 @@ console.log('(l) L4 — selection decides the surface (effectiveMode)')
   eq(laneRead.modelOverrides.fl2va, 'fl2va-pick.safetensors', 'settings: the per-lane fl2va slot survives the tolerant read')
   eq(laneRead.modelOverrides.ref2va, 'ref.safetensors', 'settings: a padded ref2va slot trims through')
   eq('merged' in laneRead.modelOverrides, false, 'settings: a non-string merged slot drops to auto')
-}
+})
 
-console.log('(m) fork substrates → input refs (§2 outputRef)')
-{
+test('(m) fork substrates → input refs (§2 outputRef)', () => {
   const doc = {
     project: { id: 'p1', name: 'P', camera: {}, createdAt: 1, lastActiveAt: 1 },
     chains: [
@@ -392,10 +390,9 @@ console.log('(m) fork substrates → input refs (§2 outputRef)')
     chains: [chainOf('local-src', { outputs: [output('out-3', 'local-src', [localOnly])] })],
   }
   eq(generation.mediaForOutput(generation.buildOutputIndex(localDoc).get('out-3')).media.path, '/out/local.mp4', 'media: a sourcePath-only take still resolves through it')
-}
+})
 
-console.log('(n) typed-hole option menus (§3 filtering + hints)')
-{
+test('(n) typed-hole option menus (§3 filtering + hints)', () => {
   const ready = { connected: true, h3Ready: true, motionContextReady: true, ltx25: { available: true, missing: [] }, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] }, utilities: [{ tool: 'remove-subtitles', label: 'Remove subtitles', available: true, missing: [] }, { tool: 'ia2v', label: 'Image + audio → video', available: false, missing: ['node LTXICLoRALoaderModelOnly'] }] }
   const produce = options.endpointOptions('produce', ['image'], ready)
   const produceIds = produce.map((row) => row.id)
@@ -432,12 +429,11 @@ console.log('(n) typed-hole option menus (§3 filtering + hints)')
   ok(consume.find((row) => row.id === 'consume:first-frame').available, 'consume(image): first-frame role offered')
   ok(!options.endpointOptions('consume', ['video'], ready).some((row) => row.id === 'consume:first-frame'), 'consume(video): first-frame role filtered out for video sources')
   ok(options.endpointOptions('consume', ['video'], ready).find((row) => row.id === 'consume:reference').available, 'consume(video): reference role accepts any media kind')
-}
+})
 
 // QOL wave (rrxlw2r) — the one-click fetch affordance (nits idg8ui4):
 // missing-deps → catalog mapping + unavailable rows carrying fetch targets.
-console.log('(n2) fetch deep-link mapping — slots/nodes → catalog entries')
-{
+test('(n2) fetch deep-link mapping — slots/nodes → catalog entries', () => {
   const entry = (id, state) => ({ id, name: `name of ${id}`, state, group: 'weights' })
   const catalog = [
     entry('ltx23-dev-checkpoint', 'absent'),
@@ -483,10 +479,9 @@ console.log('(n2) fetch deep-link mapping — slots/nodes → catalog entries')
   ok(!ltx25Row.fetchTargets, 'rows: LTX-2.5 carries no fetch targets')
   const covered = options.endpointOptions('produce', ['video'], { ...facts, utilities: [{ ...facts.utilities[0], available: true, missingSlots: [], missingNodes: [], missing: [] }] })
   ok(!covered.find((row) => row.id === 'produce:utility:remove-subtitles').fetchTargets, 'rows: an AVAILABLE utility needs no fetch affordance')
-}
+})
 
-console.log('(o) reference binding allocation (the promptComposer model, per chain)')
-{
+test('(o) reference binding allocation (the promptComposer model, per chain)', () => {
   const character = { id: 'char-1', name: 'Ada', description: '', wardrobe: '', voiceNotes: '', visualStyle: '', referencePrompt: '', createdAt: 1, updatedAt: 1, referenceMode: 'set', referenceImages: [media('/lib/ada-1.png', 'image'), media('/lib/ada-2.png', 'image')], wardrobeIds: ['ward-1'], accessoryIds: [], hairStyleIds: [], identityTemplate: 'custom', hairPreset: '', skinTone: '' }
   const wardrobe = { id: 'ward-1', name: 'Field coat', description: '', accessories: [], materials: '', colors: '', visualStyle: '', referencePrompt: '', referenceImages: [media('/lib/coat.png', 'image')], selectedReferencePaths: undefined, createdAt: 1, updatedAt: 1 }
   const location = { id: 'loc-1', name: 'Night yard', description: '', atmosphere: '', timeOfDay: '', continuityAnchors: '', visualStyle: '', environmentMode: 'built', referenceMode: 'set', referenceImages: [media('/lib/yard.png', 'image')], createdAt: 1, updatedAt: 1 }
@@ -513,10 +508,9 @@ console.log('(o) reference binding allocation (the promptComposer model, per cha
   // unknown library ids drop too
   const unknown = generation.resolveChainReferences(generation.readChainSettings({ referenceCharacterIds: ['nope'] }), libraries, resolveMedia)
   eq(unknown.length, 0, 'bindings: an unknown library id binds nothing')
-}
+})
 
-console.log('(p) the shared validation ladder (lib/h3Submit)')
-{
+test('(p) the shared validation ladder (lib/h3Submit)', () => {
   const template = {
     mode: 'text', prompt: 'a lone drummer', width: 1344, height: 768, duration: 6, seed: 1, steps: 30,
     turbo: 'off', turboLoader: 'auto', experimentalSampling: false, loraStrength: 1, sampler: 'res_multistep', scheduler: 'simple',
@@ -538,10 +532,9 @@ console.log('(p) the shared validation ladder (lib/h3Submit)')
   const badGuide = request({ mode: 'reference', referenceImages: [media('/r.png', 'image')], timelineGuides: [{ file: media('/g.png', 'image'), seconds: 7 }] })
   ok(String(h3Submit.validateH3Render(badGuide, facts)).includes('lands at or beyond'), 'ladder: a guide beyond the duration refuses with the frame warning')
   eq(h3Submit.validateH3Render(request({ prompt: '  ' }), facts), 'Add a prompt before generating.', 'ladder: an empty prompt refuses')
-}
+})
 
-console.log('(q) graph construction per selection (engine-free, L4)')
-{
+test('(q) graph construction per selection (engine-free, L4)', () => {
   const fakeSelection = { fl2va: 'T-fl2va.safetensors', ref2va: 'T-ref2va.safetensors', textEncoder: 'T-qwen.safetensors', videoVae: 'T-vvae.safetensors', audioVae: 'T-avae.safetensors', previewVae: '', fl2vLora: 'T-fl2v-lora.safetensors', ref2vLora: 'T-ref2v-lora.safetensors' }
   const request = (roles) => generation.buildCanvasRenderRequest(
     generation.readChainSettings(roles),
@@ -581,11 +574,10 @@ console.log('(q) graph construction per selection (engine-free, L4)')
   ok(classes(turboGraph).some((cls) => cls.includes('LoraLoader')), 'graph: the fast tier wires the turbo LoRA loader')
   const quality = request({ prompt: 'slow pass', turbo: 'off' })
   ok(!classes(generation.planCanvasGraph(quality, fakeSelection)).some((cls) => cls.includes('LoraLoader')), 'graph: the quality tier stays LoRA-free (registry inertness)')
-}
+})
 
 // ---- Phase 3 (task j5sj28v): the op-stack model (§5.1) ----------------------
-console.log('(r) op-stack model — kinds, tolerant settings, live-preview composition')
-{
+test('(r) op-stack model — kinds, tolerant settings, live-preview composition', () => {
   // Type-directed kind offering (§3 discipline).
   eq(ops.opKindsFor('image').length, 7, 'kinds: the image surface offers seven v1 op kinds (stabilize is video-only; the workbench tone-lock joined k9vu6t0)')
   ok(ops.opKindsFor('image').includes('crop'), 'kinds: image offers crop')
@@ -649,10 +641,9 @@ console.log('(r) op-stack model — kinds, tolerant settings, live-preview compo
   eq(ops.opSummary('rotate', { degrees: 90 }), '90°', 'summary: rotation degrees read on the chip')
   eq(ops.opSummary('trim', { start: 1, end: 5 }), '1.0–5.0s', 'summary: the trim section reads on the chip')
   eq(ops.opSummary('adjust', { brightness: 1, contrast: 1, saturation: 1 }), 'neutral', 'summary: a neutral adjust reads neutral')
-}
+})
 
-console.log('(s) typed-hole surface — the pose rig row (§5.2) + utility rows')
-{
+test('(s) typed-hole surface — the pose rig row (§5.2) + utility rows', () => {
   const facts = { connected: false, h3Ready: false, utilities: [], motionContextReady: true, ltx25: { available: true, missing: [] }, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] } }
   const consume = options.endpointOptions('consume', [], facts)
   const poseRig = consume.find((row) => row.id === 'consume:pose-rig')
@@ -661,10 +652,9 @@ console.log('(s) typed-hole surface — the pose rig row (§5.2) + utility rows'
   ok(poseRig.hint.includes('17n+5'), 'options: the pose rig row carries the keyframe-grid hint')
   const produce = options.endpointOptions('produce', ['image'], facts)
   ok(!produce.some((row) => row.id === 'consume:pose-rig'), 'options: the pose rig row never leaks to the produce side')
-}
+})
 
-console.log('(t) the LTX-2.3 utility validation ladder + official-template plan')
-{
+test('(t) the LTX-2.3 utility validation ladder + official-template plan', () => {
   const video = { path: '/out/scene.mp4', name: 'scene.mp4', kind: 'video' }
   const offlineFacts = { connected: false, info: {}, models: [] }
   eq(ltx23Submit.validateLtx23Utility({ tool: 'remove-subtitles', video }, offlineFacts), 'Start ComfyUI and verify the server connection in Settings.', 'ladder: offline refuses with the honest message')
@@ -687,7 +677,7 @@ console.log('(t) the LTX-2.3 utility validation ladder + official-template plan'
   // the factory half is exercised through the fully-resolved path below.
   eq(plan.graph, null, 'plan: unresolved models refuse the plan (honest)')
   ok(plan.refusal.includes('not ready'), 'plan: the refusal names the missing stack')
-}
+})
 
 // The H3 image stack the T=1 family resolves (34afx79) — shared by the (u)
 // ladder block and the (u-run) submission leg below.
@@ -714,8 +704,7 @@ const stillSubmitCore = loadTs('src/images/submit.ts', { window: { minimax: {
 } } })
 const h3imageGraph = loadTs('src/lib/graph/h3image.ts')
 
-console.log('(u) H3-1F as the image op — the two-slot seam, the T=1 request, the Edit handoff (34afx79)')
-{
+test('(u) H3-1F as the image op — the two-slot seam, the T=1 request, the Edit handoff (34afx79)', () => {
   const still = loadTs('src/canvas/stillIntent.ts', { window: { localStorage: localStorageStub } })
   const submitCore = stillSubmitCore
   const h3image = h3imageGraph
@@ -779,16 +768,14 @@ console.log('(u) H3-1F as the image op — the two-slot seam, the T=1 request, t
     const family = mod.H3IMG_FAMILIES.find((entry) => entry.id === id)
     return family ? family.profile : null
   }
-}
-
+})
 
 // ---------------------------------------------------------------------------
 // Phase 4 — latent continuation (the Motion-Context engine seam), the global
 // asset bindings, the LocationStudio H3-Ref2V migration, and the extracted
 // engine submit cores' ladders.
 // ---------------------------------------------------------------------------
-console.log('(t) latent continuation — chain options + Motion-Context graph shape')
-{
+test('(t) latent continuation — chain options + Motion-Context graph shape', () => {
   const mc = take('take-mc', { metrics: { kind: 'video', motionContext: { folder: 'h3_context/src/clip', clipIndex: 3 } }, latentPath: 'h3_context/src/clip_00004.safetensors' })
   eq(generation.latentPathFor({ folder: 'h3_context/src/clip', clipIndex: 3 }), 'h3_context/src/clip_00004.safetensors', 'latent path: the recorded slot is the pack’s REAL on-disk name (1-based %05d .safetensors)')
   eq(generation.latentPathFor({ folder: 'h3_context/chain-z/clip', clipIndex: 0 }), 'h3_context/chain-z/clip_00001.safetensors', 'latent path: chain start (app index 0) is the pack’s clip 1')
@@ -826,10 +813,9 @@ console.log('(t) latent continuation — chain options + Motion-Context graph sh
   const saveNode = Object.values(forkGraph).find((node) => node.class_type === 'MiniMaxH3MotionContextSaveLatent')
   eq(saveNode.inputs.filename_prefix, 'h3_context/chain-b/clip', 'graph: SaveLatent writes the fork\'s OWN folder')
   ok(classes(forkGraph).includes('MiniMaxH3MotionContextTrim'), 'graph: the continuation trims the overlap rows from the delivered output')
-}
+})
 
-console.log('(u) global asset bindings (§2 asset, F3 — consent-gated)')
-{
+test('(u) global asset bindings (§2 asset, F3 — consent-gated)', () => {
   const settings = { ...generation.chainSettingsDefaults(null), referenceAssetIds: ['asset-loc'] }
   const assets = [
     { id: 'asset-loc', kind: 'location', label: 'The mill', images: [media('/refs/mill-1.png', 'image'), media('/refs/mill-2.png', 'image')] },
@@ -843,10 +829,9 @@ console.log('(u) global asset bindings (§2 asset, F3 — consent-gated)')
   eq(cleared.length, 0, 'assets: unbinding removes the asset pictures (no zombies)')
   const withDead = generation.resolveChainReferences({ ...generation.chainSettingsDefaults(null), referenceAssetIds: ['asset-dead', 'missing'] }, generation.emptyLibraries, () => null, assets)
   eq(withDead.length, 0, 'assets: dropped/tombstoned assets are skipped honestly — never a hole in <Picture N>')
-}
+})
 
-console.log('(v) LocationStudio migration — H3 Ref2V walkthrough (the LTX-only consumer leaves LTX)')
-{
+test('(v) LocationStudio migration — H3 Ref2V walkthrough (the LTX-only consumer leaves LTX)', () => {
   const walkthrough = loadTs('src/lib/locationWalkthrough.ts')
   const project = { name: 'The Mill', description: 'a stone mill by the creek', atmosphere: 'cold morning fog', timeOfDay: 'dawn', continuityAnchors: 'the broken wheel', visualStyle: 'documentary', environmentMode: 'built' }
   const nature = { ...project, environmentMode: 'nature' }
@@ -864,10 +849,9 @@ console.log('(v) LocationStudio migration — H3 Ref2V walkthrough (the LTX-only
   const facts = { connected: false, modelReady: false, selection: {}, h3PreviewOverrideNode: undefined }
   const h3 = loadTs('src/lib/h3Submit.ts')
   eq(h3.validateH3Render(request, facts), 'Start ComfyUI and verify the server connection in Settings.', 'walkthrough request: validates through the shared H3 ladder (offline refusal)')
-}
+})
 
-console.log('(w) the extracted engine cores — ladders stay verbatim (one code path, both surfaces)')
-{
+test('(w) the extracted engine cores — ladders stay verbatim (one code path, both surfaces)', () => {
   const ltx25 = loadTs('src/lib/ltx25Submit.ts')
   const option = { mode: 'image', prompt: 'a wide survey', width: 1344, height: 768, duration: 10, seed: 1, preset: 'quality', filenamePrefix: 'video/plan' }
   eq(ltx25.validateLtx25(option, null, { connected: false, info: {}, selection: {} }), 'Start ComfyUI and verify the server connection in Settings.', 'ltx25 ladder: offline refuses first')
@@ -883,7 +867,7 @@ console.log('(w) the extracted engine cores — ladders stay verbatim (one code 
   const aceOption = { model: 'base', tags: 'synthwave', lyrics: '', instrumental: false, duration: 60, seed: 1, bpm: 120, filenamePrefix: 'a' }
   eq(ace.validateAceStep(aceOption, { connected: true, info: { 'TextEncodeAceStepAudio1.5': 1, UNETLoader: 1, DualCLIPLoader: 1, VAELoader: 1, 'EmptyAceStep1.5LatentAudio': 1, ConditioningZeroOut: 1, ModelSamplingAuraFlow: 1, KSampler: 1, VAEDecodeAudio: 1, SaveAudioAdvanced: 1 }, selection: { base: 'ace.safetensors', sft: '', vae: 'v.safetensors', textEncoderSmall: 's.safetensors', textEncoderLarge: 'l.safetensors' } }), null, 'acestep ladder: a ready engine passes clean')
   eq(ace.validateAceStep(aceOption, { connected: true, info: {}, selection: { base: '', sft: '', vae: '', textEncoderSmall: '', textEncoderLarge: '' } }), 'The ACE-Step BASE model, audio VAE, and both Qwen ACE text encoders are required.', 'acestep ladder: missing models refuse naming the variant')
-}
+})
 
 // ---------------------------------------------------------------------------
 // Phase 5 (task 7mcp11b) — the deletion wave's extracted cores: the character
@@ -892,10 +876,9 @@ console.log('(w) the extracted engine cores — ladders stay verbatim (one code 
 // its only caller in Phase 5b (MoviePlanner retired — the scene-chain
 // successor is the store's submitPlanEpisode over canvas chains; its ladder
 // reuses submitH3Render's, asserted in (p)). Async (the submission is an
-// async function); the suite's tail summary moves inside the runner.
+// async function); the suite's tail summary moved inside the runner.
 // ---------------------------------------------------------------------------
-async function phase5Cores() {
-  console.log('(x) Phase-5 extracted cores — contact sheet (ContactSheet-only)')
+test('(x) Phase-5 extracted cores — contact sheet (ContactSheet-only)', async () => {
   const contact = loadTs('src/lib/contactSheetSubmit.ts')
   const contactFacts = (overrides = {}) => ({ settings: { comfyUrl: 'http://x' }, connected: true, models: [], selection: { ref2va: 'r', textEncoder: 't', videoVae: 'v' }, clientId: 'c', ...overrides })
   const project = { id: 'char-1', name: 'Mira', baseImage: media('/refs/mira.png', 'image') }
@@ -904,52 +887,7 @@ async function phase5Cores() {
   eq(await contact.submitCharacterContactSheet(project, contactFacts({ connected: false }), io), 'Start ComfyUI and verify the server connection in Settings.', 'contact sheet: offline refuses first (the shared ladder)')
   eq(await contact.submitCharacterContactSheet({ id: 'char-2', name: 'Mira' }, contactFacts(), io), 'Approve a character identity image first.', 'contact sheet: no approved identity image refuses')
   eq(await contact.submitCharacterContactSheet(project, contactFacts(), io), 'Install the ComfyUI-H3-ContactSheet nodes and the five-view turnaround LoRA (minimax_h3_five_view_*), then refresh the engine.', 'contact sheet: the ContactSheet nodes + turnaround LoRA are REQUIRED (Phase-4 cleanup applied — the LTX survey fallback is gone)')
-}
-
-// ---------------------------------------------------------------------------
-// (u-run) The canvas H3-1F submission through the SHARED core (34afx79).
-// Async (the submission is an async function), like phase5Cores. This is the
-// failing-without-it leg for the core's T=1 tier pin: before the pin, the
-// session's packet-tier default (5) tripped the builder's exactly-one-frame
-// guard on EVERY T=1 submission — the run below would return the refusal and
-// no engine prompt would exist.
-// ---------------------------------------------------------------------------
-async function h3OneFrameSubmitRun() {
-  console.log('(u-run) H3-1F submission — the tier pin, the T=1 graph, the canvas link (34afx79)')
-  const still = loadTs('src/canvas/stillIntent.ts', { window: { localStorage: localStorageStub } })
-  const request = still.canvasH3OneFrameRequest('chain-t1', { prompt: 'a ceramic bowl of lemons on an oak table, morning light', seed: 77, resolution: '1344x768' })
-  let jobState = []
-  let linkedJobId = null
-  const notices = []
-  const io = {
-    notify: (tone, text) => { notices.push(`${tone}|${text}`) },
-    setJobs: (update) => { jobState = update(jobState) },
-    cancellationRequests: { current: new Set() },
-    onJobCreated: (jobId) => { linkedJobId = jobId },
-  }
-  const result = await stillSubmitCore.submitWorkbenchGeneration(request, { settings: { comfyUrl: 'http://engine.test' }, connected: true, models: H3_T1_FULL_STACK, info: {} }, io)
-  eq(result.ok, true, 'submit: the text→still T=1 run submits clean through the shared core (the tier pin holds)')
-  ok(jobState.length === 1 && jobState[0].status === 'running', 'submit: the job parks running after the engine accepts')
-  ok(linkedJobId === jobState[0].id, 'submit: onJobCreated fires the moment the job record exists (the canvas-link discipline added with 34afx79)')
-  ok(jobState[0].mediaType === 'image', 'submit: the job is an image job (the queue poll completes it with the image kind)')
-  eq(t1SubmittedGraphs.length, 1, 'submit: exactly one engine prompt submitted (no upload touched — the text intent uploads nothing)')
-  const graph = t1SubmittedGraphs[0].graph
-  const nodes = Object.values(graph)
-  const classes = nodes.map((node) => node.class_type)
-  ok(classes.filter((cls) => cls === 'SaveImage').length === 1, 'submit: ONE per-frame publish — the T=1 single frame (without the tier pin the builder refused here)')
-  ok(!classes.includes('LoadImage'), 'submit: no image loaders on the text intent')
-  ok(classes.includes('MiniMaxH3SigmaShift'), 'submit: the pinned T=1 sigma shifts ride the model chain')
-  ok(nodes.filter((node) => node.class_type === 'VAELoader').some((node) => /^minimax_h3_t1_image_vae/.test(String(node.inputs.vae_name))), 'submit: the decode rides the Mamad8 T=1 VAE (never the video VAE on this profile)')
-  eq(nodes.find((node) => node.class_type === 'KSamplerSelect').inputs.sampler_name, 'er_sde', 'submit: the pinned sampler er_sde')
-  eq(nodes.find((node) => node.class_type === 'BasicScheduler').inputs.scheduler, 'sgm_uniform', 'submit: the pinned scheduler sgm_uniform')
-  eq(nodes.find((node) => node.class_type === 'BasicScheduler').inputs.steps, 8, 'submit: the pinned 8-step recipe')
-  eq(h3imageGraph.h3imgGraphAudit(graph), [], 'submit: the built graph audits clean (no video-only nodes, publish set matches)')
-  const manifest = jobState[0].manifest
-  ok(manifest && manifest.h3img && manifest.h3img.family === 'h3img.generate.t1', 'submit: the h3img provenance rides the manifest (the packet-aware landing keys on it)')
-  ok(manifest.h3img.frames === 1, 'submit: the provenance records the single frame')
-  ok(manifest.canvas && manifest.canvas.chainId === 'chain-t1', 'submit: the canvas chain link rides the manifest (reload relink)')
-  ok(notices.some((entry) => entry.startsWith('success|') && entry.includes('Generate (T=1 Fast)')), 'submit: the success notice names the family honestly')
-}
+})
 
 // ---------------------------------------------------------------------------
 // (l–r) The structured H3 prompt editor's pure layer (fh94g76): the concat
@@ -957,8 +895,7 @@ async function h3OneFrameSubmitRun() {
 // semantics for library box-sets, chips/warning data, and the settings
 // round-trip for promptMode/structured.
 // ---------------------------------------------------------------------------
-console.log('(l) composeStructuredPrompt — the concat contract goldens')
-{
+test('(l) composeStructuredPrompt — the concat contract goldens', () => {
   const sp = loadTs('src/lib/structuredPrompt.ts')
   const baker = {
     concept: 'a baker opens her street bakery before sunrise',
@@ -1037,10 +974,9 @@ console.log('(l) composeStructuredPrompt — the concat contract goldens')
   eq(sp.flowCutLabel(3), 'At 00:03.000', 'cut label: seconds pad to MM:SS.mmm')
   eq(sp.flowCutLabel(63.5), 'At 01:03.500', 'cut label: minutes carry')
   eq(sp.flowCutLabel(0), 'At 00:00.000', 'cut label: zero')
-}
+})
 
-console.log('(m) parseStructuredPrompt — the deterministic no-loss round-trip')
-{
+test('(m) parseStructuredPrompt — the deterministic no-loss round-trip', () => {
   const sp = loadTs('src/lib/structuredPrompt.ts')
   // The parts the grammar pins recover EXACTLY from the composed output:
   // flow rows (+ from-times), the audio fields, the style run.
@@ -1111,10 +1047,9 @@ console.log('(m) parseStructuredPrompt — the deterministic no-loss round-trip'
   const afterParse = sp.parseStructuredPrompt(toggle)
   ok(sp.parseStructuredPrompt(toggle) !== null, 'toggle in: the parse always produces a draft')
   ok(sp.composeStructuredPrompt(afterParse).includes('The quick brown fox says:') && sp.composeStructuredPrompt(afterParse).includes('<d>[English] Wow.</d>', ), 'toggle out: the concat carries the words and the dialogue bytes')
-}
+})
 
-console.log('(n) mergeStructuredDraft + the settings round-trip + guards')
-{
+test('(n) mergeStructuredDraft + the settings round-trip + guards', () => {
   const sp = loadTs('src/lib/structuredPrompt.ts')
   const current = { ...sp.emptyStructuredDraft(), concept: 'keep me', style: 'Cinematic', flow: [{ id: '1', from: 0, to: 1, text: 'beat one' }] }
   const incoming = sp.parseStructuredPrompt('integrated_multimodal_description: [Shot 1] a library entry.\n\noverall_soundscape: Rain.\n\nnon_diegetic_music: N/A')
@@ -1137,7 +1072,6 @@ console.log('(n) mergeStructuredDraft + the settings round-trip + guards')
 
   // The chain-settings round-trip: promptMode + structured persist and
   // reload through the tolerant reader (generation.ts is pure).
-  const generation = loadTs('src/canvas/generation.ts')
   const settings = generation.readChainSettings({ prompt: 'p', promptMode: 'structured', structured: { concept: 'c', subjects: [{ name: 'Mara' }], flow: [{ from: 1, to: 2, text: 'b' }], audio: { soundscape: 's' } } })
   eq(settings.promptMode, 'structured', 'settings: promptMode round-trips')
   eq(settings.structured.concept, 'c', 'settings: the structured draft round-trips')
@@ -1148,10 +1082,9 @@ console.log('(n) mergeStructuredDraft + the settings round-trip + guards')
   eq(plain.promptMode, 'freeform', 'settings: legacy chains default to freeform')
   eq(plain.structured, null, 'settings: legacy chains carry no structured draft')
   eq(generation.chainSettingsDefaults().promptMode, 'freeform', 'settings: defaults start freeform')
-}
+})
 
-console.log('(o) chips, warnings, dialogue helper, assist adapters')
-{
+test('(o) chips, warnings, dialogue helper, assist adapters', () => {
   const sp = loadTs('src/lib/structuredPrompt.ts')
   // The camera chips are the guide §4.3 motion-type table.
   const cameraLabels = sp.STRUCTURED_CHIPS.camera.map((chip) => chip.label)
@@ -1193,7 +1126,7 @@ console.log('(o) chips, warnings, dialogue helper, assist adapters')
   eq(sp.parseFlowRows('[Shot 1] opens on the shop. [Shot 2] At 00:03.500, she pours.')[1].from, 3.5, 'flow assist parser: cut times become from-seconds')
   eq(sp.parseFlowRows('one line\nanother line').length, 2, 'flow assist parser: unmarked lines each become a beat')
   eq(sp.parseFlowRows('[Shot 1] opens on the shop. [Shot 2] At 00:03.500, she pours.')[1].text, 'she pours.', 'flow assist parser: the row text follows the label')
-}
+})
 
 // ---------------------------------------------------------------------------
 // Phase 5b (task 2u0rent) — the Director Suite pure layer: the plan document
@@ -1201,8 +1134,7 @@ console.log('(o) chips, warnings, dialogue helper, assist adapters')
 // (verdicts from docs/research/h3-transitions-and-latent-continuity.md), and
 // the timeline projection (chronological chain outputs / plan segments).
 // ---------------------------------------------------------------------------
-console.log('(y) Phase 5b — plan documents + the measured gap menu + the timeline projection')
-{
+test('(y) Phase 5b — plan documents + the measured gap menu + the timeline projection', () => {
   const plan = loadTs('src/canvas/plan.ts')
 
   eq(plan.GAP_KINDS, ['cut', 'nle', 'flf', 'black', 'bridge'], 'gap kinds: the schema\'s five, hard cut first (the measured default)')
@@ -1296,7 +1228,7 @@ console.log('(y) Phase 5b — plan documents + the measured gap menu + the timel
 
   eq(plan.formatTimelineDuration(83), '1:23', 'format: m:ss')
   eq(plan.formatTimelineDuration(0), '0:00', 'format: zero')
-}
+})
 
 // ---------------------------------------------------------------------------
 // The camera path editor's pure layer (y93rk61) — the camera compiler's
@@ -1304,8 +1236,7 @@ console.log('(y) Phase 5b — plan documents + the measured gap menu + the timel
 // compile step, the Camera-box text contract (emit → best-effort parse →
 // never-lossy splice), the persistence guard, and the one-click presets.
 // ---------------------------------------------------------------------------
-console.log('(z) cameraPath — the compile step + the box-text round-trip')
-{
+test('(z) cameraPath — the compile step + the box-text round-trip', () => {
   const cp = loadTs('src/lib/cameraPath.ts')
   const sp = loadTs('src/lib/structuredPrompt.ts')
 
@@ -1403,7 +1334,6 @@ console.log('(z) cameraPath — the compile step + the box-text round-trip')
   ok(sp.readStructuredDraft({ concept: 'c', cameraPath: [1, 2] }).cameraPath === null, 'draft: a malformed doc reads as null, never a crash')
   ok(sp.mergeStructuredDraft(sp.emptyStructuredDraft(), withPath).cameraPath.keyframes.length === 4, 'draft: merge carries an incoming doc when none exists')
   ok(sp.mergeStructuredDraft(withPath, sp.emptyStructuredDraft()).cameraPath.keyframes.length === 4, 'draft: merge keeps the current doc')
-  const generation = loadTs('src/canvas/generation.ts')
   const settings = generation.readChainSettings({ prompt: 'p', promptMode: 'structured', structured: { concept: 'c', cameraPath: doc } })
   ok(settings.structured.cameraPath.keyframes[3].distance === 2, 'settings: the authored doc round-trips through chain settings')
 
@@ -1437,7 +1367,7 @@ console.log('(z) cameraPath — the compile step + the box-text round-trip')
   for (const fragment of ['Compiled camera path — 243 frames at 24 fps', 'physically move the CAMERA', 'Reach the final pose', 'the camera pushes in']) {
     ok(detourText.includes(fragment), `freeform detour: "${fragment.slice(0, 34)}" survives compose → parse`)
   }
-}
+})
 
 // ---------------------------------------------------------------------------
 // The LoRA timeline's pure layer (7twfk6o, layer 1 — segment granularity):
@@ -1446,11 +1376,9 @@ console.log('(z) cameraPath — the compile step + the box-text round-trip')
 // REASONS; uncovered spans → base segments), the plan-document builder, and
 // the graph seam that chains the per-segment LoRA stacks.
 // ---------------------------------------------------------------------------
-console.log('(aa) LoRA timeline — the compiler, the grid, the measured windows')
-{
+test('(aa) LoRA timeline — the compiler, the grid, the measured windows', () => {
   const lt = loadTs('src/canvas/loraTimeline.ts')
   const plan = loadTs('src/canvas/plan.ts')
-  const generation = loadTs('src/canvas/generation.ts', { localStorage: localStorageStub, window: { dispatchEvent: () => undefined, addEventListener: () => undefined } })
   const workflow = loadTs('src/lib/workflow.ts')
 
   // (1) The grid: nearest 17n+5 inside the 56–345 band (the chain clamp 2–15 s
@@ -1637,9 +1565,49 @@ console.log('(aa) LoRA timeline — the compiler, the grid, the measured windows
   eq(lt.activeLorasOf({ models: { turboLora: { name: 'turbo-8.safetensors' } }, loraStack: [{ name: 'style-a.safetensors', strength: 0.8 }, { malformed: true }] }),
     { loras: [{ name: 'turbo-8.safetensors', strength: 1 }, { name: 'style-a.safetensors', strength: 0.8 }] },
     'metrics: a missing strength defaults 1; malformed stack entries drop; garbage never crashes')
-}
+})
 
-h3OneFrameSubmitRun()
-  .then(() => phase5Cores())
-  .then(() => { console.log(`\ntest-canvas: ${passed} assertions passed`) })
-  .catch((error) => { console.error(error); process.exit(1) })
+// ---------------------------------------------------------------------------
+// (u-run) The canvas H3-1F submission through the SHARED core (34afx79).
+// Async (the submission is an async function), like the (x) core above. This
+// is the failing-without-it leg for the core's T=1 tier pin: before the pin,
+// the session's packet-tier default (5) tripped the builder's exactly-one-frame
+// guard on EVERY T=1 submission — the run below would return the refusal and
+// no engine prompt would exist.
+// ---------------------------------------------------------------------------
+test('(u-run) H3-1F submission — the tier pin, the T=1 graph, the canvas link (34afx79)', async () => {
+  const still = loadTs('src/canvas/stillIntent.ts', { window: { localStorage: localStorageStub } })
+  const request = still.canvasH3OneFrameRequest('chain-t1', { prompt: 'a ceramic bowl of lemons on an oak table, morning light', seed: 77, resolution: '1344x768' })
+  let jobState = []
+  let linkedJobId = null
+  const notices = []
+  const io = {
+    notify: (tone, text) => { notices.push(`${tone}|${text}`) },
+    setJobs: (update) => { jobState = update(jobState) },
+    cancellationRequests: { current: new Set() },
+    onJobCreated: (jobId) => { linkedJobId = jobId },
+  }
+  const result = await stillSubmitCore.submitWorkbenchGeneration(request, { settings: { comfyUrl: 'http://engine.test' }, connected: true, models: H3_T1_FULL_STACK, info: {} }, io)
+  eq(result.ok, true, 'submit: the text→still T=1 run submits clean through the shared core (the tier pin holds)')
+  ok(jobState.length === 1 && jobState[0].status === 'running', 'submit: the job parks running after the engine accepts')
+  ok(linkedJobId === jobState[0].id, 'submit: onJobCreated fires the moment the job record exists (the canvas-link discipline added with 34afx79)')
+  ok(jobState[0].mediaType === 'image', 'submit: the job is an image job (the queue poll completes it with the image kind)')
+  eq(t1SubmittedGraphs.length, 1, 'submit: exactly one engine prompt submitted (no upload touched — the text intent uploads nothing)')
+  const graph = t1SubmittedGraphs[0].graph
+  const nodes = Object.values(graph)
+  const classes = nodes.map((node) => node.class_type)
+  ok(classes.filter((cls) => cls === 'SaveImage').length === 1, 'submit: ONE per-frame publish — the T=1 single frame (without the tier pin the builder refused here)')
+  ok(!classes.includes('LoadImage'), 'submit: no image loaders on the text intent')
+  ok(classes.includes('MiniMaxH3SigmaShift'), 'submit: the pinned T=1 sigma shifts ride the model chain')
+  ok(nodes.filter((node) => node.class_type === 'VAELoader').some((node) => /^minimax_h3_t1_image_vae/.test(String(node.inputs.vae_name))), 'submit: the decode rides the Mamad8 T=1 VAE (never the video VAE on this profile)')
+  eq(nodes.find((node) => node.class_type === 'KSamplerSelect').inputs.sampler_name, 'er_sde', 'submit: the pinned sampler er_sde')
+  eq(nodes.find((node) => node.class_type === 'BasicScheduler').inputs.scheduler, 'sgm_uniform', 'submit: the pinned scheduler sgm_uniform')
+  eq(nodes.find((node) => node.class_type === 'BasicScheduler').inputs.steps, 8, 'submit: the pinned 8-step recipe')
+  eq(h3imageGraph.h3imgGraphAudit(graph), [], 'submit: the built graph audits clean (no video-only nodes, publish set matches)')
+  const manifest = jobState[0].manifest
+  ok(manifest && manifest.h3img && manifest.h3img.family === 'h3img.generate.t1', 'submit: the h3img provenance rides the manifest (the packet-aware landing keys on it)')
+  ok(manifest.h3img.frames === 1, 'submit: the provenance records the single frame')
+  ok(manifest.canvas && manifest.canvas.chainId === 'chain-t1', 'submit: the canvas chain link rides the manifest (reload relink)')
+  ok(notices.some((entry) => entry.startsWith('success|') && entry.includes('Generate (T=1 Fast)')), 'submit: the success notice names the family honestly')
+  console.log(`\ntest-canvas: ${passed} assertions passed`)
+})

@@ -1,5 +1,5 @@
 'use strict'
-// Fixture child for scripts/test-engine-process.cjs — portable across POSIX
+// Fixture child for the engine-process suite (tests/engine-process.test.js) — portable across POSIX
 // and Windows (no shell-isms; everything is plain Node). Modes:
 //
 //   (none)        NDJSON lines (one deliberately-invalid line, CRLF-terminated

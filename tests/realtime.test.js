@@ -1,5 +1,5 @@
 // Realtime event fabric test (wave 1). Boots the BUILT standalone server on a
-// verified-free scratch port + scratch home (like test-storage.cjs) and
+// verified-free scratch port + scratch home (like the storage suite) and
 // exercises the fabric end to end, engine-independently:
 //   (a) UNITS against dist-server/server/realtime.js exports — binary preview
 //       framing round-trip, job-key hash determinism, job-channel
@@ -26,15 +26,30 @@
 //       preview frames fan out to EVERY fabric client while the engine sent
 //       them to exactly one session; the id survives an upstream reconnect
 // Run after `pnpm build` (the server and units load from dist-server).
+//
+// Vitest port (task z7ogmig, 2026-09-20) of scripts/test-realtime.cjs:
+// assertion bodies carry over verbatim; the linear main() became one test
+// per section (sequential within the file — sections (b)-(e) share the
+// booted server and its fabric client); CWD-relative paths are now
+// __dirname-anchored and ports draw from this suite's disjoint range
+// (tests/lib/ports.cjs).
+import { test, afterAll } from 'vitest'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+
+const require = createRequire(import.meta.url)
+const __dirname = require('node:path').dirname(fileURLToPath(import.meta.url))
+const REPO = require('node:path').resolve(__dirname, '..')
+
 const { spawn } = require('node:child_process')
 const http = require('node:http')
-const net = require('node:net')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const assert = require('node:assert/strict')
 const WebSocket = require('ws')
 const { WebSocketServer } = require('ws')
+const { makePortAllocator } = require('./lib/ports.cjs')
 const {
   normalizeComfyEvent,
   encodePreviewFrame,
@@ -42,32 +57,18 @@ const {
   parseUpstreamBinary,
   hashJobKey,
   ClientOutbox,
-} = require(path.join(__dirname, '..', 'dist-server', 'server', 'realtime.js'))
+} = require(path.join(REPO, 'dist-server', 'server', 'realtime.js'))
 
-/** Verifiably-free port (a stale dev server squatting the range would
- *  otherwise answer the readiness probe against the WRONG home). */
-async function freePort() {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    const candidate = 4550 + Math.floor(Math.random() * 300)
-    const busy = await new Promise((resolve) => {
-      const probe = net.connect({ port: candidate, host: '127.0.0.1' })
-      probe.on('error', () => resolve(false))
-      probe.on('connect', () => { probe.destroy(); resolve(true) })
-    })
-    if (!busy) return candidate
-  }
-  throw new Error('no free port found in 50 attempts')
-}
+const freePort = makePortAllocator('realtime')
 
 const children = []
 const servers = []
 let output = ''
 
 const fail = (message) => {
-  console.error(`FAIL: ${message}\n--- server output ---\n${output}`)
   for (const child of children) child.kill()
   for (const server of servers) server.close()
-  process.exit(1)
+  throw new Error(`FAIL: ${message}\n--- server output ---\n${output}`)
 }
 
 async function waitForHttp(port, pathname) {
@@ -82,7 +83,7 @@ async function waitForHttp(port, pathname) {
 }
 
 function bootServer(home, port, extraEnv = {}) {
-  const child = spawn(process.execPath, ['dist-server/server/index.js'], {
+  const child = spawn(process.execPath, [path.join(REPO, 'dist-server', 'server', 'index.js')], {
     env: { ...process.env, MINIMAX_STUDIO_HOME: home, MINIMAX_LAN_PORT: String(port), MINIMAX_NO_HTTPS: '1', ...extraEnv },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -128,10 +129,25 @@ function listen(server) {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server.address().port)))
 }
 
-async function main() {
-  // ---- (a) units -----------------------------------------------------------
+// Shared fixtures across sections (the (a) units build them; the (b) upstream
+// handler replays the legacy framing; (c) byte-compares against jpegBytes).
+const payload = Buffer.from([0xff, 0xd8, 0xff, 0xdb, 0x01, 0x02, 0x03, 0x04])
+const legacyEvent = Buffer.alloc(8); legacyEvent.write('preview', 'utf8')
+const legacyMime = Buffer.alloc(16); legacyMime.write('image/jpeg', 'utf8')
+const jpegBytes = Buffer.from([0xff, 0xd8, 0xff, 0xdb, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09])
+
+// Cross-section state (sequential tests share it, as the linear main() did)
+let client = null
+let port = 0
+let upstreamConnections = 0
+
+afterAll(() => {
+  for (const child of children) child.kill()
+  for (const server of servers) server.close()
+})
+
+test('(a) units against dist-server/server/realtime.js: framing, hashing, normalization, backpressure outbox', () => {
   // Binary framing round-trip for every mime, hash 0 (unknown job) included.
-  const payload = Buffer.from([0xff, 0xd8, 0xff, 0xdb, 0x01, 0x02, 0x03, 0x04])
   for (const mime of ['image/jpeg', 'image/png', 'image/webp', 'video/mp4']) {
     const frame = encodePreviewFrame(hashJobKey('prompt-x'), mime, payload)
     const decoded = decodePreviewFrame(frame)
@@ -148,8 +164,6 @@ async function main() {
   assert.equal(hashJobKey('a'), hashJobKey('a'), 'hash must be deterministic')
 
   // Upstream binary parsing: legacy string framing (the SSE bridge's format)…
-  const legacyEvent = Buffer.alloc(8); legacyEvent.write('preview', 'utf8')
-  const legacyMime = Buffer.alloc(16); legacyMime.write('image/jpeg', 'utf8')
   const legacy = parseUpstreamBinary(Buffer.concat([legacyEvent, legacyMime, payload]))
   assert.equal(legacy.mime, 'image/jpeg')
   assert.ok(legacy.payload.equals(payload), 'legacy framing payload starts at byte 24')
@@ -214,19 +228,19 @@ async function main() {
   outbox.pump()
   assert.deepEqual(sent.map(String), ['env-6', 'env-7', 'env-8', 'env-9', 'frame-b', 'frame-c'], 'drain sends the surviving JSON in order, then the NEWEST frame per job (frame-a was stale)')
   assert.equal(outbox.pending, 0)
+})
 
-  // ---- (b) boot + WS + telemetry without any ComfyUI engine ----------------
+test('(b) boot + WS hello + telemetry push without any ComfyUI engine', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-realtime-'))
 
   // Fake upstream ComfyUI on a kernel-assigned port, known to the server via
   // settings BEFORE boot (the fabric connects upstream lazily on subscribe).
-  let upstreamConnections = 0
+  upstreamConnections = 0
   const upstreamServer = new WebSocketServer({ port: 0, host: '127.0.0.1' })
   servers.push(upstreamServer)
   const upstreamReady = new Promise((resolve) => upstreamServer.on('listening', () => resolve(upstreamServer.address().port)))
   const upstreamPort = await upstreamReady
   fs.writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ comfyUrl: `http://127.0.0.1:${upstreamPort}` }))
-  const jpegBytes = Buffer.from([0xff, 0xd8, 0xff, 0xdb, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09])
   upstreamServer.on('connection', (socket) => {
     upstreamConnections += 1
     setTimeout(() => {
@@ -237,19 +251,20 @@ async function main() {
     }, 150)
   })
 
-  const port = await freePort()
+  port = await freePort()
   bootServer(home, port)
   await waitForHttp(port, '/api/lan/settings')
   if (!output.includes(`[server ${port}]`) || !output.includes(`"port":${port}`)) fail('the readiness probe reached a server that is not the test child')
 
-  const client = fabricClient(port)
+  client = fabricClient(port)
   await client.opened_()
   await client.waitFor((state) => state.envelopes.some((envelope) => envelope.ch === 'system' && envelope.type === 'hello'), 'system hello')
   client.send({ type: 'sub', ch: 'telemetry' })
   const telemetry = await client.waitFor((state) => state.envelopes.find((envelope) => envelope.ch === 'telemetry' && envelope.type === 'sample'), 'a pushed telemetry sample (no engine involved)')
   assert.equal(typeof telemetry.payload.available, 'boolean', 'telemetry sample carries the GPU availability flag')
+})
 
-  // ---- (c) job + preview fan-out through the fake upstream -----------------
+test('(c) job + preview fan-out through the fake upstream: correlation, hash-stamped binary frames, gapless seq', async () => {
   client.send({ type: 'sub', ch: 'job' })
   client.send({ type: 'sub', ch: 'preview' })
   const jobStart = await client.waitFor((state) => state.envelopes.find((envelope) => envelope.ch === 'job' && envelope.type === 'execution_start'), 'execution_start on the job channel')
@@ -265,8 +280,9 @@ async function main() {
   assert.ok(frame.subarray(6).equals(jpegBytes), 'frame payload is the exact upstream bytes (no base64 inflation)')
   const jobSeqs = client.envelopes.filter((envelope) => envelope.ch === 'job').map((envelope) => envelope.seq)
   for (let index = 1; index < jobSeqs.length; index += 1) assert.equal(jobSeqs[index], jobSeqs[index - 1] + 1, 'job channel seq is monotonic without gaps')
+})
 
-  // ---- (d) llm channel against a local mock OpenAI SSE endpoint ------------
+test('(d) llm channel against a local mock OpenAI SSE endpoint: streaming, abort, SSRF rejection, one shared upstream', async () => {
   const tokens = ['Hel', 'lo ', 'fab', 'ric']
   let llmAbortCloses = 0
   const llmMock = http.createServer((request, response) => {
@@ -347,8 +363,9 @@ async function main() {
   // Shared upstream: the fabric opened exactly ONE ComfyUI connection for
   // every channel subscription on this client.
   assert.equal(upstreamConnections, 1, 'one shared upstream connection across all subscribers')
+})
 
-  // ---- (e) SSE v2 fallback --------------------------------------------------
+test('(e) SSE v2 fallback pushes telemetry', async () => {
   const sseResponse = await fetch(`http://127.0.0.1:${port}/api/lan/realtime?channels=telemetry`)
   assert.equal(sseResponse.status, 200)
   assert.ok((sseResponse.headers.get('content-type') ?? '').includes('text/event-stream'))
@@ -372,8 +389,9 @@ async function main() {
   })
   assert.equal(typeof sseSample.payload.available, 'boolean')
   await sseReader.cancel()
+})
 
-  // ---- (f) token mode --------------------------------------------------------
+test('(f) token mode: WS without/with a wrong token is refused before the handshake; the correct token connects', async () => {
   const tokenHome = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-realtime-token-'))
   const tokenPort = await freePort()
   bootServer(tokenHome, tokenPort, { MINIMAX_LAN_TOKEN: '1' })
@@ -391,8 +409,9 @@ async function main() {
   const authed = fabricClient(tokenPort, token)
   await authed.opened_()
   await authed.waitFor((state) => state.envelopes.some((envelope) => envelope.ch === 'system' && envelope.type === 'hello'), 'hello after token auth')
+})
 
-  // ---- (g) F6 live progress: stable server-side clientId + preview wiring --
+test('(g) F6 live progress: stable server-side clientId + native-preview wiring against a fake engine speaking the REAL contract', async () => {
   // A fake engine speaking the REAL contract (verified against the installed
   // ComfyUI source 2026-09-18): /ws?clientId=<sid> registers a session;
   // /prompt's client_id becomes the TARGET of every progress/preview event,
@@ -524,10 +543,5 @@ async function main() {
     check()
   })
   assert.equal(engineClientIds[1], hubId, 'the reconnect registers the SAME stable clientId')
-
-  for (const child of children) child.kill()
-  for (const server of servers) server.close()
   console.log('PASS: realtime event fabric — WS + SSE v2 transports behind the constant-time token gate; job channel normalized once from one SHARED upstream ComfyUI socket (prompt correlation server-side, binary preview frames hash-stamped, no base64 on the WS path, per-channel seq gapless); telemetry pushes without an engine and stops with zero subscribers; llm channel streams tokens from a local OpenAI-compatible endpoint with abort + SSRF rejection; backpressure is bounded-queue/oldest-dropped for JSON and newest-wins for previews; F6 — one stable server-side clientId registered on the shared upstream, carried by every submission (targeted events land, page ids retired), native taesd previews requested per prompt and fanned out as binary frames to every client.')
-}
-
-void main().catch((error) => fail(error instanceof Error ? error.stack : String(error)))
+})

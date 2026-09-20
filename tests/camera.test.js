@@ -18,12 +18,24 @@
 //   (i) Motion Frame — <Video 1> rewrites, 17k+5 truncation, options
 //       override, banner, forced-off closure
 //   (j) coordinateAnchor — literal precision, defaults, error taxonomy
+//
+// Vitest port (task z7ogmig, 2026-09-20) of scripts/test-camera.cjs:
+// assertion bodies carry over verbatim; the linear sections became one test
+// each; the module-scope provenance assertion became its own leading test;
+// the fixture stays in scripts/fixtures with an anchored path.
+import { test } from 'vitest'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+
+const require = createRequire(import.meta.url)
+const __dirname = require('node:path').dirname(fileURLToPath(import.meta.url))
+
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { loadTs } = require('./lib/ts-vm.cjs')
+const { loadTs } = require('../scripts/lib/ts-vm.cjs')
 
-const FIXTURE = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'camera-goldens.json'), 'utf8'))
+const FIXTURE = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'fixtures', 'camera-goldens.json'), 'utf8'))
 
 let passed = 0
 function ok(condition, label) {
@@ -49,7 +61,6 @@ const lib = loadTs('src/lib/camera/index.ts')
 const parity = loadTs('src/lib/camera/parity.ts')
 
 const PROVENANCE = FIXTURE._provenance
-same(PROVENANCE.source_commit, '846880de859959e801b2c506dc424bd5c8b5c6c4', 'fixture provenance pins the audited upstream commit')
 
 function shapeOf(ref) {
   return ref ? { shape: ref.shape } : null
@@ -95,8 +106,11 @@ function runCase(c) {
   })
 }
 
-console.log('(a) validate_path taxonomy')
-{
+test('fixture provenance pins the audited upstream commit', () => {
+  same(PROVENANCE.source_commit, '846880de859959e801b2c506dc424bd5c8b5c6c4', 'fixture provenance pins the audited upstream commit')
+})
+
+test('(a) validate_path taxonomy', () => {
   for (const row of FIXTURE.validation) {
     if (row.error === null) {
       const parsed = lib.validatePath(row.raw)
@@ -132,10 +146,9 @@ console.log('(a) validate_path taxonomy')
       console.log(`  ok - option ${row.label}: "${row.error}"`)
     }
   }
-}
+})
 
-console.log('(b) interpolation parity (monotone PCHIP / smoothstep / linear)')
-{
+test('(b) interpolation parity (monotone PCHIP / smoothstep / linear)', () => {
   // Numeric parity tolerance: pow() is implementation-approximated (see the
   // trajectoryMath note), so sampled poses compare within 1e-12 relative —
   // several orders above the observed ulp-level deltas, tight enough to
@@ -193,10 +206,9 @@ console.log('(b) interpolation parity (monotone PCHIP / smoothstep / linear)')
   assert.throws(() => lib.interpolatePose([], 0.5), (e) => e.message === 'Empty camera path / Trajetória vazia.')
   passed += 1
   console.log('  ok - interpolatePose rejects an empty path')
-}
+})
 
-console.log('(c) golden prompts — byte-for-byte vs the upstream compiler')
-{
+test('(c) golden prompts — byte-for-byte vs the upstream compiler', () => {
   for (const c of FIXTURE.cases) {
     const result = runCase(c)
     same(result.compiledPrompt, c.outputs.compiled_prompt, `${c.id}: compiled_prompt identical`)
@@ -214,10 +226,9 @@ console.log('(c) golden prompts — byte-for-byte vs the upstream compiler')
   for (const section of ['subject_definitions:', 'summary:', 'retention_analysis:', 'detailed_description:', 'overall_soundscape:', 'non_diegetic_music:']) {
     ok(sample.includes(section), `six-section format carries "${section}"`)
   }
-}
+})
 
-console.log('(d) Python parity helpers')
-{
+test('(d) Python parity helpers', () => {
   for (const row of FIXTURE.helpers.float_repr) {
     same(parity.pyFloatRepr(Number.parseFloat(row.label)), row.value, `pyFloatRepr(${row.label}) === ${row.value}`)
   }
@@ -230,10 +241,9 @@ console.log('(d) Python parity helpers')
   for (const row of FIXTURE.helpers.round3) {
     same(parity.pyFloatRepr(parity.pyRound(Number.parseFloat(row.label), 3)), row.value, `pyRound(${row.label}, 3)`)
   }
-}
+})
 
-console.log('(e) camera vocabulary')
-{
+test('(e) camera vocabulary', () => {
   for (const row of FIXTURE.helpers.end_view) {
     same(lib.endView(row.net), row.text, `endView(${row.net})`)
   }
@@ -262,20 +272,18 @@ console.log('(e) camera vocabulary')
     console.log(`  ok - imageAspect(${JSON.stringify(row.shape)}) === ${row.aspect}`)
   }
   ok(lib.imageAspect(null) === null, 'imageAspect(null) is null')
-}
+})
 
-console.log('(f) diagnostics')
-{
+test('(f) diagnostics', () => {
   for (const entry of FIXTURE.diagnostics) {
     const items = lib.reviewPath(pathFromName(entry.path), entry.duration, entry.elevation_limit)
     eq(items, entry.items, `reviewPath(${entry.path}) items identical`)
     same(lib.diagnosticText(items, true), entry.en_text, `diagnosticText(${entry.path}, en) identical`)
     same(lib.diagnosticText(items, false), entry.pt_text, `diagnosticText(${entry.path}, pt) identical`)
   }
-}
+})
 
-console.log('(g) loop closure')
-{
+test('(g) loop closure', () => {
   const loop = FIXTURE.cases.find((c) => c.id === 'freeze_loop360')
   const result = runCase(loop)
   ok(result.options.coverage_loop_closure === true, 'exact ±360 with elevation+distance return closes the loop')
@@ -306,10 +314,9 @@ console.log('(g) loop closure')
   })
   ok(noClose.options.coverage_loop_closure === false, 'elevation not returning disqualifies closure')
   ok(noClose.info.includes('a elevacao termina em 4 em vez de 0'), 'elevation motivo is reported')
-}
+})
 
-console.log('(h) direction mirroring quirk')
-{
+test('(h) direction mirroring quirk', () => {
   const right = FIXTURE.cases.find((c) => c.id === 'freeze_orbit90_v15')
   const result = runCase(right)
   ok(result.compiledPrompt.includes("toward the camera's LEFT"), 'default invert H3 orbit mirrors +90 to LEFT in the prompt')
@@ -321,10 +328,9 @@ console.log('(h) direction mirroring quirk')
   ok(sameHudResult.compiledPrompt.includes("toward the camera's RIGHT"), "'same as HUD' keeps the authored direction")
   const loopResult = runCase(FIXTURE.cases.find((c) => c.id === 'freeze_loop360'))
   ok(loopResult.options.coverage_direction === 'counterclockwise / camera left', 'mirroring flips coverage_direction for a +360 authored circle')
-}
+})
 
-console.log('(i) Motion Frame semantics')
-{
+test('(i) Motion Frame semantics', () => {
   const motion = FIXTURE.cases.find((c) => c.id === 'node_motion_multikey')
   const result = runCase(motion)
   ok(result.compiledPrompt.includes('<Video 1> is the temporal action reference.'), '<Picture 1> headline becomes <Video 1>')
@@ -401,10 +407,9 @@ console.log('(i) Motion Frame semantics')
     passed += 1
     console.log(`  ok - motionFrameResample(${row.count}@${row.source_fps}fps) rejects: "${row.error.slice(0, 52)}…"`)
   }
-}
+})
 
-console.log('(j) coordinateAnchor')
-{
+test('(j) coordinateAnchor', () => {
   eq(lib.coordinateAnchor(''), {
     kind: 'reference_image',
     box: '[L=0.000, T=0.000, W=1.000, H=1.000]',
@@ -427,7 +432,9 @@ console.log('(j) coordinateAnchor')
   assert.throws(() => lib.coordinateAnchor('[L=-0.1, T=0.1, W=0.2, H=0.2]'), (e) => e.message === 'subject_box must have positive size and stay within the normalized image.', 'negative L')
   passed += 1
   console.log('  ok - negative L rejected')
-}
+  console.log('')
+  console.log(`camera suite: ${passed} assertions passed`)
+})
 
 function pathFromName(name) {
   const table = {
@@ -478,6 +485,3 @@ function pathFromName(name) {
 function pathJson(name) {
   return JSON.stringify(pathFromName(name))
 }
-
-console.log('')
-console.log(`camera suite: ${passed} assertions passed`)

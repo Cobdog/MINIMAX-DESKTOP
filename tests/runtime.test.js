@@ -38,6 +38,22 @@
 //   (l) weight symlink policy (increment 2): linkNeverCopy chain +
 //       linkWeightIntoModelRoot (reuse, refuse-overwrite, no-copy)
 // Run after `pnpm build:server` (the modules load from dist-server).
+//
+// Vitest port (task z7ogmig, 2026-09-20) of scripts/test-runtime.cjs:
+// assertion bodies carry over verbatim; the linear main() became one test
+// per section; CWD-relative paths are REPO-anchored; the module-scope
+// dist-server requires are guarded so a missing build NOTE-skips; probe and
+// server ports draw from this suite's disjoint range (tests/lib/ports.cjs)
+// instead of the old listen(0)-ephemeral/random picks; the failure-path
+// reaping became an afterAll safety net.
+import { test, afterAll } from 'vitest'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+
+const require = createRequire(import.meta.url)
+const __dirname = require('node:path').dirname(fileURLToPath(import.meta.url))
+const REPO = require('node:path').resolve(__dirname, '..')
+
 const { spawn } = require('node:child_process')
 const fs = require('node:fs')
 const http = require('node:http')
@@ -45,18 +61,32 @@ const os = require('node:os')
 const net = require('node:net')
 const path = require('node:path')
 const assert = require('node:assert/strict')
+const { makePortAllocator } = require('./lib/ports.cjs')
 
-const { RuntimeManager, allocatePort, renderExtraModelPathsYaml, validateModelRoot, writeExtraModelPathsConfig, extraModelPathsTarget, RESERVED_ENGINE_PORTS } = require(path.join(__dirname, '..', 'dist-server', 'server', 'runtime.js'))
-const { EngineProcess } = require(path.join(__dirname, '..', 'dist-server', 'server', 'engineProcess.js'))
-const { DEFAULT_ENGINE_PROFILES, mergeEngineProfiles, resolveActiveProfile } = require(path.join(__dirname, '..', 'dist-server', 'server', 'engineProfiles.js'))
-const { ENGINE_PATCHES, LONGCACHE_PATCH, applyEnginePatch, checkEnginePatch, detectPatchLayout, revertEnginePatch, structuralBalance, transformPatchedText } = require(path.join(__dirname, '..', 'dist-server', 'server', 'enginePatch.js'))
-const { ENGINE_NODE_PACKS, checkNodePack, findNodePack, installNodePack, uninstallNodePack, isUsableCheckout, linkNeverCopy, linkWeightIntoModelRoot, nodePackInstallDir, resolveVendorRoot } = require(path.join(__dirname, '..', 'dist-server', 'server', 'engineNodes.js'))
+const freePort = makePortAllocator('runtime')
 
-const FIXTURES = path.join(__dirname, 'fixtures')
+// NOTE guard: every module under test loads from dist-server — without the
+// build there is nothing to exercise (the suite's own philosophy; legs that
+// build the server run this in full).
+const hasServerBuild = fs.existsSync(path.join(REPO, 'dist-server', 'server', 'runtime.js'))
+if (!hasServerBuild) {
+  console.log('NOTE - no dist-server build present (runtime.js); run pnpm build:server — this suite runs on legs that build the server.')
+}
+const maybe = hasServerBuild ? test : test.skip
+
+const {
+  RuntimeManager, allocatePort, renderExtraModelPathsYaml, validateModelRoot, writeExtraModelPathsConfig, extraModelPathsTarget, RESERVED_ENGINE_PORTS,
+} = hasServerBuild ? require(path.join(REPO, 'dist-server', 'server', 'runtime.js')) : {}
+const { EngineProcess } = hasServerBuild ? require(path.join(REPO, 'dist-server', 'server', 'engineProcess.js')) : {}
+const { DEFAULT_ENGINE_PROFILES, mergeEngineProfiles, resolveActiveProfile } = hasServerBuild ? require(path.join(REPO, 'dist-server', 'server', 'engineProfiles.js')) : {}
+const { ENGINE_PATCHES, LONGCACHE_PATCH, applyEnginePatch, checkEnginePatch, detectPatchLayout, revertEnginePatch, structuralBalance, transformPatchedText } = hasServerBuild ? require(path.join(REPO, 'dist-server', 'server', 'enginePatch.js')) : {}
+const { ENGINE_NODE_PACKS, checkNodePack, findNodePack, installNodePack, uninstallNodePack, isUsableCheckout, linkNeverCopy, linkWeightIntoModelRoot, nodePackInstallDir, resolveVendorRoot } = hasServerBuild ? require(path.join(REPO, 'dist-server', 'server', 'engineNodes.js')) : {}
+
+const FIXTURES = path.join(REPO, 'scripts', 'fixtures')
 const IS_WIN = process.platform === 'win32'
 const DEATH_BUDGET_MS = 8_000
 
-EngineProcess.setUrlGuard(() => true) // readiness probes: loopback stubs are fine
+if (hasServerBuild) EngineProcess.setUrlGuard(() => true) // readiness probes: loopback stubs are fine
 
 let passed = 0
 function ok(condition, label) {
@@ -86,17 +116,6 @@ async function waitUntil(predicate, timeoutMs, label) {
   }
   if (await predicate()) return true
   throw new Error(`timed out after ${timeoutMs} ms waiting for: ${label}`)
-}
-
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer()
-    probe.once('error', reject)
-    probe.listen(0, '127.0.0.1', () => {
-      const { port } = probe.address()
-      probe.close(() => resolve(port))
-    })
-  })
 }
 
 function holdPort(port) {
@@ -139,7 +158,7 @@ async function suiteStartPort() {
 }
 
 /** Minimal settings shaped for the RuntimeManager's needs (engine + paths +
- *  comfyUrl); the suite never persists through normalizeSettings. */
+ * comfyUrl); the suite never persists through normalizeSettings. */
 function makeSettings(checkout, extra = {}) {
   const { engine: engineExtra = {}, paths: pathsExtra = {}, ...rest } = extra
   const modelRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-runtime-models-'))
@@ -303,9 +322,15 @@ async function waitForState(runtime, state, label) {
   return waitUntil(async () => (await runtime.status()).state === state, 20_000, `${label} → ${state}`)
 }
 
-// ---------------------------------------------------------------------------
-async function main() {
-  // ---- (a) extra_model_paths.yaml generation --------------------------------
+// Safety net mirroring the cjs failure path: reap everything even when a
+// test fails mid-section (a live stub's pipes would pin the worker).
+afterAll(async () => {
+  if (!hasServerBuild) return
+  await Promise.allSettled([...liveRuntimes].map((runtime) => runtime.stop()))
+  await EngineProcess.shutdownAll()
+})
+
+maybe('(a) extra_model_paths.yaml generation', async () => {
   console.log('runtime: extra_model_paths.yaml generation')
   {
     const realDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-runtime-root-'))
@@ -341,8 +366,9 @@ async function main() {
     ok(none.written === false, 'no valid roots → nothing written (an existing file is left alone)')
     ok(fs.existsSync(extraModelPathsTarget(checkout)), 'the existing generated file survives a no-root run')
   }
+})
 
-  // ---- (b) port allocation ----------------------------------------------------
+maybe('(b) port allocation: reserved + bound ports skipped, preference fall-through', async () => {
   console.log('runtime: port allocation')
   {
     const fromReserved = await allocatePort({ startPort: 8188 })
@@ -361,8 +387,9 @@ async function main() {
     heldB.close()
     await sleep(150) // let the held sockets release before later sections
   }
+})
 
-  // ---- (c) lifecycle -----------------------------------------------------------
+maybe('(c) lifecycle: spawn → supervise → stop; idempotent start; state file; log tail; health', async () => {
   console.log('runtime: spawn / supervise / stop lifecycle')
   {
     const home = makeHome()
@@ -399,8 +426,9 @@ async function main() {
     rebinding.close()
     ok((await runtime.stop()).state === 'stopped', 'stop is idempotent when already stopped')
   }
+})
 
-  // ---- (d) failure taxonomy ------------------------------------------------------
+maybe('(d) failure taxonomy: exit-before-ready + unexpected crash', async () => {
   console.log('runtime: failure taxonomy')
   {
     const home = makeHome()
@@ -421,8 +449,9 @@ async function main() {
     ok(failedStart.state === 'failed' && /before becoming ready|code 7/.test(failedStart.lastError ?? ''), `exit-before-ready recorded with reason (got "${failedStart.lastError}")`)
     ok(EngineProcess.liveCount === 0, 'failed launches leave nothing live')
   }
+})
 
-  // ---- (e) forced tree-kill --------------------------------------------------------
+maybe('(e) forced tree-kill: SIGTERM-immune engine + grandchild die with the tree', async () => {
   console.log('runtime: forced tree-kill (SIGTERM-immune engine + grandchild)')
   {
     const checkout = makeCheckout('runtime-stub-immune.cjs')
@@ -441,8 +470,9 @@ async function main() {
       ok(await waitUntil(() => !isAlive(Number(match[1])), DEATH_BUDGET_MS, 'grandchild death'), 'grandchild died with the tree (not by its own 10 s timer)')
     }
   }
+})
 
-  // ---- (f) boot reconcile -----------------------------------------------------------
+maybe('(f) boot posture reconcile: adopt, stale record, stray under external mode, unknown squatter', async () => {
   console.log('runtime: boot posture reconcile')
   {
     // (f1) adopt: a second manager on the same home adopts the running engine.
@@ -517,132 +547,136 @@ async function main() {
     await squatRuntime.stop()
     squatter.close()
   }
+})
 
-  // ---- (g) routes against the real server ----------------------------------------
+// The standalone entry REFUSES to boot without the web build (dist/index.html).
+// Legs that build only the server (Engine CI Windows) skip this section with
+// a note — the routes are platform-neutral; the OS-specific supervision
+// paths (taskkill tree-kill, tasklist verification) ran in sections (c)–(f).
+const hasWebBuild = fs.existsSync(path.join(REPO, 'dist', 'index.html'))
+if (!hasWebBuild) {
+  console.log('  NOTE - no web build present (dist/index.html); the standalone server will not boot — route coverage runs on legs that build the web app (ubuntu CI, pnpm test:all)')
+}
+const routesMaybe = hasServerBuild && hasWebBuild ? test : test.skip
+
+routesMaybe('(g) routes against the real built server: status/start/stop, profiles + consent persistence, node packs', async () => {
   console.log('runtime: /api/lan/engine/* routes')
-  // The standalone entry REFUSES to boot without the web build (dist/index.html).
-  // Legs that build only the server (Engine CI Windows) skip this section with
-  // a note — the routes are platform-neutral; the OS-specific supervision
-  // paths (taskkill tree-kill, tasklist verification) ran in sections (c)–(f).
-  if (!fs.existsSync(path.join(__dirname, '..', 'dist', 'index.html'))) {
-    console.log('  NOTE - no web build present (dist/index.html); the standalone server will not boot — route coverage runs on legs that build the web app (ubuntu CI, pnpm test:all)')
-  } else {
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-    const home = makeHome()
-    const checkout = makeCheckout()
-    const port = 4210 + Math.floor(Math.random() * 80)
-    const child = spawn(process.execPath, ['dist-server/server/index.js'], {
-      cwd: path.join(__dirname, '..'),
-      env: { ...process.env, MINIMAX_STUDIO_HOME: home, MINIMAX_LAN_PORT: String(port) },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    let serverOutput = ''
-    child.stdout.on('data', (chunk) => { serverOutput += String(chunk) })
-    child.stderr.on('data', (chunk) => { serverOutput += String(chunk) })
-    const base = `https://127.0.0.1:${port}`
-    const api = async (route, init) => {
-      const response = await fetch(`${base}${route}`, init)
-      return { status: response.status, body: await response.json().catch(() => ({})) }
-    }
-    await waitUntil(async () => {
-      try { return (await fetch(`${base}/api/lan/settings`)).ok } catch { return false }
-    }, 15_000, 'server boot')
-
-    const initial = await api('/api/lan/engine/status')
-    ok(initial.status === 200 && initial.body.mode === 'external' && initial.body.state === 'stopped' && Array.isArray(initial.body.logTail), 'default posture: external mode, stopped, empty tail')
-
-    const rejected = await api('/api/lan/engine/start', { method: 'POST' })
-    ok(rejected.status === 400 && typeof rejected.body.error === 'string', 'start is refused in external mode with a clear error')
-
-    const current = (await api('/api/lan/settings')).body.settings
-    const configured = await api('/api/lan/settings', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ settings: { ...current, engine: { mode: 'managed', checkoutPath: checkout, pythonPath: process.execPath, portPreference: 0, autoStart: false } } }),
-    })
-    ok(configured.status === 200 && configured.body.settings.engine.mode === 'managed', 'managed engine settings persist through normalizeSettings')
-
-    const started = await api('/api/lan/engine/start', { method: 'POST' })
-    ok(started.status === 200 && started.body.state === 'running' && started.body.already === false && started.body.mode === 'managed', 'POST start → running with mode managed')
-    // Security hardening 1: the LAN-facing log tail is scrubbed at the route
-    // boundary — the prompt-shaped fragment the stub prints must NOT cross
-    // the wire (the local ring keeps it; section (c) asserts the raw side).
-    const statusBody = await api('/api/lan/engine/status')
-    ok(statusBody.status === 200 && !JSON.stringify(statusBody.body.logTail).includes('NeonCyberQueen'), `the HTTP log tail scrubs prompt-shaped fragments (got ${JSON.stringify(statusBody.body.logTail).slice(0, 200)})`)
-    ok(started.body.url === `http://127.0.0.1:${started.body.port}` && Number.isInteger(started.body.pid), 'status carries url + pid')
-
-    const again = await api('/api/lan/engine/start', { method: 'POST' })
-    ok(again.status === 200 && again.body.already === true && again.body.pid === started.body.pid, 'a repeated start reports already: true with the same pid (no double spawn)')
-
-    const status = await api('/api/lan/engine/status')
-    ok(status.status === 200 && status.body.state === 'running' && status.body.health === 'ok' && !RESERVED_ENGINE_PORTS.includes(status.body.port), 'GET status: running, healthy, port clear of user instances')
-
-    const stopped = await api('/api/lan/engine/stop', { method: 'POST' })
-    ok(stopped.status === 200 && stopped.body.state === 'stopped', 'POST stop → stopped')
-    ok(!isAlive(started.body.pid), 'the engine process is gone')
-
-    const badCheckout = await api('/api/lan/settings', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ settings: { ...current, engine: { mode: 'managed', checkoutPath: '/definitely/not/a/checkout', pythonPath: process.execPath, portPreference: 0, autoStart: false, profile: 'default', profiles: current.engine.profiles, patches: {} } } }),
-    })
-    ok(badCheckout.status === 200, 'settings accept a (not-yet-validated) checkout path')
-    const badStart = await api('/api/lan/engine/start', { method: 'POST' })
-    ok(badStart.status === 400 && /checkout/i.test(badStart.body.error), 'an invalid checkout fails the start with a 400 and a clear reason')
-    ok(badStart.body.state === 'stopped', 'a config-validation refusal never attempted a launch — posture stays stopped')
-
-    // ---- increment 2: profile + consent persistence, node-pack routes ----
-    // Restore the good checkout first, then persist a vdn profile whose
-    // default-profile env smuggles a forbidden var (must be dropped) and a
-    // consent record for the LongCache patch (must survive normalization).
-    const profileSaved = await api('/api/lan/settings', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        settings: {
-          ...current,
-          engine: {
-            mode: 'managed', checkoutPath: checkout, pythonPath: process.execPath, portPreference: 0, autoStart: false,
-            profile: 'vdn',
-            profiles: {
-              default: { label: 'Default', description: 'stock', env: { PATH: '/should-be-dropped', STOCK_VAR: 'yes' }, hooks: [] },
-              vdn: { label: 'VDN', description: 'vdn stack', env: { VDN_H3_PROBE: '1' }, hooks: [{ kind: 'patch', patchId: 'longcache-block-loop' }] },
-            },
-            patches: { 'longcache-block-loop': { consented: true } },
-          },
-        },
-      }),
-    })
-    ok(profileSaved.status === 200 && profileSaved.body.settings.engine.profile === 'vdn', 'the launch profile persists through normalizeSettings')
-    const savedProfiles = profileSaved.body.settings.engine.profiles
-    ok(savedProfiles.default.env.STOCK_VAR === 'yes' && !('PATH' in savedProfiles.default.env), 'a forbidden env var (PATH) is dropped at normalization; legal ones survive')
-    ok(savedProfiles.vdn.hooks.length === 1 && savedProfiles.vdn.hooks[0].patchId === 'longcache-block-loop', 'the vdn profile keeps its patch hook')
-    ok(profileSaved.body.settings.engine.patches['longcache-block-loop']?.consented === true, 'patch consent persists through normalizeSettings')
-
-    const nodes = await api('/api/lan/engine/nodes')
-    ok(nodes.status === 200 && Array.isArray(nodes.body.packs) && nodes.body.packs.length >= 3, 'the node-pack registry lists its entries')
-    const vdnPack = nodes.body.packs.find((pack) => pack.id === 'vdn-h3')
-    ok(vdnPack && vdnPack.vendored === true && vdnPack.availability === 'ready', 'the vendored VDN pack reports ready against the real vendor payload')
-    const facokPack = nodes.body.packs.find((pack) => pack.id === 'krea2-controlnet')
-    ok(facokPack && facokPack.licenseSpdx === 'NO-LICENSE' && facokPack.installMode === 'user-fetch', 'the unlicensed pack is listed as NO-LICENSE user-fetch (never vendored)')
-
-    const installPack = await api('/api/lan/engine/nodes/install', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'vdn-h3' }) })
-    ok(installPack.status === 200 && installPack.body.pack.installed === true, 'the install route places the vendored pack into the configured checkout')
-    ok(fs.existsSync(path.join(checkout, 'custom_nodes', 'ComfyUI-VDN-H3', '__init__.py')), 'the installed pack is on disk in custom_nodes/')
-    const noSource = await api('/api/lan/engine/nodes/install', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'krea2-controlnet' }) })
-    ok(noSource.status === 400, 'a user-fetch install without a source directory is a 400 with the reason')
-    const uninstallPack = await api('/api/lan/engine/nodes/uninstall', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'vdn-h3' }) })
-    ok(uninstallPack.status === 200 && uninstallPack.body.pack.installed === false, 'the uninstall route removes the pack (delete folder)')
-    ok(!fs.existsSync(path.join(checkout, 'custom_nodes', 'ComfyUI-VDN-H3')), 'the pack folder is gone after uninstall')
-    const unknownPack = await api('/api/lan/engine/nodes/install', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'nope' }) })
-    ok(unknownPack.status === 400, 'an unknown pack id is a 400')
-
-    child.kill()
-    await waitUntil(() => !isAlive(child.pid), 5_000, 'test server exit')
-    if (serverOutput.includes('FAIL')) console.log('  NOTE - server output contained FAIL; inspect manually')
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+  const home = makeHome()
+  const checkout = makeCheckout()
+  const port = await freePort()
+  const child = spawn(process.execPath, [path.join(REPO, 'dist-server', 'server', 'index.js')], {
+    cwd: REPO,
+    env: { ...process.env, MINIMAX_STUDIO_HOME: home, MINIMAX_LAN_PORT: String(port) },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let serverOutput = ''
+  child.stdout.on('data', (chunk) => { serverOutput += String(chunk) })
+  child.stderr.on('data', (chunk) => { serverOutput += String(chunk) })
+  const base = `https://127.0.0.1:${port}`
+  const api = async (route, init) => {
+    const response = await fetch(`${base}${route}`, init)
+    return { status: response.status, body: await response.json().catch(() => ({})) }
   }
+  await waitUntil(async () => {
+    try { return (await fetch(`${base}/api/lan/settings`)).ok } catch { return false }
+  }, 15_000, 'server boot')
 
-  // ---- (h) python realism (optional) ----------------------------------------------
+  const initial = await api('/api/lan/engine/status')
+  ok(initial.status === 200 && initial.body.mode === 'external' && initial.body.state === 'stopped' && Array.isArray(initial.body.logTail), 'default posture: external mode, stopped, empty tail')
+
+  const rejected = await api('/api/lan/engine/start', { method: 'POST' })
+  ok(rejected.status === 400 && typeof rejected.body.error === 'string', 'start is refused in external mode with a clear error')
+
+  const current = (await api('/api/lan/settings')).body.settings
+  const configured = await api('/api/lan/settings', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { ...current, engine: { mode: 'managed', checkoutPath: checkout, pythonPath: process.execPath, portPreference: 0, autoStart: false } } }),
+  })
+  ok(configured.status === 200 && configured.body.settings.engine.mode === 'managed', 'managed engine settings persist through normalizeSettings')
+
+  const started = await api('/api/lan/engine/start', { method: 'POST' })
+  ok(started.status === 200 && started.body.state === 'running' && started.body.already === false && started.body.mode === 'managed', 'POST start → running with mode managed')
+  // Security hardening 1: the LAN-facing log tail is scrubbed at the route
+  // boundary — the prompt-shaped fragment the stub prints must NOT cross
+  // the wire (the local ring keeps it; section (c) asserts the raw side).
+  const statusBody = await api('/api/lan/engine/status')
+  ok(statusBody.status === 200 && !JSON.stringify(statusBody.body.logTail).includes('NeonCyberQueen'), `the HTTP log tail scrubs prompt-shaped fragments (got ${JSON.stringify(statusBody.body.logTail).slice(0, 200)})`)
+  ok(started.body.url === `http://127.0.0.1:${started.body.port}` && Number.isInteger(started.body.pid), 'status carries url + pid')
+
+  const again = await api('/api/lan/engine/start', { method: 'POST' })
+  ok(again.status === 200 && again.body.already === true && again.body.pid === started.body.pid, 'a repeated start reports already: true with the same pid (no double spawn)')
+
+  const status = await api('/api/lan/engine/status')
+  ok(status.status === 200 && status.body.state === 'running' && status.body.health === 'ok' && !RESERVED_ENGINE_PORTS.includes(status.body.port), 'GET status: running, healthy, port clear of user instances')
+
+  const stopped = await api('/api/lan/engine/stop', { method: 'POST' })
+  ok(stopped.status === 200 && stopped.body.state === 'stopped', 'POST stop → stopped')
+  ok(!isAlive(started.body.pid), 'the engine process is gone')
+
+  const badCheckout = await api('/api/lan/settings', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { ...current, engine: { mode: 'managed', checkoutPath: '/definitely/not/a/checkout', pythonPath: process.execPath, portPreference: 0, autoStart: false, profile: 'default', profiles: current.engine.profiles, patches: {} } } }),
+  })
+  ok(badCheckout.status === 200, 'settings accept a (not-yet-validated) checkout path')
+  const badStart = await api('/api/lan/engine/start', { method: 'POST' })
+  ok(badStart.status === 400 && /checkout/i.test(badStart.body.error), 'an invalid checkout fails the start with a 400 and a clear reason')
+  ok(badStart.body.state === 'stopped', 'a config-validation refusal never attempted a launch — posture stays stopped')
+
+  // ---- increment 2: profile + consent persistence, node-pack routes ----
+  // Restore the good checkout first, then persist a vdn profile whose
+  // default-profile env smuggles a forbidden var (must be dropped) and a
+  // consent record for the LongCache patch (must survive normalization).
+  const profileSaved = await api('/api/lan/settings', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      settings: {
+        ...current,
+        engine: {
+          mode: 'managed', checkoutPath: checkout, pythonPath: process.execPath, portPreference: 0, autoStart: false,
+          profile: 'vdn',
+          profiles: {
+            default: { label: 'Default', description: 'stock', env: { PATH: '/should-be-dropped', STOCK_VAR: 'yes' }, hooks: [] },
+            vdn: { label: 'VDN', description: 'vdn stack', env: { VDN_H3_PROBE: '1' }, hooks: [{ kind: 'patch', patchId: 'longcache-block-loop' }] },
+          },
+          patches: { 'longcache-block-loop': { consented: true } },
+        },
+      },
+    }),
+  })
+  ok(profileSaved.status === 200 && profileSaved.body.settings.engine.profile === 'vdn', 'the launch profile persists through normalizeSettings')
+  const savedProfiles = profileSaved.body.settings.engine.profiles
+  ok(savedProfiles.default.env.STOCK_VAR === 'yes' && !('PATH' in savedProfiles.default.env), 'a forbidden env var (PATH) is dropped at normalization; legal ones survive')
+  ok(savedProfiles.vdn.hooks.length === 1 && savedProfiles.vdn.hooks[0].patchId === 'longcache-block-loop', 'the vdn profile keeps its patch hook')
+  ok(profileSaved.body.settings.engine.patches['longcache-block-loop']?.consented === true, 'patch consent persists through normalizeSettings')
+
+  const nodes = await api('/api/lan/engine/nodes')
+  ok(nodes.status === 200 && Array.isArray(nodes.body.packs) && nodes.body.packs.length >= 3, 'the node-pack registry lists its entries')
+  const vdnPack = nodes.body.packs.find((pack) => pack.id === 'vdn-h3')
+  ok(vdnPack && vdnPack.vendored === true && vdnPack.availability === 'ready', 'the vendored VDN pack reports ready against the real vendor payload')
+  const facokPack = nodes.body.packs.find((pack) => pack.id === 'krea2-controlnet')
+  ok(facokPack && facokPack.licenseSpdx === 'NO-LICENSE' && facokPack.installMode === 'user-fetch', 'the unlicensed pack is listed as NO-LICENSE user-fetch (never vendored)')
+
+  const installPack = await api('/api/lan/engine/nodes/install', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'vdn-h3' }) })
+  ok(installPack.status === 200 && installPack.body.pack.installed === true, 'the install route places the vendored pack into the configured checkout')
+  ok(fs.existsSync(path.join(checkout, 'custom_nodes', 'ComfyUI-VDN-H3', '__init__.py')), 'the installed pack is on disk in custom_nodes/')
+  const noSource = await api('/api/lan/engine/nodes/install', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'krea2-controlnet' }) })
+  ok(noSource.status === 400, 'a user-fetch install without a source directory is a 400 with the reason')
+  const uninstallPack = await api('/api/lan/engine/nodes/uninstall', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'vdn-h3' }) })
+  ok(uninstallPack.status === 200 && uninstallPack.body.pack.installed === false, 'the uninstall route removes the pack (delete folder)')
+  ok(!fs.existsSync(path.join(checkout, 'custom_nodes', 'ComfyUI-VDN-H3')), 'the pack folder is gone after uninstall')
+  const unknownPack = await api('/api/lan/engine/nodes/install', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'nope' }) })
+  ok(unknownPack.status === 400, 'an unknown pack id is a 400')
+
+  child.kill()
+  await waitUntil(() => !isAlive(child.pid), 5_000, 'test server exit')
+  if (serverOutput.includes('FAIL')) console.log('  NOTE - server output contained FAIL; inspect manually')
+})
+
+maybe('(h) python realism (optional): real interpreter, real main.py', async () => {
   console.log('runtime: python realism')
   {
     const python = await findPython()
@@ -660,8 +694,9 @@ async function main() {
       ok(stopped.state === 'stopped' && !isAlive(started.status.pid), 'python engine stopped by the same escalation path')
     }
   }
+})
 
-  // ---- (i) launch profiles (increment 2) ------------------------------------------
+maybe('(i) launch profiles (increment 2): sanitization, env injection, state record, port policy', async () => {
   console.log('runtime: launch profiles')
   {
     // Normalization discipline: forbidden/malformed env keys and unknown
@@ -700,8 +735,9 @@ async function main() {
     const stopped = await runtime.stop()
     ok(stopped.state === 'stopped', 'a profile launch stops cleanly')
   }
+})
 
-  // ---- (j) vendored node packs (increment 2) --------------------------------------
+maybe('(j) vendored node packs (increment 2): licensing discipline, install/uninstall lifecycle, real payload', async () => {
   console.log('runtime: vendored node packs')
   {
     // Licensing discipline on the REAL registry data.
@@ -780,8 +816,9 @@ async function main() {
     ok(!fs.existsSync(path.join(nodePackInstallDir(real, { kind: 'checkout', checkout }), 'assets')), 'the vendored payload carries no demo media (assets/ excluded at vendor time)')
     await uninstallNodePack(real, { kind: 'checkout', checkout })
   }
+})
 
-  // ---- (k) consent patch manager (increment 2) ------------------------------------
+maybe('(k) consent patch manager (increment 2): layout detect, apply/backup/atomic, check, idempotence, refuse-unknown, revert, version gate', async () => {
   console.log('runtime: consent patch manager')
   {
     // Pure layout detection over the three fixture layouts.
@@ -881,8 +918,9 @@ async function main() {
     ok((await revertEnginePatch(LONGCACHE_PATCH, launchCheckout)).reverted === true, 'revert works after the launch integration too')
     await launchRuntime.stop()
   }
+})
 
-  // ---- (l) weight symlink policy (increment 2) ------------------------------------
+maybe('(l) weight symlink policy (increment 2): linkNeverCopy chain + linkWeightIntoModelRoot + the suite PASS summary', async () => {
   console.log('runtime: weight symlink policy')
   {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-runtime-links-'))
@@ -919,16 +957,4 @@ async function main() {
   const leftover = await EngineProcess.shutdownAll()
   ok(leftover.every((summary) => summary.code === 0 || summary.killedByUs), 'no stub outlives the suite')
   console.log(`runtime: all ${passed} checks passed`)
-}
-
-main().then(
-  () => { process.exitCode = 0 },
-  async (error) => {
-    console.error(`FAIL: ${error && error.stack ? error.stack : error}`)
-    // Reap everything before exiting: a live stub engine's pipes would pin
-    // the event loop and turn a clean failure into a hang.
-    await Promise.allSettled([...liveRuntimes].map((runtime) => runtime.stop()))
-    await EngineProcess.shutdownAll()
-    process.exit(1)
-  },
-)
+})

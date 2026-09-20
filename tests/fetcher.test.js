@@ -26,6 +26,22 @@
 //   (i) routes against the real built server: catalog GET, 403 without
 //       consent, consent → fetch → placed (stamped marker), remove
 // Run after `pnpm build:server` (the modules load from dist-server).
+//
+// Vitest port (task z7ogmig, 2026-09-20) of scripts/test-fetcher.cjs:
+// assertion bodies carry over verbatim; the linear main() became one test
+// per section; the module-scope dist-server requires are guarded so a
+// missing build NOTE-skips; the route-section server port draws from this
+// suite's disjoint range (tests/lib/ports.cjs) instead of the old random
+// 4310-4389 pick (the (h) local origin keeps its listen(0) ephemerality —
+// it is an origin, not a suite server).
+import { test } from 'vitest'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+
+const require = createRequire(import.meta.url)
+const __dirname = require('node:path').dirname(fileURLToPath(import.meta.url))
+const REPO = require('node:path').resolve(__dirname, '..')
+
 const { spawn } = require('node:child_process')
 const fs = require('node:fs')
 const http = require('node:http')
@@ -34,11 +50,23 @@ const path = require('node:path')
 const zlib = require('node:zlib')
 const crypto = require('node:crypto')
 const assert = require('node:assert/strict')
+const { makePortAllocator } = require('./lib/ports.cjs')
 
-const REPO = path.join(__dirname, '..')
-const { FETCH_CATALOG, findFetchEntry, fetchModelRootPath, fetchExtraModelRoots, matchesGlob, modelRootTargetPath } = require(path.join(REPO, 'dist-server', 'server', 'fetchCatalog.js'))
-const { FetchManager, createHttpFetchTransport, extractTarGz, sha256File, transportForEnvironment } = require(path.join(REPO, 'dist-server', 'server', 'fetcher.js'))
-const { ENGINE_NODE_PACKS, checkNodePack, findNodePack } = require(path.join(REPO, 'dist-server', 'server', 'engineNodes.js'))
+const freePort = makePortAllocator('fetcher')
+
+// NOTE guard: every module under test loads from dist-server — without the
+// build there is nothing to exercise (the suite's own philosophy).
+const hasServerBuild = fs.existsSync(path.join(REPO, 'dist-server', 'server', 'fetcher.js'))
+if (!hasServerBuild) {
+  console.log('NOTE - no dist-server build present (fetcher.js); run pnpm build:server — this suite runs on legs that build the server.')
+}
+const maybe = hasServerBuild ? test : test.skip
+
+const {
+  FETCH_CATALOG, findFetchEntry, fetchModelRootPath, fetchExtraModelRoots, matchesGlob, modelRootTargetPath,
+} = hasServerBuild ? require(path.join(REPO, 'dist-server', 'server', 'fetchCatalog.js')) : {}
+const { FetchManager, createHttpFetchTransport, extractTarGz, sha256File, transportForEnvironment } = hasServerBuild ? require(path.join(REPO, 'dist-server', 'server', 'fetcher.js')) : {}
+const { ENGINE_NODE_PACKS, checkNodePack, findNodePack } = hasServerBuild ? require(path.join(REPO, 'dist-server', 'server', 'engineNodes.js')) : {}
 
 let passed = 0
 function ok(condition, label) {
@@ -186,8 +214,7 @@ async function fetchAndAwait(manager, events, id, startOptions = {}) {
 }
 
 // ---------------------------------------------------------------------------
-async function main() {
-  // ---- (a) catalog integrity ---------------------------------------------------
+maybe('(a) catalog integrity: schema, licenses, destinations, single-sourcing, pins, globs', () => {
   console.log('fetcher: catalog integrity')
   {
     const ids = new Set()
@@ -270,8 +297,9 @@ async function main() {
       if (pack.installMode === 'vendor') ok(['Apache-2.0', 'MIT', 'ISC'].includes(pack.licenseSpdx), `vendor mode stays permissive-only: ${pack.id}`)
     }
   }
+})
 
-  // ---- (b) consent gating --------------------------------------------------------
+maybe('(b) consent gating: no transport call without a recorded, license-matching consent', async () => {
   console.log('fetcher: consent gating')
   {
     const home = makeHome()
@@ -297,8 +325,9 @@ async function main() {
     ok(!unknown.started && /unknown/i.test(unknown.reason), 'an unknown id is refused')
     ok(transport.state.downloads === 0 && transport.state.resolves === 0, 'still zero transport calls after every refusal')
   }
+})
 
-  // ---- (c) verification + mismatch ------------------------------------------------
+maybe('(c) verification + mismatch: pins enforced, nothing unverified placed, partials discarded', async () => {
   console.log('fetcher: verification and mismatch')
   {
     const home = makeHome()
@@ -329,8 +358,9 @@ async function main() {
     const failedStatus = after.find((entry) => entry.id === 'mlsd-annotator')
     ok(failedStatus.state === 'absent' && /last fetch failed/.test(failedStatus.note ?? ''), 'the catalog surfaces the failure honestly')
   }
+})
 
-  // ---- (d) pin stamping -------------------------------------------------------------
+maybe('(d) pin stamping: branch pins resolve-and-stamp the HEAD SHA into the record AND the marker', async () => {
   console.log('fetcher: pin stamping')
   {
     const home = makeHome()
@@ -363,8 +393,9 @@ async function main() {
     ok(turboRecord.revision === '4274783a23afcfdbea3b4876cb79effd6c510785' && turboRecord.pinKind === 'sha', 'a sha pin is used verbatim (immutable)')
     ok(transport.state.resolves === shaCalls, 'no revision resolution happened for the sha pin')
   }
+})
 
-  // ---- (e) install-record round-trip + remove -----------------------------------------
+maybe('(e) install-record round-trip + remove: state file, catalog status, cache retention', async () => {
   console.log('fetcher: install-record round-trip')
   {
     const home = makeHome()
@@ -391,8 +422,9 @@ async function main() {
     const afterRemove = (await manager.catalogStatus()).find((entry) => entry.id === 'dwpose-torchscript')
     ok(afterRemove.state === 'cached', 'status degrades to cached after remove')
   }
+})
 
-  // ---- (f) placement policy --------------------------------------------------------
+maybe('(f) placement policy: weights LINK into model roots (never copied); foreign destination refused', async () => {
   console.log('fetcher: placement policy')
   {
     const home = makeHome()
@@ -436,8 +468,9 @@ async function main() {
     const present = (await presentManager.catalogStatus()).find((candidate) => candidate.id === 'fun-control-union')
     ok(present.state === 'present' && /detected/.test(present.note ?? ''), 'a staged quantized variant satisfies presence via the detect glob')
   }
+})
 
-  // ---- (f2) dataset-repo sources (task gg7mu3s) --------------------------------------
+maybe('(f2) dataset-repo sources (gg7mu3s): /datasets/<repo>/resolve/... download URLs, verbatim sha pin, vae-root link', async () => {
   console.log('fetcher: dataset-repo download URLs')
   {
     // The fasth3-live VAE lives in an HF DATASET repo (license-gated). The
@@ -468,8 +501,9 @@ async function main() {
     const state = JSON.parse(fs.readFileSync(path.join(home, 'fetcher', 'fetch-state.json'), 'utf8'))
     ok(state.installs['fasth3-vae-w4a8'].verified === 'sha256', 'the gated-repo row still verifies at the sha256 level (the pin does not depend on the gate)')
   }
+})
 
-  // ---- (g) engine checkout ----------------------------------------------------------
+maybe('(g) engine checkout: codeload tarball → extract → main.py gate; non-empty destination refused; traversal safety', async () => {
   console.log('fetcher: engine checkout')
   {
     const home = makeHome()
@@ -504,8 +538,9 @@ async function main() {
     ok(fs.existsSync(path.join(safeDir, 'ok.py')) && !fs.existsSync(path.join(home, 'escape.py')), 'a traversal entry is refused by the extractor')
     ok(extracted.skipped.some((name) => name.includes('escape')), 'the skipped entry is reported')
   }
+})
 
-  // ---- (h) production HTTP transport (local origin, allowlist still live) -----------
+maybe('(h) production HTTP transport against a local origin: redirect allowlist, Range resume, 429 backoff', async () => {
   console.log('fetcher: production HTTP transport')
   {
     const body = crypto.randomBytes(256 * 1024)
@@ -608,98 +643,102 @@ async function main() {
     delete process.env.MINIMAX_STUDIO_FETCH_TEST_ORIGIN
     server.close()
   }
+})
 
-  // ---- (i) routes against the real built server --------------------------------------
+const hasWebBuild = fs.existsSync(path.join(REPO, 'dist', 'index.html'))
+if (!hasWebBuild) {
+  console.log('  NOTE - no web build present (dist/index.html); route coverage runs on legs that build the web app (ubuntu CI, pnpm test:all)')
+}
+const routesMaybe = hasServerBuild && hasWebBuild ? test : test.skip
+
+routesMaybe('(i) routes against the real built server: catalog GET, 403 without consent, consent → fetch → placed (stamped marker), remove', async () => {
   console.log('fetcher: /api/lan/fetch/* routes')
   {
-    if (!fs.existsSync(path.join(REPO, 'dist', 'index.html'))) {
-      console.log('  NOTE - no web build present (dist/index.html); route coverage runs on legs that build the web app (ubuntu CI, pnpm test:all)')
-    } else {
-      const home = makeHome()
-      const checkout = makeCheckout()
-      fs.mkdirSync(path.join(checkout, 'custom_nodes', 'comfyui_controlnet_aux', 'ckpts', 'lllyasviel', 'Annotators'), { recursive: true })
-      // The mock transport tree: a githead pin for facok + its archive, and
-      // a WRONG-bytes file for mlsd (the mismatch-through-routes case).
-      const mockRoot = path.join(home, 'fetch-mock')
-      fs.mkdirSync(path.join(mockRoot, 'githead', 'facok_comfyui-krea2-controlnet'), { recursive: true })
-      fs.writeFileSync(path.join(mockRoot, 'githead', 'facok_comfyui-krea2-controlnet', 'main'), '79ebfd3bd80d2180b334dd7ce57f3c9ddaa0848f')
-      fs.mkdirSync(path.join(mockRoot, 'archive'), { recursive: true })
-      fs.writeFileSync(path.join(mockRoot, 'archive', 'facok_comfyui-krea2-controlnet_79ebfd3bd80d2180b334dd7ce57f3c9ddaa0848f.tar.gz'), makeTarGz([['__init__.py', '# facok\n'], ['nodes.py', '# depth lock\n']]))
-      fs.mkdirSync(path.join(mockRoot, 'hf', 'lllyasviel', 'Annotators'), { recursive: true })
-      fs.writeFileSync(path.join(mockRoot, 'hf', 'lllyasviel', 'Annotators', 'mlsd_large_512_fp32.pth'), Buffer.alloc(128, 5)) // wrong size + sha
+    const home = makeHome()
+    const checkout = makeCheckout()
+    fs.mkdirSync(path.join(checkout, 'custom_nodes', 'comfyui_controlnet_aux', 'ckpts', 'lllyasviel', 'Annotators'), { recursive: true })
+    // The mock transport tree: a githead pin for facok + its archive, and
+    // a WRONG-bytes file for mlsd (the mismatch-through-routes case).
+    const mockRoot = path.join(home, 'fetch-mock')
+    fs.mkdirSync(path.join(mockRoot, 'githead', 'facok_comfyui-krea2-controlnet'), { recursive: true })
+    fs.writeFileSync(path.join(mockRoot, 'githead', 'facok_comfyui-krea2-controlnet', 'main'), '79ebfd3bd80d2180b334dd7ce57f3c9ddaa0848f')
+    fs.mkdirSync(path.join(mockRoot, 'archive'), { recursive: true })
+    fs.writeFileSync(path.join(mockRoot, 'archive', 'facok_comfyui-krea2-controlnet_79ebfd3bd80d2180b334dd7ce57f3c9ddaa0848f.tar.gz'), makeTarGz([['__init__.py', '# facok\n'], ['nodes.py', '# depth lock\n']]))
+    fs.mkdirSync(path.join(mockRoot, 'hf', 'lllyasviel', 'Annotators'), { recursive: true })
+    fs.writeFileSync(path.join(mockRoot, 'hf', 'lllyasviel', 'Annotators', 'mlsd_large_512_fp32.pth'), Buffer.alloc(128, 5)) // wrong size + sha
 
-      const port = 4310 + Math.floor(Math.random() * 80)
-      const child = spawn(process.execPath, ['dist-server/server/index.js'], {
-        cwd: REPO,
-        env: { ...process.env, MINIMAX_STUDIO_HOME: home, MINIMAX_LAN_PORT: String(port), MINIMAX_STUDIO_FETCH_MOCK_ROOT: mockRoot },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
-      let serverOutput = ''
-      child.stdout.on('data', (chunk) => { serverOutput += String(chunk) })
-      child.stderr.on('data', (chunk) => { serverOutput += String(chunk) })
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-      const base = `https://127.0.0.1:${port}`
-      const api = async (route, init) => {
-        const response = await fetch(`${base}${route}`, init)
-        return { status: response.status, body: await response.json().catch(() => ({})) }
-      }
-      await waitUntil(async () => {
-        try { return (await fetch(`${base}/api/lan/settings`)).ok } catch { return false }
-      }, 15_000, 'server boot')
-
-      // Configure the checkout through the real settings pipeline.
-      const current = (await api('/api/lan/settings')).body.settings
-      await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...current, engine: { ...current.engine, mode: 'managed', checkoutPath: checkout } } }) })
-
-      const catalog = await api('/api/lan/fetch/catalog')
-      ok(catalog.status === 200 && catalog.body.entries.length === FETCH_CATALOG.length, 'GET catalog lists every entry with statuses')
-      ok(catalog.body.entries.every((entry) => ['present', 'placed', 'cached', 'absent'].includes(entry.state)), 'every catalog row carries a state')
-      ok(catalog.body.entries.every((entry) => typeof entry.licenseSpdx === 'string'), 'every catalog row surfaces its license (the consent contract)')
-
-      const noConsent = await api('/api/lan/fetch/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'pack:krea2-controlnet' }) })
-      ok(noConsent.status === 403 && /consent/i.test(noConsent.body.error), 'POST start without consent is a 403 with the reason')
-
-      const consented = await api('/api/lan/fetch/consent', { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ id: 'pack:krea2-controlnet', consented: true }) })
-      ok(consented.status === 200, 'POST consent records the acknowledgement')
-      const savedSettings = (await api('/api/lan/settings')).body.settings
-      ok(savedSettings.fetch.consents['pack:krea2-controlnet']?.consented === true && savedSettings.fetch.consents['pack:krea2-controlnet']?.licenseSpdx === 'NO-LICENSE', 'the consent persists through normalizeSettings with its license')
-
-      const started = await api('/api/lan/fetch/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'pack:krea2-controlnet' }) })
-      ok(started.status === 200 && started.body.started === true, 'POST start with consent kicks off the fetch')
-      await waitUntil(async () => {
-        const state = await api('/api/lan/fetch/catalog')
-        return state.body.entries.find((entry) => entry.id === 'pack:krea2-controlnet')?.state === 'placed'
-      }, 20_000, 'the facok pack to place')
-      const placedState = await api('/api/lan/fetch/catalog')
-      const placed = placedState.body.entries.find((entry) => entry.id === 'pack:krea2-controlnet')
-      ok(placed.installedRevision === '79ebfd3bd80d2180b334dd7ce57f3c9ddaa0848f', 'the route-placed pack reports the fetch-stamped HEAD SHA')
-      const marker = JSON.parse(fs.readFileSync(path.join(checkout, 'custom_nodes', 'comfyui-krea2-controlnet', '.studio-node.json'), 'utf8'))
-      ok(marker.revision === '79ebfd3bd80d2180b334dd7ce57f3c9ddaa0848f', 'the pack marker carries the stamped SHA over the routes path')
-
-      // Mismatch through the routes: wrong bytes in the mock → failed fetch,
-      // nothing placed, honest note.
-      await api('/api/lan/fetch/consent', { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ id: 'mlsd-annotator', consented: true }) })
-      await api('/api/lan/fetch/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'mlsd-annotator' }) })
-      await waitUntil(async () => {
-        const state = await api('/api/lan/fetch/catalog')
-        const entry = state.body.entries.find((candidate) => candidate.id === 'mlsd-annotator')
-        return Boolean(entry && /last fetch failed/.test(entry.note ?? ''))
-      }, 20_000, 'the mismatched fetch to fail')
-      ok(!fs.existsSync(path.join(checkout, 'custom_nodes', 'comfyui_controlnet_aux', 'ckpts', 'lllyasviel', 'Annotators', 'mlsd_large_512_fp32.pth')), 'no unverified bytes were placed through the routes')
-
-      const removed = await api('/api/lan/fetch/remove', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'pack:krea2-controlnet' }) })
-      ok(removed.status === 200 && removed.body.removed === true, 'POST remove takes the placement back')
-      ok(!fs.existsSync(path.join(checkout, 'custom_nodes', 'comfyui-krea2-controlnet')), 'the fetched pack folder is gone')
-      const unknownRemove = await api('/api/lan/fetch/remove', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'nope' }) })
-      ok(unknownRemove.status === 404, 'removing an unknown id is a 404')
-
-      child.kill()
-      await new Promise((resolveExit) => { if (child.exitCode !== null) resolveExit(); else child.on('exit', resolveExit) })
-      if (serverOutput.includes('FAIL')) console.log('  NOTE - server output contained FAIL; inspect manually')
+    const port = await freePort()
+    const child = spawn(process.execPath, [path.join(REPO, 'dist-server', 'server', 'index.js')], {
+      cwd: REPO,
+      env: { ...process.env, MINIMAX_STUDIO_HOME: home, MINIMAX_LAN_PORT: String(port), MINIMAX_STUDIO_FETCH_MOCK_ROOT: mockRoot },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let serverOutput = ''
+    child.stdout.on('data', (chunk) => { serverOutput += String(chunk) })
+    child.stderr.on('data', (chunk) => { serverOutput += String(chunk) })
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+    const base = `https://127.0.0.1:${port}`
+    const api = async (route, init) => {
+      const response = await fetch(`${base}${route}`, init)
+      return { status: response.status, body: await response.json().catch(() => ({})) }
     }
-  }
+    await waitUntil(async () => {
+      try { return (await fetch(`${base}/api/lan/settings`)).ok } catch { return false }
+    }, 15_000, 'server boot')
 
-  // ---- transport selection ----------------------------------------------------------
+    // Configure the checkout through the real settings pipeline.
+    const current = (await api('/api/lan/settings')).body.settings
+    await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...current, engine: { ...current.engine, mode: 'managed', checkoutPath: checkout } } }) })
+
+    const catalog = await api('/api/lan/fetch/catalog')
+    ok(catalog.status === 200 && catalog.body.entries.length === FETCH_CATALOG.length, 'GET catalog lists every entry with statuses')
+    ok(catalog.body.entries.every((entry) => ['present', 'placed', 'cached', 'absent'].includes(entry.state)), 'every catalog row carries a state')
+    ok(catalog.body.entries.every((entry) => typeof entry.licenseSpdx === 'string'), 'every catalog row surfaces its license (the consent contract)')
+
+    const noConsent = await api('/api/lan/fetch/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'pack:krea2-controlnet' }) })
+    ok(noConsent.status === 403 && /consent/i.test(noConsent.body.error), 'POST start without consent is a 403 with the reason')
+
+    const consented = await api('/api/lan/fetch/consent', { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ id: 'pack:krea2-controlnet', consented: true }) })
+    ok(consented.status === 200, 'POST consent records the acknowledgement')
+    const savedSettings = (await api('/api/lan/settings')).body.settings
+    ok(savedSettings.fetch.consents['pack:krea2-controlnet']?.consented === true && savedSettings.fetch.consents['pack:krea2-controlnet']?.licenseSpdx === 'NO-LICENSE', 'the consent persists through normalizeSettings with its license')
+
+    const started = await api('/api/lan/fetch/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'pack:krea2-controlnet' }) })
+    ok(started.status === 200 && started.body.started === true, 'POST start with consent kicks off the fetch')
+    await waitUntil(async () => {
+      const state = await api('/api/lan/fetch/catalog')
+      return state.body.entries.find((entry) => entry.id === 'pack:krea2-controlnet')?.state === 'placed'
+    }, 20_000, 'the facok pack to place')
+    const placedState = await api('/api/lan/fetch/catalog')
+    const placed = placedState.body.entries.find((entry) => entry.id === 'pack:krea2-controlnet')
+    ok(placed.installedRevision === '79ebfd3bd80d2180b334dd7ce57f3c9ddaa0848f', 'the route-placed pack reports the fetch-stamped HEAD SHA')
+    const marker = JSON.parse(fs.readFileSync(path.join(checkout, 'custom_nodes', 'comfyui-krea2-controlnet', '.studio-node.json'), 'utf8'))
+    ok(marker.revision === '79ebfd3bd80d2180b334dd7ce57f3c9ddaa0848f', 'the pack marker carries the stamped SHA over the routes path')
+
+    // Mismatch through the routes: wrong bytes in the mock → failed fetch,
+    // nothing placed, honest note.
+    await api('/api/lan/fetch/consent', { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ id: 'mlsd-annotator', consented: true }) })
+    await api('/api/lan/fetch/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'mlsd-annotator' }) })
+    await waitUntil(async () => {
+      const state = await api('/api/lan/fetch/catalog')
+      const entry = state.body.entries.find((candidate) => candidate.id === 'mlsd-annotator')
+      return Boolean(entry && /last fetch failed/.test(entry.note ?? ''))
+    }, 20_000, 'the mismatched fetch to fail')
+    ok(!fs.existsSync(path.join(checkout, 'custom_nodes', 'comfyui_controlnet_aux', 'ckpts', 'lllyasviel', 'Annotators', 'mlsd_large_512_fp32.pth')), 'no unverified bytes were placed through the routes')
+
+    const removed = await api('/api/lan/fetch/remove', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'pack:krea2-controlnet' }) })
+    ok(removed.status === 200 && removed.body.removed === true, 'POST remove takes the placement back')
+    ok(!fs.existsSync(path.join(checkout, 'custom_nodes', 'comfyui-krea2-controlnet')), 'the fetched pack folder is gone')
+    const unknownRemove = await api('/api/lan/fetch/remove', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'nope' }) })
+    ok(unknownRemove.status === 404, 'removing an unknown id is a 404')
+
+    child.kill()
+    await new Promise((resolveExit) => { if (child.exitCode !== null) resolveExit(); else child.on('exit', resolveExit) })
+    if (serverOutput.includes('FAIL')) console.log('  NOTE - server output contained FAIL; inspect manually')
+  }
+})
+
+maybe('transport selection: the mock root env selects the filesystem transport (zero network) + the suite PASS summary', () => {
   console.log('fetcher: transport selection')
   {
     const home = makeHome()
@@ -710,9 +749,4 @@ async function main() {
   }
 
   console.log(`\nfetcher suite: ${passed} assertions passed`)
-}
-
-main().catch((error) => {
-  console.error(error)
-  process.exit(1)
 })

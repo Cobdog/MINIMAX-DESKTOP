@@ -1,0 +1,546 @@
+// Storage substrate test (wave 1): boots the BUILT standalone server on a
+// scratch port + scratch home (like smoke-server) and exercises the
+// SQLite/FTS5 layer end to end:
+//   (a) fresh boot creates studio.db with a stamped schema version
+//   (b) POST jobs -> GET returns them graph-stripped and manifest-preserved
+//   (c) FTS5: word search finds prompts; FTS syntax injection returns safely
+//   (d) localStorage -> server migration logic as a VM unit against fixture
+//       stores, plus workspace/projects API round-trips
+//   (e) per-job upserts: interleaved writes never lose the other job
+// Run after `pnpm build` (the server is loaded from dist-server).
+//
+// Vitest port (task z7ogmig, 2026-09-20) of scripts/test-storage.cjs:
+// assertion bodies carry over verbatim; the linear main() became a beforeAll
+// boot + one test per section (sequential within the file, so the
+// cross-section state flow — settings patched along the way — is
+// unchanged); CWD-relative paths are now __dirname-anchored and the port
+// probe draws from this suite's disjoint range (tests/lib/ports.cjs).
+import { test, beforeAll, afterAll } from 'vitest'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+
+const require = createRequire(import.meta.url)
+const __dirname = require('node:path').dirname(fileURLToPath(import.meta.url))
+const REPO = require('node:path').resolve(__dirname, '..')
+
+const { spawn } = require('node:child_process')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
+const vm = require('node:vm')
+const assert = require('node:assert/strict')
+const ts = require('typescript')
+const Database = require('better-sqlite3')
+const { makePortAllocator } = require('./lib/ports.cjs')
+
+const freePort = makePortAllocator('storage')
+
+const home = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-storage-'))
+let child = null
+let output = ''
+
+const fail = (message) => {
+  if (child) child.kill()
+  throw new Error(`FAIL: ${message}\n--- server output ---\n${output}`)
+}
+
+async function waitFor(port, pathname) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}${pathname}`)
+      if (response.ok) return response
+    } catch { /* not up yet */ }
+    await new Promise((resolve) => setTimeout(resolve, 300))
+  }
+  fail(`${pathname} never became ready`)
+}
+
+let port = 0
+let base = ''
+
+async function get(pathname) {
+  const response = await fetch(`http://127.0.0.1:${port}${pathname}`)
+  return { status: response.status, body: await response.json() }
+}
+
+async function post(pathname, payload) {
+  const response = await fetch(`http://127.0.0.1:${port}${pathname}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return { status: response.status, body: await response.json().catch(() => ({})) }
+}
+
+// ---- VM harness for the client-side migration logic (src/lib is TS) -------
+function localStorageStubFrom(initial) {
+  const store = new Map(Object.entries(initial))
+  return {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => { store.set(key, String(value)) },
+    removeItem: (key) => { store.delete(key) },
+  }
+}
+
+function loadServerStorage(localStorageStub, fetchStub, consoleStub) {
+  const exports = {}
+  const code = ts.transpileModule(fs.readFileSync(path.join(REPO, 'src/lib/serverStorage.ts'), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  }).outputText
+  vm.runInNewContext(code, {
+    exports,
+    require,
+    console: consoleStub ?? console,
+    fetch: fetchStub,
+    Headers,
+    URLSearchParams,
+    localStorage: localStorageStub,
+    window: { location: { search: '' } },
+  })
+  return exports
+}
+
+const manifestFixture = {
+  manifestVersion: 1, graphFamily: 'studio-2026-09', provider: 'minimax', mode: 'text',
+  prompt: 'a lantern-lit courtyard', seed: 12345, steps: 30, turbo: 'off', sampler: 'res_multistep',
+  scheduler: 'simple', resolution: '1344x768', durationSeconds: 5,
+  models: { diffusion: { name: 'fl2va.safetensors', bytes: 1 } }, referenceCounts: { images: 0, videos: 0, audios: 0 },
+  graphVersion: 'fnv1a-deadbeef', engine: { comfyUrl: 'http://127.0.0.1:8188', app: 'MiniMax Studio' },
+}
+
+const jobA = {
+  id: 'job-alpha', mode: 'text', status: 'completed', prompt: 'a lantern-lit courtyard at dusk',
+  createdAt: Date.now() - 60_000, progress: 100, width: 1344, height: 768, duration: 5,
+  outputUrl: '/api/lan/media?source=output&path=%2Fout%2Fa.mp4', manifest: manifestFixture,
+  graph: { '1': { class_type: 'HiddenNode', inputs: { secret: 'graph-must-not-persist' } } },
+}
+const jobB = {
+  id: 'job-beta', mode: 'text', status: 'running', prompt: 'neon rain on chrome',
+  createdAt: Date.now(), progress: 40, width: 352, height: 608, duration: 5,
+}
+
+beforeAll(async () => {
+  port = await freePort()
+  child = spawn(process.execPath, [path.join(REPO, 'dist-server', 'server', 'index.js')], {
+    env: { ...process.env, MINIMAX_STUDIO_HOME: home, MINIMAX_LAN_PORT: String(port), MINIMAX_NO_HTTPS: '1' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  child.stdout.on('data', (chunk) => { output += String(chunk) })
+  child.stderr.on('data', (chunk) => { output += String(chunk) })
+  await waitFor(port, '/api/lan/settings')
+  // Guard against talking to a foreign server that somehow took the port:
+  // our child must have announced itself on this exact port.
+  if (!output.includes(`"port":${port}`)) fail('the readiness probe reached a server that is not the test child')
+  base = `http://127.0.0.1:${port}`
+})
+
+afterAll(() => { if (child) child.kill() })
+
+test('(a) fresh boot creates studio.db with the schema version stamped', () => {
+  const dbFile = path.join(home, 'studio.db')
+  assert.ok(fs.existsSync(dbFile), 'studio.db must exist in the studio home after boot')
+  const db = new Database(dbFile)
+  const userVersion = db.pragma('user_version', { simple: true })
+  const appliedMigrations = db.prepare('SELECT id, name FROM schema_migrations ORDER BY id').all()
+  assert.ok(userVersion >= 1, `PRAGMA user_version must be stamped (got ${userVersion})`)
+  assert.ok(appliedMigrations.length >= 1, 'schema_migrations must record migration 001')
+  assert.equal(appliedMigrations[0].name, '001-foundation')
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','view')").all().map((row) => row.name)
+  for (const expected of ['jobs', 'job_events', 'assets', 'projects', 'workspace_state', 'saved_prompts', 'prompts_fts']) {
+    assert.ok(tables.includes(expected), `table ${expected} must exist`)
+  }
+  db.close()
+  // Re-boot idempotency is exercised by every later server start against an
+  // existing home; here the single-boot path has already re-run migrations
+  // safely (no divergence error on the already-migrated file).
+})
+
+test('(b) job upsert round-trip: graph stripped, manifest preserved; shape-first validation refuses unknown shapes', async () => {
+  const saved = await post('/api/lan/jobs', { jobs: [jobB, jobA] })
+  assert.equal(saved.status, 200, `job POST failed: ${JSON.stringify(saved.body)}`)
+  assert.equal(saved.body.saved, 2)
+  const listed = await get('/api/lan/jobs')
+  assert.equal(listed.status, 200)
+  const returned = listed.body.jobs
+  assert.equal(returned.length, 2, 'both posted jobs must list')
+  const alpha = returned.find((job) => job.id === 'job-alpha')
+  const beta = returned.find((job) => job.id === 'job-beta')
+  assert.ok(alpha && beta, 'posted job ids must come back')
+  assert.equal(alpha.graph, undefined, 'the submit graph must never persist')
+  assert.equal('graph' in alpha, false, 'no graph key at all')
+  assert.equal(JSON.stringify(alpha.manifest), JSON.stringify(manifestFixture), 'manifest must round-trip byte-identically')
+  assert.equal(beta.status, 'running', 'non-terminal statuses persist')
+
+  // Shape-first validation: unknown shapes are rejected with 400.
+  const badShape = await post('/api/lan/jobs', { jobs: [{ id: 'x', prompt: 'no mode or numbers' }] })
+  assert.equal(badShape.status, 400, 'malformed job must 400')
+  const tooMany = await post('/api/lan/jobs', { jobs: Array.from({ length: 101 }, (_, index) => ({ ...jobB, id: `flood-${index}` })) })
+  assert.equal(tooMany.status, 400, 'more than 100 jobs per request must 400')
+  const wrongEnvelope = await post('/api/lan/jobs', { records: [jobA] })
+  assert.equal(wrongEnvelope.status, 400, 'wrong envelope must 400')
+})
+
+test('(e) per-job upsert isolation: a later partial write updates only its own job; the other job from the earlier batch survives', async () => {
+  const updatedAlpha = { ...jobA, status: 'failed', error: 'engine reset mid-render', createdAt: jobA.createdAt }
+  const interleaveOne = await post('/api/lan/jobs', { jobs: [updatedAlpha] })
+  assert.equal(interleaveOne.status, 200)
+  const afterInterleave = await get('/api/lan/jobs')
+  const alphaAfter = afterInterleave.body.jobs.find((job) => job.id === 'job-alpha')
+  const betaAfter = afterInterleave.body.jobs.find((job) => job.id === 'job-beta')
+  assert.ok(alphaAfter && alphaAfter.status === 'failed' && alphaAfter.error === 'engine reset mid-render', 'alpha must take the newer write')
+  assert.ok(betaAfter && betaAfter.status === 'running', 'beta must survive the interleaved write (per-job upsert, never whole-list replace)')
+  // Terminal transition was recorded in the append-only event tail.
+  const eventsDb = new Database(path.join(home, 'studio.db'))
+  const events = eventsDb.prepare("SELECT * FROM job_events WHERE job_id = 'job-alpha' ORDER BY seq").all()
+  assert.ok(events.length >= 1, 'terminal transition must append a job_events row')
+  const lastEvent = events[events.length - 1]
+  assert.equal(lastEvent.type, 'status')
+  const payload = JSON.parse(lastEvent.payload_json)
+  assert.equal(payload.to, 'failed', 'event payload records the terminal state')
+  eventsDb.close()
+})
+
+test('(c) FTS5: seed prompts, search by word, attempt FTS syntax injection', async () => {
+  const prompts = [
+    { id: 'civitai.1', label: 'Golden hour', prompt: 'A courtyard bathed in golden hour light, dust motes drifting.', savedAt: 1 },
+    { id: 'civitai.2', label: 'Neon rain', prompt: 'Neon reflections rippling across rain-slick chrome streets.', savedAt: 2 },
+    { id: 'civitai.3', label: 'Snow field', prompt: 'A lone figure crossing a silent snow field at dawn.', savedAt: 3 },
+  ]
+  const seeded = await post('/api/lan/prompts', { entries: prompts })
+  assert.equal(seeded.status, 200, `prompt seed failed: ${JSON.stringify(seeded.body)}`)
+  const golden = await get(`/api/lan/search/prompts?${new URLSearchParams({ q: 'golden', limit: '50' })}`)
+  assert.equal(golden.status, 200)
+  assert.equal(golden.body.entries.length, 1, 'word search must find exactly the matching prompt')
+  assert.equal(golden.body.entries[0].id, 'civitai.1')
+  const prefix = await get(`/api/lan/search/prompts?${new URLSearchParams({ q: 'golde' })}`)
+  assert.ok(prefix.body.entries.some((entry) => entry.id === 'civitai.1'), 'prefix token must match (quoted-prefix expression)')
+  // Injection: a crafted query must neither error nor degenerate to all rows.
+  const injection = await get(`/api/lan/search/prompts?${new URLSearchParams({ q: '" OR 1=1 --' })}`)
+  assert.equal(injection.status, 200, 'FTS injection attempt must not error')
+  assert.ok(injection.body.entries.length < 3 + 8, `injection must not return the whole library (got ${injection.body.entries.length})`)
+  const loneQuote = await get(`/api/lan/search/prompts?${new URLSearchParams({ q: '"' })}`)
+  assert.equal(loneQuote.status, 200, 'lone double quote must not error')
+  // Bundled technique corpus re-seeds server-side, idempotently.
+  const library = await get('/api/lan/search/prompts?limit=500')
+  const techniqueIds = library.body.entries.filter((entry) => entry.technique).map((entry) => entry.id)
+  assert.ok(techniqueIds.includes('technique.timed-beats'), 'bundled technique corpus must be seeded at boot')
+  assert.equal(techniqueIds.length, 8, 'exactly the 8 bundled techniques (idempotent re-seed)')
+  // Delete keeps FTS and the backing row in sync.
+  const removed = await post('/api/lan/prompts/delete', { id: 'civitai.3' })
+  assert.equal(removed.status, 200)
+  const snow = await get(`/api/lan/search/prompts?${new URLSearchParams({ q: 'snow' })}`)
+  assert.equal(snow.body.entries.length, 0, 'deleted prompt must leave the index')
+})
+
+test('(d1) server-level round-trips: workspace + projects', async () => {
+  const workspace = { mode: 'reference', prompt: 'migration fixture', duration: 6, resolution: '1344x768', turbo: 'off', steps: 30, seed: 42, advanced: true }
+  const savedWorkspace = await post('/api/lan/workspace', { workspace })
+  assert.equal(savedWorkspace.status, 200)
+  const loadedWorkspace = await get('/api/lan/workspace')
+  assert.equal(loadedWorkspace.body.workspace.mode, 'reference')
+  assert.equal(loadedWorkspace.body.workspace.prompt, 'migration fixture')
+  const project = { id: 'movie-1', name: 'Nightfall', kind: 'movie', data: { id: 'movie-1', name: 'Nightfall', scenes: [{ id: 's1', shots: [] }] } }
+  const savedProject = await post('/api/lan/projects', { projects: [project] })
+  assert.equal(savedProject.status, 200)
+  const loadedProjects = await get('/api/lan/projects')
+  assert.equal(loadedProjects.body.projects.length, 1)
+  assert.equal(loadedProjects.body.projects[0].data.name, 'Nightfall')
+  const deletedProject = await post('/api/lan/projects/delete', { id: 'movie-1' })
+  assert.equal(deletedProject.status, 200)
+  assert.equal((await get('/api/lan/projects')).body.projects.length, 0)
+})
+
+test('(d2) migration logic as a unit: fixture localStorage stores against a recording fetch stub that also serves the verification GET', async () => {
+  const legacyJobs = [
+    { id: 'legacy-1', mode: 'text', status: 'completed', prompt: 'old render one', createdAt: 100, progress: 100, width: 1344, height: 768, duration: 5, manifest: { seed: 1 } },
+    { id: 'legacy-2', mode: 'text', status: 'failed', prompt: 'old render two', createdAt: 200, progress: 10, width: 0, height: 0, duration: 5 },
+  ]
+  const legacyStores = {
+    'minimax.jobs': JSON.stringify(legacyJobs),
+    'minimax.workspace': JSON.stringify({ mode: 'text', prompt: 'legacy workspace', duration: 5 }),
+    'minimax.movie-projects': JSON.stringify([{ id: 'mp-1', title: 'Legacy cut', scenes: [] }]),
+    'minimax.prompt-library': JSON.stringify([
+      { id: 'civitai.9', label: 'Kept', prompt: 'A kept community prompt long enough.', savedAt: 5 },
+      { id: 'technique.timed-beats', label: 'Technique', prompt: 'bundled technique entry', technique: true, savedAt: 0 },
+    ]),
+  }
+  const posted = { jobs: [], workspace: null, projects: [], prompts: [] }
+  const recordingFetch = async (pathname, init) => {
+    if (init && init.method === 'POST') {
+      const body = JSON.parse(init.body)
+      if (pathname === '/api/lan/jobs') { posted.jobs.push(...body.jobs); return { ok: true, status: 200, json: async () => ({ saved: body.jobs.length }) } }
+      if (pathname === '/api/lan/workspace') { posted.workspace = body.workspace; return { ok: true, status: 200, json: async () => ({ saved: true }) } }
+      if (pathname === '/api/lan/projects') { posted.projects.push(...body.projects); return { ok: true, status: 200, json: async () => ({ saved: body.projects.length }) } }
+      if (pathname === '/api/lan/prompts') { posted.prompts.push(...body.entries); return { ok: true, status: 200, json: async () => ({ saved: body.entries.length }) } }
+      throw new Error(`unexpected POST ${pathname}`)
+    }
+    if (pathname.startsWith('/api/lan/jobs')) return { ok: true, status: 200, json: async () => ({ jobs: posted.jobs }) }
+    throw new Error(`unexpected GET ${pathname}`)
+  }
+  const migrationStorage = localStorageStubFrom(legacyStores)
+  const snapshots = Object.fromEntries(Object.keys(legacyStores).map((key) => [key, migrationStorage.getItem(key)]))
+  const storageModule = loadServerStorage(migrationStorage, recordingFetch)
+  const outcome = await storageModule.migrateLocalData()
+  assert.equal(outcome.migrated, true, `migration must succeed: ${JSON.stringify(outcome)}`)
+  assert.equal(migrationStorage.getItem('minimax.data-migrated'), '1', 'marker must be set after verification')
+  assert.equal(posted.jobs.length, 2, 'both legacy jobs must be posted')
+  assert.equal(posted.jobs[0].id, 'legacy-1')
+  assert.equal(posted.workspace.prompt, 'legacy workspace')
+  assert.equal(posted.projects.length, 1)
+  assert.equal(posted.prompts.length, 1, 'technique entries are seeded server-side and must NOT be copied')
+  assert.equal(posted.prompts[0].id, 'civitai.9')
+  for (const [key, before] of Object.entries(snapshots)) {
+    assert.equal(migrationStorage.getItem(key), before, `legacy store ${key} must never be modified (COPY, NEVER DESTROY)`)
+  }
+  // Re-run is a no-op via the marker.
+  const rerun = await storageModule.migrateLocalData()
+  assert.equal(rerun.migrated, true)
+  assert.equal(rerun.reason, 'already-migrated')
+  assert.equal(posted.jobs.length, 2, 'marker present: no second copy')
+
+  // Failure path: a rejecting API leaves no marker and retries next boot.
+  const failingStorage = localStorageStubFrom(legacyStores)
+  const warned = []
+  const failingModule = loadServerStorage(failingStorage, async () => { throw new Error('server unreachable') }, { warn: (...args) => warned.push(args.join(' ')) })
+  const failedOutcome = await failingModule.migrateLocalData()
+  assert.equal(failedOutcome.migrated, false)
+  assert.equal(failingStorage.getItem('minimax.data-migrated'), null, 'failed migration must not set the marker')
+  assert.ok(warned.some((line) => line.includes('migration deferred')), 'failure must log structurally')
+})
+
+test('(f) model scan follows SYMLINKS (audit D1, task junllxf): the link-never-copy layout must reach engine-ready', async () => {
+  const modelRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-scan-'))
+  const realBytes = Buffer.from('not-a-real-model-but-scannable')
+  fs.writeFileSync(path.join(modelRoot, 'real_diffusion_v1.safetensors'), realBytes)
+  fs.symlinkSync(path.join(modelRoot, 'real_diffusion_v1.safetensors'), path.join(modelRoot, 'linked_alias_v2.safetensors'))
+  fs.symlinkSync(path.join(modelRoot, 'nowhere.safetensors'), path.join(modelRoot, 'dangling_alias.safetensors')) // dangling: skipped, never fatal
+  fs.mkdirSync(path.join(modelRoot, 'nested'))
+  fs.symlinkSync(path.join(modelRoot, 'nested'), path.join(modelRoot, 'linked_dir'))
+  fs.writeFileSync(path.join(modelRoot, 'nested', 'deep_model_v3.safetensors'), realBytes)
+  const current = (await get('/api/lan/settings')).body.settings
+  const patched = { ...current, paths: { ...current.paths, diffusion_models: modelRoot } }
+  const savedScan = await post('/api/lan/settings', { settings: patched })
+  assert.equal(savedScan.status, 200, `settings PATCH for scan test failed: ${JSON.stringify(savedScan.body).slice(0, 200)}`)
+  const bootstrapped = await get('/api/lan/bootstrap')
+  assert.equal(bootstrapped.status, 200, 'bootstrap must answer with the engine down (degraded but scanned)')
+  const names = (bootstrapped.body.models || []).filter((model) => model.kind === 'diffusion_models').map((model) => model.name)
+  assert.ok(names.includes('real_diffusion_v1.safetensors'), `real file must scan (got ${names.join(',')})`)
+  assert.ok(names.includes('linked_alias_v2.safetensors'), `SYMLINKED model must scan — the link-never-copy layout depends on it (got ${names.join(',')})`)
+  assert.ok(names.includes('deep_model_v3.safetensors'), `file inside a SYMLINKED directory must scan (got ${names.join(',')})`)
+  assert.ok(!names.includes('dangling_alias.safetensors'), 'a dangling symlink must be skipped, never listed nor fatal')
+})
+
+test('(g) output resolve contract (audit D4): the route must answer BOTH a local file path and the media URL', async () => {
+  const outDir = path.join(home, 'resolve-output')
+  fs.mkdirSync(outDir, { recursive: true })
+  fs.writeFileSync(path.join(outDir, 'rendered_00001_.mp4'), Buffer.from('mp4-bytes'))
+  const current2 = (await get('/api/lan/settings')).body.settings
+  const saved2 = await post('/api/lan/settings', { settings: { ...current2, outputDirectory: outDir } })
+  assert.equal(saved2.status, 200, 'settings PATCH for resolve test must save')
+  const resolved = await get('/api/lan/outputs/resolve?filename=rendered_00001_.mp4&type=output')
+  assert.equal(resolved.status, 200, `resolve must find the file in the output dir: ${JSON.stringify(resolved.body).slice(0, 160)}`)
+  assert.ok(typeof resolved.body.path === 'string' && resolved.body.path.startsWith('/'), `resolve must answer a LOCAL PATH (got ${JSON.stringify(resolved.body.path)})`)
+  assert.ok(fs.existsSync(resolved.body.path), 'the answered path must exist on disk')
+  assert.ok(resolved.body.url.startsWith('/api/lan/media?'), `the answered url must be the media route (got ${resolved.body.url})`)
+  const missing = await get('/api/lan/outputs/resolve?filename=absent.mp4&type=output')
+  assert.equal(missing.status, 404, 'a file outside the output directory must 404')
+})
+
+test('(g2) honest /free: an upstream engine failure must NEVER surface as {freed:true}', async () => {
+  const current3 = (await get('/api/lan/settings')).body.settings
+  const originalComfy = current3.comfyUrl
+  const saved3 = await post('/api/lan/settings', { settings: { ...current3, comfyUrl: 'http://127.0.0.1:5599' } })
+  assert.equal(saved3.status, 200, 'settings PATCH for the /free probe must save')
+  const freed = await post('/api/lan/free', {})
+  assert.equal(freed.status, 502, `/free against a dead engine must fail honestly (got ${freed.status} ${JSON.stringify(freed.body).slice(0, 120)})`)
+  assert.equal(freed.body.freed, false, 'the body must carry freed:false — never silent success')
+  assert.ok(typeof freed.body.error === 'string' && freed.body.error.length > 0, 'the refusal must carry the reason')
+  const restored3 = await post('/api/lan/settings', { settings: { ...(await get('/api/lan/settings')).body.settings, comfyUrl: originalComfy } })
+  assert.equal(restored3.status, 200, 'settings restore after the /free probe must save')
+})
+
+test('origin / Host / content-type guards (security hardening 1) + fetch-consent Option A', async () => {
+  const http = require('node:http')
+  const WebSocket = require('ws')
+  const probe = async (init, pathname = '/api/lan/settings') => {
+    const response = await fetch(`${base}${pathname}`, init)
+    await response.arrayBuffer().catch(() => undefined)
+    return response.status
+  }
+  const rawProbe = (options) => new Promise((resolve, reject) => {
+    const request = http.request({ host: '127.0.0.1', port, ...options }, (response) => {
+      response.resume()
+      response.on('end', () => resolve(response.statusCode))
+    })
+    request.on('error', reject)
+    request.end(options.body ?? null)
+  })
+
+  // Cross-site browser POST (CORS-mode fetch carries Origin): refused.
+  const forged = await probe({ method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://evil.example' }, body: JSON.stringify({ settings: { comfyUrl: 'http://127.0.0.1:8188', outputDirectory: '/tmp' } }) })
+  assert.equal(forged, 403, `a forged cross-origin POST must be refused with 403 (got ${forged})`)
+  // no-cors-style POST (text/plain body, no Origin needed to be hostile):
+  // refused by the content-type rule alone.
+  const textPlain = await probe({ method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ settings: { comfyUrl: 'http://127.0.0.1:8188', outputDirectory: '/tmp' } }) })
+  assert.equal(textPlain, 403, `a text/plain POST body must be refused (got ${textPlain})`)
+  // Cross-origin read (DNS-rebinding-shaped GET with Origin): refused.
+  const foreignGet = await probe({ headers: { origin: 'http://evil.example' } })
+  assert.equal(foreignGet, 403, `a foreign-Origin GET must be refused (got ${foreignGet})`)
+  // Same-origin POST (Origin matching scheme://Host) keeps working.
+  const sameOrigin = await probe({ method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ settings: { comfyUrl: 'http://127.0.0.1:8188', outputDirectory: home, modelRoot: home, ffmpegPath: 'ffmpeg' } }) })
+  assert.equal(sameOrigin, 200, `a same-origin POST with JSON content type must pass (got ${sameOrigin})`)
+  // Bodiless POST with no content type (Node/curl ergonomics): allowed —
+  // it is inert on readJson routes and Origin covers browser CSRF.
+  const bodiless = await rawProbe({ method: 'POST', path: '/api/lan/documents/gc' })
+  assert.equal(bodiless, 200, `a bodiless POST must still be served (got ${bodiless})`)
+
+  // Host gate: a rebound attacker domain is refused; mDNS .local passes.
+  const evilHost = await rawProbe({ method: 'GET', path: '/api/lan/settings', headers: { host: 'evil.example:4178' } })
+  assert.equal(evilHost, 403, `a non-local Host name must be refused (got ${evilHost})`)
+  const mdnsHost = await rawProbe({ method: 'GET', path: '/api/lan/settings', headers: { host: 'studio.local:4178' } })
+  assert.equal(mdnsHost, 200, `an mDNS .local Host must be served (got ${mdnsHost})`)
+  // The settings-exposed allowlist admits a custom hostname…
+  const current = (await (await fetch(`${base}/api/lan/settings`)).json()).settings
+  const savedAllowlist = await probe({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...current, lanHostAllowlist: ['mybox.studio'] } }) })
+  assert.equal(savedAllowlist, 200, 'saving a host allowlist must succeed')
+  const allowedHost = await rawProbe({ method: 'GET', path: '/api/lan/settings', headers: { host: 'mybox.studio' } })
+  assert.equal(allowedHost, 200, `an allowlisted custom Host must be served (got ${allowedHost})`)
+  // …and the allowlist does not open the door for anyone else.
+  const stillEvil = await rawProbe({ method: 'GET', path: '/api/lan/settings', headers: { host: 'other.studio' } })
+  assert.equal(stillEvil, 403, `a non-allowlisted custom Host must be refused (got ${stillEvil})`)
+
+  // Settings write validation (security hardening 1): shape + SSRF + warn.
+  const relativeOutput = await probe({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...current, outputDirectory: 'relative/out' } }) })
+  assert.equal(relativeOutput, 400, `a relative outputDirectory must be refused (got ${relativeOutput})`)
+  const remoteComfy = await probe({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...current, comfyUrl: 'http://example.com:8188' } }) })
+  assert.equal(remoteComfy, 400, `a non-local comfyUrl must be refused at save time (got ${remoteComfy})`)
+  const warned2 = await fetch(`${base}/api/lan/settings`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { ...current, outputDirectory: path.join(home, 'not-created-yet') } }),
+  })
+  const warnedBody = await warned2.json()
+  assert.equal(warned2.status, 200, 'a well-formed save with a missing directory must succeed')
+  assert.ok(Array.isArray(warnedBody.warnings) && warnedBody.warnings.some((line) => line.includes('not-created-yet')), `a nonexistent absolute path must be warned about, not silently accepted (got ${JSON.stringify(warnedBody.warnings)})`)
+
+  // WS upgrade: a foreign Origin is refused before the handshake; a plain
+  // (browserless) connect still upgrades.
+  const refusedSocket = await new Promise((resolve) => {
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`, { headers: { origin: 'http://evil.example' } })
+    socket.on('error', () => resolve('refused'))
+    socket.on('open', () => { socket.close(); resolve('opened') })
+  })
+  assert.equal(refusedSocket, 'refused', 'a WS upgrade with a foreign Origin must be refused')
+  const cleanSocket = await new Promise((resolve) => {
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+    socket.on('error', () => resolve('refused'))
+    socket.on('open', () => { socket.close(); resolve('opened') })
+  })
+  assert.equal(cleanSocket, 'opened', 'a WS upgrade without a foreign Origin must succeed')
+
+  // Fetch-consent Option A (maintainer decision 2026-09-18): consent
+  // RECORDING is accepted only from the studio's own UI — the Origin must
+  // be PRESENT and same-origin. The global gate above already refuses
+  // foreign origins everywhere; these pin the stricter consent-only rule
+  // (a raw no-Origin peer cannot authorize network fetches) and that the
+  // UI's own flow keeps working.
+  const consentBody = JSON.stringify({ id: 'mlsd-annotator', consented: true })
+  const ledgerNow = () => {
+    const raw = JSON.parse(fs.readFileSync(path.join(home, 'settings.json'), 'utf8'))
+    return raw.fetch?.consents ?? {}
+  }
+  const consentNoOrigin = await probe({ method: 'POST', headers: { 'content-type': 'application/json' }, body: consentBody }, '/api/lan/fetch/consent')
+  assert.equal(consentNoOrigin, 403, `consent without an Origin header must be refused (got ${consentNoOrigin})`)
+  const consentForeign = await probe({ method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://evil.example' }, body: consentBody }, '/api/lan/fetch/consent')
+  assert.equal(consentForeign, 403, `cross-origin consent must be refused (got ${consentForeign})`)
+  assert.equal(ledgerNow()['mlsd-annotator'], undefined, 'refused consent attempts must leave the ledger untouched')
+  const consentUi = await probe({ method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: consentBody }, '/api/lan/fetch/consent')
+  assert.equal(consentUi, 200, `the studio UI's same-origin consent POST must keep working (got ${consentUi})`)
+  assert.equal(ledgerNow()['mlsd-annotator']?.consented, true, 'the same-origin consent records into the ledger')
+  // The dataset CLIP consent writes into the SAME ledger — same rule shape.
+  const clipNoOrigin = await probe({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ consented: true }) }, '/api/lan/datasets/clip/consent')
+  assert.equal(clipNoOrigin, 403, `the CLIP consent route enforces the same UI-origin rule (got ${clipNoOrigin})`)
+  const clipUi = await probe({ method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ consented: true }) }, '/api/lan/datasets/clip/consent')
+  assert.equal(clipUi, 200, `the CLIP consent keeps working from the UI (got ${clipUi})`)
+})
+
+test('in-process seams: comfyFetch SSRF funnel + rotateToken scheme', async () => {
+  const { pathToFileURL } = require('node:url')
+  const coreUrl = pathToFileURL(path.join(REPO, 'dist-server', 'server', 'core.js')).href
+  const { createStudioServer } = await import(coreUrl)
+  const guardHome = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-storage-guard-'))
+  const guardPort = await freePort()
+  const studio = createStudioServer({
+    settingsFile: path.join(guardHome, 'settings.json'),
+    lanTokenFile: path.join(guardHome, 'lan-access-token.txt'),
+    tempDirectory: os.tmpdir(),
+    documentsDirectory: guardHome,
+    staticRoot: path.join(REPO, 'dist'),
+  })
+  try {
+    const previousPortEnv = process.env.MINIMAX_LAN_PORT
+    process.env.MINIMAX_LAN_PORT = String(guardPort)
+    try {
+      await studio.startLanServer()
+    } finally {
+      if (previousPortEnv === undefined) delete process.env.MINIMAX_LAN_PORT
+      else process.env.MINIMAX_LAN_PORT = previousPortEnv
+    }
+    const status = studio.status()
+    assert.equal(status.running, true, 'the in-process guard server must boot')
+    // The one outbound funnel every proxy path shares: a non-local service
+    // URL is refused there, not just at settings-save time.
+    await assert.rejects(studio.comfyFetch('http://example.com', '/system_stats'), /local/i, 'comfyFetch must refuse non-local service URLs')
+    // rotateToken builds links with the listener's actual scheme (HTTPS by
+    // default) — the pre-fix http:// link under TLS was dead on arrival.
+    const rotated = await studio.rotateToken()
+    const scheme = rotated.secure ? 'https' : 'http'
+    assert.ok(rotated.url.startsWith(`${scheme}://`), `rotated links must follow the ${scheme} scheme (got ${rotated.url})`)
+  } finally {
+    studio.stopLanServer()
+  }
+})
+
+test('(h) settings-GET Option B: token-gated whenever token mode is on', async () => {
+  const { pathToFileURL } = require('node:url')
+  const coreUrl = pathToFileURL(path.join(REPO, 'dist-server', 'server', 'core.js')).href
+  const { createStudioServer } = await import(coreUrl)
+  const tokenHome = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-storage-settings-'))
+  const tokenPort = await freePort()
+  fs.writeFileSync(path.join(tokenHome, 'lan-access-token.txt'), '0123456789abcdef0123456789abcdef\n')
+  const studio = createStudioServer({
+    settingsFile: path.join(tokenHome, 'settings.json'),
+    lanTokenFile: path.join(tokenHome, 'lan-access-token.txt'),
+    tempDirectory: os.tmpdir(),
+    documentsDirectory: tokenHome,
+    staticRoot: path.join(REPO, 'dist'),
+  })
+  const previousTokenEnv = process.env.MINIMAX_LAN_TOKEN
+  const previousPortEnv = process.env.MINIMAX_LAN_PORT
+  const previousNoHttpsEnv = process.env.MINIMAX_NO_HTTPS
+  process.env.MINIMAX_LAN_TOKEN = '1'
+  process.env.MINIMAX_LAN_PORT = String(tokenPort)
+  process.env.MINIMAX_NO_HTTPS = '1'
+  try {
+    await studio.startLanServer()
+    const tokenBase = `http://127.0.0.1:${tokenPort}`
+    const noToken = await fetch(`${tokenBase}/api/lan/settings`)
+    assert.equal(noToken.status, 401, `token mode: GET /settings without a token must 401 (got ${noToken.status})`)
+    const wrongToken = await fetch(`${tokenBase}/api/lan/settings`, { headers: { 'x-minimax-token': 'wrong' } })
+    assert.equal(wrongToken.status, 401, `token mode: a wrong token must 401 (got ${wrongToken.status})`)
+    const liveToken = fs.readFileSync(path.join(tokenHome, 'lan-access-token.txt'), 'utf8').trim()
+    const withToken = await fetch(`${tokenBase}/api/lan/settings`, { headers: { 'x-minimax-token': liveToken } })
+    assert.equal(withToken.status, 200, `token mode: the SPA's header token reads settings (got ${withToken.status})`)
+    const tokenBody = await withToken.json()
+    assert.ok(tokenBody.settings && typeof tokenBody.settings.comfyUrl === 'string', 'the tokened read returns the settings object (the editor data source)')
+  } finally {
+    studio.stopLanServer()
+    if (previousTokenEnv === undefined) delete process.env.MINIMAX_LAN_TOKEN
+    else process.env.MINIMAX_LAN_TOKEN = previousTokenEnv
+    if (previousPortEnv === undefined) delete process.env.MINIMAX_LAN_PORT
+    else process.env.MINIMAX_LAN_PORT = previousPortEnv
+    if (previousNoHttpsEnv === undefined) delete process.env.MINIMAX_NO_HTTPS
+    else process.env.MINIMAX_NO_HTTPS = previousNoHttpsEnv
+  }
+  console.log(`PASS: storage substrate — studio.db boots with versioned migrations; jobs upsert per-job (graph stripped, manifest kept, events on terminal); FTS5 search is injection-safe and the technique corpus seeds idempotently; workspace/projects round-trip; the localStorage migration copies+verifies without touching the originals; degraded API writes leave no marker. Server: ${base}`)
+})

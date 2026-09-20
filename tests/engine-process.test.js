@@ -14,15 +14,40 @@
 //   (g) python realism when python3 is on PATH (PYTHONUNBUFFERED/-u asserted
 //       from inside the child) — skipped with a note otherwise
 // Run after `pnpm build:server` (the module loads from dist-server).
+//
+// Vitest port (task z7ogmig, 2026-09-20) of scripts/test-engine-process.cjs:
+// assertion bodies carry over verbatim; the linear main() became one test
+// per section; the module-scope dist-server require is guarded so a missing
+// build NOTE-skips the file instead of crashing; the http-probe port draws
+// from this suite's disjoint range (tests/lib/ports.cjs).
+import { test, beforeAll } from 'vitest'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+
+const require = createRequire(import.meta.url)
+const __dirname = require('node:path').dirname(fileURLToPath(import.meta.url))
+const REPO = require('node:path').resolve(__dirname, '..')
+
 const { spawn } = require('node:child_process')
-const net = require('node:net')
+const fs = require('node:fs')
 const path = require('node:path')
 const assert = require('node:assert/strict')
+const { makePortAllocator } = require('./lib/ports.cjs')
 
-const { EngineProcess } = require(path.join(__dirname, '..', 'dist-server', 'server', 'engineProcess.js'))
+const freePort = makePortAllocator('engine-process')
 
-const FIXTURE = path.join(__dirname, 'fixtures', 'engine-child.cjs')
-const PYTHON_FIXTURE = path.join(__dirname, 'fixtures', 'engine-child.py')
+// NOTE guard: without a dist-server build there is nothing to test here —
+// the suite runs on legs that build the server (the suite's own philosophy).
+const hasServerBuild = fs.existsSync(path.join(REPO, 'dist-server', 'server', 'engineProcess.js'))
+if (!hasServerBuild) {
+  console.log('NOTE - no dist-server build present (engineProcess.js); run pnpm build:server — this suite runs on legs that build the server.')
+}
+const maybe = hasServerBuild ? test : test.skip
+
+const { EngineProcess } = hasServerBuild ? require(path.join(REPO, 'dist-server', 'server', 'engineProcess.js')) : {}
+
+const FIXTURE = path.join(REPO, 'scripts', 'fixtures', 'engine-child.cjs')
+const PYTHON_FIXTURE = path.join(REPO, 'scripts', 'fixtures', 'engine-child.py')
 const IS_WIN = process.platform === 'win32'
 // The grandchild fixture outlives its parent by 10 s on purpose; the
 // tree-kill sweep lands around 3.5 s. Anything under ~8 s proves the sweep
@@ -30,7 +55,7 @@ const IS_WIN = process.platform === 'win32'
 const GRANDCHILD_DEATH_BUDGET_MS = 8_000
 
 const phases = []
-EngineProcess.setEngineSink((event) => phases.push(event))
+if (hasServerBuild) EngineProcess.setEngineSink((event) => phases.push(event))
 
 function phaseTrace(name) {
   return phases.filter((event) => event.name === name).map((event) => event.phase)
@@ -61,17 +86,6 @@ async function waitUntil(predicate, timeoutMs, label) {
   throw new Error(`timed out after ${timeoutMs} ms waiting for: ${label}`)
 }
 
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer()
-    probe.once('error', reject)
-    probe.listen(0, '127.0.0.1', () => {
-      const { port } = probe.address()
-      probe.close(() => resolve(port))
-    })
-  })
-}
-
 function probePython() {
   const candidates = IS_WIN ? ['python', 'python3'] : ['python3', 'python']
   return new Promise((resolve) => {
@@ -97,8 +111,12 @@ function ok(condition, label) {
   console.log(`  ok - ${label}`)
 }
 
-async function main() {
-  // ---- (a) NDJSON round-trip + (b) ndjson readiness + (c) graceful stop --
+let python = null
+beforeAll(async () => {
+  python = await probePython()
+})
+
+maybe('(a) NDJSON round-trip + (b) ndjson readiness + (c) graceful stop', async () => {
   console.log('engine-process: ndjson round-trip, readiness, graceful stop')
   {
     const events = []
@@ -126,8 +144,9 @@ async function main() {
     ok(trace.join(',') === 'starting,ready,stopped', `phase trace starting→ready→stopped (got ${trace.join(',')})`)
     ok(!isAlive(engine.pid), 'child reaped after graceful exit')
   }
+})
 
-  // ---- (b) readiness rejections -------------------------------------------
+maybe('(b) readiness rejection taxonomy: exit-before-ready, matcher timeout', async () => {
   console.log('engine-process: readiness rejection taxonomy')
   {
     const failFastEvents = []
@@ -154,8 +173,9 @@ async function main() {
     const noMatchSummary = await noMatch.gracefulStop()
     ok(noMatchSummary.code === 0 && noMatchSummary.killedByUs === false, 'a readiness failure does not leak the (still healthy) child')
   }
+})
 
-  // ---- (b) http readiness: fail-closed default guard, then wired guard ----
+maybe('(b) http readiness: fail-closed default guard, then wired guard', async () => {
   console.log('engine-process: http readiness probe')
   {
     // No setUrlGuard has run: the module default is deny-all, so even a
@@ -185,8 +205,9 @@ async function main() {
     const httpSummary = await httpChild.gracefulStop()
     ok(httpSummary.code === 0 && httpSummary.killedByUs === false, 'http-ready child stops gracefully')
   }
+})
 
-  // ---- (d)+(e) forced tree-kill: grandchild dies with the tree -----------
+maybe('(d)+(e) forced tree-kill: grandchild dies with the tree', async () => {
   console.log('engine-process: forced tree-kill (SIGTERM-immune grandchild)')
   {
     const events = []
@@ -223,8 +244,9 @@ async function main() {
     const trace = phaseTrace('force-kill-child')
     ok(trace[trace.length - 1] === 'stopped', `a supervisor-initiated kill reports 'stopped' (got ${trace.join(',')}) — 'failed' is reserved for ends nobody ordered`)
   }
+})
 
-  // ---- (e) hard deadline taxonomy ------------------------------------------
+maybe('(e) hard deadline taxonomy', async () => {
   console.log('engine-process: hard timeout')
   {
     const events = []
@@ -246,8 +268,9 @@ async function main() {
       ok(await waitUntil(() => !isAlive(grandchildEvent.pid), GRANDCHILD_DEATH_BUDGET_MS, 'hard-timeout grandchild death'), 'hard-timeout tree-kill also reaches the grandchild')
     }
   }
+})
 
-  // ---- (f) shutdownAll reaps -------------------------------------------------
+maybe('(f) shutdownAll reaps the registry', async () => {
   console.log('engine-process: shutdownAll')
   {
     EngineProcess.spawn({ command: process.execPath, args: [FIXTURE], name: 'bulk-1', readiness: { type: 'none' } })
@@ -259,10 +282,10 @@ async function main() {
     const secondCall = await EngineProcess.shutdownAll()
     ok(secondCall.length === 0, 'shutdownAll is idempotent')
   }
+})
 
-  // ---- (g) python realism -----------------------------------------------------
+maybe('(g) python realism: PYTHONUNBUFFERED merged and/or -u line buffering', async () => {
   console.log('engine-process: python unbuffered contract')
-  const python = await probePython()
   if (!python) {
     console.log('  NOTE - no usable python3/python on PATH; skipping the python fixture (CI runners have it)')
   } else {
@@ -282,14 +305,6 @@ async function main() {
     ok(summary.code === 0 && summary.killedByUs === false, 'python child honors the quit protocol')
     ok(events.some((event) => event.msg === 'bye'), 'python goodbye event parsed')
   }
-
   console.log(`engine-process: all ${passed} checks passed`)
-}
+})
 
-main().then(
-  () => { process.exitCode = 0 },
-  (error) => {
-    console.error(`FAIL: ${error && error.stack ? error.stack : error}`)
-    process.exitCode = 1
-  },
-)

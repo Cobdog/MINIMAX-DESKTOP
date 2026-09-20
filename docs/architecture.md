@@ -71,7 +71,7 @@ Security posture: **open on the LAN by default** (ComfyUI-consistent; a delibera
 5. On completion: attribute the output by the **exact filename ComfyUI reported** (`extractOutputFile` + `outputs/resolve`) — never newest-file-on-disk; resolve locally when possible, stream via the proxy otherwise
 6. Post-processing: optional LTX latent 2× upscale; library/queue persistence
 
-Job state transitions live in the pure reducer `src/lib/jobReducer.ts` (terminal-state guards, no-output cap, deadline), unit-tested in `scripts/test-workflows.cjs`.
+Job state transitions live in the pure reducer `src/lib/jobReducer.ts` (terminal-state guards, no-output cap, deadline), unit-tested in `tests/workflows.test.js`.
 
 ## Optimization registry
 
@@ -82,7 +82,7 @@ Job state transitions live in the pure reducer `src/lib/jobReducer.ts` (terminal
 **Two contracts make this safe:**
 
 1. **Insert-only.** Transforms append nodes at a declared factory seam (`wraps: 'modelChain' | 'output' | …`) through a `GraphContext` — a role-addressed node map (`ctx.link('samplerSelect')`, never the raw id `'13'`) with `wrapModel()` enforcing the model chain. A transform never rewrites a node it did not create.
-2. **Inertness.** When an entry is not selected, the produced graph must be deep-equal to the pre-registry graph. `scripts/test-registry.cjs` proves this per build against `scripts/fixtures/registry-golden.json` — golden snapshots of `buildMiniMaxWorkflow` output over the matrix in `scripts/lib/registry-matrix.cjs` (captured from the pre-registry builder; regenerate deliberately with `node scripts/test-registry.cjs --update-golden` and review the diff, the fixture IS the contract). The same suite proves **painless expansion**: a hypothetical turbo family registered in test data detects, transforms, enforces its pairing, and stays inert — zero factory changes.
+2. **Inertness.** When an entry is not selected, the produced graph must be deep-equal to the pre-registry graph. `tests/registry.test.js` proves this per build against `scripts/fixtures/registry-golden.json` — golden snapshots of `buildMiniMaxWorkflow` output over the matrix in `scripts/lib/registry-matrix.cjs` (captured from the pre-registry builder; regenerate deliberately with `pnpm test:registry:update` and review the diff, the fixture IS the contract). The same suite proves **painless expansion**: a hypothetical turbo family registered in test data detects, transforms, enforces its pairing, and stays inert — zero factory changes.
 
 **Adding a method** (e.g. a new turbo family or SeedVR2 upscale): add one entry to the relevant `graph/*.ts` module — filename patterns for detection, the pairing contract (steps/sampler; `samplerNode` swaps KSamplerSelect for a dedicated pack node like larryvrh's `MiniMaxH3TurboSampler` when object_info shows it installed), and the transform. The UI surfaces detected families automatically (`detectOptimizations(info, models)` gates availability with the entry's `installHint`); model selection ranks through `turboLoraPatterns()` (official first, lightx2v newest-first, an explicit `turboFamily` workspace choice constrains to one entry). The loader choice (`auto` = dedicated pack nodes when installed / `plain` = stock `LoraLoaderModelOnly`) rides `GenerationOptions.turboLoader`.
 

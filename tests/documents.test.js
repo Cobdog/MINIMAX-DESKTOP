@@ -1,6 +1,6 @@
 // Canvas document store test (Phase 0, docs/specs/canvas-document-model.md):
 // boots the BUILT standalone server on a scratch port + scratch home (like
-// test-storage.cjs) and drives the document store end to end:
+// the storage suite) and drives the document store end to end:
 //   (a) migration 002: all §1 tables + triggers + jobs extension on a fresh
 //       boot; golden-fixture N→N+1 (a 001-only db with real legacy rows
 //       migrates forward byte-identically); history divergence = hard error
@@ -23,32 +23,35 @@
 //       STALE READS across every mutation route + external-connection
 //       writes (fail-closed stamp invalidation)
 // Run after `pnpm build` (the server + modules are loaded from dist-server).
+//
+// Vitest port (task z7ogmig, 2026-09-20) of scripts/test-documents.cjs:
+// assertion bodies carry over verbatim; the linear main() became a beforeAll
+// boot + one test per section (sequential within the file, so the
+// cross-section state flow is unchanged); CWD-relative paths are now
+// __dirname-anchored and ports draw from this suite's disjoint range
+// (tests/lib/ports.cjs).
+import { test, beforeAll, afterAll } from 'vitest'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+
+const require = createRequire(import.meta.url)
+const __dirname = require('node:path').dirname(fileURLToPath(import.meta.url))
+const REPO = require('node:path').resolve(__dirname, '..')
+
 const { spawn } = require('node:child_process')
 const http = require('node:http')
-const net = require('node:net')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const assert = require('node:assert/strict')
 const { createHash } = require('node:crypto')
 const Database = require('better-sqlite3')
+const { makePortAllocator } = require('./lib/ports.cjs')
 
-const { migrations, migrateDatabase } = require('../dist-server/server/db.js')
-const { packZip, unpackZip, MAX_ZIP_ENTRIES, MAX_ZIP_ENTRY_BYTES } = require('../dist-server/server/documentArchive.js')
+const { migrations, migrateDatabase } = require(path.join(REPO, 'dist-server/server/db.js'))
+const { packZip, unpackZip, MAX_ZIP_ENTRIES, MAX_ZIP_ENTRY_BYTES } = require(path.join(REPO, 'dist-server/server/documentArchive.js'))
 
-/** Picks a port that verifiably has nothing listening. */
-async function freePort() {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    const candidate = 4600 + Math.floor(Math.random() * 200)
-    const busy = await new Promise((resolve) => {
-      const probe = net.connect({ port: candidate, host: '127.0.0.1' })
-      probe.on('error', () => resolve(false))
-      probe.on('connect', () => { probe.destroy(); resolve(true) })
-    })
-    if (!busy) return candidate
-  }
-  throw new Error('no free port found in 50 attempts')
-}
+const freePort = makePortAllocator('documents')
 
 const sha256 = (data) => createHash('sha256').update(data).digest('hex')
 const sha256File = (file) => sha256(fs.readFileSync(file))
@@ -74,7 +77,7 @@ process.on('exit', killAllServers)
 async function bootServer(home, label) {
   const output = { text: '', label }
   const port = await freePort()
-  const child = spawn(process.execPath, ['dist-server/server/index.js'], {
+  const child = spawn(process.execPath, [path.join(REPO, 'dist-server', 'server', 'index.js')], {
     env: { ...process.env, MINIMAX_STUDIO_HOME: home, MINIMAX_LAN_PORT: String(port), MINIMAX_NO_HTTPS: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -126,10 +129,26 @@ const check = (condition, message) => {
   assertions += 1
 }
 
-async function main() {
-  // =====================================================================
-  // (a) Migration: golden fixture N→N+1 + fresh boot shape
-  // =====================================================================
+// ---- cross-section state (sequential tests share it, as the linear main() did)
+let canvasTables = []
+let homeA = ''
+let serverA = null
+let api = null
+let dbFileA = ''
+let outDir = ''
+let mediaFiles = []
+let legacyJobs = []
+let projectId = ''
+let chainId = ''
+let outputId = ''
+let assetCreated = null
+let archive = null
+let manifest = null
+let latentFiles = []
+let serverA2 = null
+let apiA2 = null
+
+test('(a) migration: golden fixture N→N+1, fresh boot shape, 004 stray healing, divergence hard-error', () => {
   const fixtureDbFile = path.join(makeHome('fixture'), 'studio.db')
   const fixtureDb = new Database(fixtureDbFile)
   const migration001 = migrations.find((migration) => migration.id === 1)
@@ -157,7 +176,7 @@ async function main() {
     projects: fixtureDb.prepare('SELECT * FROM projects').all(),
   }))
   check(goldenBefore === goldenAfter, 'legacy rows survive migration 002 byte-identically (copy-never-destroy)')
-  const canvasTables = fixtureDb.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name LIKE 'canvas%'").all().map((row) => row.name)
+  canvasTables = fixtureDb.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name LIKE 'canvas%'").all().map((row) => row.name)
   for (const expected of ['canvas_project', 'canvas_session', 'canvas_chain', 'canvas_output', 'canvas_take', 'canvas_op_stack', 'canvas_op', 'canvas_identity_payload', 'canvas_control_track', 'canvas_asset', 'canvas_asset_fork', 'canvas_plan', 'canvas_blob', 'canvas_import_marker', 'canvas_fts']) {
     check(canvasTables.includes(expected), `migration 002 creates ${expected}`)
   }
@@ -209,24 +228,26 @@ async function main() {
   assertions += 1
   fixtureDb.close()
   divergent.close()
+})
 
+beforeAll(async () => {
   // =====================================================================
   // Boot server A + seed the OLD surface (import sources)
   // =====================================================================
-  const homeA = makeHome('a')
-  const serverA = await bootServer(homeA, 'A')
-  const api = client(serverA.port)
-  const dbFileA = path.join(homeA, 'studio.db')
+  homeA = makeHome('a')
+  serverA = await bootServer(homeA, 'A')
+  api = client(serverA.port)
+  dbFileA = path.join(homeA, 'studio.db')
 
   // real artifact files for hash spot-checks
-  const outDir = path.join(homeA, 'out')
+  outDir = path.join(homeA, 'out')
   fs.mkdirSync(outDir, { recursive: true })
-  const mediaFiles = ['one.mp4', 'two.mp4', 'three.mp4'].map((name, index) => {
+  mediaFiles = ['one.mp4', 'two.mp4', 'three.mp4'].map((name, index) => {
     const file = path.join(outDir, name)
     fs.writeFileSync(file, Buffer.from(`legacy-media-${index}-${Math.random()}`))
     return file
   })
-  const legacyJobs = [
+  legacyJobs = [
     { id: 'doc-job-1', mode: 'text', status: 'completed', prompt: 'a lantern courtyard at dusk', createdAt: 1000, progress: 100, width: 1344, height: 768, duration: 5, outputUrl: `/api/lan/media?source=output&path=${encodeURIComponent(mediaFiles[0])}`, manifest: { seed: 11, steps: 30 } },
     { id: 'doc-job-2', mode: 'text', status: 'completed', prompt: 'neon rain on chrome', createdAt: 2000, progress: 100, width: 1344, height: 768, duration: 5, outputUrl: `/api/lan/media?source=output&path=${encodeURIComponent(mediaFiles[1])}`, manifest: { seed: 22 } },
     { id: 'doc-job-3', mode: 'audio', status: 'completed', prompt: 'low drone under rain', createdAt: 3000, progress: 100, width: 0, height: 0, duration: 8, outputUrl: `/api/lan/media?source=output&path=${encodeURIComponent(mediaFiles[2])}`, manifest: { seed: 33 } },
@@ -247,10 +268,11 @@ async function main() {
     { id: 'char-olio', name: 'Olio', referenceImages: [] },
   ] })
   check(charactersPosted.status === 200 && charactersPosted.body.synced === 2, 'legacy character library syncs via the old surface')
+})
 
-  // =====================================================================
-  // (e) §6 legacy import — first canvas boot
-  // =====================================================================
+afterAll(() => { killAllServers() })
+
+test('(e) §6 legacy import — first canvas boot', async () => {
   const bootstrap = await api.get('/api/lan/documents/bootstrap')
   check(bootstrap.status === 200, 'documents bootstrap answers')
   check(bootstrap.body.legacyImport.imported === true, 'first canvas boot runs the legacy import (marker set)')
@@ -310,29 +332,28 @@ async function main() {
   check(jobsUntouched === 5, 'import never touches the jobs source (copy-never-destroy)')
   check(JSON.parse(workspaceUntouched).prompt === 'legacy workspace seed', 'import never touches the workspace source')
   check(promptsUntouched >= 10, 'import never touches the prompt library source')
+})
 
-  // =====================================================================
-  // (b)(c)(d) CRUD + invariants on a fresh project
-  // =====================================================================
+test('(b)(c) CRUD + take append-only on a fresh project: supersession round-trip + trigger enforcement', async () => {
   const created = await api.post('/api/lan/documents/projects', { name: 'Document test' })
   check(created.status === 200 && created.body.project.schemaVersion >= 1, 'project create stamps schemaVersion')
-  const projectId = created.body.project.id
+  projectId = created.body.project.id
   const defaultsSet = await api.post('/api/lan/documents/projects/update', { id: projectId, settingsDefaults: { duration: 6, resolution: '1344x768' } })
   check(defaultsSet.status === 200, 'project chain-settings defaults set')
 
   const chainCreated = await api.post('/api/lan/documents/chains', { projectId, inputSpec: { fresh: { prompt: 'a quiet lighthouse at dawn' } }, settings: { seed: 99 } })
   check(chainCreated.status === 200 && chainCreated.body.chain.stale === false, 'chain create answers')
-  const chainId = chainCreated.body.chain.id
+  chainId = chainCreated.body.chain.id
   check(chainCreated.body.chain.settings.seed === 99, 'chain settings persist')
   check(chainCreated.body.chain.settings.duration === 6, 'project settings-defaults seed new chains (workspace import payoff)')
   check(typeof chainCreated.body.chain.opStackId === 'string', 'chain create provisions an op stack')
 
   const outputCreated = await api.post('/api/lan/documents/outputs', { chainId, substrates: ['decoded'] })
   check(outputCreated.status === 200, 'output create answers')
-  const outputId = outputCreated.body.output.id
+  outputId = outputCreated.body.output.id
 
   // takes with real files (registered + hashed on ingest)
-  const latentFiles = []
+  latentFiles = []
   const takePayload = (index) => {
     const file = path.join(outDir, `take-${index}.latent`)
     fs.writeFileSync(file, Buffer.from(`latent-payload-${index}-${Math.random()}`))
@@ -368,7 +389,9 @@ async function main() {
   takeDb.prepare('UPDATE canvas_take SET superseded_by = ? WHERE id = ?').run(takeTwoId, takeOneId) // idempotent marker write
   takeDb.close()
   assertions += 1
+})
 
+test('(d) ops bake immutability + identity/control-track upserts + staleness propagation + assets + plan/camera/session', async () => {
   // ops: add, reorder, bake, immutability
   const opOne = await api.post('/api/lan/documents/ops', { chainId, kind: 'crop', settings: { x: 0, y: 0, w: 100 } })
   const opTwo = await api.post('/api/lan/documents/ops', { chainId, kind: 'trim', settings: { start: 1, end: 4 } })
@@ -404,7 +427,7 @@ async function main() {
   check(unstale.status === 200 && unstale.body.chain.stale === false, 'stale clears on rerun (explicit)')
 
   // assets: global create + consent-gated fork into project
-  const assetCreated = await api.post('/api/lan/documents/assets', { kind: 'character', fields: { label: 'Harbormaster', description: 'keeps the light' }, canonicalReferenceSet: ['/inputs/harbor-1.png'] })
+  assetCreated = await api.post('/api/lan/documents/assets', { kind: 'character', fields: { label: 'Harbormaster', description: 'keeps the light' }, canonicalReferenceSet: ['/inputs/harbor-1.png'] })
   check(assetCreated.status === 200, 'global asset create')
   const forkDenied = await api.post('/api/lan/documents/assets/fork', { projectId, assetId: assetCreated.body.asset.id })
   check(forkDenied.status === 400, 'fork-into-project without consent is refused (F3 consent gate)')
@@ -422,10 +445,9 @@ async function main() {
   check(sessionSaved.status === 200 && sessionSaved.body.session.openProjects[0] === projectId, 'session persists open projects + active canvas')
   const sessionRead = await api.get('/api/lan/documents/session')
   check(sessionRead.body.session.activeProject === projectId, 'session reads back')
+})
 
-  // =====================================================================
-  // (f) retention/GC adversarials (§3)
-  // =====================================================================
+test('(f) retention/GC adversarials (§3): fork-edge liveness, locked/canonical protection, prune, trash round-trip, empty-trash', async () => {
   const gcProject = await api.post('/api/lan/documents/projects', { name: 'GC test' })
   const gcProjectId = gcProject.body.project.id
   const mkFile = (name) => {
@@ -521,10 +543,9 @@ async function main() {
   const gone = await api.get('/api/lan/documents/projects?trash=1')
   check(!gone.body.projects.some((project) => project.id === gcProjectId), 'trash emptied')
   check(!fs.existsSync(canonicalBlob.abs), 'blob file removed with its last reference at empty-trash')
+})
 
-  // =====================================================================
-  // (h) §4 FTS surfaces + injection safety
-  // =====================================================================
+test('(h) §4 FTS surfaces + injection safety', async () => {
   const ftsChain = await api.get(`/api/lan/documents/search?${new URLSearchParams({ q: 'lighthouse' })}`)
   check(ftsChain.body.results.some((result) => result.source_id === chainId && result.source_kind === 'chain'), 'chain prompt is searchable')
   const ftsPlan = await api.get(`/api/lan/documents/search?${new URLSearchParams({ q: 'heist' })}`)
@@ -539,10 +560,9 @@ async function main() {
   check(ftsInjection.status === 200 && ftsInjection.body.results.length <= 20, 'FTS injection attempt neither errors nor degenerates to all rows')
   const ftsLone = await api.get(`/api/lan/documents/search?${new URLSearchParams({ q: '"' })}`)
   check(ftsLone.status === 200, 'lone double quote must not error')
+})
 
-  // =====================================================================
-  // (h2) Phase 2 ingestion routes: bytes -> blob row -> served media
-  // =====================================================================
+test('(h2) Phase 2 ingestion routes: bytes -> blob row -> served media', async () => {
   const pngBytes = Buffer.from('89504e470d0a1a0a0000000d4948445200000040000000400806000000', 'hex')
   const ingest = await api.post('/api/lan/documents/blobs/ingest', { data: pngBytes.toString('base64'), name: 'dropped-plate.png', kind: 'image' })
   check(ingest.status === 200 && ingest.body.path.includes('canvas-media') && ingest.body.blob.relPath.startsWith('canvas-blobs/'), 'ingest returns the engine-visible copy + the content-addressed blob path')
@@ -557,10 +577,9 @@ async function main() {
   check(badKind.status === 400, 'ingest refuses unknown media kinds')
   const emptyBytes = await api.post('/api/lan/documents/blobs/ingest', { data: '', name: 'empty.png', kind: 'image' })
   check(emptyBytes.status === 400, 'ingest refuses empty payloads')
+})
 
-  // =====================================================================
-  // (i) unknown-newer refuses loudly; old surface untouched
-  // =====================================================================
+test('(i) unknown-newer refuses loudly; old surface untouched', async () => {
   const futureDb = new Database(dbFileA)
   futureDb.prepare("UPDATE canvas_project SET schema_version = 999, app_version = '9.9.9-future' WHERE id = 'legacy:project'").run()
   futureDb.close()
@@ -580,14 +599,13 @@ async function main() {
   check(preserved.gpu_queue_state === 'queued_for_gpu' && preserved.plan_ref === 'plan-x', 'old-surface job upsert never clobbers the canvas extension columns (zero impact)')
   const oldJobsListed = await api.get('/api/lan/jobs')
   check(oldJobsListed.status === 200 && oldJobsListed.body.jobs.length === 5, 'the old jobs listing still answers identically')
+})
 
-  // =====================================================================
-  // (g) §7 archive: round-trip into a fresh studio + refusals
-  // =====================================================================
+test('(g) §7 archive: round-trip into a fresh studio + refusals', async () => {
   const exportResponse = await api.getRaw(`/api/lan/documents/export?id=${projectId}`)
   check(exportResponse.status === 200 && exportResponse.headers.get('content-type') === 'application/zip', 'export answers with a zip')
-  const archive = exportResponse.buffer
-  const manifest = JSON.parse(unpackZip(archive).get('manifest.json'))
+  archive = exportResponse.buffer
+  manifest = JSON.parse(unpackZip(archive).get('manifest.json'))
   check(manifest.format === 'minimax-canvas-archive' && manifest.schemaVersion >= 1, 'manifest carries format + schemaVersion')
   check(manifest.counts.takes === 2 && manifest.counts.chains === 2, 'manifest counts the exported document')
   check(manifest.blobs.length === 1 && manifest.missingBlobs.length === 2, `present + evicted + unregistered-ref blobs all ride in the manifest (got ${manifest.blobs.length} + ${manifest.missingBlobs.length})`)
@@ -636,11 +654,9 @@ async function main() {
   check(refusedFormat.status === 400 && refusedFormat.body.error.includes('archive (format)'), 'unknown-newer archive FORMAT refuses loudly')
   const collision = await apiB.post('/api/lan/documents/import', { archiveBase64: archive.toString('base64') })
   check(collision.status === 400 && /already exists/.test(collision.body.error ?? ''), 'importing onto a taken project id refuses loudly (documented seam: no silent re-id)')
+})
 
-  // =====================================================================
-  // (j) correctness wave 1 — the audit-fix regressions (junllxf)
-  // =====================================================================
-
+test('correctness wave 1 (junllxf) part 1: shared-blob eviction survival, takeId-pinned priors, jobId-idempotent + stray-healing appendTake', async () => {
   // --- B1′: a shared content hash must survive the eviction of ONE take ---
   const sharedProject = await api.post('/api/lan/documents/projects', { name: 'Shared content' })
   const sharedProjectId = sharedProject.body.project.id
@@ -683,6 +699,11 @@ async function main() {
   const pinnedProjectId = pinnedProject.body.project.id
   const pinnedSource = await api.post('/api/lan/documents/chains', { projectId: pinnedProjectId, inputSpec: { fresh: { prompt: 'pinned source' } } })
   const pinnedOutput = (await api.post('/api/lan/documents/outputs', { chainId: pinnedSource.body.chain.id })).body.output
+  const mkFile = (name) => {
+    const file = path.join(outDir, name)
+    fs.writeFileSync(file, Buffer.from(`gc-${name}-${Math.random()}`))
+    return file
+  }
   const pinnedPrior = await api.post('/api/lan/documents/takes', { outputId: pinnedOutput.id, artifacts: [mkFile('pinned-prior.latent')] })
   await api.post('/api/lan/documents/takes', { outputId: pinnedOutput.id, artifacts: [mkFile('pinned-canonical.latent')] })
   // the fork edge pins the PRIOR take explicitly (fork-from-early-take)
@@ -739,11 +760,21 @@ async function main() {
     return rows
   })()
   check(strayCounts.filter((row) => row.superseded_by === null).length === 1 && strayCounts.find((row) => row.id === healingTake.body.take.id).superseded_by === null, 'a new append supersedes EVERY stray — exactly one non-superseded take remains (invariant 2 restored, not assumed)')
+})
+
+test('correctness wave 1 part 2: torn-copy repair, poisoned-list isolation, locked staleness, plan CAS, FTS kind filter', async () => {
+  const outDirLocal = outDir
+  // re-find the stray output from part 1 via its healing take's output
+  // (the ids flow across tests through the server's own state)
+  const strayProjectListed = await api.get('/api/lan/documents/projects')
+  const strayProjectRow = strayProjectListed.body.projects.find((project) => project.name === 'Strays')
+  const strayDoc = await api.get(`/api/lan/documents/project?id=${strayProjectRow.id}`)
+  const strayOutput = strayDoc.body.chains.find((chain) => chain.inputSpec?.fresh?.prompt === 'stray source').outputs[0]
 
   // --- M6: a torn copy at the canonical hash path is detected and repaired,
   // never served as verified content ---
   {
-    const tornFile = path.join(outDir, 'torn-video.mp4')
+    const tornFile = path.join(outDirLocal, 'torn-video.mp4')
     fs.writeFileSync(tornFile, Buffer.from(`torn-content-${Math.random()}`))
     const tornTake = await api.post('/api/lan/documents/takes', { outputId: strayOutput.id, artifacts: [tornFile] })
     const tornRel = tornTake.body.take.artifacts[0]
@@ -816,72 +847,77 @@ async function main() {
     const chainHits = await api.get(`/api/lan/documents/search?${new URLSearchParams({ q: 'needle', kind: 'chain', limit: '1' })}`)
     check(chainHits.status === 200 && chainHits.body.results.length === 1 && chainHits.body.results[0].source_id === ftsChain.body.chain.id, `kind-filtered search finds the chain past 30 noisier job rows at limit 1 (got ${JSON.stringify(chainHits.body.results)})`)
   }
+})
 
-  // --- M5′ + B2: the cancel contract is honest; remote outputs fetch-and-
-  // ingest server-side (a tiny mock engine stands in for ComfyUI) ---
-  {
-    const mockEngine = http.createServer((request, response) => {
-      const url = new URL(request.url ?? '/', 'http://mock.engine')
-      if (request.method === 'GET' && url.pathname === '/queue') {
-        // cancelPromptAt reads item[1] as the prompt id
-        response.writeHead(200, { 'content-type': 'application/json' })
-        response.end(JSON.stringify(mockEngineState.pending.length
-          ? { queue_running: [], queue_pending: [[0, mockEngineState.pending[0]]] }
-          : { queue_running: [], queue_pending: [] }))
-        return
-      }
-      if (request.method === 'POST' && url.pathname === '/queue') {
-        mockEngineState.pending = []
-        response.writeHead(200, { 'content-type': 'application/json' })
-        response.end('{}')
-        return
-      }
-      if (request.method === 'POST' && url.pathname === '/interrupt') {
-        response.writeHead(200, { 'content-type': 'application/json' })
-        response.end('{}')
-        return
-      }
-      if (request.method === 'GET' && url.pathname.startsWith('/history/')) {
-        response.writeHead(200, { 'content-type': 'application/json' })
-        response.end('{}')
-        return
-      }
-      if (request.method === 'GET' && url.pathname === '/view') {
-        response.writeHead(200, { 'content-type': 'application/octet-stream' })
-        response.end(mockEngineState.viewBytes)
-        return
-      }
-      response.writeHead(404)
+test('correctness wave 1 part 3 (M5′ + B2): honest cancel contract + remote-output fetch-and-ingest against a mock engine', async () => {
+  const mockEngine = http.createServer((request, response) => {
+    const url = new URL(request.url ?? '/', 'http://mock.engine')
+    if (request.method === 'GET' && url.pathname === '/queue') {
+      // cancelPromptAt reads item[1] as the prompt id
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify(mockEngineState.pending.length
+        ? { queue_running: [], queue_pending: [[0, mockEngineState.pending[0]]] }
+        : { queue_running: [], queue_pending: [] }))
+      return
+    }
+    if (request.method === 'POST' && url.pathname === '/queue') {
+      mockEngineState.pending = []
+      response.writeHead(200, { 'content-type': 'application/json' })
       response.end('{}')
-    })
-    const mockEngineState = { pending: [], viewBytes: Buffer.from(`remote-engine-output-${Math.random()}`) }
-    const mockPort = await freePort()
-    await new Promise((resolve) => mockEngine.listen(mockPort, '127.0.0.1', resolve))
-    const settingsRead = await api.get('/api/lan/settings')
-    const originalSettings = settingsRead.body.settings
-    const redirected = await api.post('/api/lan/settings', { settings: { ...originalSettings, comfyUrl: `http://127.0.0.1:${mockPort}`, outputDirectory: outDir } })
-    check(redirected.status === 200, 'settings redirect to the mock engine answers')
+      return
+    }
+    if (request.method === 'POST' && url.pathname === '/interrupt') {
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end('{}')
+      return
+    }
+    if (request.method === 'GET' && url.pathname.startsWith('/history/')) {
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end('{}')
+      return
+    }
+    if (request.method === 'GET' && url.pathname === '/view') {
+      response.writeHead(200, { 'content-type': 'application/octet-stream' })
+      response.end(mockEngineState.viewBytes)
+      return
+    }
+    response.writeHead(404)
+    response.end('{}')
+  })
+  const mockEngineState = { pending: [], viewBytes: Buffer.from(`remote-engine-output-${Math.random()}`) }
+  const mockPort = await freePort()
+  await new Promise((resolve) => mockEngine.listen(mockPort, '127.0.0.1', resolve))
+  const settingsRead = await api.get('/api/lan/settings')
+  const originalSettings = settingsRead.body.settings
+  const redirected = await api.post('/api/lan/settings', { settings: { ...originalSettings, comfyUrl: `http://127.0.0.1:${mockPort}`, outputDirectory: outDir } })
+  check(redirected.status === 200, 'settings redirect to the mock engine answers')
 
-    // cancel of a prompt the engine never heard of: cancelled FALSE (M5′)
-    const cancelUnknown = await api.post('/api/lan/cancel', { promptId: 'never-submitted' })
-    check(cancelUnknown.status === 200 && cancelUnknown.body.cancelled === false && cancelUnknown.body.state === 'unknown', `an unknown prompt cancels honestly (got ${JSON.stringify(cancelUnknown.body)})`)
-    // cancel of a queued prompt: cancelled TRUE + the queue state
-    mockEngineState.pending = ['queued-prompt-1']
-    const cancelPending = await api.post('/api/lan/cancel', { promptId: 'queued-prompt-1' })
-    check(cancelPending.body.cancelled === true && cancelPending.body.state === 'pending', `a queued prompt cancels truthfully (got ${JSON.stringify(cancelPending.body)})`)
+  // cancel of a prompt the engine never heard of: cancelled FALSE (M5′)
+  const cancelUnknown = await api.post('/api/lan/cancel', { promptId: 'never-submitted' })
+  check(cancelUnknown.status === 200 && cancelUnknown.body.cancelled === false && cancelUnknown.body.state === 'unknown', `an unknown prompt cancels honestly (got ${JSON.stringify(cancelUnknown.body)})`)
+  // cancel of a queued prompt: cancelled TRUE + the queue state
+  mockEngineState.pending = ['queued-prompt-1']
+  const cancelPending = await api.post('/api/lan/cancel', { promptId: 'queued-prompt-1' })
+  check(cancelPending.body.cancelled === true && cancelPending.body.state === 'pending', `a queued prompt cancels truthfully (got ${JSON.stringify(cancelPending.body)})`)
 
-    // B2: fetch-and-ingest of a remote engine output
-    const remoteIngest = await api.post('/api/lan/documents/blobs/ingest-output', { filename: 'Canvas_Remote_123.mp4', subfolder: 'video', type: 'output', kind: 'video' })
-    check(remoteIngest.status === 200, `remote output ingest answers (${remoteIngest.status} ${JSON.stringify(remoteIngest.body).slice(0, 140)})`)
-    check(remoteIngest.body.blob?.hash === sha256(mockEngineState.viewBytes) && remoteIngest.body.blob.present === true, 'the fetched output is hash-verified + registered present')
-    check(fs.existsSync(remoteIngest.body.path) && remoteIngest.body.path.startsWith(outDir), 'the fetched output landed as an output-dir copy (durable, engine-visible)')
-    const remoteBad = await api.post('/api/lan/documents/blobs/ingest-output', { filename: '../escape.mp4', kind: 'video' })
-    check(remoteBad.status === 400, 'ingest-output refuses traversal filenames (the proxy validation)')
+  // B2: fetch-and-ingest of a remote engine output
+  const remoteIngest = await api.post('/api/lan/documents/blobs/ingest-output', { filename: 'Canvas_Remote_123.mp4', subfolder: 'video', type: 'output', kind: 'video' })
+  check(remoteIngest.status === 200, `remote output ingest answers (${remoteIngest.status} ${JSON.stringify(remoteIngest.body).slice(0, 140)})`)
+  check(remoteIngest.body.blob?.hash === sha256(mockEngineState.viewBytes) && remoteIngest.body.blob.present === true, 'the fetched output is hash-verified + registered present')
+  check(fs.existsSync(remoteIngest.body.path) && remoteIngest.body.path.startsWith(outDir), 'the fetched output landed as an output-dir copy (durable, engine-visible)')
+  const remoteBad = await api.post('/api/lan/documents/blobs/ingest-output', { filename: '../escape.mp4', kind: 'video' })
+  check(remoteBad.status === 400, 'ingest-output refuses traversal filenames (the proxy validation)')
 
-    await api.post('/api/lan/settings', { settings: originalSettings })
-    mockEngine.close()
+  await api.post('/api/lan/settings', { settings: originalSettings })
+  mockEngine.close()
+})
+
+test('correctness wave 1 part 4 (B1 + M3′): latent durability + exports, control-track blob lifecycle', async () => {
+  const mkFile = (name) => {
+    const file = path.join(outDir, name)
+    fs.writeFileSync(file, Buffer.from(`gc-${name}-${Math.random()}`))
+    return file
   }
-
   // --- B1: latents register durably + ride exports; unregistered ones are
   // visible in missingBlobs (never silently omitted) ---
   {
@@ -948,68 +984,64 @@ async function main() {
     check(trashEmptied.status === 200, 'trash empty answers')
     check(fs.existsSync(trackBlobAbs), 'the live control track\'s blob survives an unrelated trash-empty (referencedNow includes tracks)')
   }
+})
 
-  // --- M3: shared-blob archive import upserts; a failed import leaves
-  // NOTHING behind (rows rolled back, no staged files, no orphan blobs) ---
-  {
-    const homeC = makeHome('c')
-    const serverC = await bootServer(homeC, 'C')
-    const apiC = client(serverC.port)
-    await apiC.get('/api/lan/documents/bootstrap')
-    // studio C ALREADY has the archive's blob content registered (the same
-    // bytes ingested by an unrelated project) — the import must upsert over
-    // the existing canvas_blob row instead of aborting on the path PK.
-    const cProject = await apiC.post('/api/lan/documents/projects', { name: 'C local' })
-    const cChain = await apiC.post('/api/lan/documents/chains', { projectId: cProject.body.project.id, inputSpec: { fresh: { prompt: 'c chain' } } })
-    const cOutput = (await apiC.post('/api/lan/documents/outputs', { chainId: cChain.body.chain.id })).body.output
-    const sharedAgain = path.join(homeC, 'same-bytes.latent')
-    fs.writeFileSync(sharedAgain, fs.readFileSync(latentFiles[1]))
-    await apiC.post('/api/lan/documents/takes', { outputId: cOutput.id, artifacts: [sharedAgain] })
-    const sharedImport = await apiC.post('/api/lan/documents/import', { archiveBase64: archive.toString('base64') })
-    check(sharedImport.status === 200, `importing an archive whose blob rows already exist UPSERTS instead of PK-aborting (${sharedImport.status} ${JSON.stringify(sharedImport.body).slice(0, 160)})`)
-    const cBlobCount = (() => {
-      const db = new Database(path.join(homeC, 'studio.db'))
-      const rows = db.prepare('SELECT path, missing FROM canvas_blob').all()
-      db.close()
-      return rows
-    })()
-    check(cBlobCount.filter((row) => row.path === manifest.blobs[0].path).length === 1 && cBlobCount.find((row) => row.path === manifest.blobs[0].path).missing === 0, 'the shared blob row is single and PRESENT after import')
+test('correctness wave 1 part 5 (M3): shared-blob archive import upserts; a failed import leaves NOTHING behind', async () => {
+  const homeC = makeHome('c')
+  const serverC = await bootServer(homeC, 'C')
+  const apiC = client(serverC.port)
+  await apiC.get('/api/lan/documents/bootstrap')
+  // studio C ALREADY has the archive's blob content registered (the same
+  // bytes ingested by an unrelated project) — the import must upsert over
+  // the existing canvas_blob row instead of aborting on the path PK.
+  const cProject = await apiC.post('/api/lan/documents/projects', { name: 'C local' })
+  const cChain = await apiC.post('/api/lan/documents/chains', { projectId: cProject.body.project.id, inputSpec: { fresh: { prompt: 'c chain' } } })
+  const cOutput = (await apiC.post('/api/lan/documents/outputs', { chainId: cChain.body.chain.id })).body.output
+  const sharedAgain = path.join(homeC, 'same-bytes.latent')
+  fs.writeFileSync(sharedAgain, fs.readFileSync(latentFiles[1]))
+  await apiC.post('/api/lan/documents/takes', { outputId: cOutput.id, artifacts: [sharedAgain] })
+  const sharedImport = await apiC.post('/api/lan/documents/import', { archiveBase64: archive.toString('base64') })
+  check(sharedImport.status === 200, `importing an archive whose blob rows already exist UPSERTS instead of PK-aborting (${sharedImport.status} ${JSON.stringify(sharedImport.body).slice(0, 160)})`)
+  const cBlobCount = (() => {
+    const db = new Database(path.join(homeC, 'studio.db'))
+    const rows = db.prepare('SELECT path, missing FROM canvas_blob').all()
+    db.close()
+    return rows
+  })()
+  check(cBlobCount.filter((row) => row.path === manifest.blobs[0].path).length === 1 && cBlobCount.find((row) => row.path === manifest.blobs[0].path).missing === 0, 'the shared blob row is single and PRESENT after import')
 
-    // failed import after blob staging: rows roll back AND no staged file
-    // survives ("a failure leaves nothing behind")
-    const failFiles = unpackZip(archive)
-    const failDocument = JSON.parse(failFiles.get('document.json'))
-    failDocument.project.id = 'rollback:project'
-    for (const chain of failDocument.chains) chain.project_id = 'nonexistent-project' // FK abort AFTER blob staging
-    failFiles.set('document.json', Buffer.from(JSON.stringify(failDocument)))
-    const failManifest = JSON.parse(failFiles.get('manifest.json'))
-    failManifest.projectId = 'rollback:project'
-    failFiles.set('manifest.json', Buffer.from(JSON.stringify(failManifest)))
-    const failArchive = packZip([...failFiles.entries()].map(([name, data]) => ({ name, data })))
-    const failedImport = await apiC.post('/api/lan/documents/import', { archiveBase64: failArchive.toString('base64') })
-    check(failedImport.status === 400, `the doomed import fails loudly (${failedImport.status})`)
-    const stagedLeftovers = (() => {
-      const found = []
-      const walk = (dir) => {
-        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-          const full = path.join(dir, entry.name)
-          if (entry.isDirectory()) walk(full)
-          else if (entry.name.includes('.importing-')) found.push(full)
-        }
+  // failed import after blob staging: rows roll back AND no staged file
+  // survives ("a failure leaves nothing behind")
+  const failFiles = unpackZip(archive)
+  const failDocument = JSON.parse(failFiles.get('document.json'))
+  failDocument.project.id = 'rollback:project'
+  for (const chain of failDocument.chains) chain.project_id = 'nonexistent-project' // FK abort AFTER blob staging
+  failFiles.set('document.json', Buffer.from(JSON.stringify(failDocument)))
+  const failManifest = JSON.parse(failFiles.get('manifest.json'))
+  failManifest.projectId = 'rollback:project'
+  failFiles.set('manifest.json', Buffer.from(JSON.stringify(failManifest)))
+  const failArchive = packZip([...failFiles.entries()].map(([name, data]) => ({ name, data })))
+  const failedImport = await apiC.post('/api/lan/documents/import', { archiveBase64: failArchive.toString('base64') })
+  check(failedImport.status === 400, `the doomed import fails loudly (${failedImport.status})`)
+  const stagedLeftovers = (() => {
+    const found = []
+    const walk = (dir) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) walk(full)
+        else if (entry.name.includes('.importing-')) found.push(full)
       }
-      walk(path.join(homeC, 'canvas-blobs'))
-      return found
-    })()
-    check(stagedLeftovers.length === 0, `a failed import un-stages its blob payloads (got ${stagedLeftovers.length} leftovers)`)
-    const rollbackProject = await apiC.get('/api/lan/documents/project?id=rollback:project')
-    check(rollbackProject.status === 404, 'the rolled-back project left no rows behind')
-    serverC.child.kill()
-  }
+    }
+    walk(path.join(homeC, 'canvas-blobs'))
+    return found
+  })()
+  check(stagedLeftovers.length === 0, `a failed import un-stages its blob payloads (got ${stagedLeftovers.length} leftovers)`)
+  const rollbackProject = await apiC.get('/api/lan/documents/project?id=rollback:project')
+  check(rollbackProject.status === 404, 'the rolled-back project left no rows behind')
+  serverC.child.kill()
+})
 
-
-  // =====================================================================
-  // (g2) security hardening 1: archive column allowlist + zip resource caps
-  // =====================================================================
+test('(g2) security hardening 1: archive column allowlist + zip resource caps', async () => {
   // SQL injection through column names: a crafted take key rewrites the
   // INSERT into an attacker-shaped statement. Pre-fix this import SUCCEEDED
   // (the injected row landed); the allowlist must refuse the whole import.
@@ -1100,181 +1132,156 @@ async function main() {
     assertions += 1
     serverD.child.kill()
   }
+})
 
-  // =====================================================================
-  // restart = migrations no-op + document stability
-  // =====================================================================
+test('restart = migrations no-op + document stability', async () => {
   serverA.child.kill()
   await new Promise((resolve) => setTimeout(resolve, 400))
-  const serverA2 = await bootServer(homeA, 'A2')
-  const apiA2 = client(serverA2.port)
+  serverA2 = await bootServer(homeA, 'A2')
+  apiA2 = client(serverA2.port)
   const afterRestart = await apiA2.get(`/api/lan/documents/project?id=${projectId}`)
   check(afterRestart.status === 200 && afterRestart.body.chains.length === 2 && afterRestart.body.project.camera.zoom === 1.5, 'restart re-opens the document unchanged (append-only migrations, autosave stable)')
   const sessionAfterRestart = await apiA2.get('/api/lan/documents/session')
   check(sessionAfterRestart.body.session.activeProject === projectId, 'session survives restart')
   const importStatusAfterRestart = await apiA2.get('/api/lan/documents/bootstrap')
   check(importStatusAfterRestart.body.legacyImport.imported === true, 'the legacy-import marker survives restart (never re-imports)')
+})
 
-  // =====================================================================
-  // (g3) security hardening 1: blob-registration source scoping
-  // =====================================================================
-  {
-    // Route-level proof that uploads (output-contained) still register.
-    const scopedOutput = path.join(homeA, 'scoped-output')
-    fs.mkdirSync(scopedOutput, { recursive: true })
-    const currentSettings = (await apiA2.get('/api/lan/settings')).body.settings
-    const scopedSettings = await apiA2.post('/api/lan/settings', { settings: { ...currentSettings, outputDirectory: scopedOutput } })
-    check(scopedSettings.status === 200, 'pointing the output directory at a scratch dir succeeds')
-    const onePixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
-    const ingested = await apiA2.post('/api/lan/documents/blobs/ingest', { kind: 'image', name: 'probe.png', data: onePixel.toString('base64') })
-    check(ingested.status === 200 && ingested.body.blob?.present === true, 'an output-contained upload still registers as a blob')
+test('(g3) security hardening 1: blob-registration source scoping', async () => {
+  // Route-level proof that uploads (output-contained) still register.
+  const scopedOutput = path.join(homeA, 'scoped-output')
+  fs.mkdirSync(scopedOutput, { recursive: true })
+  const currentSettings = (await apiA2.get('/api/lan/settings')).body.settings
+  const scopedSettings = await apiA2.post('/api/lan/settings', { settings: { ...currentSettings, outputDirectory: scopedOutput } })
+  check(scopedSettings.status === 200, 'pointing the output directory at a scratch dir succeeds')
+  const onePixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  const ingested = await apiA2.post('/api/lan/documents/blobs/ingest', { kind: 'image', name: 'probe.png', data: onePixel.toString('base64') })
+  check(ingested.status === 200 && ingested.body.blob?.present === true, 'an output-contained upload still registers as a blob')
 
-    // The arbitrary-file-read primitive: an out-of-scope source (outside the
-    // studio home AND the output directory) must NOT be copied into the
-    // content-addressed tree and must NOT become servable. The take keeps
-    // the plain string; the would-be blob path 404s.
-    const outsideHome = makeHome('outside')
-    const secretFile = path.join(outsideHome, 'secret.txt')
-    const secretBytes = Buffer.from(`secret-bytes-${Math.random()}`)
-    fs.writeFileSync(secretFile, secretBytes)
-    const scopeProject = (await apiA2.post('/api/lan/documents/projects', { name: 'Scope test' })).body.project
-    const scopeChain = (await apiA2.post('/api/lan/documents/chains', { projectId: scopeProject.id, inputSpec: { fresh: { prompt: 'scope shot' } } })).body.chain
-    const scopeOutput = (await apiA2.post('/api/lan/documents/outputs', { chainId: scopeChain.id })).body.output
-    const refusedTake = await apiA2.post('/api/lan/documents/takes', { outputId: scopeOutput.id, artifacts: [secretFile] })
-    check(refusedTake.status === 200, 'appending a take with an out-of-scope artifact still succeeds (the STRING is kept)')
-    check(refusedTake.body.take.artifacts[0] === secretFile, `the out-of-scope artifact is stored as the plain string, never registered (got ${JSON.stringify(refusedTake.body.take.artifacts[0])})`)
-    const wouldBeRelPath = path.join('canvas-blobs', sha256(secretBytes).slice(0, 2), sha256(secretBytes))
-    const refusedBlob = await apiA2.getRaw(`/api/lan/documents/blobs/file?path=${encodeURIComponent(wouldBeRelPath)}`)
-    check(refusedBlob.status === 404, `the would-be blob path must NOT serve the secret bytes (got ${refusedBlob.status})`)
+  // The arbitrary-file-read primitive: an out-of-scope source (outside the
+  // studio home AND the output directory) must NOT be copied into the
+  // content-addressed tree and must NOT become servable. The take keeps
+  // the plain string; the would-be blob path 404s.
+  const outsideHome = makeHome('outside')
+  const secretFile = path.join(outsideHome, 'secret.txt')
+  const secretBytes = Buffer.from(`secret-bytes-${Math.random()}`)
+  fs.writeFileSync(secretFile, secretBytes)
+  const scopeProject = (await apiA2.post('/api/lan/documents/projects', { name: 'Scope test' })).body.project
+  const scopeChain = (await apiA2.post('/api/lan/documents/chains', { projectId: scopeProject.id, inputSpec: { fresh: { prompt: 'scope shot' } } })).body.chain
+  const scopeOutput = (await apiA2.post('/api/lan/documents/outputs', { chainId: scopeChain.id })).body.output
+  const refusedTake = await apiA2.post('/api/lan/documents/takes', { outputId: scopeOutput.id, artifacts: [secretFile] })
+  check(refusedTake.status === 200, 'appending a take with an out-of-scope artifact still succeeds (the STRING is kept)')
+  check(refusedTake.body.take.artifacts[0] === secretFile, `the out-of-scope artifact is stored as the plain string, never registered (got ${JSON.stringify(refusedTake.body.take.artifacts[0])})`)
+  const wouldBeRelPath = path.join('canvas-blobs', sha256(secretBytes).slice(0, 2), sha256(secretBytes))
+  const refusedBlob = await apiA2.getRaw(`/api/lan/documents/blobs/file?path=${encodeURIComponent(wouldBeRelPath)}`)
+  check(refusedBlob.status === 404, `the would-be blob path must NOT serve the secret bytes (got ${refusedBlob.status})`)
 
-    // In-scope control: a studio-home file still registers.
-    const inHomeFile = path.join(outDir, 'scope-control.latent')
-    fs.writeFileSync(inHomeFile, Buffer.from(`scope-control-${Math.random()}`))
-    const controlTake = await apiA2.post('/api/lan/documents/takes', { outputId: scopeOutput.id, artifacts: [inHomeFile] })
-    check(controlTake.status === 200 && controlTake.body.take.artifacts[0].startsWith(`canvas-blobs${path.sep}`), `an in-scope artifact still registers into the blob tree (got ${JSON.stringify(controlTake.body.take.artifacts[0])})`)
-    const controlBlob = await apiA2.getRaw(`/api/lan/documents/blobs/file?path=${encodeURIComponent(controlTake.body.take.artifacts[0])}`)
-    check(controlBlob.status === 200, 'the registered in-scope blob serves')
+  // In-scope control: a studio-home file still registers.
+  const inHomeFile = path.join(outDir, 'scope-control.latent')
+  fs.writeFileSync(inHomeFile, Buffer.from(`scope-control-${Math.random()}`))
+  const controlTake = await apiA2.post('/api/lan/documents/takes', { outputId: scopeOutput.id, artifacts: [inHomeFile] })
+  check(controlTake.status === 200 && controlTake.body.take.artifacts[0].startsWith(`canvas-blobs${path.sep}`), `an in-scope artifact still registers into the blob tree (got ${JSON.stringify(controlTake.body.take.artifacts[0])})`)
+  const controlBlob = await apiA2.getRaw(`/api/lan/documents/blobs/file?path=${encodeURIComponent(controlTake.body.take.artifacts[0])}`)
+  check(controlBlob.status === 200, 'the registered in-scope blob serves')
+})
+
+test('(j) document-read cache + ETag (perf wave 1): hit/miss/304 and NO STALE READS across every mutation route + external-connection writes', async () => {
+  const base = `http://127.0.0.1:${serverA2.port}`
+  const project = (await apiA2.post('/api/lan/documents/projects', { name: 'read-cache' })).body.project
+  const chain = (await apiA2.post('/api/lan/documents/chains', { projectId: project.id, inputSpec: { fresh: { prompt: 'cache probe' } } })).body.chain
+  const output = (await apiA2.post('/api/lan/documents/outputs', { chainId: chain.id })).body.output
+  await apiA2.post('/api/lan/documents/takes', { outputId: output.id, artifacts: [], metrics: { kind: 'image', name: 'cache-probe' } })
+
+  const docPath = `/api/lan/documents/project?id=${encodeURIComponent(project.id)}`
+  const fetchDoc = async (etag) => {
+    const response = await fetch(base + docPath, { headers: etag ? { 'if-none-match': etag } : {} })
+    return { status: response.status, etag: response.headers.get('etag'), cache: response.headers.get('x-minimax-document-cache'), body: await response.text() }
   }
 
-  // =====================================================================
-  // (j) Document-read cache + ETag (perf wave 1): GET /project folds once
-  //     and serves many (fail-closed stamp invalidation — see
-  //     server/documents.ts). The correctness bar here is NO STALE READS:
-  //     after EVERY mutation route the next read must be rebuilt (cache
-  //     miss) AND reflect the change; a conditional read holding the
-  //     pre-mutation ETag must re-validate (200), never 304. Unchanged
-  //     reads hit the cache; If-None-Match with the current ETag is 304.
-  //     Unrelated-table writes (session, blob ingest) also drop the entry
-  //     (over-invalidation by design — the stamp is global, the safety is
-  //     total); their documents are content-identical, so a conditional
-  //     read MAY 304 — content-hash ETags make that correct, not stale.
-  // =====================================================================
-  {
-    const base = `http://127.0.0.1:${serverA2.port}`
-    const project = (await apiA2.post('/api/lan/documents/projects', { name: 'read-cache' })).body.project
-    const chain = (await apiA2.post('/api/lan/documents/chains', { projectId: project.id, inputSpec: { fresh: { prompt: 'cache probe' } } })).body.chain
-    const output = (await apiA2.post('/api/lan/documents/outputs', { chainId: chain.id })).body.output
-    await apiA2.post('/api/lan/documents/takes', { outputId: output.id, artifacts: [], metrics: { kind: 'image', name: 'cache-probe' } })
+  const first = await fetchDoc()
+  check(first.status === 200 && first.cache === 'miss' && typeof first.etag === 'string' && first.etag.length > 8, 'first read is a cache miss carrying a content ETag')
+  const second = await fetchDoc()
+  check(second.status === 200 && second.cache === 'hit' && second.etag === first.etag && second.body === first.body, 'unchanged re-read is a cache hit with a byte-identical body')
+  const notModified = await fetchDoc(first.etag)
+  check(notModified.status === 304 && notModified.body === '' && notModified.etag === first.etag, 'a matching If-None-Match answers 304 with no body')
 
-    const docPath = `/api/lan/documents/project?id=${encodeURIComponent(project.id)}`
-    const fetchDoc = async (etag) => {
-      const response = await fetch(base + docPath, { headers: etag ? { 'if-none-match': etag } : {} })
-      return { status: response.status, etag: response.headers.get('etag'), cache: response.headers.get('x-minimax-document-cache'), body: await response.text() }
+  /** Mutate → the read MUST be rebuilt AND show the change; the OLD etag
+   *  MUST re-validate. changeCheck receives the parsed fresh document. */
+  const expectFresh = async (label, mutate, changeCheck) => {
+    const before = await fetchDoc()
+    const etagBefore = before.etag
+    const mutation = await mutate()
+    if (mutation && typeof mutation === 'object' && 'status' in mutation) {
+      check(mutation.status === 200, `${label}: the mutation route answered 200 (got ${mutation.status}: ${JSON.stringify(mutation.body ?? {}).slice(0, 160)})`)
     }
-
-    const first = await fetchDoc()
-    check(first.status === 200 && first.cache === 'miss' && typeof first.etag === 'string' && first.etag.length > 8, 'first read is a cache miss carrying a content ETag')
-    const second = await fetchDoc()
-    check(second.status === 200 && second.cache === 'hit' && second.etag === first.etag && second.body === first.body, 'unchanged re-read is a cache hit with a byte-identical body')
-    const notModified = await fetchDoc(first.etag)
-    check(notModified.status === 304 && notModified.body === '' && notModified.etag === first.etag, 'a matching If-None-Match answers 304 with no body')
-
-    /** Mutate → the read MUST be rebuilt AND show the change; the OLD etag
-     *  MUST re-validate. changeCheck receives the parsed fresh document. */
-    const expectFresh = async (label, mutate, changeCheck) => {
-      const before = await fetchDoc()
-      const etagBefore = before.etag
-      const mutation = await mutate()
-      if (mutation && typeof mutation === 'object' && 'status' in mutation) {
-        check(mutation.status === 200, `${label}: the mutation route answered 200 (got ${mutation.status}: ${JSON.stringify(mutation.body ?? {}).slice(0, 160)})`)
-      }
-      const after = await fetchDoc()
-      check(after.status === 200, `${label}: read answers after the write`)
-      check(after.cache === 'miss', `${label}: the cached entry was dropped (no stale serve)`)
-      const parsed = JSON.parse(after.body)
-      check(changeCheck(parsed), `${label}: the fresh document reflects the change`)
-      check(after.etag !== etagBefore, `${label}: the content ETag moved`)
-      const revalidate = await fetchDoc(etagBefore)
-      check(revalidate.status === 200, `${label}: a conditional read with the pre-write ETag re-validates (never 304)`)
-      return parsed
-    }
-    /** Write that cannot change THIS document (other tables): the entry
-     *  still drops (fail-closed stamp), content is identical. */
-    const expectDroppedOnly = async (label, mutate) => {
-      await mutate()
-      const after = await fetchDoc()
-      check(after.status === 200 && after.cache === 'miss', `${label}: the global stamp dropped the entry (over-invalidation by design)`)
-    }
-
-    const chainsOf = (doc) => doc.chains.filter((entry) => entry.id === chain.id)
-    await expectFresh('rename project', () => apiA2.post('/api/lan/documents/projects/update', { id: project.id, name: 'read-cache-2' }), (doc) => doc.project.name === 'read-cache-2')
-    await expectFresh('project camera autosave', () => apiA2.post('/api/lan/documents/projects/update', { id: project.id, camera: { camera: { x: 123, y: 5, k: 0.9 }, layout: {} } }), (doc) => doc.project.camera?.camera?.x === 123)
-    await expectFresh('chain create', () => apiA2.post('/api/lan/documents/chains', { projectId: project.id, kind: 'media', inputSpec: { fresh: { media: { kind: 'image', name: 'x.png' } } } }), (doc) => doc.chains.length === 2)
-    await expectFresh('chain settings update', () => apiA2.post('/api/lan/documents/chains/update', { id: chain.id, settings: { seed: 77 } }), (doc) => chainsOf(doc)[0].settings.seed === 77)
-    await expectFresh('chain staleness flip', () => apiA2.post('/api/lan/documents/chains/update', { id: chain.id, stale: true }), (doc) => chainsOf(doc)[0].stale === true)
-    await expectFresh('output create', () => apiA2.post('/api/lan/documents/outputs', { chainId: chain.id, substrates: ['decoded'] }), (doc) => chainsOf(doc)[0].outputs.length === 2)
-    await expectFresh('take append', () => apiA2.post('/api/lan/documents/takes', { outputId: output.id, artifacts: [], metrics: { kind: 'image', name: 'second' } }), (doc) => chainsOf(doc)[0].outputs.find((entry) => entry.id === output.id).takes.length === 2)
-    const takesList = (await apiA2.get(`/api/lan/documents/takes?outputId=${output.id}`)).body
-    const nonCanonicalTakeId = takesList.takes.find((entry) => entry.id !== takesList.canonicalTakeId).id
-    await expectFresh('take supersede', () => apiA2.post('/api/lan/documents/takes/supersede', { outputId: output.id, takeId: nonCanonicalTakeId }), (doc) => chainsOf(doc)[0].outputs.find((entry) => entry.id === output.id).canonicalTakeId === nonCanonicalTakeId)
-
-    let opOne
-    await expectFresh('op add', async () => { opOne = (await apiA2.post('/api/lan/documents/ops', { chainId: chain.id, kind: 'crop', settings: { x: 0, y: 0, w: 10 } })).body.op }, (doc) => chainsOf(doc)[0].ops.length === 1)
-    await expectFresh('op settings update', () => apiA2.post('/api/lan/documents/ops/update', { id: opOne.id, settings: { x: 42 } }), (doc) => chainsOf(doc)[0].ops.find((entry) => entry.id === opOne.id).settings.x === 42)
-    let opTwo
-    await expectFresh('second op add', async () => { opTwo = (await apiA2.post('/api/lan/documents/ops', { chainId: chain.id, kind: 'trim', settings: { start: 0, end: 2 } })).body.op }, (doc) => chainsOf(doc)[0].ops.length === 2)
-    await expectFresh('op reorder', () => apiA2.post('/api/lan/documents/ops/reorder', { chainId: chain.id, orderedIds: [opTwo.id, opOne.id] }), (doc) => chainsOf(doc)[0].ops[0].id === opTwo.id)
-    await expectFresh('op bake', () => apiA2.post('/api/lan/documents/ops/bake', { id: opOne.id }), (doc) => chainsOf(doc)[0].ops.find((entry) => entry.id === opOne.id).bakedAt !== null)
-    await expectFresh('op delete', () => apiA2.post('/api/lan/documents/ops/delete', { id: opTwo.id }), (doc) => chainsOf(doc)[0].ops.length === 1)
-    await expectFresh('identity upsert', () => apiA2.post('/api/lan/documents/identity', { chainId: chain.id, subjectText: 'Mara', strength: 0.5 }), (doc) => chainsOf(doc)[0].identity?.subjectText === 'Mara')
-    await expectFresh('control track add', () => apiA2.post('/api/lan/documents/control-tracks', { chainId: chain.id, kind: 'depth', source: 'extracted', inputRef: 'canvas-blobs/aa/deadbeef', params: { strength: 1 } }), (doc) => chainsOf(doc)[0].controlTracks.length === 1)
-
-    let plan
-    await expectFresh('plan create', async () => { plan = (await apiA2.post('/api/lan/documents/plans', { projectId: project.id, document: { brief: 'first brief', segments: [], gaps: [] } })).body.plan }, (doc) => doc.plans.length === 1 && doc.plans[0].document.brief === 'first brief')
-    const planDocNow = JSON.parse((await fetchDoc()).body)
-    await expectFresh('plan CAS update', () => apiA2.post('/api/lan/documents/plans', { id: plan.id, projectId: project.id, expectedUpdatedAt: planDocNow.plans[0].updatedAt, document: { brief: 'second brief', segments: [], gaps: [] } }), (doc) => doc.plans[0].document.brief === 'second brief')
-
-    const asset = (await apiA2.post('/api/lan/documents/assets', { kind: 'character', fields: { label: 'X' } })).body.asset
-    await expectFresh('asset fork (consented)', () => apiA2.post('/api/lan/documents/assets/fork', { projectId: project.id, assetId: asset.id, consent: true }), (doc) => doc.assetForks.length === 1)
-    await expectFresh('chain tombstone', () => apiA2.post('/api/lan/documents/chains/delete', { id: chain.id }), (doc) => doc.chains.length === 1)
-    await expectFresh('chain restore', () => apiA2.post('/api/lan/documents/chains/restore', { id: chain.id }), (doc) => doc.chains.length === 2)
-    await expectFresh('project tombstone', () => apiA2.post('/api/lan/documents/projects/delete', { id: project.id }), (doc) => doc.project.deletedAt !== null)
-    await expectFresh('project restore', () => apiA2.post('/api/lan/documents/projects/restore', { id: project.id }), (doc) => doc.project.deletedAt === null)
-
-    await expectDroppedOnly('session save (unrelated table)', () => apiA2.post('/api/lan/documents/session', { openProjects: [project.id], activeProject: project.id }))
-    await expectDroppedOnly('blob ingest (blob rows are not document content)', () => apiA2.post('/api/lan/documents/blobs/ingest', { kind: 'image', name: 'stamp.png', data: Buffer.from('stamp-probe').toString('base64') }))
-
-    // Cross-connection invalidation (the data_version half of the stamp): a
-    // SECOND SQLite connection committing a chain row must drop the entry.
-    const externalDb = new Database(path.join(serverA2.home, 'studio.db'))
-    try {
-      const beforeExternal = await fetchDoc()
-      externalDb.prepare('UPDATE canvas_project SET name = ? WHERE id = ?').run('read-cache-external', project.id)
-      const afterExternal = await fetchDoc()
-      check(afterExternal.cache === 'miss', 'an external-connection write drops the cached entry (data_version)')
-      check(JSON.parse(afterExternal.body).project.name === 'read-cache-external', 'the external write is visible immediately (no stale window)')
-      check(afterExternal.body !== beforeExternal.body, 'the external write changed the served document')
-    } finally {
-      externalDb.close()
-    }
+    const after = await fetchDoc()
+    check(after.status === 200, `${label}: read answers after the write`)
+    check(after.cache === 'miss', `${label}: the cached entry was dropped (no stale serve)`)
+    const parsed = JSON.parse(after.body)
+    check(changeCheck(parsed), `${label}: the fresh document reflects the change`)
+    check(after.etag !== etagBefore, `${label}: the content ETag moved`)
+    const revalidate = await fetchDoc(etagBefore)
+    check(revalidate.status === 200, `${label}: a conditional read with the pre-write ETag re-validates (never 304)`)
+    return parsed
+  }
+  /** Write that cannot change THIS document (other tables): the entry
+   *  still drops (fail-closed stamp), content is identical. */
+  const expectDroppedOnly = async (label, mutate) => {
+    await mutate()
+    const after = await fetchDoc()
+    check(after.status === 200 && after.cache === 'miss', `${label}: the global stamp dropped the entry (over-invalidation by design)`)
   }
 
-  killAllServers()
+  const chainsOf = (doc) => doc.chains.filter((entry) => entry.id === chain.id)
+  await expectFresh('rename project', () => apiA2.post('/api/lan/documents/projects/update', { id: project.id, name: 'read-cache-2' }), (doc) => doc.project.name === 'read-cache-2')
+  await expectFresh('project camera autosave', () => apiA2.post('/api/lan/documents/projects/update', { id: project.id, camera: { camera: { x: 123, y: 5, k: 0.9 }, layout: {} } }), (doc) => doc.project.camera?.camera?.x === 123)
+  await expectFresh('chain create', () => apiA2.post('/api/lan/documents/chains', { projectId: project.id, kind: 'media', inputSpec: { fresh: { media: { kind: 'image', name: 'x.png' } } } }), (doc) => doc.chains.length === 2)
+  await expectFresh('chain settings update', () => apiA2.post('/api/lan/documents/chains/update', { id: chain.id, settings: { seed: 77 } }), (doc) => chainsOf(doc)[0].settings.seed === 77)
+  await expectFresh('chain staleness flip', () => apiA2.post('/api/lan/documents/chains/update', { id: chain.id, stale: true }), (doc) => chainsOf(doc)[0].stale === true)
+  await expectFresh('output create', () => apiA2.post('/api/lan/documents/outputs', { chainId: chain.id, substrates: ['decoded'] }), (doc) => chainsOf(doc)[0].outputs.length === 2)
+  await expectFresh('take append', () => apiA2.post('/api/lan/documents/takes', { outputId: output.id, artifacts: [], metrics: { kind: 'image', name: 'second' } }), (doc) => chainsOf(doc)[0].outputs.find((entry) => entry.id === output.id).takes.length === 2)
+  const takesList = (await apiA2.get(`/api/lan/documents/takes?outputId=${output.id}`)).body
+  const nonCanonicalTakeId = takesList.takes.find((entry) => entry.id !== takesList.canonicalTakeId).id
+  await expectFresh('take supersede', () => apiA2.post('/api/lan/documents/takes/supersede', { outputId: output.id, takeId: nonCanonicalTakeId }), (doc) => chainsOf(doc)[0].outputs.find((entry) => entry.id === output.id).canonicalTakeId === nonCanonicalTakeId)
+
+  let opOne
+  await expectFresh('op add', async () => { opOne = (await apiA2.post('/api/lan/documents/ops', { chainId: chain.id, kind: 'crop', settings: { x: 0, y: 0, w: 10 } })).body.op }, (doc) => chainsOf(doc)[0].ops.length === 1)
+  await expectFresh('op settings update', () => apiA2.post('/api/lan/documents/ops/update', { id: opOne.id, settings: { x: 42 } }), (doc) => chainsOf(doc)[0].ops.find((entry) => entry.id === opOne.id).settings.x === 42)
+  let opTwo
+  await expectFresh('second op add', async () => { opTwo = (await apiA2.post('/api/lan/documents/ops', { chainId: chain.id, kind: 'trim', settings: { start: 0, end: 2 } })).body.op }, (doc) => chainsOf(doc)[0].ops.length === 2)
+  await expectFresh('op reorder', () => apiA2.post('/api/lan/documents/ops/reorder', { chainId: chain.id, orderedIds: [opTwo.id, opOne.id] }), (doc) => chainsOf(doc)[0].ops[0].id === opTwo.id)
+  await expectFresh('op bake', () => apiA2.post('/api/lan/documents/ops/bake', { id: opOne.id }), (doc) => chainsOf(doc)[0].ops.find((entry) => entry.id === opOne.id).bakedAt !== null)
+  await expectFresh('op delete', () => apiA2.post('/api/lan/documents/ops/delete', { id: opTwo.id }), (doc) => chainsOf(doc)[0].ops.length === 1)
+  await expectFresh('identity upsert', () => apiA2.post('/api/lan/documents/identity', { chainId: chain.id, subjectText: 'Mara', strength: 0.5 }), (doc) => chainsOf(doc)[0].identity?.subjectText === 'Mara')
+  await expectFresh('control track add', () => apiA2.post('/api/lan/documents/control-tracks', { chainId: chain.id, kind: 'depth', source: 'extracted', inputRef: 'canvas-blobs/aa/deadbeef', params: { strength: 1 } }), (doc) => chainsOf(doc)[0].controlTracks.length === 1)
+
+  let plan
+  await expectFresh('plan create', async () => { plan = (await apiA2.post('/api/lan/documents/plans', { projectId: project.id, document: { brief: 'first brief', segments: [], gaps: [] } })).body.plan }, (doc) => doc.plans.length === 1 && doc.plans[0].document.brief === 'first brief')
+  const planDocNow = JSON.parse((await fetchDoc()).body)
+  await expectFresh('plan CAS update', () => apiA2.post('/api/lan/documents/plans', { id: plan.id, projectId: project.id, expectedUpdatedAt: planDocNow.plans[0].updatedAt, document: { brief: 'second brief', segments: [], gaps: [] } }), (doc) => doc.plans[0].document.brief === 'second brief')
+
+  const asset = (await apiA2.post('/api/lan/documents/assets', { kind: 'character', fields: { label: 'X' } })).body.asset
+  await expectFresh('asset fork (consented)', () => apiA2.post('/api/lan/documents/assets/fork', { projectId: project.id, assetId: asset.id, consent: true }), (doc) => doc.assetForks.length === 1)
+  await expectFresh('chain tombstone', () => apiA2.post('/api/lan/documents/chains/delete', { id: chain.id }), (doc) => doc.chains.length === 1)
+  await expectFresh('chain restore', () => apiA2.post('/api/lan/documents/chains/restore', { id: chain.id }), (doc) => doc.chains.length === 2)
+  await expectFresh('project tombstone', () => apiA2.post('/api/lan/documents/projects/delete', { id: project.id }), (doc) => doc.project.deletedAt !== null)
+  await expectFresh('project restore', () => apiA2.post('/api/lan/documents/projects/restore', { id: project.id }), (doc) => doc.project.deletedAt === null)
+
+  await expectDroppedOnly('session save (unrelated table)', () => apiA2.post('/api/lan/documents/session', { openProjects: [project.id], activeProject: project.id }))
+  await expectDroppedOnly('blob ingest (blob rows are not document content)', () => apiA2.post('/api/lan/documents/blobs/ingest', { kind: 'image', name: 'stamp.png', data: Buffer.from('stamp-probe').toString('base64') }))
+
+  // Cross-connection invalidation (the data_version half of the stamp): a
+  // SECOND SQLite connection committing a chain row must drop the entry.
+  const externalDb = new Database(path.join(serverA2.home, 'studio.db'))
+  try {
+    const beforeExternal = await fetchDoc()
+    externalDb.prepare('UPDATE canvas_project SET name = ? WHERE id = ?').run('read-cache-external', project.id)
+    const afterExternal = await fetchDoc()
+    check(afterExternal.cache === 'miss', 'an external-connection write drops the cached entry (data_version)')
+    check(JSON.parse(afterExternal.body).project.name === 'read-cache-external', 'the external write is visible immediately (no stale window)')
+    check(afterExternal.body !== beforeExternal.body, 'the external write changed the served document')
+  } finally {
+    externalDb.close()
+  }
   console.log(`PASS: canvas document store — migration 002 (golden fixture N→N+1, divergence hard-error, ${canvasTables.length} canvas tables + jobs extension); §6 legacy import (5 jobs -> 3 takes + 1 failure output, counts + hash spot-checks + marker + clean retry, sources untouched); tombstones/trash round-trips + GC adversarials (fork-edge liveness over a tombstoned source, locked + canonical never evicted, session prune); take append-only + bake immutability trigger-enforced; §7 archive round-trip (zip, hash-verified blobs, global-asset placeholders, unknown-newer refusal); §4 FTS (chain/asset/plan/take/job, injection-safe, kind-filter-before-limit); unknown-newer document refusal names the writer; correctness wave 1 (shared-blob eviction survival + takeId-pinned priors, jobId-idempotent + stray-healing appendTake, torn-copy repair, poisoned-list isolation, locked-staleness gating, plan CAS 409, honest cancel verdicts, remote-output fetch+ingest, latent durability + visible missingBlobs, control-track blob lifecycle, shared-blob import upsert + staged-file rollback); document-read cache + ETag (perf wave 1 — hit/miss/304 + no stale reads across every mutation route, external-connection invalidation). ${assertions} assertions.`)
-}
-
-void main().catch((error) => {
-  killAllServers()
-  console.error(`FAIL: ${error instanceof Error ? error.stack : String(error)}`)
-  process.exit(1)
 })

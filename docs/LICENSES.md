@@ -318,7 +318,7 @@ verdict and the option pick remain staged with the maintainer.*
    the consent-gated fetcher resolves branch pins to the HEAD SHA at fetch
    time and stamps that SHA into the install marker and the fetch install
    record (`server/fetcher.ts` pin discipline; tested in
-   `scripts/test-fetcher.cjs` §d). Local-directory installs of a
+   `tests/fetcher.test.js` §d). Local-directory installs of a
    branch-pinned pack still inherit the registry string — the branch flows
    only through the fetcher.
 2. **Bundled-distribution notices** — if a minified/binary dist ever ships,

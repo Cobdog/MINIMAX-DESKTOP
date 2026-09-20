@@ -24,56 +24,29 @@ jobs:
         with:
           python-version: '3.x'
       - run: python -m pip install --disable-pip-version-check numpy
+      # ffmpeg is required by the filmstrip + datasets suites (wave 2d /
+      # sv14rt0: server-side sprite-sheet thumbnails, synthetic ingest
+      # fixtures). ubuntu-latest does NOT ship it by default. Decision:
+      # install it rather than let the tests skip on CI. Runners without
+      # ffmpeg still SKIP gracefully with a logged reason (test-side guard).
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
       # License audit (task 68rnn84): dep SPDX classification + the
-      # never-vendor-what-we-cannot-ship registry invariant.
+      # never-vendor-what-we-can't-ship registry invariant.
       - run: pnpm license:audit
-      - run: pnpm test
+      # Build BEFORE the unit phase (vitest migration z7ogmig, 2026-09-20):
+      # the dist-server-booting suites test fresh code, never a stale dist.
       - run: pnpm build
+      # ONE vitest run: every unit suite in parallel worker processes — the
+      # full tests/ set (workflows, registry, h3img, storage, documents,
+      # realtime, filmstrip, llm, engine, runtime, fetcher, instance,
+      # lora-form, poserig, camera, canvas, benchmarks, launcher, datasets;
+      # per-suite iteration aliases: pnpm test:registry, …; watch: pnpm
+      # test:watch).
+      - run: pnpm test
       - run: pnpm smoke:server
-      # Canvas document store (Phase 0, task oiavqh8): runs AFTER build — the
-      # suite boots the built server on a scratch home (same pattern as the
-      # gate-local test:storage). Migration 002 golden fixture, §6 legacy
-      # import, GC fork-edge adversarials, §7 archive round-trip, §4 FTS.
-      - run: pnpm test:documents
-      # Managed ComfyUI runtime (increment 1): stub-checkout suite — needs
-      # neither python nor a real checkout; the python section self-skips.
-      - run: pnpm test:runtime
-      # Local-first fetcher (task hgjbea2): consent-gated network fetches with
-      # the transport mocked throughout — catalog integrity, pin stamping,
-      # verification, placement policy, routes. Zero real network in CI.
-      - run: pnpm test:fetcher
-      # External-instance integration (task 9om4bi9): instance-sourced model
-      # inventory parsing/merge, the external custom-nodes install target +
-      # foreign refusal, live pack detection, app-relative io defaults, and
-      # the routes against a local fake engine. Zero real network.
-      - run: pnpm test:instance
-      # Form-adapter node (task k271ykk): python math/golden suite (numpy
-      # installed above) + the server-side detection/registry/catalog tests.
-      - run: pnpm test:lora-form
-      # IK pose rig (task 41ebvfo): pure client modules through the VM
-      # harness — IK solvers, palette-exact draw ops vs goldens, keypoint
-      # JSON round-trip, grid snapping. No engine, no browser needed.
-      - run: pnpm test:poserig
-      # Camera path compiler (task ving89w): the bruxosdovfx v19.1 port —
-      # golden prompts byte-compared against upstream-generated fixtures
-      # (committed; the Python generator lives beside them for regeneration).
-      # No python needed at test time.
-      - run: pnpm test:camera
-      # Canvas Phase 1 (task jl4ye8x): the pure substrate modules — camera
-      # store discipline, zoom bands, culling math, tile/edge derivation,
-      # status-ring ladder, radar attention. The route shell is e2e (below).
-      - run: pnpm test:canvas
-      # ffmpeg is required by the filmstrip capability (wave 2d: server-side
-      # sprite-sheet thumbnails + the e2e video fixture). ubuntu-latest does
-      # NOT ship it by default. Decision: install it rather than let the
-      # tests skip on CI — the filmstrip route and the 11th e2e test then run
-      # for real, and future benchmark work needs ffmpeg too. Runners without
-      # ffmpeg still SKIP gracefully with a logged reason (test-side guard).
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
-      - run: pnpm test:filmstrip
       # NO browser download: the Playwright config launches the runner's
       # SYSTEM browser (ubuntu images ship Google Chrome + Chromium) and
       # throws with a one-line reason if none is found. Local dev needs a
@@ -83,9 +56,3 @@ jobs:
       # test-results/vision/. Judgment (JUDGE.md subagent) never runs in CI;
       # `pnpm vision:report` is the local pre-release gate for the verdicts.
       - run: pnpm test:vision
-      # Benchmark harness (task cp96zdm): offline suite — registry/leaderboard,
-      # CLI handling, the fetch-catalog bridge (snapshot + dist-server built
-      # above), mock-candidate build smoke for every suite (python+numpy
-      # installed above), metric math fixtures, blind-bundle/vision:report
-      # compatibility. GPU validation is a staged local follow-up, never CI.
-      - run: pnpm test:benchmarks

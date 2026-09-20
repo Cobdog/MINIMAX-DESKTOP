@@ -27,39 +27,41 @@
 //       /api/tags, the legacy /api/lan/ollama routes still working, and
 //       prepare rejecting streaming
 // Run after `pnpm build` (the server and units load from dist-server).
+//
+// Vitest port (task z7ogmig, 2026-09-20) of scripts/test-llm.cjs:
+// assertion bodies carry over verbatim; the linear main() became one test
+// per section (sequential within the file — (b)-(g) share the booted
+// router-mode app server and mocks, (h) boots the fallback server); CWD-
+// relative paths are now __dirname-anchored and ports draw from this suite's
+// disjoint range (tests/lib/ports.cjs).
+import { test, afterAll } from 'vitest'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+
+const require = createRequire(import.meta.url)
+const __dirname = require('node:path').dirname(fileURLToPath(import.meta.url))
+const REPO = require('node:path').resolve(__dirname, '..')
+
 const { spawn } = require('node:child_process')
 const http = require('node:http')
-const net = require('node:net')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const assert = require('node:assert/strict')
 const WebSocket = require('ws')
-const { inferFamily, familyManifest, buildCompletionParams, stripChannelMarkup } = require(path.join(__dirname, '..', 'dist-server', 'server', 'llm', 'registry.js'))
+const { makePortAllocator } = require('./lib/ports.cjs')
+const { inferFamily, familyManifest, buildCompletionParams, stripChannelMarkup } = require(path.join(REPO, 'dist-server', 'server', 'llm', 'registry.js'))
 
-/** Verifiably-free port (same rationale as test-realtime). */
-async function freePort() {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    const candidate = 4850 + Math.floor(Math.random() * 300)
-    const busy = await new Promise((resolve) => {
-      const probe = net.connect({ port: candidate, host: '127.0.0.1' })
-      probe.on('error', () => resolve(false))
-      probe.on('connect', () => { probe.destroy(); resolve(true) })
-    })
-    if (!busy) return candidate
-  }
-  throw new Error('no free port found in 50 attempts')
-}
+const freePort = makePortAllocator('llm')
 
 const children = []
 const servers = []
 let output = ''
 
 const fail = (message) => {
-  console.error(`FAIL: ${message}\n--- server output ---\n${output}`)
   for (const child of children) child.kill()
   for (const server of servers) server.close()
-  process.exit(1)
+  throw new Error(`FAIL: ${message}\n--- server output ---\n${output}`)
 }
 
 function listen(server) {
@@ -86,7 +88,7 @@ async function waitForHttp(port, pathname) {
 }
 
 function bootServer(home, port) {
-  const child = spawn(process.execPath, ['dist-server/server/index.js'], {
+  const child = spawn(process.execPath, [path.join(REPO, 'dist-server', 'server', 'index.js')], {
     env: { ...process.env, MINIMAX_STUDIO_HOME: home, MINIMAX_LAN_PORT: String(port), MINIMAX_NO_HTTPS: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -234,8 +236,22 @@ function createMockOllama() {
   return { ollama, calls }
 }
 
-async function main() {
-  // ---- (a) registry units ----------------------------------------------------
+// Cross-section state (sequential tests share it, as the linear main() did)
+let routerCalls = null
+let comfyCalls = null
+let ollamaCalls = null
+let routerPort = 0
+let comfyPort = 0
+let ollamaPort = 0
+let port = 0
+let client = null
+
+afterAll(() => {
+  for (const child of children) child.kill()
+  for (const server of servers) server.close()
+})
+
+test('(a) registry units: family inference, per-family completion params, the Gemma channel-strip macro', () => {
   assert.equal(inferFamily('DeepSeek-V4-Flash-0731-Q4'), 'deepseek', 'name-pattern family inference (case-insensitive)')
   assert.equal(inferFamily('gemma-4-31b-it'), 'gemma')
   assert.equal(inferFamily('qwen3:latest'), 'qwen')
@@ -265,14 +281,19 @@ async function main() {
   // Interleaved channels: content between an opener and the NEXT closer is
   // thought and drops; only pre-opener text in each segment survives.
   assert.equal(stripChannelMarkup('a<channel|>b<|channel>c<channel|>d'), 'abd', 'macro handles interleaved channels')
+})
 
+test('(b) model listing + provider selection through /api/lan/llm/models (router active, auto-resolved model)', async () => {
   // ---- mocks + router-mode app server ----------------------------------------
-  const { router, calls: routerCalls } = createMockRouter()
-  const { comfy, calls: comfyCalls } = createMockComfy()
-  const { ollama, calls: ollamaCalls } = createMockOllama()
-  const routerPort = await listen(router)
-  const comfyPort = await listen(comfy)
-  const ollamaPort = await listen(ollama)
+  const { router, calls: routerCallsLocal } = createMockRouter()
+  const { comfy, calls: comfyCallsLocal } = createMockComfy()
+  const { ollama, calls: ollamaCallsLocal } = createMockOllama()
+  routerCalls = routerCallsLocal
+  comfyCalls = comfyCallsLocal
+  ollamaCalls = ollamaCallsLocal
+  routerPort = await listen(router)
+  comfyPort = await listen(comfy)
+  ollamaPort = await listen(ollama)
   servers.push(router, comfy, ollama)
 
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-llm-'))
@@ -282,11 +303,10 @@ async function main() {
     ollamaModel: 'qwen3:latest',
     llamaCppUrl: `http://127.0.0.1:${routerPort}`,
   }))
-  const port = await freePort()
+  port = await freePort()
   bootServer(home, port)
   await waitForHttp(port, '/api/lan/settings')
 
-  // ---- (b) model listing + provider selection --------------------------------
   const modelsResponse = await (await fetch(`http://127.0.0.1:${port}/api/lan/llm/models`)).json()
   assert.equal(modelsResponse.provider, 'router', 'configured router URL selects the router provider')
   assert.equal(modelsResponse.models.length, 2)
@@ -306,8 +326,9 @@ async function main() {
   assert.ok(probe.latencyMs >= 0)
   const ssrf = await fetch(`http://127.0.0.1:${port}/api/lan/llm/models?url=${encodeURIComponent('http://example.com')}`)
   assert.equal(ssrf.status, 400, 'non-local probe rejected by the SSRF guard')
+})
 
-  // ---- (c) composer through the unified generate route -----------------------
+test('(c) the layered composer through /api/lan/llm/generate: 8-layer system, content variants, fragments, structured JSON', async () => {
   const generateResponse = await (await postJson(port, '/api/lan/llm/generate', {
     task: 'enhance', targetEngine: 'minimax-h3', length: 'detailed', contentLevel: 'nsfw',
     instructions: 'Runtime facts.', draft: 'courier in the rain',
@@ -354,8 +375,9 @@ async function main() {
   assert.ok(routerCalls.completions[routerCalls.completions.length - 1].messages[0].content.includes('HOUSE RULES OVERRIDE MARKER'), 'fragment override wins over factory text')
   const fragmentList = await (await fetch(`http://127.0.0.1:${port}/api/lan/llm/fragments`)).json()
   assert.ok(fragmentList.fragments.some((row) => row.id === 'factory:rules:default' && row.content.includes('HOUSE RULES OVERRIDE MARKER')), 'overrides listed through the fragments route')
+})
 
-  // ---- (d) DeepSeek wire shapes on the mock -----------------------------------
+test('(d) DeepSeek wire shapes on the mock: top-level thinking, reasoning_effort, reasoning_content passback', async () => {
   await postJson(port, '/api/lan/llm/generate', { task: 'enhance', targetEngine: 'minimax-h3', draft: 'x', thinking: true })
   const thinkingBody = routerCalls.completions[routerCalls.completions.length - 1]
   assert.equal(thinkingBody.thinking.type, 'enabled', 'explicit thinking override honored')
@@ -375,9 +397,10 @@ async function main() {
   const assistantTurn = historyBody.messages.find((message) => message.role === 'assistant')
   assert.ok(assistantTurn, 'assistant history preserved')
   assert.equal(assistantTurn.reasoning_content, 'the reasoning', 'reasoning_content passed back on the assistant turn')
+})
 
-  // ---- (e) streaming through the realtime fabric -------------------------------
-  const client = fabricClient(port)
+test('(e) token streaming through the realtime fabric llm channel: tokens intact, reasoning deltas never leak', async () => {
+  client = fabricClient(port)
   await client.opened_()
   client.send({ type: 'sub', ch: 'engine' })
 
@@ -401,8 +424,9 @@ async function main() {
   assert.equal(thinkingTokens, 'streamed answer', 'reasoning_content never leaks into the token channel')
   const thinkingStreamBody = routerCalls.completions[routerCalls.completions.length - 1]
   assert.equal(thinkingStreamBody.stream, true, 'the fabric always requests streaming')
+})
 
-  // ---- (f) unload choreography on generation submit -----------------------------
+test('(f) unload choreography on generation submit: engine-channel observable, sticky + setting-off respected', async () => {
   assert.equal(routerCalls.unload.length, 0, 'no unload before any generation')
   const submit = await postJson(port, '/api/lan/prompt', { prompt: { '1': { class_type: 'X', inputs: {} } } })
   assert.ok(submit.ok, 'submission succeeded')
@@ -425,8 +449,9 @@ async function main() {
   await new Promise((resolve) => setTimeout(resolve, 300))
   assert.equal(routerCalls.unload.length, 1, 'unloadLlmOnGenerate=false skips the choreography entirely')
   await postJson(port, '/api/lan/settings', { settings: { ...settingsNow.settings, llamaStickyModels: '', unloadLlmOnGenerate: true } })
+})
 
-  // ---- (g) vision captioning ----------------------------------------------------
+test('(g) vision captioning: Gemma image-part-first content order on the wire', async () => {
   const vision = await (await postJson(port, '/api/lan/llm/vision', { image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg', model: 'gemma-4-31b-it' })).json()
   assert.equal(vision.caption, 'composed answer')
   assert.equal(vision.model, 'gemma-4-31b-it')
@@ -436,10 +461,11 @@ async function main() {
   assert.equal(parts[0].type, 'image_url', 'gemma orders the IMAGE part first')
   assert.equal(parts[0].image_url.url.startsWith('data:image/png;base64,'), true)
   assert.equal(parts[1].type, 'text')
+})
 
-  for (const child of children) child.kill()
+test('(h) Ollama fallback with an EMPTY router URL: listing, legacy routes, prepare refusing streaming', async () => {
+  for (const child of children.splice(0)) child.kill()
 
-  // ---- (h) Ollama fallback with an EMPTY router URL -----------------------------
   const fallbackHome = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-llm-fallback-'))
   fs.writeFileSync(path.join(fallbackHome, 'settings.json'), JSON.stringify({
     comfyUrl: `http://127.0.0.1:${comfyPort}`,
@@ -480,6 +506,4 @@ async function main() {
   for (const child of children) child.kill()
   for (const server of servers) server.close()
   console.log('PASS: LLM layer — router provider selected from settings with family-inferred model listing (vision from router metadata), the 8-layer composer resolving verbatim seed fragments by NULL-wildcard specificity (sfw/suggestive/nsfw trio + target-engine rows + server-persisted user overrides), DeepSeek wire rules (top-level thinking object never \'off\', reasoning_effort, reasoning_content passback), token streaming through the realtime fabric llm channel (reasoning deltas never leak as tokens), VRAM unload choreography on every generation submit (engine-channel observable, sticky + setting-off respected, ~2 s budget), Gemma image-part-first vision captioning, and the byte-exact Ollama fallback when the router URL is empty.')
-}
-
-void main().catch((error) => fail(error instanceof Error ? error.stack : String(error)))
+})

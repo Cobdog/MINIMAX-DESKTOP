@@ -16,7 +16,22 @@
 //   (g) metric math: pure metric functions vs fixed arrays (python+numpy)
 //   (h) blind-judge: bundle emission is vision:report-compatible (unjudged
 //       bundle fails the gate; judged fixture passes) + unblind round trip
+//   (i) Windows-leg eol guard: no i/crlf in the index; LEADERBOARD.md pinned
+//       eol=lf.
 // Run after `pnpm build` on CI (uses dist-server when present; snapshot otherwise).
+//
+// Vitest port (task z7ogmig, 2026-09-20) of scripts/test-benchmarks.cjs:
+// assertion bodies carry over verbatim; the linear main() became one test
+// per section with the shared temp-registry state hoisted to module scope
+// (tests run sequentially within the file, so the cross-section state flow
+// is unchanged); the module-scope eol guard became the final test.
+import { test } from 'vitest'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+
+const require = createRequire(import.meta.url)
+const __dirname = require('node:path').dirname(fileURLToPath(import.meta.url))
+
 const { spawnSync } = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -24,7 +39,7 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const assert = require('node:assert/strict')
 
-const REPO = path.join(__dirname, '..')
+const REPO = path.resolve(__dirname, '..')
 const BENCH = path.join(REPO, 'benchmarks')
 
 let passed = 0
@@ -48,7 +63,14 @@ const TINY_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
   'base64')
 
-async function main() {
+// Shared temp state across the registry/leaderboard/CLI/record sections
+// (the original main() created one tmp dir and threaded it through).
+let tmp = ''
+let registry = null
+let env = null
+let regPath = ''
+
+test('(a) suite inventory + fixture invariants', async () => {
   console.log('(a) suite inventory + fixture invariants')
   const suites = await importLib('suites.mjs')
   const names = suites.listSuites()
@@ -68,12 +90,14 @@ async function main() {
     ok(/prompt|sceneText|sourcePrompt/.test(blob), `${name}: fixture prompts committed`)
     ok(/42133[78]/.test(blob) || /seed/.test(blob), `${name}: fixture seeds committed`)
   }
+})
 
+test('(b) registry append-only semantics (temp registry)', async () => {
   console.log('(b) registry append-only semantics (temp registry)')
-  const registry = await importLib('registry.mjs')
-  const tmp = tmpdir()
-  const regPath = path.join(tmp, 'registry.json')
-  const env = { id: 'test-env', gpu: 'Test GPU', driver: '1.0', comfyui: '0.34.0', quant: [], adapters: [] }
+  registry = await importLib('registry.mjs')
+  tmp = tmpdir()
+  regPath = path.join(tmp, 'registry.json')
+  env = { id: 'test-env', gpu: 'Test GPU', driver: '1.0', comfyui: '0.34.0', quant: [], adapters: [] }
   registry.ensureEnvironment(env, regPath)
   ok(true, 'environment recorded')
   let threw = false
@@ -103,9 +127,12 @@ async function main() {
     registry.appendRow({ suite: 'x', candidate: { id: 'z' } }, regPath)
   } catch { threw = true }
   ok(threw, 'malformed row refused (schema check)')
+})
 
+test('(c) leaderboard regeneration', async () => {
   console.log('(c) leaderboard regeneration')
   const leaderboard = await importLib('leaderboard.mjs')
+  const suites = await importLib('suites.mjs')
   const suitesMap = () => Object.fromEntries(suites.listSuites().map((n) => [n, suites.loadSuite(n)]))
   const out1 = path.join(tmp, 'LEADERBOARD-1.md')
   const out2 = path.join(tmp, 'LEADERBOARD-2.md')
@@ -124,7 +151,9 @@ async function main() {
     'committed LEADERBOARD.md matches a fresh regeneration (EOL-insensitive, never hand-edited)')
   ok(committed.startsWith('# Benchmark leaderboard — GENERATED, do not edit'),
     'leaderboard carries the do-not-edit header')
+})
 
+test('(d) CLI argument handling', () => {
   console.log('(d) CLI argument handling')
   const runCli = (args) => spawnSync(process.execPath, [path.join(BENCH, 'run.mjs'), ...args],
     { encoding: 'utf8', cwd: REPO, timeout: 60_000 })
@@ -157,7 +186,9 @@ async function main() {
   runCli(['--suite', 'tier-ladder', '--candidate', candFile])
   ok(fs.readFileSync(path.join(BENCH, 'results', 'registry.json'), 'utf8') === before,
     'plan-only mode (no --execute) writes nothing to the registry')
+})
 
+test('(e2) --record: run-dir -> registry row with delta verdict', async () => {
   console.log('(e2) --record: run-dir -> registry row with delta verdict')
   const record = await importLib('record.mjs')
   const recReg = path.join(tmp, 'registry-record.json')
@@ -198,7 +229,9 @@ async function main() {
   try { await record.recordRun(badRun, { suite: 'tier-ladder', environmentId: 'test-env', registryPath: recReg }) } catch { recordThrew = true }
   ok(recordThrew && registry.loadRegistry(recReg).rows.length === before2,
     'incomplete run dir refused; nothing appended')
+})
 
+test('(e) fetch-catalog bridge (snapshot; zero network)', async () => {
   console.log('(e) fetch-catalog bridge (snapshot; zero network)')
   const catalog = await importLib('catalog.mjs')
   ok(catalog.catalogAvailable(), 'catalog resolvable (dist-server or committed snapshot)')
@@ -222,24 +255,28 @@ async function main() {
     })
   } catch (e) { fetchRefused = /not an experiment prerequisite/.test(e.message) }
   ok(fetchRefused, 'fetchCandidate refuses non-prerequisite entries (consent must be human-recorded)')
+})
 
+test('(f)+(g) candidate parameterization (python build smoke) + metric math vs fixtures', () => {
   console.log('(f) candidate parameterization — mock candidate through every build path')
   const pythonBin = process.env.BENCH_PYTHON ?? 'python3'
   const pyProbe = spawnSync(pythonBin, ['-c', 'import numpy'], { encoding: 'utf8' })
   if (pyProbe.status !== 0) {
     console.log('  skip - python3+numpy unavailable in this environment (logged reason; CI legs install both)')
-  } else {
-    const buildSmoke = spawnSync(pythonBin, [path.join(BENCH, 'tools', 'smoke_builds.py')],
-      { encoding: 'utf8', cwd: REPO, timeout: 120_000 })
-    ok(buildSmoke.status === 0 && /7\/7 suites/.test(buildSmoke.stdout),
-      `every suite builds incumbent+candidate graphs (${buildSmoke.stdout.trim().split('\n').pop()})`)
-    console.log('(g) metric math vs fixtures')
-    const metricSmoke = spawnSync(pythonBin, [path.join(BENCH, 'tools', 'smoke_metrics.py')],
-      { encoding: 'utf8', cwd: REPO, timeout: 120_000 })
-    ok(metricSmoke.status === 0 && /all assertions passed/.test(metricSmoke.stdout),
-      'pure metric math passes fixed-array fixtures (psnr/seam/activity/motion/thirds)')
+    return
   }
+  const buildSmoke = spawnSync(pythonBin, [path.join(BENCH, 'tools', 'smoke_builds.py')],
+    { encoding: 'utf8', cwd: REPO, timeout: 120_000 })
+  ok(buildSmoke.status === 0 && /7\/7 suites/.test(buildSmoke.stdout),
+    `every suite builds incumbent+candidate graphs (${buildSmoke.stdout.trim().split('\n').pop()})`)
+  console.log('(g) metric math vs fixtures')
+  const metricSmoke = spawnSync(pythonBin, [path.join(BENCH, 'tools', 'smoke_metrics.py')],
+    { encoding: 'utf8', cwd: REPO, timeout: 120_000 })
+  ok(metricSmoke.status === 0 && /all assertions passed/.test(metricSmoke.stdout),
+    'pure metric math passes fixed-array fixtures (psnr/seam/activity/motion/thirds)')
+})
 
+test('(h) blind-judge bundle: vision:report compatibility + unblind', async () => {
   console.log('(h) blind-judge bundle: vision:report compatibility + unblind')
   const blindjudge = await importLib('blindjudge.mjs')
   const media = path.join(tmp, 'media')
@@ -281,13 +318,7 @@ async function main() {
   ok(Object.keys(unblinded.perCandidate).length === 2 &&
     unblinded.perCandidate[Object.keys(unblinded.perCandidate)[0]].verdict === 'pass',
     'unblind maps letters back to candidates with verdicts')
-
   console.log(`\nbenchmarks offline suite: ${passed} assertions passed`)
-}
-
-main().catch((e) => {
-  console.error(`\nbenchmarks offline suite FAILED: ${e.message}`)
-  process.exit(1)
 })
 
 // Windows-leg guard (platform-stable form): (a) no tracked file may be CRLF
@@ -296,7 +327,7 @@ main().catch((e) => {
 // checkout cannot flip them (the 2026-09-16 class). Working-tree w/crlf for
 // ordinary text=auto files is the NORMAL benign Windows condition (git
 // normalizes back on commit) — not checked, by design.
-{
+test('eol-pin invariant: no i/crlf in the index; LEADERBOARD.md pinned eol=lf', () => {
   const { execFileSync } = require('node:child_process')
   const eol = execFileSync('git', ['ls-files', '--eol'], { encoding: 'utf8' })
   const lines = eol.split('\n').filter(Boolean)
@@ -304,4 +335,4 @@ main().catch((e) => {
   ok(indexCrlf.length === 0, `tracked files stored with CRLF in the index: ${indexCrlf.slice(0, 5).join('; ')}`)
   const attrs = execFileSync('git', ['check-attr', 'eol', '--', 'benchmarks/results/LEADERBOARD.md'], { encoding: 'utf8' })
   ok(/eol:\s*lf/.test(attrs), 'benchmarks/results/LEADERBOARD.md must carry an explicit eol=lf pin (Windows autocrlf guard)')
-}
+})
