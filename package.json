@@ -2,7 +2,7 @@
   "name": "minimax-studio",
   "version": "0.1.0",
   "private": true,
-  "description": "Local-first web studio for MiniMax H3, LTX-2.5, ACE-Step and Z-Image generation through ComfyUI",
+  "description": "Local-first web studio for MiniMax H3 video, image and music generation (plus ACE-Step audio) through ComfyUI",
   "author": "James",
   "scripts": {
     "dev": "vite",

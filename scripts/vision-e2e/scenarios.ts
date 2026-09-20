@@ -473,6 +473,10 @@ export const SCENARIOS: VisionScenario[] = [
         drive: async (page) => {
           // Bring the ComfyUI-MiniMax-H3-Turbo row (a studio marker at an OLD
           // revision → outdated) to the top; the hybrid-loader row below
+          // reads "installed on instance" (the fake instance serves its
+          // classes — rubric amended 2026-09-20 after the Phase-0 vision
+          // judge flagged the old "reads missing" clause as jointly
+          // unsatisfiable with checkpoint 7's installed-row requirement).
           // reads missing.
           await page.evaluate(() => {
             const rows = Array.from(document.querySelectorAll<HTMLElement>('.node-packs-section .node-pack-row'))
@@ -485,7 +489,7 @@ export const SCENARIOS: VisionScenario[] = [
           SHELL_CONTEXT,
           'The same Settings dock, scrolled WITHIN the "Node packs" list to the "ComfyUI-MiniMax-H3-Turbo" pack row (bold name, an "Apache-2.0" license badge, a "user-fetch" mode tag); rows above sit above the fold (intended scrolling, not clipping; judge only what is in frame).',
           'The ComfyUI-MiniMax-H3-Turbo row carries a STATUS BADGE reading "outdated — restart engine to activate" (a warning tone) with a muted version string reading "0123456789ab": the studio placed an older revision than the registry now pins — the honest drift state, CORRECT, not a defect. The row\'s note line names the reinstall move ("pinned revision changed — reinstall to move …").',
-          'The row below ("ComfyUI_MinimaxH3HybridLoader") reads "missing" (muted tone) with a "Fetch…" button in its action column.',
+          'The row below ("ComfyUI_MinimaxH3HybridLoader") reads "installed on instance" (a positive tone — the fake instance serves its node classes) with "Fetch…"/"Uninstall" actions in its action column. (Amended 2026-09-20: the pre-amendment clause expected "missing", jointly unsatisfiable with the engine-packs checkpoint\'s "at least one row reading installed on instance" — only this row satisfies it.)',
           'Defects to flag: the outdated badge mislabeled (e.g. reading "installed @ pin" or "missing"), the version string absent, badges overlapping text, a "local repo directory" input visible anywhere.',
         ].join(' '),
       },
@@ -908,7 +912,7 @@ export const SCENARIOS: VisionScenario[] = [
         rubric: [
           'Context: a dark-theme desktop studio at 1920x1080 on the ?canvas=1 canvas route — slim top titlebar (canvas tab, radar chip reading "calm" or a queue count, "engine offline" chip, then small "library V", "settings", "index ⌘K" buttons at the right — ALL intended Phase-4 additions), a near-black dotted-grid canvas surface below, and a slim contextual bottom bar at the foot.',
           'ONE media tile visible on the canvas (dark rounded card, 16:9 preview showing a dark blue rectangle with a gold square, head/tail endpoint dots) — it may be partially covered by floating panels; silhouette presence is enough.',
-          'A PROPERTIES panel (floating, right side): header with the object title + a mode pill; a PROMPT section with a textarea placeholder and a row of four small pill buttons beneath it (enhance / timeline / audio pass / library — muted icons + labels, possibly dimmed because no local LLM is connected in tests: dimming is CORRECT); sections below for Engine, References, Identity payload with a strength slider, Guides, Takes.',
+          'A PROPERTIES panel (floating, right side): header with the object title + a mode pill; a PROMPT section with a textarea placeholder and a row of four small pill buttons beneath it (enhance / audio pass / timeline → Flow / library — the timeline pill\'s label carries an arrow reading "timeline → Flow"; muted icons + labels, possibly dimmed because no local LLM is connected in tests: dimming is CORRECT. Amended 2026-09-20 to match the shipped label after the Phase-0 vision judge read the arrow label as "inverse flow"); sections below for Engine, References, Identity payload with a strength slider, Guides, Takes.',
           'A separate AUDIO DOCK panel (floating, left-of-center or left side): header with a music note icon + "Music 3 — complete song"; body with a filled multi-line caption textarea containing visible caption text about ambient piano, a Lyrics textarea (empty placeholder), a "seconds" number input showing 60, and a muted note line about the track landing as its own object; footer with a "generate song" button (may be dimmed — the engine is offline in tests, CORRECT).',
           'Blessings: floating panels may overlap the tile; dense small sub-labels are the design language; dimmed/disabled buttons are intended offline states; the bottom bar may read "generate" with a prompt input + Music 3 / ACE-Step / library chips.',
           'Defects to flag: either panel missing entirely, panels overlapping EACH OTHER so their headers cannot both be read, the caption textarea empty or clipped, unreadable text mid-glyph, a pure-white or pure-black dead region, no titlebar buttons at all.',

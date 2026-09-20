@@ -482,9 +482,11 @@ print_token_block() {
   echo "token:    $TOKEN_VALUE"
   echo "local:    $BANNER_SCHEME://$BANNER_HOST:$R_PORT/?token=$TOKEN_VALUE"
   LAN_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9][0-9.]*\).*/\1/p' | head -n 1)
-  TOKEN_URL="$BANNER_SCHEME://$BANNER_HOST:$R_PORT/?mobile=1&token=$TOKEN_VALUE"
+  # (mobile=1 dropped 2026-09-20 with the Phase-0 mobile-companion removal —
+  # every device now gets the full studio, so the token URL points at the app root)
+  TOKEN_URL="$BANNER_SCHEME://$BANNER_HOST:$R_PORT/?token=$TOKEN_VALUE"
   if [ -n "$LAN_IP" ]; then
-    TOKEN_URL="$BANNER_SCHEME://$LAN_IP:$R_PORT/?mobile=1&token=$TOKEN_VALUE"
+    TOKEN_URL="$BANNER_SCHEME://$LAN_IP:$R_PORT/?token=$TOKEN_VALUE"
     echo "lan:      $TOKEN_URL"
   fi
   if [ "$CFG_QR" = "true" ] && command -v qrencode >/dev/null 2>&1; then
