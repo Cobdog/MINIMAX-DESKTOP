@@ -334,6 +334,14 @@ test('(l) L4 — selection decides the surface (effectiveMode)', () => {
   eq(laneRead.modelOverrides.fl2va, 'fl2va-pick.safetensors', 'settings: the per-lane fl2va slot survives the tolerant read')
   eq(laneRead.modelOverrides.ref2va, 'ref.safetensors', 'settings: a padded ref2va slot trims through')
   eq('merged' in laneRead.modelOverrides, false, 'settings: a non-string merged slot drops to auto')
+  // The decoder-split VAE trio (epdvxd4): the new keys parse; a stored
+  // legacy 'vae' STRING survives the read (the resolution seam migrates it,
+  // not the reader — stored documents never rewrite behind the user's back).
+  const vaeRead = generation.readChainSettings({ modelOverrides: { vae: 'legacy-decoder.safetensors', videoVae: ' v-pick.safetensors ', audioVae: 'a-pick.safetensors', imageVae: 42 } })
+  eq(vaeRead.modelOverrides.vae, 'legacy-decoder.safetensors', 'settings: a stored legacy vae string survives for the migration seam')
+  eq(vaeRead.modelOverrides.videoVae, 'v-pick.safetensors', 'settings: the videoVae slot trims through')
+  eq(vaeRead.modelOverrides.audioVae, 'a-pick.safetensors', 'settings: the audioVae slot survives')
+  eq('imageVae' in vaeRead.modelOverrides, false, 'settings: a non-string imageVae slot drops to auto')
 })
 
 test('(m) fork substrates → input refs (§2 outputRef)', () => {

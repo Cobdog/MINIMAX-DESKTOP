@@ -2348,7 +2348,7 @@ test('a model override reaches the engine graph and the job manifest (fake engin
   for (const [kind, files] of Object.entries({
     diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
     text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
-    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
+    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors', 'h3-community-video-decoder.safetensors', 'h3-community-audio-decoder.safetensors'],
     loras: ['minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors'],
   })) {
     fsModule.mkdirSync(pathModule.join(modelRoot, kind), { recursive: true })
@@ -2404,7 +2404,7 @@ test('a model override reaches the engine graph and the job manifest (fake engin
       ...originalSettings,
       comfyUrl: `http://127.0.0.1:${enginePort}`,
       paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: pathModule.join(modelRoot, 'diffusion_models'), text_encoders: pathModule.join(modelRoot, 'text_encoders'), vae: pathModule.join(modelRoot, 'vae'), loras: pathModule.join(modelRoot, 'loras') },
-      modelOverrides: { minimax: { fl2va: mergeName } },
+      modelOverrides: { minimax: { fl2va: mergeName, videoVae: 'h3-community-video-decoder.safetensors', audioVae: 'h3-community-audio-decoder.safetensors' } },
     } } })
     await resetSession(page)
     await page.goto('/?canvas=1')
@@ -2423,12 +2423,16 @@ test('a model override reaches the engine graph and the job manifest (fake engin
     // in this text-mode render; the unset slots stay on inference. A
     // reference-mode render of the same settings would load the OFFICIAL
     // Ref2VA file — the lane split, proven per-mode in the unit suite.
+    // The decoder-split VAE pair (epdvxd4): the community decoders land on
+    // the graph's TWO VAELoader nodes — node 3 (video) and node 4 (audio).
     expect(submittedGraphs.length).toBeGreaterThan(0)
     const graph = JSON.parse(submittedGraphs[submittedGraphs.length - 1]) as { prompt: Record<string, { class_type: string; inputs: Record<string, unknown> }> }
     expect(graph.prompt['1'].class_type).toBe('UNETLoader')
     expect(graph.prompt['1'].inputs.unet_name).toBe(mergeName)
     expect(graph.prompt['2'].inputs.clip_name).toBe('qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors')
-    expect(graph.prompt['3'].inputs.vae_name).toBe('minimax_h3_video_vae_fp16.safetensors')
+    expect(graph.prompt['3'].inputs.vae_name).toBe('h3-community-video-decoder.safetensors')
+    expect(graph.prompt['4'].class_type).toBe('VAELoader')
+    expect(graph.prompt['4'].inputs.vae_name).toBe('h3-community-audio-decoder.safetensors')
 
     // THE MANIFEST (provenance): the resolved filenames plus which slots were
     // explicit picks — polled through the storage API the queue writes through.
@@ -2439,7 +2443,7 @@ test('a model override reaches the engine graph and the job manifest (fake engin
     }, { timeout: 15_000 }).toBe(mergeName)
     const jobs = ((await (await request.get('/api/lan/jobs')).json()) as { jobs: OverrideJobRecord[] }).jobs
     const overrideJob = jobs.find((entry) => entry.promptId === 'ov-e2e-1')!
-    expect(overrideJob.manifest?.modelOverrides).toEqual({ fl2va: mergeName })
+    expect(overrideJob.manifest?.modelOverrides).toEqual({ fl2va: mergeName, videoVae: 'h3-community-video-decoder.safetensors', audioVae: 'h3-community-audio-decoder.safetensors' })
     expect(overrideJob.manifest?.models?.textEncoder?.name).toBe('qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors')
     expect(problems.filter((entry) => !environmental(entry))).toEqual([])
   } finally {
@@ -2492,6 +2496,17 @@ test('model overrides surface in Settings and the chain properties panel (both s
     await expect(familyBlock.locator('[data-model-override-slot="fl2va"]')).toHaveCount(1)
     await expect(familyBlock.locator('[data-model-override-slot="ref2va"]')).toHaveCount(1)
     await expect(familyBlock.locator('[data-model-override-slot="merged"]')).toHaveCount(1)
+    // (epdvxd4) the VAE rows split by decoder — video + audio on the video
+    // family, no legacy 'vae' row, and NO image row (the Mamad8 legality map:
+    // the video family's graphs are all multi-frame).
+    await expect(familyBlock.locator('[data-model-override-slot="vae"]')).toHaveCount(0)
+    await expect(familyBlock.locator('[data-model-override-slot="videoVae"]')).toHaveCount(1)
+    await expect(familyBlock.locator('[data-model-override-slot="audioVae"]')).toHaveCount(1)
+    await expect(familyBlock.locator('[data-model-override-slot="imageVae"]')).toHaveCount(0)
+    // Per-decoder auto labels: the video row names the video inference, the
+    // audio row the audio one.
+    await expect.poll(async () => familyBlock.locator('[data-model-override-slot="videoVae"] select option').first().textContent(), { timeout: 15_000 }).toContain('minimax_h3_video_vae_fp16.safetensors')
+    await expect.poll(async () => familyBlock.locator('[data-model-override-slot="audioVae"] select option').first().textContent(), { timeout: 15_000 }).toContain('minimax_h3_audio_vae_fp32.safetensors')
     const checkpointSelect = familyBlock.locator('[data-model-override-slot="fl2va"] select')
     // The AUTO option leads with what auto currently resolves to.
     await expect.poll(async () => checkpointSelect.locator('option').first().textContent(), { timeout: 15_000 }).toContain('minimax_h3_fl2va_pruned_int8_convrot.safetensors')
@@ -2507,9 +2522,17 @@ test('model overrides surface in Settings and the chain properties panel (both s
     const fl2vaRow = dock.locator('.h3-stack-list > div').first()
     await expect(fl2vaRow.locator('small')).toContainText(mergeName)
     await expect(fl2vaRow.locator('em')).toHaveText('Override')
-    // The ltx23 family honestly exposes only its scan-anchored slots.
+    // The ltx23 family honestly exposes only its scan-anchored slots —
+    // including the split VAE pair (epdvxd4).
     await expect(dock.locator('[data-model-override-family="ltx23"] [data-model-override-slot="checkpoint"]')).toHaveCount(0)
     await expect(dock.locator('[data-model-override-family="ltx23"] [data-model-override-slot="textEncoder"]')).toHaveCount(1)
+    await expect(dock.locator('[data-model-override-family="ltx23"] [data-model-override-slot="videoVae"]')).toHaveCount(1)
+    await expect(dock.locator('[data-model-override-family="ltx23"] [data-model-override-slot="audioVae"]')).toHaveCount(1)
+    // The workbench is the ONLY family with the image VAE row (the T=1
+    // legality map, epdvxd4 AC-4); its audio-only engines expose one VAE row.
+    await expect(dock.locator('[data-model-override-family="h3image"] [data-model-override-slot="imageVae"]')).toHaveCount(1)
+    await expect(dock.locator('[data-model-override-family="music3"] [data-model-override-slot="audioVae"]')).toHaveCount(1)
+    await expect(dock.locator('[data-model-override-family="music3"] [data-model-override-slot="videoVae"]')).toHaveCount(0)
     // Save persists through the server's tolerant normalize.
     await dock.locator('button.primary-button', { hasText: 'Save settings' }).click()
     await expect.poll(async () => {

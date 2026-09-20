@@ -507,14 +507,20 @@ routesMaybe('(d) app-relative io defaults through the real settings pipeline + (
       // (fl2va/ref2va/merged) normalize through the REAL pipeline, and a
       // legacy single-checkpoint pick migrates onto fl2va+ref2va
       // fill-if-unset — never silently dropped. The generic families keep
-      // 'checkpoint'. Failing-without-it: the pre-split normalizer kept
-      // only the three old slot keys — fl2va/ref2va/merged posted as auto
-      // (dropped at save) and the legacy pick stayed a bare checkpoint the
-      // split families no longer expose.
+      // 'checkpoint'. The VAE split (epdvxd4, 2026-09-20): a legacy 'vae'
+      // pick migrates onto videoVae (the video families — its old meaning
+      // there) or audioVae (music3/acestep, whose one decoder IS
+      // audio-class), fill-if-unset, consumed key. Failing-without-it: the
+      // pre-split normalizer kept only the six old slot keys —
+      // videoVae/audioVae/imageVae posted as auto (dropped at save) and the
+      // legacy vae pick stayed a key no family exposes anymore.
       const legacyOverrides = await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...fresh, modelOverrides: {
         minimax: { checkpoint: 'legacy-merge.safetensors', fl2va: 'explicit-fl2va.safetensors', vae: '  ' },
-        h3image: { checkpoint: 'legacy-image.safetensors' },
-        ltx25: { checkpoint: 'ltx-keep.safetensors' },
+        h3image: { checkpoint: 'legacy-image.safetensors', vae: 'legacy-h3-video-vae.safetensors', videoVae: 'explicit-workbench-video-vae.safetensors' },
+        ltx25: { checkpoint: 'ltx-keep.safetensors', vae: 'legacy-ltx-video-vae.safetensors', audioVae: 'ltx-audio-vae.safetensors' },
+        ltx23: { vae: 'legacy-ltx23-video-vae.safetensors' },
+        music3: { vae: 'legacy-dav.safetensors' },
+        acestep: { vae: 'legacy-ace-audio-vae.safetensors', imageVae: 'not-a-real-pick.safetensors' },
       } } }) })
       const normalized = legacyOverrides.body.settings.modelOverrides ?? {}
       ok(normalized.minimax?.fl2va === 'explicit-fl2va.safetensors', `minimax: an explicit lane pick wins its lane (got ${JSON.stringify(normalized.minimax)})`)
@@ -522,7 +528,15 @@ routesMaybe('(d) app-relative io defaults through the real settings pipeline + (
       ok(!('checkpoint' in (normalized.minimax ?? {})), 'minimax: the consumed legacy key never persists')
       ok(!('vae' in (normalized.minimax ?? {})), 'minimax: a blank slot drops to auto')
       ok(normalized.h3image?.fl2va === 'legacy-image.safetensors' && normalized.h3image?.ref2va === 'legacy-image.safetensors', 'h3image: the legacy pick lands on BOTH lanes (behavior-preserving)')
+      ok(normalized.h3image?.videoVae === 'explicit-workbench-video-vae.safetensors', 'h3image: an explicit videoVae pick wins over the legacy vae value')
+      ok(!('vae' in (normalized.h3image ?? {})), 'h3image: the consumed legacy vae key never persists')
       ok(normalized.ltx25?.checkpoint === 'ltx-keep.safetensors', 'ltx25: the generic checkpoint family is untouched by the migration')
+      ok(normalized.ltx25?.videoVae === 'legacy-ltx-video-vae.safetensors', 'ltx25: the legacy vae pick lands on videoVae (the old slot meaning on a video family)')
+      ok(normalized.ltx25?.audioVae === 'ltx-audio-vae.safetensors', 'ltx25: the new audioVae slot normalizes through')
+      ok(normalized.ltx23?.videoVae === 'legacy-ltx23-video-vae.safetensors', 'ltx23: the legacy vae pick lands on videoVae')
+      ok(normalized.music3?.audioVae === 'legacy-dav.safetensors', 'music3: the legacy vae pick lands on audioVae (the family one decoder is audio-class)')
+      ok(normalized.acestep?.audioVae === 'legacy-ace-audio-vae.safetensors', 'acestep: the legacy vae pick lands on audioVae')
+      ok(normalized.acestep?.imageVae === 'not-a-real-pick.safetensors', 'acestep: an imageVae pick persists shape-wise — the family gate lives renderer-side (refused as unexposed at consult)')
       const reread = (await api('/api/lan/settings')).body.settings.modelOverrides ?? {}
       ok(reread.minimax?.ref2va === 'legacy-merge.safetensors' && !('checkpoint' in (reread.minimax ?? {})), 'the migrated shape is what persists on disk')
       await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: fresh }) })

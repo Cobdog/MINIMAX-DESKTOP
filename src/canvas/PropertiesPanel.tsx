@@ -760,7 +760,7 @@ export function PropertiesPanel() {
               {outcome?.state === 'applied' && outcome.warning && <p className="canvas-properties-warning" data-canvas-model-override-problem role="status">{outcome.warning}</p>}
             </div>
           })}
-          <p className="canvas-properties-note">A pick here beats the global Settings pick, which beats auto inference. Picks are exact scanned filenames; the resolved files ride the take's manifest. The H3 lanes pin FL2VA / Ref2VA separately; the merged pick is one pre-merged checkpoint for both and wins when set.</p>
+          <p className="canvas-properties-note">A pick here beats the global Settings pick, which beats auto inference. Picks are exact scanned filenames; the resolved files ride the take's manifest. The H3 lanes pin FL2VA / Ref2VA separately; the merged pick is one pre-merged checkpoint for both and wins when set. The VAE picks are decoder-specific (video / audio) — the image decoder is workbench-only.</p>
         </details>}
         <div className="canvas-properties-row">
           <label htmlFor="canvas-duration">seconds</label>
