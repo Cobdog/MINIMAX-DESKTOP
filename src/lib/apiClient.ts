@@ -252,9 +252,6 @@ export function createWebApiClient(): DesktopApi {
       })
       return body && 'path' in body ? body.path : null
     },
-    async syncMobileCharacters(characters: unknown[]) {
-      return postJson('/api/lan/characters', { characters })
-    },
     async freeComfyMemory() {
       return postJson<{ freed: boolean }>('/api/lan/free', {})
     },
