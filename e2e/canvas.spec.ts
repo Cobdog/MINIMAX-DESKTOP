@@ -979,62 +979,8 @@ test('fork semantics complete: early take → canonical switch → stale propaga
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
-test('engines-as-ops: the utility typed-hole seam builds the official template (probe), menu gates honestly', async ({ page }) => {
-  const problems = await trackErrors(page)
-  await resetSession(page)
-  await page.goto('/?canvas=1&probe=canvas')
-  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
-  await dropPng(page, 'utility-source.png')
-  await expect(page.locator('[data-canvas-tile]').first()).toBeVisible({ timeout: 10_000 })
-
-  // The probe is the typed-hole → graph-construction seam: validation refuses
-  // offline with the honest message, yet the REAL factory builds the official
-  // template against a resolved TEST selection (construction is pure).
-  const plan = page.evaluate.bind(page)
-  const removeSubtitles = await plan((tool: string) => (window as unknown as { __canvasUtilityPlan(tool: string): { validation: string | null; graph: { nodeClasses: string[]; loadVideoCount: number; manualSigmasCount: number; saveVideo: boolean; audioSourceClass: Array<string | null>; total: number } } }).__canvasUtilityPlan(tool), 'remove-subtitles')
-  expect(removeSubtitles.validation).toContain('Start ComfyUI')
-  expect(removeSubtitles.graph.loadVideoCount).toBe(1)
-  expect(removeSubtitles.graph.manualSigmasCount).toBe(2) // the two-stage ManualSigmas shape
-  expect(removeSubtitles.graph.saveVideo).toBe(true)
-  expect(removeSubtitles.graph.audioSourceClass[0]).toBe('GetVideoComponents') // original audio passes through
-  expect(removeSubtitles.graph.nodeClasses).toContain('LTXAddVideoICLoRAGuide')
-
-  const ia2v = await plan((tool: string) => (window as unknown as { __canvasUtilityPlan(tool: string): { graph: { audioSourceClass: Array<string | null>; loadVideoCount: number } | null } }).__canvasUtilityPlan(tool), 'ia2v')
-  expect(ia2v.graph!.audioSourceClass[0]).toBe('LTXVAudioVAEDecode') // ia2v muxes GENERATED audio
-  expect(ia2v.graph!.loadVideoCount).toBe(0)
-
-  // The menu rows stay availability-gated: offline every utility is offered
-  // but disabled with the honest reason — ia2v (no node packs) leads with the
-  // missing-weights install guidance; a pack-gated tool leads with the engine.
-  const tile = page.locator('[data-canvas-tile]').first()
-  await page.waitForTimeout(600)
-  await tile.locator('[data-canvas-endpoint="tail"]').click()
-  const menu = page.locator('[data-canvas-endpoint-menu="produce"]')
-  await expect(menu).toBeVisible()
-  const ia2vRow = menu.locator('[data-canvas-menu-row="produce:utility:ia2v"]')
-  await expect(ia2vRow).toBeVisible()
-  await expect(ia2vRow).toBeDisabled()
-  await expect(ia2vRow).toContainText('Not ready — missing')
-
-  // QOL wave (rrxlw2r, nits idg8ui4): the one-click fetch affordance — the
-  // unavailable row deep-links into the FetchBrowser with the missing
-  // entries highlighted, and the consent gate stays INTACT (the click gets
-  // TO consent, never past it: no consent modal, nothing fetched).
-  const fetchButton = menu.locator('[data-canvas-menu-fetch="produce:utility:ia2v"]')
-  await expect(fetchButton).toBeVisible()
-  await fetchButton.click()
-  await expect(page.locator('[data-canvas-endpoint-menu="produce"]')).toHaveCount(0)
-  const dock = page.locator('[data-canvas-settings-dock]')
-  await expect(dock).toBeVisible()
-  const focused = dock.locator('.fetch-row.fetch-focused')
-  await expect(focused.first()).toBeVisible({ timeout: 15_000 })
-  expect(await focused.count()).toBeGreaterThan(1)
-  // The highlighted entry's own Fetch button is the next explicit step —
-  // no consent dialog was opened by the deep-link itself.
-  await expect(page.locator('.fetch-consent-modal')).toHaveCount(0)
-  await expect(focused.first().getByRole('button', { name: /fetch/i })).toBeVisible()
-  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
-})
+// (The LTX-2.3 utility typed-hole probe test was removed with LTX —
+// Phase 0, 2026-09-20; the __canvasUtilityPlan window probe is gone.)
 
 test('H3-1F as the image op: the stills intent routes the T=1 family; image+control hands off to Edit (probe)', async ({ page }) => {
   const problems = await trackErrors(page)
@@ -1485,7 +1431,7 @@ test("the 'r' rerunStale gesture clears the stale flags it remediates (M2)", asy
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
-test('engines-as-ops complete: LTX-2.5 general row + the audio docks (probe seams + honest gating)', async ({ page }) => {
+test('engines-as-ops complete: the audio docks (probe seams + honest gating)', async ({ page }) => {
   const problems = await trackErrors(page)
   await resetSession(page)
   await page.goto('/?canvas=1&probe=canvas')
@@ -1495,25 +1441,9 @@ test('engines-as-ops complete: LTX-2.5 general row + the audio docks (probe seam
   await expect(tile).toBeVisible({ timeout: 10_000 })
   await page.waitForTimeout(600)
 
-  // The LTX-2.5 GENERAL surface is a typed-hole produce row (image source),
-  // availability-gated offline with the honest reason.
-  await tile.locator('[data-canvas-endpoint="tail"]').click()
-  const menu = page.locator('[data-canvas-endpoint-menu="produce"]')
-  await expect(menu).toBeVisible()
-  const ltxRow = menu.locator('[data-canvas-menu-row="produce:ltx25"]')
-  await expect(ltxRow).toBeVisible()
-  await expect(ltxRow).toBeDisabled()
-  await expect(ltxRow).toContainText('Not ready')
-
-  // The engine-op plan seams: ltx25 + both audio engines build their graphs
-  // offline (construction is pure) while validation refuses honestly.
+  // (The LTX-2.5 typed-hole row + plan seam were removed with LTX — Phase
+  // 0, 2026-09-20; the audio engine-ops below remain the plan seams.)
   const plan = page.evaluate.bind(page)
-  const ltx = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; validation: string | null; graph: { manualSigmasCount: number; saveVideo: boolean } } }).__canvasSubmitPlan(spec), { engine: 'ltx25' })
-  expect(ltx.mode).toBe('ltx25')
-  expect(ltx.validation).toContain('Start ComfyUI')
-  expect(ltx.graph.manualSigmasCount).toBeGreaterThan(0)
-  expect(ltx.graph.saveVideo).toBe(true)
-
   const music3 = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; validation: string | null; graph: { textEncode: boolean; saveAudio: boolean } } }).__canvasSubmitPlan(spec), { mediaType: 'audio', audioEngine: 'music3' })
   expect(music3.mode).toBe('music3')
   expect(music3.graph.textEncode).toBe(true)
@@ -1525,11 +1455,8 @@ test('engines-as-ops complete: LTX-2.5 general row + the audio docks (probe seam
 
   // The audio dock: the bottom bar's nothing-selected context opens Music 3;
   // offline the submit button carries the honest refusal. One press, one
-  // action (app-tour wave d6iy68r, review m1): the FIRST Escape closes the
-  // menu only — the second deselects, returning the bar to its empty
-  // context (the old single-press close-AND-deselect was the bug itself).
-  await page.keyboard.press('Escape')
-  await expect(menu).toHaveCount(0)
+  // action (app-tour wave d6iy68r, review m1): the FIRST Escape deselects,
+  // returning the bar to its empty context.
   await page.keyboard.press('Escape')
   await expect(page.locator('.canvas-tile.selected')).toHaveCount(0)
   await page.locator('[data-canvas-bar-music3]').click()
@@ -1788,10 +1715,9 @@ test('Phase-5 deletion smoke: Create / Queue / Library / LTX 2.5 are gone; the c
   await expect(page.locator('[data-canvas-library]')).toBeVisible()
   await page.keyboard.press('Escape')
 
-  // LTX 2.5 → the engine lives as the typed-hole produce row on an image
-  // object (probe-asserted by the engines-as-ops spec above); the old
-  // workspace surface is gone.
-  await expect(page.locator('[data-retired="ltx25"]')).toHaveCount(0)
+  // LTX 2.5 → the old workspace surface is gone AND the engine itself was
+  // removed (Phase 0, 2026-09-20): no retired markers anywhere.
+  await expect(page.locator('[data-retired]')).toHaveCount(0)
   await page.screenshot({ path: 'test-results/shots/23-phase5-four-deleted.png' })
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
@@ -1800,28 +1726,9 @@ test('Phase-5 deletion smoke: Create / Queue / Library / LTX 2.5 are gone; the c
 // chain through the store's seedChain — compiled prompt + shot settings,
 // CONSENT-GATED (created + selected + inspected, NEVER submitted: zero jobs
 // appear; the user generates from the panel — principle 5).
-test('the Studios dock shot handoff seeds a chain, consent-gated (nothing auto-executes)', async ({ page }) => {
-  const problems = await trackErrors(page)
-  await resetSession(page)
-  await page.goto('/?canvas=1&probe=canvas')
-  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
-  const result = await page.evaluate(() => (window as unknown as { __canvasScenario(name: string): { ok: boolean; chainId?: string; selected?: boolean; inspector?: boolean; jobsCreated?: number; reason?: string } }).__canvasScenario('seed-chain'))
-  expect(result.ok, result.reason).toBe(true)
-  expect(result.selected).toBe(true)
-  expect(result.inspector).toBe(true)
-  expect(result.jobsCreated).toBe(0)
-  await expect(page.locator(`[data-canvas-tile="${result.chainId}"]`)).toBeVisible({ timeout: 10_000 })
-  // The shot's compiled settings persisted on the chain (the document write
-  // settles; the API read is the durable truth).
-  await page.waitForTimeout(400)
-  const document = await activeDocument(page)
-  const chain = document.chains.find((entry) => entry.id === result.chainId)
-  expect(chain, 'the seeded chain exists in the document').toBeTruthy()
-  expect(chain!.settings.prompt).toContain('drummer steps off the night train')
-  expect(chain!.settings.duration).toBe(9)
-  expect(chain!.settings.resolution).toBe('768x1344')
-  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
-})
+// (The Studios dock shot-handoff test was removed with the Studios —
+// Phase 0, 2026-09-20. The consent-gated seeding contract it proved lives
+// on through the segment-seeding scenario in the Phase-5b test below.)
 
 // ---- Phase 5b (task 2u0rent): the Director Suite — timeline projection,
 // plan documents, the measured gap menu, MoviePlanner retirement. ----------
@@ -1993,16 +1900,8 @@ test('MoviePlanner retired (5b): no movie tab; the plan surface is the timeline;
   await page.goto('/?canvas=1')
   await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
 
-  // The Studios dock carries the five ASSET studios — the movie tab died
-  // with its surface (the plan lives on the document store now).
-  await page.locator('[data-canvas-studios-button]').click()
-  const dock = page.locator('[data-canvas-studios-dock]')
-  await expect(dock).toBeVisible()
-  await expect(dock.locator('[data-canvas-studios-tab]')).toHaveCount(5)
-  await expect(dock.locator('[data-canvas-studios-tab="movie"]')).toHaveCount(0)
-  await expect(page.getByRole('heading', { name: /movie planner/i })).toHaveCount(0)
-  await page.locator('[data-canvas-studios-close]').click()
-
+  // (The Studios dock five-tab block was removed with the Studios — Phase
+  // 0, 2026-09-20; the movie-tab absence checks died with the dock.)
   // The launcher's movie-plan chip opens the TIMELINE (the Director Suite).
   await page.locator('[data-canvas-chip="movie"]').click()
   await expect(page.locator('[data-canvas-timeline]')).toBeVisible()
@@ -2018,15 +1917,8 @@ test('MoviePlanner retired (5b): no movie tab; the plan surface is the timeline;
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
-test('the mobile companion still boots, marked unmaintained (L10)', async ({ page }) => {
-  const problems = await trackErrors(page)
-  await page.goto('/?mobile=1')
-  // The route renders its companion shell — kept booting per L10 (out of v1
-  // scope, no canvas capabilities; the unmaintained marker is in the code).
-  await expect(page.locator('main.mobile-app')).toBeVisible({ timeout: 15_000 })
-  await expect(page.locator('.mobile-header')).toContainText('MiniMax Studio')
-  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
-})
+// (The mobile companion boot test was removed with the mobile route —
+// Phase 0, 2026-09-20; git history is the archive.)
 
 test('F6 live progress: targeted engine events + preview frames surface on the generating tile', async ({ page }) => {
   const problems = await trackErrors(page)
@@ -2525,12 +2417,8 @@ test('model overrides surface in Settings and the chain properties panel (both s
     const fl2vaRow = dock.locator('.h3-stack-list > div').first()
     await expect(fl2vaRow.locator('small')).toContainText(mergeName)
     await expect(fl2vaRow.locator('em')).toHaveText('Override')
-    // The ltx23 family honestly exposes only its scan-anchored slots —
-    // including the split VAE pair (epdvxd4).
-    await expect(dock.locator('[data-model-override-family="ltx23"] [data-model-override-slot="checkpoint"]')).toHaveCount(0)
-    await expect(dock.locator('[data-model-override-family="ltx23"] [data-model-override-slot="textEncoder"]')).toHaveCount(1)
-    await expect(dock.locator('[data-model-override-family="ltx23"] [data-model-override-slot="videoVae"]')).toHaveCount(1)
-    await expect(dock.locator('[data-model-override-family="ltx23"] [data-model-override-slot="audioVae"]')).toHaveCount(1)
+    // (The ltx23 family's scan-anchored slot rows were removed with LTX —
+    // Phase 0, 2026-09-20.)
     // The workbench is the ONLY family with the image VAE row (the T=1
     // legality map, epdvxd4 AC-4); its audio-only engines expose one VAE row.
     await expect(dock.locator('[data-model-override-family="h3image"] [data-model-override-slot="imageVae"]')).toHaveCount(1)

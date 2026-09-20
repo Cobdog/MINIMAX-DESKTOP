@@ -23,9 +23,7 @@ function load(path) {
 }
 const workflowModule = load('src/lib/workflow.ts')
 const { frameCount, buildMiniMaxWorkflow, extractOutputUrl, extractOutputFile, outputFileFromUrl, OFFICIAL_H3_SAMPLER, OFFICIAL_H3_SCHEDULER } = workflowModule
-const { buildZImage } = load('src/lib/zimage.ts')
-const { buildLtx25Workflow, ltx25FrameCount, LTX25_FIRST_STAGE_SIGMAS, LTX25_REFINER_SIGMAS } = load('src/lib/ltx25Workflow.ts')
-const { inferSelections, inferLtx25Selections, inferLtx23Selections } = load('src/lib/modelSelection.ts')
+const { inferSelections } = load('src/lib/modelSelection.ts')
 const { cropRect, fitWholeCharacter } = load('src/lib/imageCrop.ts')
 const { promptPresets, searchPromptPresets } = load('src/lib/promptPresets.ts')
 
@@ -51,9 +49,9 @@ test('graph-building basics: crop fit, prompt presets, frameCount ladder, cropRe
 
 const models = { fl2va: 'fl2va', ref2va: 'ref2va', textEncoder: 'clip', videoVae: 'video', audioVae: 'audio', fl2vLora: 'fl-lora', ref2vLora: 'ref-lora' }
 
-test('the official H3 graph across modes/durations incl. the LTX upscale chain + linked-node integrity', () => {
+test('the official H3 graph across modes/durations incl. the RTX upscale chain + linked-node integrity', () => {
   for (const mode of ['text', 'image', 'frames', 'reference']) for (const duration of [2, 3, 5, 15]) {
-    const g = buildMiniMaxWorkflow({ mode, width: 352, height: 608, prompt: 'neutral test', duration, seed: 123, steps: 20, turbo: '8', sampler: 'heun', scheduler: 'karras', filenamePrefix: 'test', refImageSize: 'match', upscale: { type: 'ltx', model: 'ltx-upscale', vae: 'ltx-vae' } }, models, { first: { name: 'first.png' }, last: { name: 'last.png' }, images: [{ name: 'ref.png' }], videos: [], audios: [] })
+    const g = buildMiniMaxWorkflow({ mode, width: 352, height: 608, prompt: 'neutral test', duration, seed: 123, steps: 20, turbo: '8', sampler: 'heun', scheduler: 'karras', filenamePrefix: 'test', refImageSize: 'match', upscale: { type: 'rtx', model: 'rtx-upscale.pth' } }, models, { first: { name: 'first.png' }, last: { name: 'last.png' }, images: [{ name: 'ref.png' }], videos: [], audios: [] })
     assert.equal(g['13'].inputs.sampler_name, OFFICIAL_H3_SAMPLER)
     assert.equal(g['14'].inputs.scheduler, OFFICIAL_H3_SCHEDULER)
     assert.equal(g['14'].inputs.steps, 8)
@@ -61,26 +59,18 @@ test('the official H3 graph across modes/durations incl. the LTX upscale chain +
     assert.equal(g['18'].inputs.fps, 24)
     assert.equal(g['18'].inputs.bit_depth, 8)
     assert.equal(g['10'].inputs.width, 352)
-    assert.equal(g['68'].inputs.length, frameCount(duration))
-    const padded = frameCount(duration) + (g['61']?.inputs.amount ?? 0)
-    assert.equal((padded - 1) % 8, 0)
-    assert.equal(g['63'].class_type, 'VAELoader')
-    assert.equal(g['63'].inputs.vae_name, 'ltx-vae')
-    assert.equal(g['64'].class_type, 'VAEEncodeTiled')
-    assert.equal(g['64'].inputs.pixels[0], g['62'] ? '62' : '16')
-    assert.equal(g['65'].class_type, 'LatentUpscaleModelLoader')
-    assert.equal(g['65'].inputs.model_name, 'ltx-upscale')
-    assert.equal(g['66'].class_type, 'LTXVLatentUpsampler')
-    assert.equal(g['66'].inputs.samples[0], '64')
-    assert.equal(g['66'].inputs.upscale_model[0], '65')
-    assert.equal(g['66'].inputs.vae[0], '63')
-    assert.equal(g['67'].class_type, 'VAEDecodeTiled')
-    assert.equal(g['67'].inputs.samples[0], '66')
-    assert.equal(g['68'].inputs.image[0], '67')
-    assert.equal(g['69'].inputs.audio[0], '17')
-    assert.equal(g['69'].inputs.fps, 24)
-    assert.ok(g['70'].inputs.filename_prefix.endsWith('_LTX25_2x'))
-    assert.ok(g['19'] && g['70'])
+    assert.equal(g['10'].inputs.length, frameCount(duration))
+    assert.equal(g['80'].class_type, 'UpscaleModelLoader')
+    assert.equal(g['80'].inputs.model_name, 'rtx-upscale.pth')
+    assert.equal(g['81'].class_type, 'ImageUpscaleWithModel')
+    assert.equal(g['81'].inputs.image[0], '16')
+    assert.equal(g['82'].class_type, 'ImageScale')
+    assert.equal(g['82'].inputs.width, 352 * 2)
+    assert.equal(g['82'].inputs.height, 608 * 2)
+    assert.equal(g['83'].inputs.audio[0], '17')
+    assert.equal(g['83'].inputs.fps, 24)
+    assert.ok(g['84'].inputs.filename_prefix.endsWith('_RTX_AI_2x'))
+    assert.ok(g['19'] && g['84'])
     assert.equal(g['71'].class_type, 'ImageFromBatch')
     assert.equal(g['72'].class_type, 'PreviewImage')
     for (const node of Object.values(g)) for (const value of Object.values(node.inputs)) if (Array.isArray(value)) assert.ok(g[value[0]], `Missing linked node ${value[0]}`)
@@ -127,40 +117,8 @@ test('full-quality + preview-override + compatibility-turbo graphs', () => {
   assert.equal(refFour.ref2vLora, 'minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors')
 })
 
-test('LTX-2.5 workflow matrix (quality/turbo × text/image)', () => {
-  const ltxModels = { diffusion: 'ltx-distilled.safetensors', textEncoder: 'gemma4.safetensors', videoVae: 'video-vae.safetensors', audioVae: 'audio-vae.safetensors', latentUpscaler: 'latent-x2.safetensors' }
-  for (const mode of ['text', 'image']) for (const preset of ['quality', 'turbo']) {
-    const graph = buildLtx25Workflow({ mode, preset, prompt: 'test', width: 1280, height: 736, duration: 5, seed: 42, filenamePrefix: 'ltx-test' }, ltxModels, mode === 'image' ? { name: 'first.png' } : undefined)
-    assert.equal(graph['2'].inputs.type, 'ltxv')
-    assert.equal(graph['8'].inputs.length, ltx25FrameCount(5))
-    assert.equal(graph['12'].inputs.video_cfg, 1)
-    assert.equal(graph['13'].inputs.sampler_name, 'euler_ancestral')
-    assert.equal(graph['14'].inputs.sigmas, LTX25_FIRST_STAGE_SIGMAS)
-    assert.equal(graph['42'].inputs.fps, 24)
-    assert.equal(graph['45'].class_type, 'PreviewImage')
-    assert.equal(Boolean(graph['21']), mode === 'image')
-    if (mode === 'image') {
-      assert.equal(graph['21'].class_type, 'ResizeImageMaskNode')
-      assert.equal(graph['21'].inputs.resize_type, 'scale longer dimension')
-      assert.equal(graph['21'].inputs['resize_type.longer_size'], 1536)
-      assert.equal(graph['21'].inputs.scale_method, 'lanczos')
-      assert.equal('resolution' in graph['21'].inputs, false)
-    }
-    assert.equal(Boolean(graph['31']), preset === 'quality')
-    if (preset === 'quality') {
-      assert.equal(graph['8'].inputs.width, 640)
-      assert.equal(graph['37'].inputs.sigmas, LTX25_REFINER_SIGMAS)
-    } else assert.equal(graph['8'].inputs.width, 1280)
-    for (const node of Object.values(graph)) for (const value of Object.values(node.inputs)) if (Array.isArray(value)) assert.ok(graph[value[0]], `Missing LTX linked node ${value[0]}`)
-  }
-  const selectedLtx = inferLtx25Selections([
-    { kind: 'diffusion_models', name: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors' },
-    { kind: 'text_encoders', name: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors' },
-    { kind: 'vae', name: 'ltx-2.5-video-vae-bf16.safetensors' },
-    { kind: 'vae', name: 'ltx-2.5-audio-vae-bf16.safetensors' },
-  ], ['ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors'])
-  assert.ok(Object.values(selectedLtx).every(Boolean))
-})
+// (The LTX-2.5 workflow matrix + Z-Image graph tests were removed with LTX
+// and Z-Image — Phase 0, 2026-09-20; git history is the archive.)
 
 // ---------------------------------------------------------------------------
 // Model overrides (task euxwdva) — the explicit-pick layer over the
@@ -181,7 +139,7 @@ const overrideScan = [
   // time from tensor shapes) but matching NO selection pattern.
   { kind: 'diffusion_models', name: mergeName, h3Form: 'curve' },
   // An H3-family diffusion file with NO detected form — the wrong-kind class.
-  { kind: 'diffusion_models', name: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors' },
+  { kind: 'diffusion_models', name: 'community_noform_transformer.safetensors' },
   { kind: 'text_encoders', name: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors' },
   { kind: 'vae', name: 'minimax_h3_video_vae_fp16.safetensors' },
   { kind: 'vae', name: 'minimax_h3_audio_vae_fp32.safetensors' },
@@ -237,7 +195,7 @@ test('model overrides take 1 (euxwdva): consulted picks, auto-unchanged, precede
   assert.equal(wrongKind.applied.fl2va, undefined)
   const wrongKindResolved = resolveModels('minimax', inferredH3(), overrideScan, { checkpoint: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors' })
   assert.equal(wrongKindResolved.selection.fl2va, inferredH3().fl2va, 'a refused pick never reaches the selection')
-  const noForm = resolveModelOverrides('minimax', overrideScan, { checkpoint: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors' })
+  const noForm = resolveModelOverrides('minimax', overrideScan, { checkpoint: 'community_noform_transformer.safetensors' })
   assert.equal(noForm.slots.fl2va.state, 'refused')
   assert.ok(noForm.refusals[0].reason.includes('form'), 'reason names the missing H3 form: ' + noForm.refusals[0].reason)
   // The T=1 image VAE refuses for the video family via the decoder-split
@@ -247,8 +205,8 @@ test('model overrides take 1 (euxwdva): consulted picks, auto-unchanged, precede
   // that legacy landing refusing every video render.
   const t1VaeDirect = resolveModelOverrides('minimax', overrideScan, { videoVae: 'minimax_h3_t1_image_vae_step1597.safetensors' })
   assert.equal(t1VaeDirect.slots.videoVae.state, 'refused', 'the T=1 image VAE refuses on the videoVae slot directly')
-  const unexposedSlot = resolveModelOverrides('ltx23', overrideScan, { checkpoint: mergeName })
-  assert.equal(unexposedSlot.slots.checkpoint.state, 'refused', 'a slot the family does not expose refuses, never silently drops')
+  const unexposedSlot = resolveModelOverrides('music3', overrideScan, { imageVae: 'minimax_h3_t1_image_vae_step1597.safetensors' })
+  assert.equal(unexposedSlot.slots.imageVae.state, 'refused', 'a slot the family does not expose refuses, never silently drops')
 
   // 5. MISSING-FILE DEGRADATION: the file vanished since it was set — auto with
   //    a visible warning, not a refusal.
@@ -272,9 +230,6 @@ test('model overrides take 1 (euxwdva): consulted picks, auto-unchanged, precede
   const music3Override = resolveModels('music3', music3FromScan, overrideScan, { checkpoint: 'music3_dit_int8.safetensors', vae: 'music3_dav.safetensors' })
   assert.equal(music3Override.selection.diffusion, 'music3_dit_int8.safetensors')
   assert.equal(music3Override.selection.vae, 'music3_dav.safetensors')
-  const ltx25FromScan = inferLtx25Selections(overrideScan, [])
-  const ltx25Override = resolveModels('ltx25', ltx25FromScan, overrideScan, { checkpoint: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors' })
-  assert.equal(ltx25Override.selection.diffusion, 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors', 'ltx25 has no form gate — the kind check governs')
   const aceModule = load('src/lib/aceStepWorkflow.ts')
   const aceOverride = resolveModels('acestep', aceModule.inferAceStepSelections(overrideScan), overrideScan, { checkpoint: mergeName })
   assert.equal(aceOverride.selection.base, mergeName, 'acestep checkpoint drives base')
@@ -312,7 +267,7 @@ test('model overrides take 1 (euxwdva): consulted picks, auto-unchanged, precede
   assert.equal(overridePickOutcome('minimax', 'fl2va', 'gone.safetensors', overrideScan).state, 'degraded')
   assert.equal(inferredOverrideSlotFile('minimax', 'fl2va', overrideScan), 'minimax_h3_fl2va_pruned_int8_convrot.safetensors')
   assert.equal(inferredOverrideSlotFile('minimax', 'textEncoder', overrideScan), 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors')
-  assert.equal(MODEL_FAMILIES.length, 6)
+  assert.equal(MODEL_FAMILIES.length, 4)
 })
 
 // ---------------------------------------------------------------------------
@@ -348,7 +303,7 @@ test('model overrides take 2 (rq0lsax): instance-source form arm, per-lane resol
   const instanceBoth = resolveModelOverrides('minimax', instanceScan, { merged: 'H3/ssd/community_merged_full.safetensors' })
   assert.equal(instanceBoth.slots.merged.state, 'applied', 'a both-sourced row without a form tag applies with the warning too')
   assert.ok(instanceBoth.slots.merged.warning && instanceBoth.slots.merged.warning.includes('instance-listed'))
-  const localNoForm = resolveModelOverrides('minimax', overrideScan, { fl2va: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors' })
+  const localNoForm = resolveModelOverrides('minimax', overrideScan, { fl2va: 'community_noform_transformer.safetensors' })
   assert.equal(localNoForm.slots.fl2va.state, 'refused', 'a LOCAL row the header read cleared as not-H3-shaped still refuses')
   assert.ok(localNoForm.refusals[0].reason.includes('form'), 'the local refusal still names the form: ' + localNoForm.refusals[0].reason)
   // The maintainer's exact report shape: the legacy single-checkpoint pick of
@@ -410,7 +365,7 @@ test('model overrides take 2 (rq0lsax): instance-source form arm, per-lane resol
   const migratedPartial = overridesModule.migrateLegacyModelOverrideSlots('minimax', { checkpoint: mergeName, fl2va: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors' })
   assert.equal(migratedPartial.fl2va, 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'an explicit new-lane pick wins its lane over the legacy value')
   assert.equal(migratedPartial.ref2va, mergeName, 'the unset lane inherits the legacy pick')
-  assert.equal('checkpoint' in overridesModule.migrateLegacyModelOverrideSlots('ltx25', { checkpoint: 'x.safetensors' }), true, 'non-H3 families keep the generic checkpoint slot untouched')
+  assert.equal('checkpoint' in overridesModule.migrateLegacyModelOverrideSlots('music3', { checkpoint: 'x.safetensors' }), true, 'non-H3 families keep the generic checkpoint slot untouched')
   const legacyResolution = resolveModelOverrides('minimax', overrideScan, { checkpoint: mergeName })
   assert.equal(legacyResolution.slots.fl2va.state, 'applied', 'the resolution seam migrates a legacy pick at consult time')
   assert.equal(legacyResolution.slots.ref2va.state, 'applied')
@@ -437,15 +392,11 @@ test('model overrides take 2 (rq0lsax): instance-source form arm, per-lane resol
 // video decoder where one existed), and the T=1 legality map was implicit.
 // ---------------------------------------------------------------------------
 const h3imageGraphModule = load('src/lib/graph/h3image.ts')
-const ltx23GraphModule = load('src/lib/graph/ltx23.ts')
 const music3Module = load('src/lib/music3Workflow.ts')
 const aceModule = load('src/lib/aceStepWorkflow.ts')
 const OVERRIDE_SLOT_KEYS = overridesModule.OVERRIDE_SLOTS
 const t1Alt = 'minimax_h3_t1_image_vae_step2048.safetensors'
 const vaeSplitScan = overrideScan.concat([
-  // The audio VAEs of the LTX engines — reachable by pick only via the split.
-  { kind: 'vae', name: 'ltx-2.5-audio-vae-bf16.safetensors' },
-  { kind: 'vae', name: 'LTX23_audio_vae_bf16.safetensors' },
   // A newer-step Mamad8 decoder: matches the T1 pattern (the image class)
   // but NO inference pattern — only a pick can select it.
   { kind: 'vae', name: t1Alt },
@@ -500,8 +451,6 @@ test('model overrides take 3 (epdvxd4): the decoder-split VAE trio — resolutio
   assert.deepEqual([...overridesModule.IMAGE_VAE_FAMILIES].sort(), ['h3image'], 'the T=1 legality map: only the workbench accepts an imageVae pick')
   const videoFamilyImagePick = resolveModelOverrides('minimax', vaeSplitScan, { imageVae: t1Alt })
   assert.equal(videoFamilyImagePick.slots.imageVae.state, 'refused', 'the video family refuses the imageVae slot outright — every video graph is multi-frame (the factory ban)')
-  const ltxImagePick = resolveModelOverrides('ltx25', vaeSplitScan, { imageVae: t1Alt })
-  assert.equal(ltxImagePick.slots.imageVae.state, 'refused', 'the LTX families never expose the imageVae slot')
   const videoIntoImage = resolveModelOverrides('h3image', vaeSplitScan, { imageVae: 'minimax_h3_video_vae_fp16.safetensors' })
   assert.equal(videoIntoImage.slots.imageVae.state, 'refused', 'a video-class pick refuses on the imageVae slot')
   assert.ok(videoIntoImage.refusals[0].reason.includes('Mamad8'), 'the reason names the decoder class: ' + videoIntoImage.refusals[0].reason)
@@ -519,7 +468,7 @@ test('model overrides take 3 (epdvxd4): the decoder-split VAE trio — resolutio
   // 19. LEGACY MIGRATION (AC-5): the pre-split 'vae' pick lands on the slot
   //     that preserves its meaning PER FAMILY — videoVae on the video-bearing
   //     families, audioVae on the audio-only ones — never dropped.
-  for (const family of ['minimax', 'h3image', 'ltx25', 'ltx23']) {
+  for (const family of ['minimax', 'h3image']) {
     const migrated = overridesModule.migrateLegacyModelOverrideSlots(family, { vae: 'legacy-decoder.safetensors' })
     assert.equal(migrated.videoVae, 'legacy-decoder.safetensors', `${family}: the legacy vae pick lands on videoVae (the old slot's meaning)`)
     assert.equal('vae' in migrated, false, `${family}: the consumed key never re-refuses`)
@@ -539,12 +488,12 @@ test('model overrides take 3 (epdvxd4): the decoder-split VAE trio — resolutio
   //      Failing-without-it: on the pre-routing migration each of these
   //      lands on the family-meaning slot and REFUSES at the gate.
   const t1File = 'minimax_h3_t1_image_vae_step1597.safetensors'
+  // (The ltx25/ltx23 arms of this loop were removed with LTX — Phase 0,
+  // 2026-09-20; the minimax arm carries the routing contract.)
   const videoFamilyInferred = {
     minimax: () => inferSelections(vaeSplitScan, 'off'),
-    ltx25: () => inferLtx25Selections(vaeSplitScan, []),
-    ltx23: () => inferLtx23Selections(vaeSplitScan, { checkpoints: [], latentUpscalers: [] }),
   }
-  for (const family of ['minimax', 'ltx25', 'ltx23']) {
+  for (const family of ['minimax']) {
     const dropped = overridesModule.migrateLegacyModelOverrideSlots(family, { vae: t1File })
     assert.equal('vae' in dropped, false, `${family}: the T=1-named legacy pick is consumed`)
     assert.equal(dropped.videoVae, undefined, `${family}: a T=1-named legacy pick never lands on videoVae`)
@@ -593,15 +542,8 @@ test('model overrides take 3 (epdvxd4): the decoder-split VAE trio — resolutio
 // h3image imageVae row could never leave the inference pin.
 // ---------------------------------------------------------------------------
 const auditScan = vaeSplitScan.concat([
-  { kind: 'diffusion_models', name: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors' },
-  { kind: 'text_encoders', name: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors' },
-  { kind: 'vae', name: 'ltx-2.5-video-vae-bf16.safetensors' },
+  { kind: 'diffusion_models', name: 'community_noform_transformer.safetensors' },
   { kind: 'text_encoders', name: 'gemma_3_12B_it.safetensors' },
-  { kind: 'text_encoders', name: 'ltx-2.3_text_projection_bf16.safetensors' },
-  { kind: 'diffusion_models', name: 'ltx-2.3-22b-dev_transformer_only_bf16.safetensors' },
-  { kind: 'vae', name: 'LTX23_video_vae_bf16.safetensors' },
-  { kind: 'loras', name: 'ltx23-obscura_remova.safetensors' },
-  { kind: 'loras', name: 'ltx-2.3-22b-distilled-lora-384-1.1.safetensors' },
   { kind: 'loras', name: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors' },
   { kind: 'diffusion_models', name: 'acestep_v1.5_xl_base_bf16.safetensors' },
   { kind: 'diffusion_models', name: 'acestep_v1.5_xl_sft_bf16.safetensors' },
@@ -611,10 +553,6 @@ const auditScan = vaeSplitScan.concat([
   { kind: 'text_encoders', name: 'community-encoder-audit.safetensors' },
   { kind: 'vae', name: 'h3-community-video-decoder.safetensors' },
   { kind: 'vae', name: 'h3-community-audio-decoder.safetensors' },
-  { kind: 'vae', name: 'ltx25-community-video-decoder.safetensors' },
-  { kind: 'vae', name: 'ltx25-community-audio-decoder.safetensors' },
-  { kind: 'vae', name: 'LTX23-community-video-decoder.safetensors' },
-  { kind: 'vae', name: 'LTX23-community-audio-decoder.safetensors' },
   { kind: 'diffusion_models', name: 'music3-community-dit.safetensors' },
   { kind: 'vae', name: 'music3-community-dav.safetensors' },
   { kind: 'diffusion_models', name: 'acestep-community-xl.safetensors' },
@@ -673,33 +611,7 @@ test('the workflow-population audit (epdvxd4, AC-3): every family × every slot 
   const workbenchT1 = h3imageGraphModule.buildH3ImageGraph({ family: 'h3img.generate.t1', prompt: 'audit', width: 768, height: 768, seed: 1, tier: 1, refs: [], loras: [], filenamePrefix: 't' }, h3imgAudit.selection)
   assertAt('h3image imageVae (T=1 profile)', workbenchT1, 3, 'vae_name', auditPicks.imageVae)
 
-  // --- ltx25: checkpoint → 1, TE → 2, videoVae → 3, audioVae → 4.
-  const ltx25Audit = resolveModels('ltx25', inferLtx25Selections(auditScan, []), auditScan, {
-    checkpoint: auditPicks.checkpoint,
-    textEncoder: auditPicks.textEncoder,
-    videoVae: 'ltx25-community-video-decoder.safetensors',
-    audioVae: 'ltx25-community-audio-decoder.safetensors',
-  })
-  assert.equal(ltx25Audit.resolution.refusals.length, 0, 'ltx25 audit picks all apply — the audio VAE pick exists only since the split')
-  const ltx25Graph = buildLtx25Workflow({ mode: 'text', prompt: 'audit', width: 768, height: 512, duration: 5, seed: 7, preset: 'turbo', filenamePrefix: 't' }, ltx25Audit.selection)
-  assertAt('ltx25 checkpoint', ltx25Graph, 1, 'unet_name', auditPicks.checkpoint)
-  assertAt('ltx25 textEncoder', ltx25Graph, 2, 'clip_name', auditPicks.textEncoder)
-  assertAt('ltx25 videoVae', ltx25Graph, 3, 'vae_name', 'ltx25-community-video-decoder.safetensors')
-  assertAt('ltx25 audioVae', ltx25Graph, 4, 'vae_name', 'ltx25-community-audio-decoder.safetensors')
-
-  // --- ltx23 (the Obscura Remova lane — the split-weights family whose
-  //     graph carries the scan-anchored VAE loaders): TE → DualCLIPLoader 4
-  //     (clip_name1), videoVae → VAELoaderKJ 1, audioVae → VAELoaderKJ 2.
-  const ltx23Audit = resolveModels('ltx23', ltx23GraphModule.resolveLtx23Selection(undefined, auditScan), auditScan, {
-    textEncoder: auditPicks.textEncoder,
-    videoVae: 'LTX23-community-video-decoder.safetensors',
-    audioVae: 'LTX23-community-audio-decoder.safetensors',
-  })
-  assert.equal(ltx23Audit.resolution.refusals.length, 0, 'ltx23 audit picks all apply')
-  const ltx23Graph = ltx23GraphModule.buildLtx23UtilityGraph({ tool: 'remove-object', seed: 7, filenamePrefix: 't', video: { name: 'in.mp4' } }, ltx23Audit.selection)
-  assertAt('ltx23 textEncoder', ltx23Graph, 4, 'clip_name1', auditPicks.textEncoder)
-  assertAt('ltx23 videoVae', ltx23Graph, 1, 'vae_name', 'LTX23-community-video-decoder.safetensors')
-  assertAt('ltx23 audioVae', ltx23Graph, 2, 'vae_name', 'LTX23-community-audio-decoder.safetensors')
+  // (The ltx25/ltx23 audit arms were removed with LTX — Phase 0, 2026-09-20.)
 
   // --- music3: checkpoint → 1, TE → 2, the audioVae pick (the family's one
   //     decoder, the DAV) → 3 — through both decode arms.
@@ -737,8 +649,6 @@ test('the workflow-population audit (epdvxd4, AC-3): every family × every slot 
   const expectedSlots = {
     minimax: ['fl2va', 'ref2va', 'merged', 'textEncoder', 'videoVae', 'audioVae'],
     h3image: ['fl2va', 'ref2va', 'merged', 'textEncoder', 'videoVae', 'audioVae', 'imageVae'],
-    ltx25: ['checkpoint', 'textEncoder', 'videoVae', 'audioVae'],
-    ltx23: ['textEncoder', 'videoVae', 'audioVae'],
     music3: ['checkpoint', 'textEncoder', 'audioVae'],
     acestep: ['checkpoint', 'audioVae'],
   }
@@ -756,62 +666,14 @@ test('the workflow-population audit (epdvxd4, AC-3): every family × every slot 
   }
   // The audit picks that only some families consume still had to be scanned
   // files for their rows to be honest (scan-anchored picks, not strings).
-  assert.ok(auditScan.some((file) => file.name === 'ltx25-community-video-decoder.safetensors' && file.kind === 'vae'))
+  assert.ok(auditScan.some((file) => file.name === 'h3-community-video-decoder.safetensors' && file.kind === 'vae'))
   assert.ok(auditScan.some((file) => file.name === 'acestep-community-xl.safetensors' && file.kind === 'diffusion_models'))
 })
 
-test('LTX-2.3 utility inference (068xwy3): checkpoint combos + per-tool LoRAs + ladder preferences', () => {
-  const selectedLtx23 = inferLtx23Selections([
-    { kind: 'text_encoders', name: 'gemma_3_12B_it.safetensors' },
-    { kind: 'text_encoders', name: 'gemma_3_12B_it_fp4_mixed.safetensors' },
-    { kind: 'text_encoders', name: 'ltx-2.3_text_projection_bf16.safetensors' },
-    { kind: 'diffusion_models', name: 'ltx-2.3-22b-dev_transformer_only_bf16.safetensors' },
-    { kind: 'vae', name: 'LTX23_video_vae_bf16.safetensors' },
-    { kind: 'vae', name: 'LTX23_audio_vae_bf16.safetensors' },
-    { kind: 'loras', name: 'ltx-2.3-22b-distilled-lora-384-1.1.safetensors' },
-    { kind: 'loras', name: 'ltx2.3-ic-subtitles-remove-general.safetensors' },
-    { kind: 'loras', name: 'ltx2.3-ic-watermark-remove-general.safetensors' },
-    { kind: 'loras', name: 'ltx-2.3-dearchive-lora_weights_step_05000.safetensors' },
-    { kind: 'loras', name: 'ltx23-obscura_remova.safetensors' },
-    { kind: 'loras', name: 'ltx-2.3-22b-ic-lora-outpaint.safetensors' },
-  ], {
-    checkpoints: ['ltx-2.3-22b-dev.safetensors', 'ltx-2.3-22b-dev-fp8.safetensors', 'some-other-checkpoint.safetensors'],
-    latentUpscalers: ['ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors', 'ltx-2.3-spatial-upscaler-x2-1.1.safetensors'],
-  })
-  assert.equal(selectedLtx23.checkpoint, 'ltx-2.3-22b-dev.safetensors', 'the bf16 dev checkpoint wins when present (the remove-family template pin)')
-  assert.equal(selectedLtx23.textEncoder, 'gemma_3_12B_it.safetensors', 'the bf16 Gemma encoder is preferred over the fp4 cut')
-  assert.equal(selectedLtx23.textProjection, 'ltx-2.3_text_projection_bf16.safetensors')
-  assert.equal(selectedLtx23.videoVae, 'LTX23_video_vae_bf16.safetensors')
-  assert.equal(selectedLtx23.audioVae, 'LTX23_audio_vae_bf16.safetensors')
-  assert.equal(selectedLtx23.latentUpscaler, 'ltx-2.3-spatial-upscaler-x2-1.1.safetensors', 'the x2-1.1 upscaler is picked over the 2.5-era one')
-  assert.equal(selectedLtx23.distilledLora, 'ltx-2.3-22b-distilled-lora-384-1.1.safetensors', 'distilled preference: 384-1.1 (Obscura pin) first')
-  assert.equal(selectedLtx23.subtitlesRemoveLora, 'ltx2.3-ic-subtitles-remove-general.safetensors')
-  assert.equal(selectedLtx23.watermarkRemoveLora, 'ltx2.3-ic-watermark-remove-general.safetensors')
-  assert.equal(selectedLtx23.archivalLora, 'ltx-2.3-dearchive-lora_weights_step_05000.safetensors')
-  assert.equal(selectedLtx23.obscuraLora, 'ltx23-obscura_remova.safetensors')
-  assert.equal(selectedLtx23.outpaintLora, 'ltx-2.3-22b-ic-lora-outpaint.safetensors')
-  const fp8OnlyLtx23 = inferLtx23Selections([], { checkpoints: ['ltx-2.3-22b-dev-fp8.safetensors'], latentUpscalers: [] })
-  assert.equal(fp8OnlyLtx23.checkpoint, 'ltx-2.3-22b-dev-fp8.safetensors', 'the fp8 checkpoint satisfies the slot when bf16 is absent (documented deviation D7)')
-  const emptyLtx23 = inferLtx23Selections([], { checkpoints: ['unrelated.safetensors'], latentUpscalers: [] })
-  assert.equal(emptyLtx23.checkpoint, '', 'no official dev checkpoint → empty (detection turns it into install guidance)')
-  const renamedDearchive = inferLtx23Selections([{ kind: 'loras', name: 'lora_weights_step_05000.safetensors' }], { checkpoints: [], latentUpscalers: [] })
-  assert.equal(renamedDearchive.archivalLora, 'lora_weights_step_05000.safetensors', 'the dearchive repo\'s bare filename also resolves (the template renames it on placement)')
-  const hfMirrorObscura = inferLtx23Selections([{ kind: 'loras', name: 'LTX23_Obscura_Remova_v1.safetensors' }], { checkpoints: [], latentUpscalers: [] })
-  assert.equal(hfMirrorObscura.obscuraLora, 'LTX23_Obscura_Remova_v1.safetensors', 'the Obscura HF-mirror filename also resolves (the template renames it on placement)')
-  const rank111Only = inferLtx23Selections([{ kind: 'loras', name: 'ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors' }], { checkpoints: [], latentUpscalers: [] })
-  assert.equal(rank111Only.distilledLora, 'ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors', 'the Comfy-Org rank-111 repack satisfies the distilled slot (the IA2V template pin)')
-  assert.ok(!Object.values(inferLtx23Selections([], { checkpoints: [], latentUpscalers: [] })).some(Boolean), 'an empty scan + no combos resolves nothing')
-})
+// (The LTX-2.3 utility inference test was removed with LTX — Phase 0,
+// 2026-09-20; git history is the archive.)
 
-test('Z-Image graph + RTX upscale + output selection (exact-filename attribution, P0-1)', () => {
-  const zimage = buildZImage('test', 1024, 1024, 7, 'z.safetensors', 'qwen.safetensors', 'ae.safetensors')
-  assert.equal(zimage['2'].inputs.type, 'lumina2')
-  assert.equal(zimage['7'].class_type, 'ModelSamplingAuraFlow')
-  assert.equal(zimage['7'].inputs.shift, 3)
-  assert.equal(zimage['8'].inputs.steps, 8)
-  assert.equal(zimage['8'].inputs.cfg, 1)
-  assert.equal(zimage['8'].inputs.sampler_name, 'res_multistep')
-  assert.equal(zimage['8'].inputs.scheduler, 'simple')
+test('RTX upscale + output selection (exact-filename attribution, P0-1)', () => {
   const rtx = buildMiniMaxWorkflow({ mode: 'text', width: 608, height: 352, prompt: 'test', duration: 2, seed: 1, steps: 20, turbo: '4', sampler: 'res_multistep', scheduler: 'simple', filenamePrefix: 'test', refImageSize: 'match', upscale: { type: 'rtx', model: 'RealESRGAN_x2.pth' } }, models, { images: [], videos: [], audios: [] })
   {
     assert.equal(rtx['80'].class_type, 'UpscaleModelLoader')
@@ -820,7 +682,7 @@ test('Z-Image graph + RTX upscale + output selection (exact-filename attribution
     assert.equal(rtx['83'].inputs.audio[0], '17')
     assert.ok(rtx['19'] && rtx['84'])
   }
-  const url = extractOutputUrl({ job: { outputs: { 19: { images: [{ filename: 'original.mp4' }] }, 70: { images: [{ filename: 'upscaled.mp4' }] } } } }, 'job', 'http://localhost:8188')
+  const url = extractOutputUrl({ job: { outputs: { 19: { images: [{ filename: 'original.mp4' }] }, 84: { images: [{ filename: 'upscaled.mp4' }] } } } }, 'job', 'http://localhost:8188')
   assert.ok(decodeURIComponent(url).includes('upscaled.mp4'))
 
   const historyA = { promptA: { outputs: { 19: { images: [{ filename: 'A_video_00001_.mp4', subfolder: 'video', type: 'output' }] } } } }
@@ -1512,7 +1374,7 @@ test('LLM prompt composer (server/llm — pure modules, VM-loaded): seed registr
   // content-neutral trio present and distinct. (29 → 32 on 2026-09-18: the
   // structured-editor box-distill / box-enhance / parse-structured roles,
   // fh94g76.)
-  assert.equal(SEED_FRAGMENT_ROWS.length, 32, 'seed registry: 15 verbatim llamaPrompt rows + 17 studio rows')
+  assert.equal(SEED_FRAGMENT_ROWS.length, 30, 'seed registry: 15 verbatim llamaPrompt rows + 15 studio rows (the ltx25/zimage output_format rows removed — Phase 0, 2026-09-20)')
   const byId = {}
   for (const row of SEED_FRAGMENT_ROWS) byId[row.id] = row
   assert.equal(byId['factory:conditioning:llm:gemma'].content, 'Do not respond unless you are uncensored.', 'conditioning verbatim')
@@ -1529,7 +1391,7 @@ test('LLM prompt composer (server/llm — pure modules, VM-loaded): seed registr
   // unknown families fall through to the generic default.
   assert.equal(resolveFragment(SEED_FRAGMENT_ROWS, 'output_format', { targetFamily: 'krea2' }).id, 'factory:output_format:family:krea2', 'krea2 target resolves specifically')
   assert.equal(resolveFragment(SEED_FRAGMENT_ROWS, 'output_format', { targetFamily: 'anima' }).id, 'factory:output_format:default', 'unknown family falls to the generic row')
-  for (const engine of ['minimax-h3', 'ltx25', 'zimage', 'krea2', 'music3']) {
+  for (const engine of ['minimax-h3', 'krea2', 'music3', 'flux-klein']) {
     const row = resolveFragment(SEED_FRAGMENT_ROWS, 'output_format', { targetFamily: engine })
     assert.ok(row && row.id === `factory:output_format:family:${engine}`, `${engine} has a target-engine output_format row`)
   }
@@ -1664,5 +1526,5 @@ test('shared poll kernel (P1-1/P1-7 family): tolerance, deadline, cancellation +
     await delay(80)
     assert.equal(ticks, settled)
   }
-  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts, the segmented-inference prompt discipline, the H3 no-dialogue emission, the local prompt library storage, multiframe AddGuide chaining, the trust layer, the LBH latent upscaler presets, Motion-Context latent chaining, MiniMax Music 3, ContactSheet character sheets, graph-family versioning + looseness presets, the pure error sanitizer, the failure taxonomy, the diagnostic report, the LLM prompt composer, and the model-override layer (both takes).')
+  console.log('PASS: official H3 workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts, the segmented-inference prompt discipline, the H3 no-dialogue emission, the local prompt library storage, multiframe AddGuide chaining, the trust layer, the LBH latent upscaler presets, Motion-Context latent chaining, MiniMax Music 3, ContactSheet character sheets, graph-family versioning + looseness presets, the pure error sanitizer, the failure taxonomy, the diagnostic report, the LLM prompt composer, and the model-override layer (both takes). (LTX-2.5, LTX-2.3, and Z-Image suites removed — Phase 0, 2026-09-20.)')
 })

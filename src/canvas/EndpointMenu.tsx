@@ -8,7 +8,6 @@
  * type-natural generation routes lead.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Download } from 'lucide-react'
 import { useCanvasStore } from './store'
 import { endpointOptions, type SourceKind } from './options'
 import { readChainSettings } from './generation'
@@ -111,25 +110,6 @@ export function EndpointMenu() {
                   <span className="canvas-menu-row-note">{option.available ? option.description : option.reason}</span>
                   {option.hint && option.available && <span className="canvas-menu-row-hint">{option.hint}</span>}
                 </button>
-                {/* QOL wave (rrxlw2r, nits idg8ui4): the one-click fetch
-                    affordance — outside the disabled action button, so the
-                    guidance stays clickable. Opens the settings dock with
-                    these entries highlighted in the FetchBrowser; the fetch
-                    itself still goes through its own consent dialog. */}
-                {option.fetchTargets && option.fetchTargets.length > 0 && (
-                  <button
-                    type="button"
-                    className="canvas-menu-row-fetch"
-                    data-canvas-menu-fetch={option.id}
-                    title={`Opens the fetchable-items browser on: ${option.fetchTargets.map((target) => target.name).join(' · ')}`}
-                    onClick={() => {
-                      useCanvasStore.getState().openFetchBrowser(option.fetchTargets!.map((target) => target.id))
-                      setEndpointMenu(null)
-                    }}
-                  >
-                    <Download size={11} /> fetch missing ({option.fetchTargets.length})
-                  </button>
-                )}
               </div>
             ))}
           </div>

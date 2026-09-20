@@ -94,7 +94,7 @@ test('the 7 greyed views are deleted: no nav, no markers, no surfaces (§8 Phase
   await expect(page.locator('[data-retired="library"]')).toHaveCount(0)
   await expect(page.locator('[data-retired="ltx25"]')).toHaveCount(0)
   // The capabilities live on canvas: the launcher chips + radar buttons.
-  for (const selector of ['[data-canvas-settings-button]', '[data-canvas-studios-button]', '[data-canvas-diagnostics-button]', '[data-canvas-library-button]', '[data-canvas-index-button]']) {
+  for (const selector of ['[data-canvas-settings-button]', '[data-canvas-diagnostics-button]', '[data-canvas-library-button]', '[data-canvas-index-button]']) {
     await expect(page.locator(selector)).toBeVisible()
   }
   await page.screenshot({ path: 'test-results/shots/25-phase5-default-canvas.png' })
@@ -110,27 +110,8 @@ test('every kept surface renders without renderer errors through its canvas dock
   await page.goto('/')
   await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
 
-  // The Studios dock: the five kept ASSET-authoring surfaces (Characters,
-  // Hair, Wardrobe, Accessories, Locations) — lazy chunks load + render.
-  // Movie retired with MoviePlanner in Phase 5b: the plan surface is the
-  // timeline projection (plan documents on the document store).
-  await page.locator('[data-canvas-studios-button]').click()
-  await expect(page.locator('[data-canvas-studios-dock]')).toBeVisible()
-  const studioHeadings: Array<[string, RegExp]> = [
-    ['characters', /character studio/i],
-    ['hair', /hair studio/i],
-    ['wardrobes', /wardrobe studio/i],
-    ['accessories', /accessory studio/i],
-    ['locations', /location studio/i],
-  ]
-  for (const [tab, heading] of studioHeadings) {
-    await page.locator(`[data-canvas-studios-tab="${tab}"]`).click()
-    await expect(page.getByRole('heading', { name: heading }).first()).toBeVisible({ timeout: 15_000 })
-    await page.waitForTimeout(150)
-  }
-  await expect(page.locator('[data-canvas-studios-tab="movie"]')).toHaveCount(0)
-  await page.locator('[data-canvas-studios-close]').click()
-  await expect(page.locator('[data-canvas-studios-dock]')).toHaveCount(0)
+  // (The Studios dock block was removed with the Studios — Phase 0,
+  // 2026-09-20; git history is the archive.)
 
   // The Director Suite (Phase 5b): the timeline projection summons by V.
   await page.keyboard.press('v')
@@ -154,11 +135,8 @@ test('captures 1920x1080 screenshots of the post-deletion surfaces for vision in
   await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
   await page.waitForTimeout(400)
   await page.screenshot({ path: 'test-results/shots/01-default-canvas.png' })
-  await page.locator('[data-canvas-studios-button]').click()
-  await expect(page.getByRole('heading', { name: /character studio/i }).first()).toBeVisible({ timeout: 15_000 })
-  await page.waitForTimeout(400)
-  await page.screenshot({ path: 'test-results/shots/02-studios-characters.png' })
-  await page.locator('[data-canvas-studios-close]').click()
+  // (The 02-studios-characters capture was removed with the Studios —
+  // Phase 0, 2026-09-20.)
   // Phase 5b: the plan surface is the timeline projection (MoviePlanner
   // retired); capture its summoned empty state.
   await page.keyboard.press('v')
@@ -187,7 +165,7 @@ test('launcher keeps the prompt bar and chips visible at 1080p', async ({ page }
   await expect(page.locator('[data-canvas-promptbar]')).toBeVisible()
   expect(await inViewport(page.locator('[data-canvas-prompt]'))).toBe(true)
   expect(await inViewport(page.locator('[data-canvas-submit]'))).toBe(true)
-  for (const chip of ['image', 'video', 'music3', 'acestep', 'studios', 'movie', 'prompt-library']) {
+  for (const chip of ['image', 'video', 'music3', 'acestep', 'movie', 'prompt-library']) {
     await expect(page.locator(`[data-canvas-chip="${chip}"]`)).toBeVisible()
     expect(await inViewport(page.locator(`[data-canvas-chip="${chip}"]`))).toBe(true)
   }
@@ -292,11 +270,8 @@ test('diagnostics dock renders, builds a scrubbed report, and copies it', async 
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
-test('mobile companion view boots alongside the studio', async ({ page }) => {  const problems = await trackErrors(page)
-  await page.goto('/?mobile=1')
-  await expect(page.locator('.mobile-app, main').first()).toBeVisible()
-  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
-})
+// (The mobile companion boot test was removed with the mobile route —
+// Phase 0, 2026-09-20; git history is the archive.)
 
 // Wave 1 — the realtime event fabric: on boot the client establishes its ONE
 // fabric connection to the app's own server (WebSocket primary, SSE v2
@@ -613,9 +588,10 @@ test('first-run guidance: empty model roots show dismissible onboarding, never a
   await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
   const notice = page.locator('[data-canvas-first-run]')
   await expect(notice).toBeVisible({ timeout: 20_000 })
-  await expect(notice).toContainText('No models found')
-  // Path one: straight into Settings (the model-locations config).
-  await notice.getByRole('button', { name: 'Open settings — model locations' }).click()
+  await expect(notice).toContainText('No models visible')
+  // Path one: straight into Settings (the engine connection — the
+  // registry-only model source).
+  await notice.getByRole('button', { name: 'Open settings — engine connection' }).click()
   await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible()
   await page.locator('[data-canvas-settings-close]').click()
   await expect(page.locator('[data-canvas-settings-dock]')).toHaveCount(0)
@@ -729,7 +705,9 @@ test('external instance: instance-sourced models, live pack chips, install into 
     // The merged inventory: instance rows with zero local files.
     const diffusionCount = page.locator('[data-model-kind-count="diffusion_models"]')
     await expect(diffusionCount).toBeVisible({ timeout: 20_000 })
-    await expect(diffusionCount).toContainText('2 files · 2 instance · 0 local')
+    // (The local-arm count display was trimmed with the registry-only
+    // inventory row — a zero local arm no longer renders; Phase 0, 2026-09-20.)
+    await expect(diffusionCount).toContainText('2 files · 2 instance')
 
     // Live chips from the instance's own node list: the hybrid loader pack is
     // INSTALLED ON INSTANCE (its class is served) with no folder install at
@@ -779,15 +757,15 @@ test('external instance: instance-sourced models, live pack chips, install into 
     // follow-up: this is a working instance's normal state, not a failure;
     // mjhlt3k: a foreign USER-FETCH row carries neither Fetch… nor Install —
     // its only install path would be refused over the pre-existing folder).
-    mkdirSync(join(externalDir, 'radiance'), { recursive: true })
-    writeFileSync(join(externalDir, 'radiance', 'user-file.py'), '# theirs\n')
+    mkdirSync(join(externalDir, 'comfyui-minimax-h3-audio-T8'), { recursive: true })
+    writeFileSync(join(externalDir, 'comfyui-minimax-h3-audio-T8', 'user-file.py'), '# theirs\n')
     await page.locator('[data-canvas-settings-close]').click()
     await page.locator('[data-canvas-settings-button]').click()
-    const radianceRow = page.locator('.node-pack-row').filter({ hasText: 'radiance' })
+    const radianceRow = page.locator('.node-pack-row').filter({ hasText: 'comfyui-minimax-h3-audio-T8' })
     await expect(radianceRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'present — not studio-managed', { timeout: 15_000 })
     await expect(radianceRow.getByRole('button', { name: 'Fetch…' })).toHaveCount(0)
     await expect(radianceRow.getByRole('button', { name: /^Install$/ })).toHaveCount(0)
-    expect(fs.readFileSync(join(externalDir, 'radiance', 'user-file.py'), 'utf8')).toBe('# theirs\n')
+    expect(fs.readFileSync(join(externalDir, 'comfyui-minimax-h3-audio-T8', 'user-file.py'), 'utf8')).toBe('# theirs\n')
 
     expect(problems.filter((entry) => !environmental(entry))).toEqual([])
   } finally {

@@ -32,9 +32,9 @@ export type CanvasChainSettings = {
    *  (Music 3 / ACE-Step) create mediaType 'audio' chains. */
   mediaType: 'video' | 'image' | 'audio'
   /** §5.4 engines-as-ops (Phase 4): which engine a video chain renders
-   *  through — H3 (default) or the LTX-2.5 general graph (the typed-hole
-   *  produce row; the workspace greyed out with the nav model). */
-  engine: 'h3' | 'ltx25'
+   *  through — H3 (the only engine since LTX's removal, Phase 0 2026-09-20;
+   *  the field survives as the documented seam). */
+  engine: 'h3'
   /** The image intent's engine (34afx79, 2026-09-19) — the two-slot typed
    *  hole: H3-1F (the h3image Generate-T=1 family) is wired today; Krea 2
    *  stills (mf3wfq6, queued) is the second slot and docks into the same
@@ -189,7 +189,8 @@ export function readChainSettings(raw: Record<string, unknown>, settings?: AppSe
     : []
   const turbo = raw.turbo === 'off' || raw.turbo === '4' || raw.turbo === '8' ? raw.turbo : base.turbo
   const policy = raw.clothingPolicy === 'wardrobe' || raw.clothingPolicy === 'underwear' || raw.clothingPolicy === 'unrestricted' ? raw.clothingPolicy : base.clothingPolicy
-  const upscale = raw.upscaleMode === 'ltx' || raw.upscaleMode === 'rtx' || raw.upscaleMode === 'lbh2d' || raw.upscaleMode === 'lbh3d' ? raw.upscaleMode : 'off'
+  // A stored 'ltx' (the removed Phase-0 mode) falls back to 'off'.
+  const upscale = raw.upscaleMode === 'rtx' || raw.upscaleMode === 'lbh2d' || raw.upscaleMode === 'lbh3d' ? raw.upscaleMode : 'off'
   // Model overrides (task euxwdva): per-slot strings only; anything else
   // (wrong type, empty) drops to auto — external data never crashes the read.
   // The H3 per-lane slots (rq0lsax) and the decoder-split VAE trio (epdvxd4)
@@ -206,7 +207,7 @@ export function readChainSettings(raw: Record<string, unknown>, settings?: AppSe
     ...base,
     prompt: str(raw.prompt, base.prompt),
     mediaType: raw.mediaType === 'image' ? 'image' : raw.mediaType === 'audio' ? 'audio' : 'video',
-    engine: raw.engine === 'ltx25' ? 'ltx25' : 'h3',
+    engine: 'h3',
     imageEngine: raw.imageEngine === 'krea2' ? 'krea2' : 'h3-1f',
     audio,
     duration: Math.max(2, Math.min(15, num(raw.duration, base.duration))),

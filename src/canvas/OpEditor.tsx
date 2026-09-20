@@ -424,7 +424,6 @@ export function OpEditor() {
               return <>
                 <label>engine
                   <select data-canvas-op-field="mode" value={upscale.mode} onChange={(event) => patchSelected({ mode: event.target.value }, true)}>
-                    <option value="ltx">LTX 2.5 spatial ×2</option>
                     <option value="rtx">AI upscale model (RTX)</option>
                     <option value="lbh2d">LBH-123-AI 2D latent</option>
                     <option value="lbh3d">LBH-123-AI 3D latent</option>

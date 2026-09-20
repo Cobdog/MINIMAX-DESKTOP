@@ -76,6 +76,11 @@ export type VisionScenario = {
  *  (MoviePlanner retired — plan documents + the timeline projection are the
  *  planning surface).
  *
+ *  Rubric amendment (2026-09-20, Phase 0): the titlebar "studios" button
+ *  and the launcher "studios" chip are GONE (the five asset Studios and the
+ *  mobile companion removed; LTX and Z-Image fully removed) — their absence
+ *  is the design, not a regression.
+ *
  *  Rubric amendment (2026-09-18, QOL wave rrxlw2r): the titlebar now LEADS
  *  with the shared surface switcher — a compact bordered pill group ("canvas"
  *  and "datasets" today; more surfaces appear as they register) with the
@@ -84,7 +89,7 @@ export type VisionScenario = {
  *  the canvas-default-boot rubric). */
 const SHELL_CONTEXT = [
   'Context for every clause: a dark-theme desktop studio app at 1920x1080 whose ONLY surface is a video canvas — a slim top titlebar over a near-black dotted-grid infinite canvas. There is NO left sidebar and NO grouped navigation: the old shell was deleted (Phase 5); do not flag its absence.',
-  'Top titlebar (slim): FIRST a compact surface-switcher pill group — small linked pills reading "canvas" and "datasets" with the active surface highlighted inside a thin rounded border (QOL wave 2026-09-18) — then canvas tabs (a named tab like "Canvas <date>" with an × affordance), a pill-shaped radar button (reading "calm" or a queue count), a muted "engine offline" chip — the engine being offline in tests is CORRECT, not a defect — then small "timeline V", "library V", "studios", "diagnostics", "settings", "index ⌘K" buttons at the right.',
+  'Top titlebar (slim): FIRST a compact surface-switcher pill group — small linked pills reading "canvas" and "datasets" with the active surface highlighted inside a thin rounded border (QOL wave 2026-09-18) — then canvas tabs (a named tab like "Canvas <date>" with an × affordance), a pill-shaped radar button (reading "calm" or a queue count), a muted "engine offline" chip — the engine being offline in tests is CORRECT, not a defect — then small "timeline V", "library V", "diagnostics", "settings", "index ⌘K" buttons at the right.',
   'A slim contextual bottom bar spans the canvas foot; a small object counter may sit bottom-right.',
   'Dimmed/disabled controls and small muted sub-labels are the app\'s intentional dense design language, NOT contrast defects — only flag text that is genuinely unreadable against its immediate background.',
 ].join(' ')
@@ -188,8 +193,8 @@ export const SCENARIOS: VisionScenario[] = [
         label: 'Canvas — default-boot launcher fully visible at 1920x1080 (no old shell anywhere)',
         rubric: [
           SHELL_CONTEXT,
-          'Center of the canvas: a centered launcher block. Its TOP may carry the first-run onboarding notice (QOL wave 2026-09-18): a dashed-blue-bordered card titled "No models found — one setup step before the first render." with two small buttons ("Open settings — model locations", "Browse fetchable items") and an × dismiss — INTENDED guidance on the models-empty test home, never a defect. Below it a large heading "A blank canvas", a one-line subtitle mentioning describing a shot or dropping anything, and below it the PROMPT BAR — a wide dark rounded textarea (placeholder mentioning "/" to focus and Enter to spawn) with a submit button at its right reading "Spawn video seed" with a small video icon.',
-          'Below the prompt bar, a CHIP ROW of small rounded pill buttons, at minimum: "image prompt", "video prompt" (one of these highlighted as the active media type), "noDialogue handoff", "drop / pick media", "Music 3", "ACE-Step", "prompt library", "studios", and "movie plan" — each with a small icon. All chips must sit fully inside the viewport with readable labels.',
+          'Center of the canvas: a centered launcher block. Its TOP may carry the first-run onboarding notice (QOL wave 2026-09-18): a dashed-blue-bordered card titled "No models visible — one setup step before the first render." with two small buttons ("Open settings — engine connection", "Browse fetchable items") and an × dismiss — INTENDED guidance on the models-empty test home, never a defect. Below it a large heading "A blank canvas", a one-line subtitle mentioning describing a shot or dropping anything, and below it the PROMPT BAR — a wide dark rounded textarea (placeholder mentioning "/" to focus and Enter to spawn) with a submit button at its right reading "Spawn video seed" with a small video icon.',
+          'Below the prompt bar, a CHIP ROW of small rounded pill buttons, at minimum: "image prompt", "video prompt" (one of these highlighted as the active media type), "noDialogue handoff", "drop / pick media", "Music 3", "ACE-Step", "prompt library", and "movie plan" — each with a small icon. All chips must sit fully inside the viewport with readable labels.',
           'A "Resume" section below the chips: a header row with the word "Resume" and a "new canvas" button, then either recent-canvas cards (name + date, any count) or the muted line "No other canvases yet — the first prompt creates one." — either state is correct.',
           'NO left sidebar, NO grouped navigation (Create / Queue / Library / Clip editor), NO "retired" pills anywhere — the old shell is deleted by design; any of those appearing is a REGRESSION, flag it.',
           'Defects to flag: overlapping titlebar controls, the prompt bar or chips clipped by the viewport, unreadable text mid-glyph, a pure-white or pure-black dead region covering the surface.',
@@ -315,7 +320,7 @@ export const SCENARIOS: VisionScenario[] = [
           'The text-encoder and Ref2VA rows\' selects show an "auto (inferred) — …" option naming the inferred file, or "auto (inferred) — nothing detected" — either label is correct.',
           'The Audio VAE row\'s select shows an "auto (inferred) — …" option naming the inferred audio VAE file (the video family has NO "Image VAE (T=1)" row at all — that absence is the intended legality map, not a defect).',
           'The MERGED checkpoint row\'s select shows "auto (inferred) — nothing detected" — the intended honest state (inference can never see community merges; that is the override layer\'s reason to exist), not a defect.',
-          'Later families ("MiniMax H3 image workbench", "LTX-2.5 video", "LTX-2.3 utilities", "MiniMax Music 3", "ACE-Step XL 1.5") may continue below the fold; the H3 image workbench family shows the same per-lane trio PLUS an "Image VAE (T=1)" row (the only family with one), LTX-2.5 video shows Video VAE + Audio VAE rows, and LTX-2.3 utilities shows ONLY Text encoder + Video VAE + Audio VAE rows (no checkpoint row) — those shapes are the intended honest slot exposure, not defects.',
+          'Later families ("MiniMax H3 image workbench", "MiniMax Music 3", "ACE-Step XL 1.5") may continue below the fold; the H3 image workbench family shows the same per-lane trio PLUS an "Image VAE (T=1)" row (the only family with one), Music 3 shows Checkpoint + Text encoder + Audio VAE rows, and ACE-Step shows Checkpoint + Audio VAE rows — those shapes are the intended honest slot exposure, not defects. (The LTX-2.5 and LTX-2.3 families were removed — Phase 0, 2026-09-20; their absence is intended.)',
           'Native dropdown selects CLIP a long displayed value at the select\'s right edge without an ellipsis (the full text appears when the dropdown opens) — intended native behavior, not a defect. The FL2VA row\'s applied pick "TenStrip_10Eros-Max_beta5_int8.safetensors" is short enough to display fully.',
           'Defects to flag: rows without selects, two controls overlapping, a select clipped mid-glyph, the card\'s title truncated, a red/refused notice on any checkpoint row (only the amber degraded notice is expected).',
         ].join(' '),
@@ -370,15 +375,17 @@ export const SCENARIOS: VisionScenario[] = [
       // honest states share one capture frame; a Comfy-Registry pyproject
       // folder (managed-by-ComfyUI badge + version 1.4.2) on krea2-controlnet
       // two rows above krea2edit; and a studio marker at an OLD revision
-      // (outdated badge) on radiance (first judged bundle 2026-09-19; the
-      // state set extended 2026-09-19 by mjhlt3k).
+      // (outdated badge) on ComfyUI-MiniMax-H3-Turbo (radiance carried this
+      // fixture before the LTX pack removal — Phase 0, 2026-09-20; first
+      // judged bundle 2026-09-19; the state set extended 2026-09-19 by
+      // mjhlt3k).
       writeFileSync(join(externalDir, 'comfyui-krea2edit', '.studio-node.json'), `${JSON.stringify({ id: 'krea2edit', revision: '86f886dac23013d88996e3a2e99093ba44d322fb', mode: 'user-fetch', installedAt: Date.now(), source: 'vision' }, null, 2)}\n`)
       mkdirSync(join(externalDir, 'krea2-anypaint'), { recursive: true })
       writeFileSync(join(externalDir, 'krea2-anypaint', 'user-file.py'), '# theirs\n')
       mkdirSync(join(externalDir, 'comfyui-krea2-controlnet'), { recursive: true })
       writeFileSync(join(externalDir, 'comfyui-krea2-controlnet', 'pyproject.toml'), '[project]\nname = "comfyui-krea2-controlnet"\nversion = "1.4.2"\n\n[tool.comfy]\nPublisherId = "facok"\n')
-      mkdirSync(join(externalDir, 'radiance'), { recursive: true })
-      writeFileSync(join(externalDir, 'radiance', '.studio-node.json'), `${JSON.stringify({ id: 'radiance', revision: '0123456789abcdef0123456789abcdef01234567', mode: 'user-fetch', installedAt: Date.now(), source: 'vision' }, null, 2)}\n`)
+      mkdirSync(join(externalDir, 'ComfyUI-MiniMax-H3-Turbo'), { recursive: true })
+      writeFileSync(join(externalDir, 'ComfyUI-MiniMax-H3-Turbo', '.studio-node.json'), `${JSON.stringify({ id: 'minimax-h3-turbo', revision: '0123456789abcdef0123456789abcdef01234567', mode: 'user-fetch', installedAt: Date.now(), source: 'vision' }, null, 2)}\n`)
 
       const modelRoot = resolve('test-home/vision-instance-models')
       for (const kind of ['diffusion_models', 'text_encoders', 'vae', 'loras', 'vae_approx', 'clip_vision']) mkdirSync(join(modelRoot, kind), { recursive: true })
@@ -464,20 +471,21 @@ export const SCENARIOS: VisionScenario[] = [
         id: 'settings-engine-packs-outdated-1080p',
         label: 'Settings dock — node packs: the outdated badge (installed behind the pin)',
         drive: async (page) => {
-          // Bring the radiance row (a studio marker at an OLD revision →
-          // outdated) to the top; autocontext below reads missing.
+          // Bring the ComfyUI-MiniMax-H3-Turbo row (a studio marker at an OLD
+          // revision → outdated) to the top; the hybrid-loader row below
+          // reads missing.
           await page.evaluate(() => {
             const rows = Array.from(document.querySelectorAll<HTMLElement>('.node-packs-section .node-pack-row'))
-            const target = rows.find((row) => row.textContent?.includes('radiance'))
+            const target = rows.find((row) => row.textContent?.includes('ComfyUI-MiniMax-H3-Turbo'))
             target?.scrollIntoView({ block: 'start' })
           })
           await page.waitForTimeout(400)
         },
         rubric: [
           SHELL_CONTEXT,
-          'The same Settings dock, scrolled WITHIN the "Node packs" list to the "radiance" pack row (bold name "radiance", a "GPL-3.0" license badge, a "user-fetch" mode tag); rows above sit above the fold (intended scrolling, not clipping; judge only what is in frame).',
-          'The radiance row carries a STATUS BADGE reading "outdated — restart engine to activate" (a warning tone) with a muted version string reading "0123456789ab": the studio placed an older revision than the registry now pins — the honest drift state, CORRECT, not a defect. The row\'s note line names the reinstall move ("pinned revision changed — reinstall to move …").',
-          'The row below ("ComfyUI_MinimaxH3_AutoContext") reads "missing" (muted tone) with a "Fetch…" button in its action column.',
+          'The same Settings dock, scrolled WITHIN the "Node packs" list to the "ComfyUI-MiniMax-H3-Turbo" pack row (bold name, an "Apache-2.0" license badge, a "user-fetch" mode tag); rows above sit above the fold (intended scrolling, not clipping; judge only what is in frame).',
+          'The ComfyUI-MiniMax-H3-Turbo row carries a STATUS BADGE reading "outdated — restart engine to activate" (a warning tone) with a muted version string reading "0123456789ab": the studio placed an older revision than the registry now pins — the honest drift state, CORRECT, not a defect. The row\'s note line names the reinstall move ("pinned revision changed — reinstall to move …").',
+          'The row below ("ComfyUI_MinimaxH3HybridLoader") reads "missing" (muted tone) with a "Fetch…" button in its action column.',
           'Defects to flag: the outdated badge mislabeled (e.g. reading "installed @ pin" or "missing"), the version string absent, badges overlapping text, a "local repo directory" input visible anywhere.',
         ].join(' '),
       },
@@ -1534,37 +1542,35 @@ export const SCENARIOS: VisionScenario[] = [
       },
       {
         id: 'settings-dock-stack',
-        label: 'Three docks open — cascaded positions, every header band visible',
+        label: 'Two docks open — cascaded positions, every header band visible',
         drive: async (page) => {
           await page.setViewportSize({ width: 1920, height: 1080 })
           await page.goto('/')
           await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
-          // Natural order (settings → studios → diagnostics): the 48px
-          // y-steps keep every dock's header band above the next dock's
-          // top, so all three titles are directly visible.
+          // Natural order (settings → diagnostics): the 48px y-steps keep
+          // every dock's header band above the next dock's top, so both
+          // titles are directly visible. (The studios dock was removed with
+          // the Studios — Phase 0, 2026-09-20.)
           await page.locator('[data-canvas-settings-button]').click()
           await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible()
-          await page.locator('[data-canvas-studios-button]').click()
-          await expect(page.locator('[data-canvas-studios-dock]')).toBeVisible()
           await page.locator('[data-canvas-diagnostics-button]').click()
           await expect(page.locator('[data-canvas-diagnostics-dock]')).toBeVisible()
           const ownerAt = async (x: number, y: number) => page.evaluate(({ x, y }) => {
             const element = document.elementFromPoint(x, y)
-            const dock = element?.closest('[data-canvas-settings-dock],[data-canvas-studios-dock],[data-canvas-diagnostics-dock]') as HTMLElement | null
+            const dock = element?.closest('[data-canvas-settings-dock],[data-canvas-diagnostics-dock]') as HTMLElement | null
             if (!dock) return ''
             if (dock.hasAttribute('data-canvas-settings-dock')) return 'settings'
-            if (dock.hasAttribute('data-canvas-studios-dock')) return 'studios'
             if (dock.hasAttribute('data-canvas-diagnostics-dock')) return 'diagnostics'
             return ''
           }, { x, y })
           const positions: Array<{ x: number; y: number }> = []
-          for (const selector of ['[data-canvas-settings-dock]', '[data-canvas-studios-dock]', '[data-canvas-diagnostics-dock]']) {
+          for (const selector of ['[data-canvas-settings-dock]', '[data-canvas-diagnostics-dock]']) {
             const box = await page.locator(selector).boundingBox()
             expect(box, `${selector} has geometry`).not.toBeNull()
             positions.push({ x: box!.x, y: box!.y })
           }
-          expect(new Set(positions.map((position) => `${position.x},${position.y}`)).size, 'no two open docks share a position').toBe(3)
-          for (const selector of ['[data-canvas-settings-dock]', '[data-canvas-studios-dock]', '[data-canvas-diagnostics-dock]']) {
+          expect(new Set(positions.map((position) => `${position.x},${position.y}`)).size, 'no two open docks share a position').toBe(2)
+          for (const selector of ['[data-canvas-settings-dock]', '[data-canvas-diagnostics-dock]']) {
             const icon = await page.locator(`${selector} .canvas-inspector-header svg`).first().boundingBox()
             expect(icon, `${selector} header icon has geometry`).not.toBeNull()
             expect(await ownerAt(icon!.x + 2, icon!.y + 2), `${selector}'s header band is the top hit at its icon`).toBeTruthy()
@@ -1572,10 +1578,10 @@ export const SCENARIOS: VisionScenario[] = [
           await page.waitForTimeout(400)
         },
         rubric: [
-          'Context: the studio at 1920x1080 with THREE floating docks open in the order settings, studios, diagnostics — Settings at the top-left, Studios stepped below-right of it, Diagnostics stepped below-right again. Because each dock\'s header sits ABOVE the next dock\'s top edge, ALL THREE header strips are simultaneously visible down a diagonal: "Settings — docked" (highest, leftmost), "Studios — asset authoring", "Diagnostics — docked" (lowest, most right, fully in front as the most recently opened). Overlapping panel BODIES are expected and fine — only the header bands must each stay visible with their × close buttons.',
-          'Each visible header reads its title with its × close button; bodies show settings sections, the character studio, and the diagnostics report respectively.',
+          'Context: the studio at 1920x1080 with TWO floating docks open in the order settings, diagnostics — Settings at the top-left, Diagnostics stepped below-right of it. Because each dock\'s header sits ABOVE the next dock\'s top edge, BOTH header strips are simultaneously visible down a diagonal: "Settings — docked" (highest, leftmost), "Diagnostics — docked" (lowest, most right, fully in front as the most recently opened). Overlapping panel BODIES are expected and fine — only the header bands must each stay visible with their × close buttons.',
+          'Each visible header reads its title with its × close button; bodies show settings sections and the diagnostics report respectively.',
           'Blessings: docks overlapping each other\'s bodies is intended (floating panels); the newest dock rendering fully in front is intended (raise-on-open).',
-          'Defects to flag: two docks at IDENTICAL positions, a header band (or its ×) completely hidden behind another dock, a dock off-screen, only two docks present when three were opened.',
+          'Defects to flag: two docks at IDENTICAL positions, a header band (or its ×) completely hidden behind another dock, a dock off-screen, only one dock present when two were opened.',
         ].join(' '),
       },
     ],

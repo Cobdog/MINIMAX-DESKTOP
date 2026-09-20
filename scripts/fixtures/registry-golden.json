@@ -3,7 +3,7 @@
  "generatedFrom": "buildMiniMaxWorkflow (registry era)",
  "entries": [
   {
-   "name": "ltx-text-2s",
+   "name": "upscale-text-2s",
    "options": {
     "prompt": "neutral test",
     "width": 352,
@@ -18,9 +18,8 @@
     "duration": 2,
     "turbo": "8",
     "upscale": {
-     "type": "ltx",
-     "model": "ltx-upscale",
-     "vae": "ltx-vae"
+     "type": "rtx",
+     "model": "rtx-upscale.pth"
     }
    },
    "models": {
@@ -209,142 +208,6 @@
       "codec": "auto"
      }
     },
-    "60": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "16",
-       0
-      ],
-      "batch_index": 55,
-      "length": 1
-     }
-    },
-    "61": {
-     "class_type": "RepeatImageBatch",
-     "inputs": {
-      "image": [
-       "60",
-       0
-      ],
-      "amount": 1
-     }
-    },
-    "62": {
-     "class_type": "ImageBatch",
-     "inputs": {
-      "image1": [
-       "16",
-       0
-      ],
-      "image2": [
-       "61",
-       0
-      ]
-     }
-    },
-    "63": {
-     "class_type": "VAELoader",
-     "inputs": {
-      "vae_name": "ltx-vae"
-     }
-    },
-    "64": {
-     "class_type": "VAEEncodeTiled",
-     "inputs": {
-      "pixels": [
-       "62",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "65": {
-     "class_type": "LatentUpscaleModelLoader",
-     "inputs": {
-      "model_name": "ltx-upscale"
-     }
-    },
-    "66": {
-     "class_type": "LTXVLatentUpsampler",
-     "inputs": {
-      "samples": [
-       "64",
-       0
-      ],
-      "upscale_model": [
-       "65",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ]
-     }
-    },
-    "67": {
-     "class_type": "VAEDecodeTiled",
-     "inputs": {
-      "samples": [
-       "66",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "68": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "67",
-       0
-      ],
-      "batch_index": 0,
-      "length": 56
-     }
-    },
-    "69": {
-     "class_type": "CreateVideo",
-     "inputs": {
-      "images": [
-       "68",
-       0
-      ],
-      "audio": [
-       "17",
-       0
-      ],
-      "fps": 24,
-      "bit_depth": 8,
-      "color_space": "sRGB"
-     }
-    },
-    "70": {
-     "class_type": "SaveVideo",
-     "inputs": {
-      "video": [
-       "69",
-       0
-      ],
-      "filename_prefix": "test_LTX25_2x",
-      "format": "auto",
-      "codec": "auto"
-     }
-    },
     "71": {
      "class_type": "ImageFromBatch",
      "inputs": {
@@ -364,11 +227,71 @@
        0
       ]
      }
+    },
+    "80": {
+     "class_type": "UpscaleModelLoader",
+     "inputs": {
+      "model_name": "rtx-upscale.pth"
+     }
+    },
+    "81": {
+     "class_type": "ImageUpscaleWithModel",
+     "inputs": {
+      "upscale_model": [
+       "80",
+       0
+      ],
+      "image": [
+       "16",
+       0
+      ]
+     }
+    },
+    "82": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "81",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": 704,
+      "height": 1216,
+      "crop": "disabled"
+     }
+    },
+    "83": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "82",
+       0
+      ],
+      "audio": [
+       "17",
+       0
+      ],
+      "fps": 24,
+      "bit_depth": 8,
+      "color_space": "sRGB"
+     }
+    },
+    "84": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "83",
+       0
+      ],
+      "filename_prefix": "test_RTX_AI_2x",
+      "format": "auto",
+      "codec": "auto"
+     }
     }
    }
   },
   {
-   "name": "ltx-text-5s",
+   "name": "upscale-text-5s",
    "options": {
     "prompt": "neutral test",
     "width": 352,
@@ -383,9 +306,8 @@
     "duration": 5,
     "turbo": "8",
     "upscale": {
-     "type": "ltx",
-     "model": "ltx-upscale",
-     "vae": "ltx-vae"
+     "type": "rtx",
+     "model": "rtx-upscale.pth"
     }
    },
    "models": {
@@ -574,142 +496,6 @@
       "codec": "auto"
      }
     },
-    "60": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "16",
-       0
-      ],
-      "batch_index": 123,
-      "length": 1
-     }
-    },
-    "61": {
-     "class_type": "RepeatImageBatch",
-     "inputs": {
-      "image": [
-       "60",
-       0
-      ],
-      "amount": 5
-     }
-    },
-    "62": {
-     "class_type": "ImageBatch",
-     "inputs": {
-      "image1": [
-       "16",
-       0
-      ],
-      "image2": [
-       "61",
-       0
-      ]
-     }
-    },
-    "63": {
-     "class_type": "VAELoader",
-     "inputs": {
-      "vae_name": "ltx-vae"
-     }
-    },
-    "64": {
-     "class_type": "VAEEncodeTiled",
-     "inputs": {
-      "pixels": [
-       "62",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "65": {
-     "class_type": "LatentUpscaleModelLoader",
-     "inputs": {
-      "model_name": "ltx-upscale"
-     }
-    },
-    "66": {
-     "class_type": "LTXVLatentUpsampler",
-     "inputs": {
-      "samples": [
-       "64",
-       0
-      ],
-      "upscale_model": [
-       "65",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ]
-     }
-    },
-    "67": {
-     "class_type": "VAEDecodeTiled",
-     "inputs": {
-      "samples": [
-       "66",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "68": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "67",
-       0
-      ],
-      "batch_index": 0,
-      "length": 124
-     }
-    },
-    "69": {
-     "class_type": "CreateVideo",
-     "inputs": {
-      "images": [
-       "68",
-       0
-      ],
-      "audio": [
-       "17",
-       0
-      ],
-      "fps": 24,
-      "bit_depth": 8,
-      "color_space": "sRGB"
-     }
-    },
-    "70": {
-     "class_type": "SaveVideo",
-     "inputs": {
-      "video": [
-       "69",
-       0
-      ],
-      "filename_prefix": "test_LTX25_2x",
-      "format": "auto",
-      "codec": "auto"
-     }
-    },
     "71": {
      "class_type": "ImageFromBatch",
      "inputs": {
@@ -729,11 +515,71 @@
        0
       ]
      }
+    },
+    "80": {
+     "class_type": "UpscaleModelLoader",
+     "inputs": {
+      "model_name": "rtx-upscale.pth"
+     }
+    },
+    "81": {
+     "class_type": "ImageUpscaleWithModel",
+     "inputs": {
+      "upscale_model": [
+       "80",
+       0
+      ],
+      "image": [
+       "16",
+       0
+      ]
+     }
+    },
+    "82": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "81",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": 704,
+      "height": 1216,
+      "crop": "disabled"
+     }
+    },
+    "83": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "82",
+       0
+      ],
+      "audio": [
+       "17",
+       0
+      ],
+      "fps": 24,
+      "bit_depth": 8,
+      "color_space": "sRGB"
+     }
+    },
+    "84": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "83",
+       0
+      ],
+      "filename_prefix": "test_RTX_AI_2x",
+      "format": "auto",
+      "codec": "auto"
+     }
     }
    }
   },
   {
-   "name": "ltx-text-15s",
+   "name": "upscale-text-15s",
    "options": {
     "prompt": "neutral test",
     "width": 352,
@@ -748,9 +594,8 @@
     "duration": 15,
     "turbo": "8",
     "upscale": {
-     "type": "ltx",
-     "model": "ltx-upscale",
-     "vae": "ltx-vae"
+     "type": "rtx",
+     "model": "rtx-upscale.pth"
     }
    },
    "models": {
@@ -939,142 +784,6 @@
       "codec": "auto"
      }
     },
-    "60": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "16",
-       0
-      ],
-      "batch_index": 361,
-      "length": 1
-     }
-    },
-    "61": {
-     "class_type": "RepeatImageBatch",
-     "inputs": {
-      "image": [
-       "60",
-       0
-      ],
-      "amount": 7
-     }
-    },
-    "62": {
-     "class_type": "ImageBatch",
-     "inputs": {
-      "image1": [
-       "16",
-       0
-      ],
-      "image2": [
-       "61",
-       0
-      ]
-     }
-    },
-    "63": {
-     "class_type": "VAELoader",
-     "inputs": {
-      "vae_name": "ltx-vae"
-     }
-    },
-    "64": {
-     "class_type": "VAEEncodeTiled",
-     "inputs": {
-      "pixels": [
-       "62",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "65": {
-     "class_type": "LatentUpscaleModelLoader",
-     "inputs": {
-      "model_name": "ltx-upscale"
-     }
-    },
-    "66": {
-     "class_type": "LTXVLatentUpsampler",
-     "inputs": {
-      "samples": [
-       "64",
-       0
-      ],
-      "upscale_model": [
-       "65",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ]
-     }
-    },
-    "67": {
-     "class_type": "VAEDecodeTiled",
-     "inputs": {
-      "samples": [
-       "66",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "68": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "67",
-       0
-      ],
-      "batch_index": 0,
-      "length": 362
-     }
-    },
-    "69": {
-     "class_type": "CreateVideo",
-     "inputs": {
-      "images": [
-       "68",
-       0
-      ],
-      "audio": [
-       "17",
-       0
-      ],
-      "fps": 24,
-      "bit_depth": 8,
-      "color_space": "sRGB"
-     }
-    },
-    "70": {
-     "class_type": "SaveVideo",
-     "inputs": {
-      "video": [
-       "69",
-       0
-      ],
-      "filename_prefix": "test_LTX25_2x",
-      "format": "auto",
-      "codec": "auto"
-     }
-    },
     "71": {
      "class_type": "ImageFromBatch",
      "inputs": {
@@ -1094,11 +803,71 @@
        0
       ]
      }
+    },
+    "80": {
+     "class_type": "UpscaleModelLoader",
+     "inputs": {
+      "model_name": "rtx-upscale.pth"
+     }
+    },
+    "81": {
+     "class_type": "ImageUpscaleWithModel",
+     "inputs": {
+      "upscale_model": [
+       "80",
+       0
+      ],
+      "image": [
+       "16",
+       0
+      ]
+     }
+    },
+    "82": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "81",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": 704,
+      "height": 1216,
+      "crop": "disabled"
+     }
+    },
+    "83": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "82",
+       0
+      ],
+      "audio": [
+       "17",
+       0
+      ],
+      "fps": 24,
+      "bit_depth": 8,
+      "color_space": "sRGB"
+     }
+    },
+    "84": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "83",
+       0
+      ],
+      "filename_prefix": "test_RTX_AI_2x",
+      "format": "auto",
+      "codec": "auto"
+     }
     }
    }
   },
   {
-   "name": "ltx-image-2s",
+   "name": "upscale-image-2s",
    "options": {
     "prompt": "neutral test",
     "width": 352,
@@ -1113,9 +882,8 @@
     "duration": 2,
     "turbo": "8",
     "upscale": {
-     "type": "ltx",
-     "model": "ltx-upscale",
-     "vae": "ltx-vae"
+     "type": "rtx",
+     "model": "rtx-upscale.pth"
     }
    },
    "models": {
@@ -1317,142 +1085,6 @@
       "image": "first.png"
      }
     },
-    "60": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "16",
-       0
-      ],
-      "batch_index": 55,
-      "length": 1
-     }
-    },
-    "61": {
-     "class_type": "RepeatImageBatch",
-     "inputs": {
-      "image": [
-       "60",
-       0
-      ],
-      "amount": 1
-     }
-    },
-    "62": {
-     "class_type": "ImageBatch",
-     "inputs": {
-      "image1": [
-       "16",
-       0
-      ],
-      "image2": [
-       "61",
-       0
-      ]
-     }
-    },
-    "63": {
-     "class_type": "VAELoader",
-     "inputs": {
-      "vae_name": "ltx-vae"
-     }
-    },
-    "64": {
-     "class_type": "VAEEncodeTiled",
-     "inputs": {
-      "pixels": [
-       "62",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "65": {
-     "class_type": "LatentUpscaleModelLoader",
-     "inputs": {
-      "model_name": "ltx-upscale"
-     }
-    },
-    "66": {
-     "class_type": "LTXVLatentUpsampler",
-     "inputs": {
-      "samples": [
-       "64",
-       0
-      ],
-      "upscale_model": [
-       "65",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ]
-     }
-    },
-    "67": {
-     "class_type": "VAEDecodeTiled",
-     "inputs": {
-      "samples": [
-       "66",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "68": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "67",
-       0
-      ],
-      "batch_index": 0,
-      "length": 56
-     }
-    },
-    "69": {
-     "class_type": "CreateVideo",
-     "inputs": {
-      "images": [
-       "68",
-       0
-      ],
-      "audio": [
-       "17",
-       0
-      ],
-      "fps": 24,
-      "bit_depth": 8,
-      "color_space": "sRGB"
-     }
-    },
-    "70": {
-     "class_type": "SaveVideo",
-     "inputs": {
-      "video": [
-       "69",
-       0
-      ],
-      "filename_prefix": "test_LTX25_2x",
-      "format": "auto",
-      "codec": "auto"
-     }
-    },
     "71": {
      "class_type": "ImageFromBatch",
      "inputs": {
@@ -1472,11 +1104,71 @@
        0
       ]
      }
+    },
+    "80": {
+     "class_type": "UpscaleModelLoader",
+     "inputs": {
+      "model_name": "rtx-upscale.pth"
+     }
+    },
+    "81": {
+     "class_type": "ImageUpscaleWithModel",
+     "inputs": {
+      "upscale_model": [
+       "80",
+       0
+      ],
+      "image": [
+       "16",
+       0
+      ]
+     }
+    },
+    "82": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "81",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": 704,
+      "height": 1216,
+      "crop": "disabled"
+     }
+    },
+    "83": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "82",
+       0
+      ],
+      "audio": [
+       "17",
+       0
+      ],
+      "fps": 24,
+      "bit_depth": 8,
+      "color_space": "sRGB"
+     }
+    },
+    "84": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "83",
+       0
+      ],
+      "filename_prefix": "test_RTX_AI_2x",
+      "format": "auto",
+      "codec": "auto"
+     }
     }
    }
   },
   {
-   "name": "ltx-image-5s",
+   "name": "upscale-image-5s",
    "options": {
     "prompt": "neutral test",
     "width": 352,
@@ -1491,9 +1183,8 @@
     "duration": 5,
     "turbo": "8",
     "upscale": {
-     "type": "ltx",
-     "model": "ltx-upscale",
-     "vae": "ltx-vae"
+     "type": "rtx",
+     "model": "rtx-upscale.pth"
     }
    },
    "models": {
@@ -1695,142 +1386,6 @@
       "image": "first.png"
      }
     },
-    "60": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "16",
-       0
-      ],
-      "batch_index": 123,
-      "length": 1
-     }
-    },
-    "61": {
-     "class_type": "RepeatImageBatch",
-     "inputs": {
-      "image": [
-       "60",
-       0
-      ],
-      "amount": 5
-     }
-    },
-    "62": {
-     "class_type": "ImageBatch",
-     "inputs": {
-      "image1": [
-       "16",
-       0
-      ],
-      "image2": [
-       "61",
-       0
-      ]
-     }
-    },
-    "63": {
-     "class_type": "VAELoader",
-     "inputs": {
-      "vae_name": "ltx-vae"
-     }
-    },
-    "64": {
-     "class_type": "VAEEncodeTiled",
-     "inputs": {
-      "pixels": [
-       "62",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "65": {
-     "class_type": "LatentUpscaleModelLoader",
-     "inputs": {
-      "model_name": "ltx-upscale"
-     }
-    },
-    "66": {
-     "class_type": "LTXVLatentUpsampler",
-     "inputs": {
-      "samples": [
-       "64",
-       0
-      ],
-      "upscale_model": [
-       "65",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ]
-     }
-    },
-    "67": {
-     "class_type": "VAEDecodeTiled",
-     "inputs": {
-      "samples": [
-       "66",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "68": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "67",
-       0
-      ],
-      "batch_index": 0,
-      "length": 124
-     }
-    },
-    "69": {
-     "class_type": "CreateVideo",
-     "inputs": {
-      "images": [
-       "68",
-       0
-      ],
-      "audio": [
-       "17",
-       0
-      ],
-      "fps": 24,
-      "bit_depth": 8,
-      "color_space": "sRGB"
-     }
-    },
-    "70": {
-     "class_type": "SaveVideo",
-     "inputs": {
-      "video": [
-       "69",
-       0
-      ],
-      "filename_prefix": "test_LTX25_2x",
-      "format": "auto",
-      "codec": "auto"
-     }
-    },
     "71": {
      "class_type": "ImageFromBatch",
      "inputs": {
@@ -1850,11 +1405,71 @@
        0
       ]
      }
+    },
+    "80": {
+     "class_type": "UpscaleModelLoader",
+     "inputs": {
+      "model_name": "rtx-upscale.pth"
+     }
+    },
+    "81": {
+     "class_type": "ImageUpscaleWithModel",
+     "inputs": {
+      "upscale_model": [
+       "80",
+       0
+      ],
+      "image": [
+       "16",
+       0
+      ]
+     }
+    },
+    "82": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "81",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": 704,
+      "height": 1216,
+      "crop": "disabled"
+     }
+    },
+    "83": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "82",
+       0
+      ],
+      "audio": [
+       "17",
+       0
+      ],
+      "fps": 24,
+      "bit_depth": 8,
+      "color_space": "sRGB"
+     }
+    },
+    "84": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "83",
+       0
+      ],
+      "filename_prefix": "test_RTX_AI_2x",
+      "format": "auto",
+      "codec": "auto"
+     }
     }
    }
   },
   {
-   "name": "ltx-image-15s",
+   "name": "upscale-image-15s",
    "options": {
     "prompt": "neutral test",
     "width": 352,
@@ -1869,9 +1484,8 @@
     "duration": 15,
     "turbo": "8",
     "upscale": {
-     "type": "ltx",
-     "model": "ltx-upscale",
-     "vae": "ltx-vae"
+     "type": "rtx",
+     "model": "rtx-upscale.pth"
     }
    },
    "models": {
@@ -2073,142 +1687,6 @@
       "image": "first.png"
      }
     },
-    "60": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "16",
-       0
-      ],
-      "batch_index": 361,
-      "length": 1
-     }
-    },
-    "61": {
-     "class_type": "RepeatImageBatch",
-     "inputs": {
-      "image": [
-       "60",
-       0
-      ],
-      "amount": 7
-     }
-    },
-    "62": {
-     "class_type": "ImageBatch",
-     "inputs": {
-      "image1": [
-       "16",
-       0
-      ],
-      "image2": [
-       "61",
-       0
-      ]
-     }
-    },
-    "63": {
-     "class_type": "VAELoader",
-     "inputs": {
-      "vae_name": "ltx-vae"
-     }
-    },
-    "64": {
-     "class_type": "VAEEncodeTiled",
-     "inputs": {
-      "pixels": [
-       "62",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "65": {
-     "class_type": "LatentUpscaleModelLoader",
-     "inputs": {
-      "model_name": "ltx-upscale"
-     }
-    },
-    "66": {
-     "class_type": "LTXVLatentUpsampler",
-     "inputs": {
-      "samples": [
-       "64",
-       0
-      ],
-      "upscale_model": [
-       "65",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ]
-     }
-    },
-    "67": {
-     "class_type": "VAEDecodeTiled",
-     "inputs": {
-      "samples": [
-       "66",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "68": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "67",
-       0
-      ],
-      "batch_index": 0,
-      "length": 362
-     }
-    },
-    "69": {
-     "class_type": "CreateVideo",
-     "inputs": {
-      "images": [
-       "68",
-       0
-      ],
-      "audio": [
-       "17",
-       0
-      ],
-      "fps": 24,
-      "bit_depth": 8,
-      "color_space": "sRGB"
-     }
-    },
-    "70": {
-     "class_type": "SaveVideo",
-     "inputs": {
-      "video": [
-       "69",
-       0
-      ],
-      "filename_prefix": "test_LTX25_2x",
-      "format": "auto",
-      "codec": "auto"
-     }
-    },
     "71": {
      "class_type": "ImageFromBatch",
      "inputs": {
@@ -2228,11 +1706,71 @@
        0
       ]
      }
+    },
+    "80": {
+     "class_type": "UpscaleModelLoader",
+     "inputs": {
+      "model_name": "rtx-upscale.pth"
+     }
+    },
+    "81": {
+     "class_type": "ImageUpscaleWithModel",
+     "inputs": {
+      "upscale_model": [
+       "80",
+       0
+      ],
+      "image": [
+       "16",
+       0
+      ]
+     }
+    },
+    "82": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "81",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": 704,
+      "height": 1216,
+      "crop": "disabled"
+     }
+    },
+    "83": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "82",
+       0
+      ],
+      "audio": [
+       "17",
+       0
+      ],
+      "fps": 24,
+      "bit_depth": 8,
+      "color_space": "sRGB"
+     }
+    },
+    "84": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "83",
+       0
+      ],
+      "filename_prefix": "test_RTX_AI_2x",
+      "format": "auto",
+      "codec": "auto"
+     }
     }
    }
   },
   {
-   "name": "ltx-frames-2s",
+   "name": "upscale-frames-2s",
    "options": {
     "prompt": "neutral test",
     "width": 352,
@@ -2247,9 +1785,8 @@
     "duration": 2,
     "turbo": "8",
     "upscale": {
-     "type": "ltx",
-     "model": "ltx-upscale",
-     "vae": "ltx-vae"
+     "type": "rtx",
+     "model": "rtx-upscale.pth"
     }
    },
    "models": {
@@ -2464,142 +2001,6 @@
       "image": "last.png"
      }
     },
-    "60": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "16",
-       0
-      ],
-      "batch_index": 55,
-      "length": 1
-     }
-    },
-    "61": {
-     "class_type": "RepeatImageBatch",
-     "inputs": {
-      "image": [
-       "60",
-       0
-      ],
-      "amount": 1
-     }
-    },
-    "62": {
-     "class_type": "ImageBatch",
-     "inputs": {
-      "image1": [
-       "16",
-       0
-      ],
-      "image2": [
-       "61",
-       0
-      ]
-     }
-    },
-    "63": {
-     "class_type": "VAELoader",
-     "inputs": {
-      "vae_name": "ltx-vae"
-     }
-    },
-    "64": {
-     "class_type": "VAEEncodeTiled",
-     "inputs": {
-      "pixels": [
-       "62",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "65": {
-     "class_type": "LatentUpscaleModelLoader",
-     "inputs": {
-      "model_name": "ltx-upscale"
-     }
-    },
-    "66": {
-     "class_type": "LTXVLatentUpsampler",
-     "inputs": {
-      "samples": [
-       "64",
-       0
-      ],
-      "upscale_model": [
-       "65",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ]
-     }
-    },
-    "67": {
-     "class_type": "VAEDecodeTiled",
-     "inputs": {
-      "samples": [
-       "66",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "68": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "67",
-       0
-      ],
-      "batch_index": 0,
-      "length": 56
-     }
-    },
-    "69": {
-     "class_type": "CreateVideo",
-     "inputs": {
-      "images": [
-       "68",
-       0
-      ],
-      "audio": [
-       "17",
-       0
-      ],
-      "fps": 24,
-      "bit_depth": 8,
-      "color_space": "sRGB"
-     }
-    },
-    "70": {
-     "class_type": "SaveVideo",
-     "inputs": {
-      "video": [
-       "69",
-       0
-      ],
-      "filename_prefix": "test_LTX25_2x",
-      "format": "auto",
-      "codec": "auto"
-     }
-    },
     "71": {
      "class_type": "ImageFromBatch",
      "inputs": {
@@ -2619,11 +2020,71 @@
        0
       ]
      }
+    },
+    "80": {
+     "class_type": "UpscaleModelLoader",
+     "inputs": {
+      "model_name": "rtx-upscale.pth"
+     }
+    },
+    "81": {
+     "class_type": "ImageUpscaleWithModel",
+     "inputs": {
+      "upscale_model": [
+       "80",
+       0
+      ],
+      "image": [
+       "16",
+       0
+      ]
+     }
+    },
+    "82": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "81",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": 704,
+      "height": 1216,
+      "crop": "disabled"
+     }
+    },
+    "83": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "82",
+       0
+      ],
+      "audio": [
+       "17",
+       0
+      ],
+      "fps": 24,
+      "bit_depth": 8,
+      "color_space": "sRGB"
+     }
+    },
+    "84": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "83",
+       0
+      ],
+      "filename_prefix": "test_RTX_AI_2x",
+      "format": "auto",
+      "codec": "auto"
+     }
     }
    }
   },
   {
-   "name": "ltx-frames-5s",
+   "name": "upscale-frames-5s",
    "options": {
     "prompt": "neutral test",
     "width": 352,
@@ -2638,9 +2099,8 @@
     "duration": 5,
     "turbo": "8",
     "upscale": {
-     "type": "ltx",
-     "model": "ltx-upscale",
-     "vae": "ltx-vae"
+     "type": "rtx",
+     "model": "rtx-upscale.pth"
     }
    },
    "models": {
@@ -2855,142 +2315,6 @@
       "image": "last.png"
      }
     },
-    "60": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "16",
-       0
-      ],
-      "batch_index": 123,
-      "length": 1
-     }
-    },
-    "61": {
-     "class_type": "RepeatImageBatch",
-     "inputs": {
-      "image": [
-       "60",
-       0
-      ],
-      "amount": 5
-     }
-    },
-    "62": {
-     "class_type": "ImageBatch",
-     "inputs": {
-      "image1": [
-       "16",
-       0
-      ],
-      "image2": [
-       "61",
-       0
-      ]
-     }
-    },
-    "63": {
-     "class_type": "VAELoader",
-     "inputs": {
-      "vae_name": "ltx-vae"
-     }
-    },
-    "64": {
-     "class_type": "VAEEncodeTiled",
-     "inputs": {
-      "pixels": [
-       "62",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "65": {
-     "class_type": "LatentUpscaleModelLoader",
-     "inputs": {
-      "model_name": "ltx-upscale"
-     }
-    },
-    "66": {
-     "class_type": "LTXVLatentUpsampler",
-     "inputs": {
-      "samples": [
-       "64",
-       0
-      ],
-      "upscale_model": [
-       "65",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ]
-     }
-    },
-    "67": {
-     "class_type": "VAEDecodeTiled",
-     "inputs": {
-      "samples": [
-       "66",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "68": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "67",
-       0
-      ],
-      "batch_index": 0,
-      "length": 124
-     }
-    },
-    "69": {
-     "class_type": "CreateVideo",
-     "inputs": {
-      "images": [
-       "68",
-       0
-      ],
-      "audio": [
-       "17",
-       0
-      ],
-      "fps": 24,
-      "bit_depth": 8,
-      "color_space": "sRGB"
-     }
-    },
-    "70": {
-     "class_type": "SaveVideo",
-     "inputs": {
-      "video": [
-       "69",
-       0
-      ],
-      "filename_prefix": "test_LTX25_2x",
-      "format": "auto",
-      "codec": "auto"
-     }
-    },
     "71": {
      "class_type": "ImageFromBatch",
      "inputs": {
@@ -3010,11 +2334,71 @@
        0
       ]
      }
+    },
+    "80": {
+     "class_type": "UpscaleModelLoader",
+     "inputs": {
+      "model_name": "rtx-upscale.pth"
+     }
+    },
+    "81": {
+     "class_type": "ImageUpscaleWithModel",
+     "inputs": {
+      "upscale_model": [
+       "80",
+       0
+      ],
+      "image": [
+       "16",
+       0
+      ]
+     }
+    },
+    "82": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "81",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": 704,
+      "height": 1216,
+      "crop": "disabled"
+     }
+    },
+    "83": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "82",
+       0
+      ],
+      "audio": [
+       "17",
+       0
+      ],
+      "fps": 24,
+      "bit_depth": 8,
+      "color_space": "sRGB"
+     }
+    },
+    "84": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "83",
+       0
+      ],
+      "filename_prefix": "test_RTX_AI_2x",
+      "format": "auto",
+      "codec": "auto"
+     }
     }
    }
   },
   {
-   "name": "ltx-frames-15s",
+   "name": "upscale-frames-15s",
    "options": {
     "prompt": "neutral test",
     "width": 352,
@@ -3029,9 +2413,8 @@
     "duration": 15,
     "turbo": "8",
     "upscale": {
-     "type": "ltx",
-     "model": "ltx-upscale",
-     "vae": "ltx-vae"
+     "type": "rtx",
+     "model": "rtx-upscale.pth"
     }
    },
    "models": {
@@ -3246,142 +2629,6 @@
       "image": "last.png"
      }
     },
-    "60": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "16",
-       0
-      ],
-      "batch_index": 361,
-      "length": 1
-     }
-    },
-    "61": {
-     "class_type": "RepeatImageBatch",
-     "inputs": {
-      "image": [
-       "60",
-       0
-      ],
-      "amount": 7
-     }
-    },
-    "62": {
-     "class_type": "ImageBatch",
-     "inputs": {
-      "image1": [
-       "16",
-       0
-      ],
-      "image2": [
-       "61",
-       0
-      ]
-     }
-    },
-    "63": {
-     "class_type": "VAELoader",
-     "inputs": {
-      "vae_name": "ltx-vae"
-     }
-    },
-    "64": {
-     "class_type": "VAEEncodeTiled",
-     "inputs": {
-      "pixels": [
-       "62",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "65": {
-     "class_type": "LatentUpscaleModelLoader",
-     "inputs": {
-      "model_name": "ltx-upscale"
-     }
-    },
-    "66": {
-     "class_type": "LTXVLatentUpsampler",
-     "inputs": {
-      "samples": [
-       "64",
-       0
-      ],
-      "upscale_model": [
-       "65",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ]
-     }
-    },
-    "67": {
-     "class_type": "VAEDecodeTiled",
-     "inputs": {
-      "samples": [
-       "66",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "68": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "67",
-       0
-      ],
-      "batch_index": 0,
-      "length": 362
-     }
-    },
-    "69": {
-     "class_type": "CreateVideo",
-     "inputs": {
-      "images": [
-       "68",
-       0
-      ],
-      "audio": [
-       "17",
-       0
-      ],
-      "fps": 24,
-      "bit_depth": 8,
-      "color_space": "sRGB"
-     }
-    },
-    "70": {
-     "class_type": "SaveVideo",
-     "inputs": {
-      "video": [
-       "69",
-       0
-      ],
-      "filename_prefix": "test_LTX25_2x",
-      "format": "auto",
-      "codec": "auto"
-     }
-    },
     "71": {
      "class_type": "ImageFromBatch",
      "inputs": {
@@ -3401,11 +2648,71 @@
        0
       ]
      }
+    },
+    "80": {
+     "class_type": "UpscaleModelLoader",
+     "inputs": {
+      "model_name": "rtx-upscale.pth"
+     }
+    },
+    "81": {
+     "class_type": "ImageUpscaleWithModel",
+     "inputs": {
+      "upscale_model": [
+       "80",
+       0
+      ],
+      "image": [
+       "16",
+       0
+      ]
+     }
+    },
+    "82": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "81",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": 704,
+      "height": 1216,
+      "crop": "disabled"
+     }
+    },
+    "83": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "82",
+       0
+      ],
+      "audio": [
+       "17",
+       0
+      ],
+      "fps": 24,
+      "bit_depth": 8,
+      "color_space": "sRGB"
+     }
+    },
+    "84": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "83",
+       0
+      ],
+      "filename_prefix": "test_RTX_AI_2x",
+      "format": "auto",
+      "codec": "auto"
+     }
     }
    }
   },
   {
-   "name": "ltx-reference-2s",
+   "name": "upscale-reference-2s",
    "options": {
     "prompt": "neutral test",
     "width": 352,
@@ -3420,9 +2727,8 @@
     "duration": 2,
     "turbo": "8",
     "upscale": {
-     "type": "ltx",
-     "model": "ltx-upscale",
-     "vae": "ltx-vae"
+     "type": "rtx",
+     "model": "rtx-upscale.pth"
     }
    },
    "models": {
@@ -3632,142 +2938,6 @@
       "codec": "auto"
      }
     },
-    "60": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "16",
-       0
-      ],
-      "batch_index": 55,
-      "length": 1
-     }
-    },
-    "61": {
-     "class_type": "RepeatImageBatch",
-     "inputs": {
-      "image": [
-       "60",
-       0
-      ],
-      "amount": 1
-     }
-    },
-    "62": {
-     "class_type": "ImageBatch",
-     "inputs": {
-      "image1": [
-       "16",
-       0
-      ],
-      "image2": [
-       "61",
-       0
-      ]
-     }
-    },
-    "63": {
-     "class_type": "VAELoader",
-     "inputs": {
-      "vae_name": "ltx-vae"
-     }
-    },
-    "64": {
-     "class_type": "VAEEncodeTiled",
-     "inputs": {
-      "pixels": [
-       "62",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "65": {
-     "class_type": "LatentUpscaleModelLoader",
-     "inputs": {
-      "model_name": "ltx-upscale"
-     }
-    },
-    "66": {
-     "class_type": "LTXVLatentUpsampler",
-     "inputs": {
-      "samples": [
-       "64",
-       0
-      ],
-      "upscale_model": [
-       "65",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ]
-     }
-    },
-    "67": {
-     "class_type": "VAEDecodeTiled",
-     "inputs": {
-      "samples": [
-       "66",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "68": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "67",
-       0
-      ],
-      "batch_index": 0,
-      "length": 56
-     }
-    },
-    "69": {
-     "class_type": "CreateVideo",
-     "inputs": {
-      "images": [
-       "68",
-       0
-      ],
-      "audio": [
-       "17",
-       0
-      ],
-      "fps": 24,
-      "bit_depth": 8,
-      "color_space": "sRGB"
-     }
-    },
-    "70": {
-     "class_type": "SaveVideo",
-     "inputs": {
-      "video": [
-       "69",
-       0
-      ],
-      "filename_prefix": "test_LTX25_2x",
-      "format": "auto",
-      "codec": "auto"
-     }
-    },
     "71": {
      "class_type": "ImageFromBatch",
      "inputs": {
@@ -3786,6 +2956,66 @@
        "71",
        0
       ]
+     }
+    },
+    "80": {
+     "class_type": "UpscaleModelLoader",
+     "inputs": {
+      "model_name": "rtx-upscale.pth"
+     }
+    },
+    "81": {
+     "class_type": "ImageUpscaleWithModel",
+     "inputs": {
+      "upscale_model": [
+       "80",
+       0
+      ],
+      "image": [
+       "16",
+       0
+      ]
+     }
+    },
+    "82": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "81",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": 704,
+      "height": 1216,
+      "crop": "disabled"
+     }
+    },
+    "83": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "82",
+       0
+      ],
+      "audio": [
+       "17",
+       0
+      ],
+      "fps": 24,
+      "bit_depth": 8,
+      "color_space": "sRGB"
+     }
+    },
+    "84": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "83",
+       0
+      ],
+      "filename_prefix": "test_RTX_AI_2x",
+      "format": "auto",
+      "codec": "auto"
      }
     },
     "300": {
@@ -3803,7 +3033,7 @@
    }
   },
   {
-   "name": "ltx-reference-5s",
+   "name": "upscale-reference-5s",
    "options": {
     "prompt": "neutral test",
     "width": 352,
@@ -3818,9 +3048,8 @@
     "duration": 5,
     "turbo": "8",
     "upscale": {
-     "type": "ltx",
-     "model": "ltx-upscale",
-     "vae": "ltx-vae"
+     "type": "rtx",
+     "model": "rtx-upscale.pth"
     }
    },
    "models": {
@@ -4030,142 +3259,6 @@
       "codec": "auto"
      }
     },
-    "60": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "16",
-       0
-      ],
-      "batch_index": 123,
-      "length": 1
-     }
-    },
-    "61": {
-     "class_type": "RepeatImageBatch",
-     "inputs": {
-      "image": [
-       "60",
-       0
-      ],
-      "amount": 5
-     }
-    },
-    "62": {
-     "class_type": "ImageBatch",
-     "inputs": {
-      "image1": [
-       "16",
-       0
-      ],
-      "image2": [
-       "61",
-       0
-      ]
-     }
-    },
-    "63": {
-     "class_type": "VAELoader",
-     "inputs": {
-      "vae_name": "ltx-vae"
-     }
-    },
-    "64": {
-     "class_type": "VAEEncodeTiled",
-     "inputs": {
-      "pixels": [
-       "62",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "65": {
-     "class_type": "LatentUpscaleModelLoader",
-     "inputs": {
-      "model_name": "ltx-upscale"
-     }
-    },
-    "66": {
-     "class_type": "LTXVLatentUpsampler",
-     "inputs": {
-      "samples": [
-       "64",
-       0
-      ],
-      "upscale_model": [
-       "65",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ]
-     }
-    },
-    "67": {
-     "class_type": "VAEDecodeTiled",
-     "inputs": {
-      "samples": [
-       "66",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "68": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "67",
-       0
-      ],
-      "batch_index": 0,
-      "length": 124
-     }
-    },
-    "69": {
-     "class_type": "CreateVideo",
-     "inputs": {
-      "images": [
-       "68",
-       0
-      ],
-      "audio": [
-       "17",
-       0
-      ],
-      "fps": 24,
-      "bit_depth": 8,
-      "color_space": "sRGB"
-     }
-    },
-    "70": {
-     "class_type": "SaveVideo",
-     "inputs": {
-      "video": [
-       "69",
-       0
-      ],
-      "filename_prefix": "test_LTX25_2x",
-      "format": "auto",
-      "codec": "auto"
-     }
-    },
     "71": {
      "class_type": "ImageFromBatch",
      "inputs": {
@@ -4186,6 +3279,66 @@
       ]
      }
     },
+    "80": {
+     "class_type": "UpscaleModelLoader",
+     "inputs": {
+      "model_name": "rtx-upscale.pth"
+     }
+    },
+    "81": {
+     "class_type": "ImageUpscaleWithModel",
+     "inputs": {
+      "upscale_model": [
+       "80",
+       0
+      ],
+      "image": [
+       "16",
+       0
+      ]
+     }
+    },
+    "82": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "81",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": 704,
+      "height": 1216,
+      "crop": "disabled"
+     }
+    },
+    "83": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "82",
+       0
+      ],
+      "audio": [
+       "17",
+       0
+      ],
+      "fps": 24,
+      "bit_depth": 8,
+      "color_space": "sRGB"
+     }
+    },
+    "84": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "83",
+       0
+      ],
+      "filename_prefix": "test_RTX_AI_2x",
+      "format": "auto",
+      "codec": "auto"
+     }
+    },
     "300": {
      "class_type": "LoadImage",
      "inputs": {
@@ -4201,7 +3354,7 @@
    }
   },
   {
-   "name": "ltx-reference-15s",
+   "name": "upscale-reference-15s",
    "options": {
     "prompt": "neutral test",
     "width": 352,
@@ -4216,9 +3369,8 @@
     "duration": 15,
     "turbo": "8",
     "upscale": {
-     "type": "ltx",
-     "model": "ltx-upscale",
-     "vae": "ltx-vae"
+     "type": "rtx",
+     "model": "rtx-upscale.pth"
     }
    },
    "models": {
@@ -4428,142 +3580,6 @@
       "codec": "auto"
      }
     },
-    "60": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "16",
-       0
-      ],
-      "batch_index": 361,
-      "length": 1
-     }
-    },
-    "61": {
-     "class_type": "RepeatImageBatch",
-     "inputs": {
-      "image": [
-       "60",
-       0
-      ],
-      "amount": 7
-     }
-    },
-    "62": {
-     "class_type": "ImageBatch",
-     "inputs": {
-      "image1": [
-       "16",
-       0
-      ],
-      "image2": [
-       "61",
-       0
-      ]
-     }
-    },
-    "63": {
-     "class_type": "VAELoader",
-     "inputs": {
-      "vae_name": "ltx-vae"
-     }
-    },
-    "64": {
-     "class_type": "VAEEncodeTiled",
-     "inputs": {
-      "pixels": [
-       "62",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "65": {
-     "class_type": "LatentUpscaleModelLoader",
-     "inputs": {
-      "model_name": "ltx-upscale"
-     }
-    },
-    "66": {
-     "class_type": "LTXVLatentUpsampler",
-     "inputs": {
-      "samples": [
-       "64",
-       0
-      ],
-      "upscale_model": [
-       "65",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ]
-     }
-    },
-    "67": {
-     "class_type": "VAEDecodeTiled",
-     "inputs": {
-      "samples": [
-       "66",
-       0
-      ],
-      "vae": [
-       "63",
-       0
-      ],
-      "tile_size": 512,
-      "overlap": 64,
-      "temporal_size": 64,
-      "temporal_overlap": 8
-     }
-    },
-    "68": {
-     "class_type": "ImageFromBatch",
-     "inputs": {
-      "image": [
-       "67",
-       0
-      ],
-      "batch_index": 0,
-      "length": 362
-     }
-    },
-    "69": {
-     "class_type": "CreateVideo",
-     "inputs": {
-      "images": [
-       "68",
-       0
-      ],
-      "audio": [
-       "17",
-       0
-      ],
-      "fps": 24,
-      "bit_depth": 8,
-      "color_space": "sRGB"
-     }
-    },
-    "70": {
-     "class_type": "SaveVideo",
-     "inputs": {
-      "video": [
-       "69",
-       0
-      ],
-      "filename_prefix": "test_LTX25_2x",
-      "format": "auto",
-      "codec": "auto"
-     }
-    },
     "71": {
      "class_type": "ImageFromBatch",
      "inputs": {
@@ -4582,6 +3598,66 @@
        "71",
        0
       ]
+     }
+    },
+    "80": {
+     "class_type": "UpscaleModelLoader",
+     "inputs": {
+      "model_name": "rtx-upscale.pth"
+     }
+    },
+    "81": {
+     "class_type": "ImageUpscaleWithModel",
+     "inputs": {
+      "upscale_model": [
+       "80",
+       0
+      ],
+      "image": [
+       "16",
+       0
+      ]
+     }
+    },
+    "82": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "81",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": 704,
+      "height": 1216,
+      "crop": "disabled"
+     }
+    },
+    "83": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "82",
+       0
+      ],
+      "audio": [
+       "17",
+       0
+      ],
+      "fps": 24,
+      "bit_depth": 8,
+      "color_space": "sRGB"
+     }
+    },
+    "84": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "83",
+       0
+      ],
+      "filename_prefix": "test_RTX_AI_2x",
+      "format": "auto",
+      "codec": "auto"
      }
     },
     "300": {

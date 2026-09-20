@@ -61,9 +61,9 @@
  * and imageVae (the Mamad8 T=1 decoder) replace the old single 'vae' pick.
  * The graphs load DISTINCT decoders — the H3 video/workbench graphs carry a
  * video VAELoader (node 3) AND an audio VAELoader (node 4), the T=1 Fast
- * profile decodes through its own image VAE, the LTX engines carry the same
- * video/audio pair, and the audio-only engines' (music3/acestep) one VAE is
- * audio-class — so a single 'vae' entry could reach only ever one of them.
+ * profile decodes through its own image VAE, and the audio-only engines'
+ * (music3/acestep) one VAE is audio-class — so a single 'vae' entry could
+ * reach only ever one of them.
  * Slot legality is per family (IMAGE_VAE_FAMILIES): the imageVae pick
  * exists only where a single-frame graph can legally consume it; the video
  * family refuses it outright (every video graph is multi-frame — the
@@ -73,7 +73,7 @@
 import type { ModelFile, ModelOverrideSlots } from '../types'
 import { inferH3ImgSelection, T1_IMAGE_VAE_PATTERN } from './graph/h3image'
 import { inferAceStepSelections } from './aceStepWorkflow'
-import { inferLtx23Selections, inferLtx25Selections, inferSelections } from './modelSelection'
+import { inferSelections } from './modelSelection'
 import { inferMusic3Selection } from './music3Workflow'
 
 export type ModelOverrideSlotName = 'checkpoint' | 'fl2va' | 'ref2va' | 'merged' | 'textEncoder' | 'vae' | 'videoVae' | 'audioVae' | 'imageVae'
@@ -89,16 +89,15 @@ export const OVERRIDE_SLOTS: readonly ModelOverrideSlotName[] = ['checkpoint', '
 /** The diffusion-model slots the H3 form gate governs. */
 const CHECKPOINT_CLASS_SLOTS: ReadonlySet<ModelOverrideSlotName> = new Set(['checkpoint', 'fl2va', 'ref2va', 'merged'])
 
-export type ModelFamilyId = 'minimax' | 'h3image' | 'ltx25' | 'ltx23' | 'music3' | 'acestep'
+export type ModelFamilyId = 'minimax' | 'h3image' | 'music3' | 'acestep'
 
 export type ModelFamilyInfo = {
   id: ModelFamilyId
   label: string
   note: string
-  /** The slots this family exposes. Omitted slots resolve engine-side
-   *  (ltx23's single-file checkpoint arrives through engine combo lists,
-   *  outside the six scanner kinds) or are genuinely plural (acestep's two
-   *  DISTINCT text encoders — one pick for both would be dishonest). */
+  /** The slots this family exposes. Omitted slots resolve engine-side or are
+   *  genuinely plural (acestep's two DISTINCT text encoders — one pick for
+   *  both would be dishonest). */
   slots: readonly ModelOverrideSlotName[]
   /** The scan kind each exposed slot picks from. */
   slotKinds: Partial<Record<ModelOverrideSlotName, ModelFile['kind']>>
@@ -113,7 +112,7 @@ export type ModelFamilyInfo = {
  *  no imageVae slot at all — a pick there is refused as unexposed, never a
  *  silent maybe-corruption. The workbench's T=1 Fast profile is the one
  *  legal consumer; its packet/compose/edit siblings never touch the slot's
- *  field. The LTX families have no T=1 image decoder at all. */
+ *  field. */
 export const IMAGE_VAE_FAMILIES: ReadonlySet<ModelFamilyId> = new Set(['h3image'])
 
 /** The family registry the Settings page and the properties panel render. */
@@ -133,22 +132,6 @@ export const MODEL_FAMILIES: readonly ModelFamilyInfo[] = [
     slots: ['fl2va', 'ref2va', 'merged', 'textEncoder', 'videoVae', 'audioVae', 'imageVae'],
     slotKinds: { fl2va: 'diffusion_models', ref2va: 'diffusion_models', merged: 'diffusion_models', textEncoder: 'text_encoders', videoVae: 'vae', audioVae: 'vae', imageVae: 'vae' },
     requireH3Form: true,
-  },
-  {
-    id: 'ltx25',
-    label: 'LTX-2.5 video',
-    note: 'The LTX-2.5 general engine: diffusion transformer, Gemma text encoder, and the graph\'s two decoders — the video VAE (node 3) and the audio VAE (node 4). The latent upscaler stays inferred (engine combo list).',
-    slots: ['checkpoint', 'textEncoder', 'videoVae', 'audioVae'],
-    slotKinds: { checkpoint: 'diffusion_models', textEncoder: 'text_encoders', videoVae: 'vae', audioVae: 'vae' },
-    requireH3Form: false,
-  },
-  {
-    id: 'ltx23',
-    label: 'LTX-2.3 utilities',
-    note: 'The one-graph editing tools. The single-file dev checkpoint resolves through the engine\'s combo list (models/checkpoints is outside the scanner kinds), so only the text encoder and the split-weights VAE picks (video/audio, the Obscura Remova lane) are scan-anchored.',
-    slots: ['textEncoder', 'videoVae', 'audioVae'],
-    slotKinds: { textEncoder: 'text_encoders', videoVae: 'vae', audioVae: 'vae' },
-    requireH3Form: false,
   },
   {
     id: 'music3',
@@ -200,8 +183,6 @@ export const SLOT_LABELS: Record<ModelOverrideSlotName, string> = {
 const SLOT_FIELDS: Record<ModelFamilyId, Partial<Record<ModelOverrideSlotName, string[]>>> = {
   minimax: { fl2va: ['fl2va'], ref2va: ['ref2va'], merged: ['merged'], textEncoder: ['textEncoder'], videoVae: ['videoVae'], audioVae: ['audioVae'] },
   h3image: { fl2va: ['fl2va'], ref2va: ['ref2va'], merged: ['merged'], textEncoder: ['textEncoder'], videoVae: ['videoVae'], audioVae: ['audioVae'], imageVae: ['t1ImageVae'] },
-  ltx25: { checkpoint: ['diffusion'], textEncoder: ['textEncoder'], videoVae: ['videoVae'], audioVae: ['audioVae'] },
-  ltx23: { textEncoder: ['textEncoder'], videoVae: ['videoVae'], audioVae: ['audioVae'] },
   music3: { checkpoint: ['diffusion'], textEncoder: ['textEncoder'], audioVae: ['vae'] },
   acestep: { checkpoint: ['base', 'sft'], audioVae: ['vae'] },
 }
@@ -211,8 +192,10 @@ const H3_LANE_FAMILIES: ReadonlySet<string> = new Set(['minimax', 'h3image'])
 
 /** The families whose legacy single 'vae' pick meant the VIDEO decoder
  *  (epdvxd4) — their graphs load a video+audio VAELoader pair and the old
- *  slot drove only the video one. */
-const VIDEO_VAE_FAMILIES: ReadonlySet<string> = new Set(['minimax', 'h3image', 'ltx25', 'ltx23'])
+ *  slot drove only the video one. (The removed LTX families also belonged
+ *  here; a stored legacy 'vae' pick under those keys now drops with the
+ *  family — Phase 0, 2026-09-20.) */
+const VIDEO_VAE_FAMILIES: ReadonlySet<string> = new Set(['minimax', 'h3image'])
 
 /** The families whose legacy single 'vae' pick meant the AUDIO decoder
  *  (epdvxd4) — their one decoder is audio-class (music3's DAV, ACE-Step's
@@ -511,8 +494,6 @@ export function inferredOverrideSlotFile(familyId: ModelFamilyId, slot: ModelOve
   let record: Record<string, unknown> | null = null
   if (familyId === 'minimax') record = inferSelections(files, 'off')
   else if (familyId === 'h3image') record = inferH3ImgSelection(files)
-  else if (familyId === 'ltx25') record = inferLtx25Selections(files, [])
-  else if (familyId === 'ltx23') record = inferLtx23Selections(files, { checkpoints: [], latentUpscalers: [] })
   else if (familyId === 'music3') record = inferMusic3Selection(files)
   else if (familyId === 'acestep') record = inferAceStepSelections(files)
   const value = record ? record[primary] : undefined

@@ -216,7 +216,7 @@ maybe('(b) external custom-nodes target resolution + installs + foreign refusal 
     ok(checked.installed === true && checked.targetKind === 'external' && checked.instanceState === 'absent', 'an installed pack whose instance does not serve the classes carries installed + absent (the restart-needed state)')
 
     // Foreign refusal: a pack folder that exists WITHOUT our marker.
-    const foreignPack = ENGINE_NODE_PACKS.find((entry) => entry.id === 'radiance')
+    const foreignPack = ENGINE_NODE_PACKS.find((entry) => entry.id === 'krea2-controlnet')
     fs.mkdirSync(path.join(externalDir, foreignPack.name), { recursive: true })
     fs.writeFileSync(path.join(externalDir, foreignPack.name, 'mine.py'), '# not ours\n')
     const refused = await installNodePack(foreignPack, { target, sourceDirectory: sourceDir })
@@ -361,14 +361,14 @@ maybe('(f) the checkNodePack status matrix on crafted folders', async () => {
     ok(/ahead of the pin/.test(ahead.managedNotice ?? '') && ahead.managedNotice?.includes(fixtures.shaB.slice(0, 12)), 'the managed notice appears with the direction and the installed revision')
 
     // (5) foreign plain folder — presence without version.
-    const plainDir = path.join(fixtures.matrixDir, 'radiance')
+    const plainDir = path.join(fixtures.matrixDir, 'krea2-anypaint')
     fs.mkdirSync(plainDir, { recursive: true })
     fs.writeFileSync(path.join(plainDir, 'user-file.py'), '# theirs\n')
-    const plain = await checkNodePack(ENGINE_NODE_PACKS.find((entry) => entry.id === 'radiance'), matrixTarget, null, 'unknown')
+    const plain = await checkNodePack(ENGINE_NODE_PACKS.find((entry) => entry.id === 'krea2-anypaint'), matrixTarget, null, 'unknown')
     ok(plain.folderState === 'foreign' && plain.versionInfo === undefined && plain.versionRelation === undefined && plain.managedNotice === undefined, 'a plain foreign folder stays version-unknown with no fabricated fields')
 
     // (6) absent — nothing to detect.
-    const absent = await checkNodePack(ENGINE_NODE_PACKS.find((entry) => entry.id === 'ltxvideo'), matrixTarget, null, 'unknown')
+    const absent = await checkNodePack(ENGINE_NODE_PACKS.find((entry) => entry.id === 'autocontext'), matrixTarget, null, 'unknown')
     ok(absent.folderState === 'missing' && absent.versionInfo === undefined, 'a missing folder stays missing with no version fields')
   }
 })
@@ -517,8 +517,6 @@ routesMaybe('(d) app-relative io defaults through the real settings pipeline + (
       const legacyOverrides = await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...fresh, modelOverrides: {
         minimax: { checkpoint: 'legacy-merge.safetensors', fl2va: 'explicit-fl2va.safetensors', vae: '  ' },
         h3image: { checkpoint: 'legacy-image.safetensors', vae: 'legacy-h3-video-vae.safetensors', videoVae: 'explicit-workbench-video-vae.safetensors' },
-        ltx25: { checkpoint: 'ltx-keep.safetensors', vae: 'legacy-ltx-video-vae.safetensors', audioVae: 'ltx-audio-vae.safetensors' },
-        ltx23: { vae: 'legacy-ltx23-video-vae.safetensors' },
         music3: { vae: 'legacy-dav.safetensors' },
         acestep: { vae: 'legacy-ace-audio-vae.safetensors', imageVae: 'not-a-real-pick.safetensors' },
       } } }) })
@@ -530,10 +528,6 @@ routesMaybe('(d) app-relative io defaults through the real settings pipeline + (
       ok(normalized.h3image?.fl2va === 'legacy-image.safetensors' && normalized.h3image?.ref2va === 'legacy-image.safetensors', 'h3image: the legacy pick lands on BOTH lanes (behavior-preserving)')
       ok(normalized.h3image?.videoVae === 'explicit-workbench-video-vae.safetensors', 'h3image: an explicit videoVae pick wins over the legacy vae value')
       ok(!('vae' in (normalized.h3image ?? {})), 'h3image: the consumed legacy vae key never persists')
-      ok(normalized.ltx25?.checkpoint === 'ltx-keep.safetensors', 'ltx25: the generic checkpoint family is untouched by the migration')
-      ok(normalized.ltx25?.videoVae === 'legacy-ltx-video-vae.safetensors', 'ltx25: the legacy vae pick lands on videoVae (the old slot meaning on a video family)')
-      ok(normalized.ltx25?.audioVae === 'ltx-audio-vae.safetensors', 'ltx25: the new audioVae slot normalizes through')
-      ok(normalized.ltx23?.videoVae === 'legacy-ltx23-video-vae.safetensors', 'ltx23: the legacy vae pick lands on videoVae')
       ok(normalized.music3?.audioVae === 'legacy-dav.safetensors', 'music3: the legacy vae pick lands on audioVae (the family one decoder is audio-class)')
       ok(normalized.acestep?.audioVae === 'legacy-ace-audio-vae.safetensors', 'acestep: the legacy vae pick lands on audioVae')
       ok(normalized.acestep?.imageVae === 'not-a-real-pick.safetensors', 'acestep: an imageVae pick persists shape-wise — the family gate lives renderer-side (refused as unexposed at consult)')
@@ -553,13 +547,11 @@ routesMaybe('(d) app-relative io defaults through the real settings pipeline + (
       const t1Overrides = await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...fresh, modelOverrides: {
         minimax: { vae: t1File },
         h3image: { vae: t1File },
-        ltx25: { videoVae: t1File },
         music3: { vae: 'a-video-vae.safetensors' },
       } } }) })
       const t1norm = t1Overrides.body.settings.modelOverrides ?? {}
       ok(!t1norm.minimax?.videoVae && !('vae' in (t1norm.minimax ?? {})), `minimax: a T=1-named legacy pick has no legal slot — dropped, never wedged onto videoVae (got ${JSON.stringify(t1norm.minimax)})`)
       ok(t1norm.h3image?.imageVae === t1File && !t1norm.h3image?.videoVae, `h3image: a T=1-named legacy pick routes to imageVae — the one legal slot (got ${JSON.stringify(t1norm.h3image)})`)
-      ok(!t1norm.ltx25?.videoVae, `ltx25: a stored videoVae wedge naming the T=1 file heals (dropped) at load (got ${JSON.stringify(t1norm.ltx25)})`)
       ok(!t1norm.music3?.audioVae, `music3: a video-named legacy pick on an audio family has no legal slot — dropped (got ${JSON.stringify(t1norm.music3)})`)
       await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: fresh }) })
 
@@ -651,12 +643,12 @@ routesMaybe('(d) app-relative io defaults through the real settings pipeline + (
       ok(fs.existsSync(path.join(externalDir, 'minimax-lora-form-adapter', 'nodes.py')), 'the pre-existing form-adapter folder is untouched')
 
       // Foreign refusal through the route (the user-fetch pack).
-      const foreignDir = path.join(externalDir, 'radiance')
+      const foreignDir = path.join(externalDir, 'comfyui-krea2-controlnet')
       fs.mkdirSync(foreignDir, { recursive: true })
       fs.writeFileSync(path.join(foreignDir, 'user-file.py'), '# theirs\n')
-      const foreign = await api('/api/lan/engine/nodes/install', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'radiance', sourceDirectory: localCopy }) })
+      const foreign = await api('/api/lan/engine/nodes/install', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'krea2-controlnet', sourceDirectory: localCopy }) })
       ok(foreign.status === 400 && /refusing to replace/i.test(foreign.body.error), 'the route refuses a foreign folder in the external target')
-      const foreignRow = (await api('/api/lan/engine/nodes')).body.packs.find((pack) => pack.id === 'radiance')
+      const foreignRow = (await api('/api/lan/engine/nodes')).body.packs.find((pack) => pack.id === 'krea2-controlnet')
       ok(foreignRow.folderState === 'foreign', 'the foreign state is listed honestly for the Settings chip')
 
       // ---- the status board (task mjhlt3k): version-aware rows + the
@@ -673,7 +665,7 @@ routesMaybe('(d) app-relative io defaults through the real settings pipeline + (
         const cnrDir = path.join(externalDir, 'comfyui-krea2-controlnet')
         fs.mkdirSync(cnrDir, { recursive: true })
         fs.writeFileSync(path.join(cnrDir, 'pyproject.toml'), '[project]\nname = "comfyui-krea2-controlnet"\nversion = "1.4.2"\n\n[tool.comfy]\nPublisherId = "facok"\n')
-        const gitDir = path.join(externalDir, 'ComfyUI-LTXVideo')
+        const gitDir = path.join(externalDir, 'ComfyUI_MinimaxH3_AutoContext')
         fs.cpSync(fixtures.gitRepo, gitDir, { recursive: true })
 
         const board = (await api('/api/lan/engine/nodes')).body.packs
@@ -682,7 +674,7 @@ routesMaybe('(d) app-relative io defaults through the real settings pipeline + (
         ok(markerRow.installed === true && markerRow.versionInfo?.source === 'studio-marker' && markerRow.versionRelation === 'at-pin' && markerRow.versionInfo.version === markerRow.pinnedRevision, 'a marker at the pin reports studio-marker / at-pin with the revision')
         const cnrRow = byBoardId.get('krea2-controlnet')
         ok(cnrRow.folderState === 'foreign' && cnrRow.versionInfo?.source === 'comfyui-registry' && cnrRow.versionInfo?.managedBy === 'comfyui' && cnrRow.versionInfo?.version === '1.4.2', 'a Comfy-Registry pyproject folder reports managed-by-comfyui with its version')
-        const gitRow = byBoardId.get('ltxvideo')
+        const gitRow = byBoardId.get('autocontext')
         ok(gitRow.folderState === 'foreign' && gitRow.versionInfo?.source === 'git-checkout' && gitRow.versionInfo?.version === fixtures.shaB, 'a git-checkout folder reports the HEAD sha as its version')
         ok(gitRow.versionRelation === 'differs' && /not determinable/.test(gitRow.managedNotice ?? ''), 'a git HEAD unrelated to the sha pin reports differs with the honest not-locally-determinable notice')
         ok(byBoardId.get('krea2edit')?.hasNetworkSource === true && byBoardId.get('vdn-h3')?.hasNetworkSource === false && byBoardId.get('lora-form-adapter')?.hasNetworkSource === false, 'hasNetworkSource marks fetch-catalog packs (user-fetch yes; vendored and local-install entries no)')

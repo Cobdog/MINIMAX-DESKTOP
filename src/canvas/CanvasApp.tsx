@@ -31,7 +31,6 @@ import { PropertiesPanel } from './PropertiesPanel'
 import { Launcher } from './Launcher'
 import { Radar } from './Radar'
 import { SettingsDock } from './SettingsDock'
-import { StudiosDock } from './StudiosDock'
 import { Substrate } from './Substrate'
 import { useCanvasStore } from './store'
 import { useJobsStore } from '../state/jobsStore'
@@ -101,8 +100,7 @@ export function CanvasApp() {
         else if (state.endpointMenu || state.forkMenu) {
           state.setEndpointMenu(null)
           state.setForkMenu(null)
-        } else if (state.studiosDock) state.setStudiosDock(null)
-        else if (state.diagnosticsDock) state.setDiagnosticsDock(false)
+        } else if (state.diagnosticsDock) state.setDiagnosticsDock(false)
         else select(null)
         return
       }
@@ -228,7 +226,6 @@ export function CanvasApp() {
       <PoseRigDock />
       <AudioDock />
       <SettingsDock />
-      <StudiosDock />
       <DiagnosticsDock />
       <IndexOverlay />
       <LibraryOverlay />

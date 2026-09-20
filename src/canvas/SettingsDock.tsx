@@ -13,22 +13,17 @@
  * viewport-clamped (dockDefaultGeometry) and the dock raises to the top of
  * the dock stack on open and on any grab (store.raiseDock) — three open
  * docks no longer stack at near-identical positions with DOM order picking
- * the winner. The LTX-2.3 run row is wired through the shared submit core
- * (it used to be unreachable dead code: onRunLtxUtility was never passed).
+ * the winner.
  */
 import { useContext, useEffect, useState } from 'react'
 import { Rnd } from 'react-rnd'
 import { Settings, X } from 'lucide-react'
 import { h3StackReport } from '../lib/h3Stack'
-import { submitLtx23Utility } from '../lib/ltx23UtilitySubmit'
-import type { Ltx23UtilityKind } from '../lib/graph/ltx23'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 import { SettingsView } from '../views/SettingsView'
-import type { MediaFile } from '../types'
-import { useJobsStore } from '../state/jobsStore'
 import { CanvasSessionContext } from './sessionContext'
 import { dockDefaultGeometry } from './dockGeometry'
-import { engineBridge, useCanvasStore } from './store'
+import { useCanvasStore } from './store'
 
 export function SettingsDock() {
   const open = useCanvasStore((state) => state.settingsDock)
@@ -37,8 +32,6 @@ export function SettingsDock() {
   const raiseDock = useCanvasStore((state) => state.raiseDock)
   // QOL wave (rrxlw2r): the fetch affordance's focus ids (an unavailable
   // canvas menu row deep-linked here) — consumed once by the FetchBrowser.
-  const fetchFocus = useCanvasStore((state) => state.fetchFocus)
-  const setFetchFocus = useCanvasStore((state) => state.setFetchFocus)
   const context = useContext(CanvasSessionContext)
   const [diagnosticRunning, setDiagnosticRunning] = useState(false)
   // Dock stacking (review M11): this dock's own z, raised on open and on
@@ -67,30 +60,6 @@ export function SettingsDock() {
     } catch (error) {
       toast('error', `Settings could not be saved: ${error instanceof Error ? error.message : String(error)}`)
     }
-  }
-
-  // M7 (review 2026-09-19): the LTX-2.3 utilities run row — wired through
-  // the SAME shared core the canvas uses (lib/ltx23UtilitySubmit.ts), so the
-  // row the section copy always promised actually submits. Validation and
-  // refusals surface as toasts from the core; the job lands in the shared
-  // queue like every other run.
-  const runLtxUtility = async (options: { tool: Ltx23UtilityKind; input: MediaFile | null; audio?: MediaFile | null; prompt?: string }): Promise<string | null> => {
-    const result = await submitLtx23Utility(
-      {
-        tool: options.tool,
-        prompt: options.prompt,
-        video: options.tool === 'ia2v' ? null : options.input,
-        image: options.tool === 'ia2v' ? options.input ?? null : undefined,
-        audio: options.audio ?? null,
-      },
-      { settings, connected: status.connected, info: session.info, models, clientId: engineBridge.clientId },
-      {
-        notify: (tone, text) => toast(tone, text),
-        setJobs: (update) => useJobsStore.getState().setJobs(update),
-        cancellationRequests: engineBridge.cancellationRequests ?? { current: new Set<string>() },
-      },
-    )
-    return result.ok ? null : result.message
   }
 
   const runDiagnosticsNow = async () => {
@@ -140,9 +109,6 @@ export function SettingsDock() {
           onCheck={() => void checkConnection(settings.comfyUrl)}
           onSave={save}
           onRunDiagnostics={() => void runDiagnosticsNow()}
-          onRunLtxUtility={runLtxUtility}
-          fetchFocusEntryIds={fetchFocus ?? undefined}
-          onFetchFocusConsumed={() => setFetchFocus(null)}
         />
       </ErrorBoundary>
     </div>

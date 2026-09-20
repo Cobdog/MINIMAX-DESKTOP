@@ -94,7 +94,7 @@ export const DEFAULT_SETTINGS: Record<OpKind, () => OpSettings> = {
   mask: () => ({ strokes: [] }),
   adjust: () => ({ brightness: 1, contrast: 1, saturation: 1 }),
   trim: () => ({ start: 0, end: 15 }),
-  upscale: () => ({ mode: 'ltx' }),
+  upscale: () => ({ mode: 'rtx' }),
   stabilize: () => ({ strength: 0.5 }),
   'color-grade': () => ({ temperature: 0, tint: 0 }),
   'h3img.tone-lock': () => ({ lockStrength: 0.85, detailStrength: 0.55, radius: 32 }),
@@ -138,7 +138,8 @@ export function readOpSettings(kind: string, raw: Record<string, unknown> | null
     }
     case 'upscale': {
       const mode = record.mode
-      return { mode: mode === 'rtx' || mode === 'lbh2d' || mode === 'lbh3d' ? mode : mode === 'off' ? 'ltx' : 'ltx' }
+      // A stored 'ltx' (the removed Phase-0 mode) falls back to 'rtx'.
+      return { mode: mode === 'rtx' || mode === 'lbh2d' || mode === 'lbh3d' ? mode : 'rtx' }
     }
     case 'stabilize':
       return { strength: num(record.strength, 0.5, 0, 1) }

@@ -15,7 +15,7 @@ export type ComfyPrompt = Record<string, ComfyNode>
 /** Engines a registry entry can apply to. The factory only exposes the seam
  * points an engine declares; today only the MiniMax H3 builder is
  * registry-wired, the list exists so future builders adopt the same entries. */
-export type EngineId = 'minimax' | 'ltx25' | 'acestep' | 'music3' | 'zimage'
+export type EngineId = 'minimax' | 'acestep' | 'music3'
 
 /** Factory chain points an entry may insert at. This is the insert-only
  * contract: transforms append nodes at a declared seam and re-point only the

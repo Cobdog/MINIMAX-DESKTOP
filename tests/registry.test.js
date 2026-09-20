@@ -8,7 +8,7 @@
  *      optimization can never perturb the base path.
  *  (b) TRANSFORM CORRECTNESS — entry-on graphs match hand-asserted
  *      expectations (turbo node wiring incl. the larryvrh pairing swap,
- *      LBH/LTX/RTX chains, preview override).
+ *      LBH/RTX chains, preview override).
  *  (c) DETECTION — mock object_info + model-scan fixtures resolve each
  *      entry's availability, model file, missing nodes and node packs.
  *  (d) PAIRING CONTRACTS — steps and sampler are enforced per family
@@ -48,11 +48,9 @@ const path = require('node:path')
 const { loadTs } = require('../scripts/lib/ts-vm.cjs')
 const { GOLDEN_MATRIX } = require('../scripts/lib/registry-matrix.cjs')
 const { KREA2_MATRIX, KREA2_BASE, KREA2_MODELS } = require('../scripts/lib/krea2edit-matrix.cjs')
-const { LTX23_MATRIX, LTX23_MODELS, LTX23_EXPECTED_CENSUS } = require('../scripts/lib/ltx23-matrix.cjs')
 
 const FIXTURE = path.resolve(__dirname, '..', 'scripts', 'fixtures', 'registry-golden.json')
 const KREA2_FIXTURE = path.resolve(__dirname, '..', 'scripts', 'fixtures', 'krea2edit-golden.json')
-const LTX23_FIXTURE = path.resolve(__dirname, '..', 'scripts', 'fixtures', 'ltx23-golden.json')
 
 // Golden regeneration is a deliberate act: `vitest run registry -- --update-golden`
 // (vitest forwards args after `--` into process.argv) or the env-var form
@@ -71,10 +69,6 @@ const {
 const {
   buildKrea2Graph, buildKrea2T2iGraph, detectKrea2EditFamilies, findKrea2EditFamily,
   krea2LoraKindOfFilename, krea2RecipeAudit, resolveKrea2EditModels, KREA2_EDIT_FAMILIES, KREA2_RECIPE_PINS,
-} = graphModule
-const {
-  buildLtx23UtilityGraph, buildLtx23UtilityGraphWithAudit, detectLtx23Utilities, findLtx23Utility,
-  resolveLtx23Selection, LTX23_UTILITIES, LTX23_PINS, LTX23_PROMPTS,
 } = graphModule
 const { inferSelections } = loadTs('src/lib/modelSelection.ts')
 
@@ -96,13 +90,12 @@ function canon(value) {
 // Mock engine surfaces (object_info + model scan fixtures)
 // ---------------------------------------------------------------------------
 const node = (input) => ({ input: { required: input } })
-const ltxModelList = [['ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors', 'LatentUpscaleModelLoader']]
 
 const FULL_INFO = {
   KSamplerSelect: node({ sampler_name: [['res_multistep', 'euler']] }),
   BasicScheduler: node({ scheduler: [['simple', 'beta']] }),
-  VAELoader: node({ vae_name: [['minimax_h3_video_vae_fp16.safetensors', 'ltx-2.5-video-vae-bf16.safetensors']] }),
-  VAEEncodeTiled: node({}), LatentUpscaleModelLoader: node({ model_name: ltxModelList }), LTXVLatentUpsampler: node({}),
+  VAELoader: node({ vae_name: [['minimax_h3_video_vae_fp16.safetensors']] }),
+  VAEEncodeTiled: node({}),
   VAEDecodeTiled: node({}), ImageFromBatch: node({}), RepeatImageBatch: node({}), ImageBatch: node({}),
   MinimaxH3LatentUpscalerNode2D: node({ model_name: [['minimax_h3_latent_upscaler_2d_fp16.safetensors']] }),
   MinimaxH3LatentUpscaler3D: node({ model_name: [['minimax_h3_latent_upscaler_3d_fp16.safetensors']] }),
@@ -202,7 +195,7 @@ function ok(condition, message) {
   checks += 1
 }
 
-updateMaybe('--update-golden: re-snapshot the registry + krea2 + ltx23 fixtures from the CURRENT builders', () => {
+updateMaybe('--update-golden: re-snapshot the registry + krea2 fixtures from the CURRENT builders', () => {
   const entries = GOLDEN_MATRIX.map(({ name, options, models, uploads }) => ({
     name, options, models, uploads,
     graph: buildMiniMaxWorkflow(options, models, uploads),
@@ -215,12 +208,7 @@ updateMaybe('--update-golden: re-snapshot the registry + krea2 + ltx23 fixtures 
   const baseEntry = KREA2_MATRIX[0]
   const baseGraph = buildKrea2T2iGraph(baseEntry.options, baseEntry.models)
   fs.writeFileSync(KREA2_FIXTURE, JSON.stringify({ version: 1, generatedFrom: 'buildKrea2Graph + buildKrea2T2iGraph (krea2edit families)', base: baseGraph, entries: krea2Entries }, null, 1) + '\n')
-  const ltx23Entries = LTX23_MATRIX.map(({ name, request, models }) => ({
-    name, request, models,
-    graph: buildLtx23UtilityGraph(request, models),
-  }))
-  fs.writeFileSync(LTX23_FIXTURE, JSON.stringify({ version: 1, generatedFrom: 'buildLtx23UtilityGraph (LTX-2.3 official-template utilities)', entries: ltx23Entries }, null, 1) + '\n')
-  console.log(`Regenerated ${entries.length} golden graphs at ${path.relative(process.cwd(), FIXTURE)}, ${krea2Entries.length} Krea 2 edit graphs at ${path.relative(process.cwd(), KREA2_FIXTURE)}, and ${ltx23Entries.length} LTX-2.3 utility graphs at ${path.relative(process.cwd(), LTX23_FIXTURE)} — review the diff: the fixtures ARE the contract.`)
+  console.log(`Regenerated ${entries.length} golden graphs at ${path.relative(process.cwd(), FIXTURE)} and ${krea2Entries.length} Krea 2 edit graphs at ${path.relative(process.cwd(), KREA2_FIXTURE)} — review the diff: the fixtures ARE the contract.`)
 })
 
 maybe('(a) inertness vs the pre-registry goldens + registry shape', () => {
@@ -237,7 +225,7 @@ maybe('(a) inertness vs the pre-registry goldens + registry shape', () => {
     ok(entry.ui.description.length > 0, `${entry.id} has a UI description`)
     ok(entry.appliesTo.includes('minimax'), `${entry.id} applies to the H3 engine`)
   }
-  for (const required of ['turbo.official-fl2v-8', 'turbo.lightx2v-fl2v-4', 'turbo.lightx2v-ref2v-8', 'turbo.pdd-fl2va-8', 'turbo.pdd-ref2va-8', 'turbo.drbaph-4', 'turbo.larryvrh-v4-8', 'turbo.ref2v-4', 'upscale.ltx2x', 'upscale.lbh2d', 'upscale.lbh3d', 'upscale.rtx', 'preview.h3-override']) {
+  for (const required of ['turbo.official-fl2v-8', 'turbo.lightx2v-fl2v-4', 'turbo.lightx2v-ref2v-8', 'turbo.pdd-fl2va-8', 'turbo.pdd-ref2va-8', 'turbo.drbaph-4', 'turbo.larryvrh-v4-8', 'turbo.ref2v-4', 'upscale.lbh2d', 'upscale.lbh3d', 'upscale.rtx', 'preview.h3-override']) {
     ok(Boolean(findOptimization(required)), `registry contains ${required}`)
   }
   assert.throws(() => registerOptimization(entries[0]), /duplicate id/, 'duplicate registration is rejected')
@@ -297,9 +285,6 @@ maybe('(b) transform correctness', () => {
     ok(graph['90'].class_type === 'SplitSigmas' && graph['92'].class_type === 'MinimaxH3LatentUpscaler3D', 'LBH 3D entry inserts its block')
     ok(graph['15'].inputs.sigmas.join('|') === '90|0', 'LBH rewires the stage-1 sampler sigmas')
     ok(graph['99'].class_type === 'SaveVideo', 'LBH save node present')
-    const ltx = MATRIX_BY_NAME['ltx-text-5s']
-    const ltxGraph = buildMiniMaxWorkflow(ltx.options, ltx.models, ltx.uploads)
-    ok(ltxGraph['66'].class_type === 'LTXVLatentUpsampler' && ltxGraph['70'].class_type === 'SaveVideo', 'LTX 2x entry inserts its block')
     const rtx = MATRIX_BY_NAME['rtx-turbo4']
     const rtxGraph = buildMiniMaxWorkflow(rtx.options, rtx.models, rtx.uploads)
     ok(rtxGraph['82'].class_type === 'ImageScale' && rtxGraph['84'].class_type === 'SaveVideo', 'RTX entry inserts its block')
@@ -328,14 +313,12 @@ maybe('(c) detection against mock object_info + scans', () => {
     const bareById = {}
     for (const { entry, detection } of bare) bareById[entry.id] = detection
     ok(bareById['turbo.official-fl2v-8'].available === true && bareById['turbo.official-fl2v-8'].packs.larryvrhTurbo === false, 'turbo detection works offline of the pack; pack reported absent')
-    ok(bareById['upscale.ltx2x'].available === false && bareById['upscale.ltx2x'].missingNodes.length === 7, 'LTX entry reports its missing nodes on a bare engine')
     ok(bareById['upscale.lbh3d'].available === false && bareById['upscale.lbh3d'].missingNodes.join() === 'MinimaxH3LatentUpscaler3D', 'LBH 3D entry names its missing node')
     ok(bareById['preview.h3-override'].available === false, 'preview entry unavailable on a bare engine')
     ok(bareById['upscale.rtx'].available === false, 'RTX entry needs an upscale model')
     const full = detectOptimizations(FULL_INFO, [])
     const fullById = {}
     for (const { entry, detection } of full) fullById[entry.id] = detection
-    ok(fullById['upscale.ltx2x'].available === true && fullById['upscale.ltx2x'].model === 'ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors', 'LTX entry resolves its model from object_info choices')
     ok(fullById['upscale.lbh2d'].available === true && fullById['upscale.rtx'].available === true && fullById['preview.h3-override'].available === true, 'upscale+preview entries available on the full mock')
     ok(fullById['turbo.lightx2v-fl2v-4'].available === false, 'turbo entries need their LoRA file (no false availability)')
     ok(larryvrhTurboPackPresent(FULL_INFO) && !larryvrhTurboPackPresent(BARE_INFO) && !larryvrhTurboPackPresent(undefined), 'pack presence helper')
@@ -764,221 +747,8 @@ maybe('(f8) Krea 2 availability gating per family', () => {
   }
 })
 
-// ---- (g) LTX-2.3 one-graph utilities ------------------------------------
-const ltx23Fixture = JSON.parse(fs.readFileSync(LTX23_FIXTURE, 'utf8'))
-const ltx23GoldenByName = {}
-for (const { name, graph } of ltx23Fixture.entries) ltx23GoldenByName[name] = graph
-
-maybe('(g1) LTX-2.3 registry shape: six tools, unique ids, guidance, zero H3-registry leakage', () => {
-  ok(ltx23Fixture.entries.length === LTX23_MATRIX.length, 'ltx23 golden fixture covers the whole matrix — regenerate with --update-golden if the matrix changed')
-
-  ok(LTX23_UTILITIES.length === 6, 'six LTX-2.3 utilities ship (remove-subtitles, remove-watermark, restore-archival, remove-object, outpaint, ia2v)')
-  const utilityIds = LTX23_UTILITIES.map((utility) => utility.id)
-  ok(new Set(utilityIds).size === utilityIds.length, 'utility ids are unique')
-  for (const utility of LTX23_UTILITIES) {
-    ok(typeof utility.detect === 'function', `${utility.id} has detect`)
-    ok(utility.ui.description.length > 0 && (utility.ui.installHint ?? '').length > 0, `${utility.id} carries description + install guidance`)
-    ok(utility.ui.input.length > 0, `${utility.id} declares its input surface`)
-  }
-  ok(!optimizationEntries().some((entry) => entry.id.startsWith('ltx23.')), 'LTX-2.3 utilities live in their own registry — the H3 optimization list is untouched')
-  const ia2v = findLtx23Utility('ltx23.ia2v')
-  ok(ia2v && ia2v.packNodes.length === 0, 'ia2v needs ZERO node packs (the all-core native workflow)')
-  ok(findLtx23Utility('ltx23.remove-subtitles').packNodes.includes('LTXICLoRALoaderModelOnly') && findLtx23Utility('ltx23.remove-subtitles').packNodes.includes('GetImageSizeAndCount'), 'the remove family gates on the LTXVideo + KJNodes packs')
-  ok(findLtx23Utility('ltx23.outpaint').packNodes.includes('Float32ColorCorrect'), 'outpaint gates on radiance (the load-bearing color-correct node)')
-})
-
-maybe('(g2) LTX-2.3 golden equality + topology audit + template census over every matrix config', () => {
-  for (const { name, request, models } of LTX23_MATRIX) {
-    const { graph, violations } = buildLtx23UtilityGraphWithAudit(request, models)
-    assert.equal(canon(graph), canon(ltx23GoldenByName[name]), `ltx23 golden drift for config '${name}' — regenerate with --update-golden and review the diff`)
-    checks += 1
-    ok(violations.length === 0, `ltx23 topology audit must pass for '${name}' (got: ${violations.join('; ')})`)
-    checks += 1
-    const censusKind = request.tool === 'remove-subtitles' || request.tool === 'remove-watermark' || request.tool === 'restore-archival' ? 'remove' : request.tool === 'remove-object' ? 'obscura' : request.tool
-    const expected = LTX23_EXPECTED_CENSUS[censusKind].census
-    const built = {}
-    for (const node of Object.values(graph)) built[node.class_type] = (built[node.class_type] ?? 0) + 1
-    const expectedKeys = Object.keys(expected).sort()
-    const builtKeys = Object.keys(built).sort()
-    assert.equal(builtKeys.join(','), expectedKeys.join(','), `ltx23 census class drift for '${name}' (${LTX23_EXPECTED_CENSUS[censusKind].source}; deltas: ${LTX23_EXPECTED_CENSUS[censusKind].deltas})`)
-    for (const key of expectedKeys) assert.equal(built[key], expected[key], `ltx23 census count drift for ${key} in '${name}'`)
-    checks += 2
-  }
-})
-
-maybe('(g3) LTX-2.3 template-pinned values — the official templates are data, and this is the pin', () => {
-  {
-    const pins = LTX23_PINS
-    ok(pins.firstStageSigmas === '1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0', 'stage-1 sigma ladder pinned to the official LTX-2.3 dev schedule')
-    ok(pins.removeRefinerSigmas === '0.909375, 0.725, 0.421875, 0.0', 'remove-family refine ladder pinned')
-    ok(pins.ia2vRefinerSigmas === '0.85, 0.7250, 0.4219, 0.0', 'ia2v refine ladder pinned')
-    ok(pins.frameCountExpression === '(int((a - 1) / 8)) * 8 + 1', 'latent-safe frame-count expression pinned')
-    ok(pins.guide.frameIdx === 0 && pins.guide.strength === 1 && pins.guide.latentDownscaleFactor === 1 && pins.guide.crop === 'disabled', 'IC-LoRA guide attach pins: frame 0 / strength 1 / downscale 1 / crop disabled')
-    ok(pins.remove.cfg === 1 && pins.remove.sampler === 'euler' && pins.remove.stage2NoiseSeed === 29, 'remove family pin: CFG 1 / euler / fixed stage-2 noise 29')
-    ok(pins.obscura.steps === 8 && pins.obscura.cfg === 1 && pins.obscura.sampler === 'euler_ancestral_cfg_pp' && pins.obscura.scheduler === 'linear_quadratic' && pins.obscura.obscuraStrength === 2.0 && pins.obscura.distilledStrength === 0.4 && pins.obscura.fps === 25, 'Obscura pin: 8 steps / CFG 1 / euler_ancestral_cfg_pp+linear_quadratic / obscura@2.0 wrapping distilled@0.4 / 25 fps')
-    ok(pins.outpaint.cfg === 1 && pins.outpaint.sampler === 'euler_ancestral' && pins.outpaint.distilledStrength === 0.5 && pins.outpaint.outpaintStrength === 1.0 && pins.outpaint.guideGamma === 2, 'outpaint pin: CFG 1 / euler_ancestral / distilled@0.5 + outpaint@1.0 / gamma-2 guide')
-    ok(pins.ia2v.cfg === 1 && pins.ia2v.distilledStrength === 0.5 && pins.ia2v.stage1ImageStrength === 0.7 && pins.ia2v.stage2ImageStrength === 1 && pins.ia2v.stage2NoiseSeed === 42, 'ia2v pin: CFG 1 / distilled@0.5 / image anchors 0.7→1.0 / fixed stage-2 noise 42')
-    ok(LTX23_PROMPTS.subtitles.startsWith('Remove subtitles, captions') && LTX23_PROMPTS.watermark.startsWith('Remove short-video platform watermarks') && LTX23_PROMPTS.archival.startsWith('A modern, high-resolution'), 'per-tool default prompts pinned verbatim from the templates')
-    ok(LTX23_PROMPTS.obscura === 'Remove the {object} from the foreground.', 'Obscura prompt form pinned')
-  }
-})
-
-maybe('(g4) LTX-2.3 hand-asserted load-bearing wiring per family (template node ids)', () => {
-  {
-    const remove = buildLtx23UtilityGraph(LTX23_MATRIX[0].request, LTX23_MATRIX[0].models)
-    ok(remove['5085'].inputs.ckpt_name === 'ltx-2.3-22b-dev.safetensors' && remove['5084'].inputs.text_encoder === 'gemma_3_12B_it.safetensors', 'remove family loads the template-exact checkpoint + Gemma encoder')
-    ok(remove['5087'].inputs.lora_name === 'ltx2.3-ic-subtitles-remove-general.safetensors' && remove['5087'].inputs.strength_model === 1.2, 'subtitles IC-LoRA @1.2 (the template pin)')
-    ok(remove['5064'].inputs.sigmas === LTX23_PINS.firstStageSigmas && remove['5075'].inputs.sigmas === LTX23_PINS.removeRefinerSigmas, 'the two ManualSigmas ladders carry the pinned schedules')
-    ok(remove['5069'].inputs.samples.join('|') === '5082|2' && remove['5069'].inputs.upscale_model.join('|') === '5059|0', 'stage 2 upsamples the CROPPED stage-1 latent with the x2-1.1 model')
-    ok(remove['5071'].inputs.image.join('|') === '5068|0' && remove['5094'].inputs.image.join('|') === '5089|0', 'each stage guides with its own resolution-matched resize (half then full)')
-    ok(remove['5098'].inputs.audio_latent.join('|') === '5083|0' && remove['5099'].inputs.audio_latent.join('|') === '5070|1', 'audio reference tokens re-bind per stage (source audio, then stage-1 output audio)')
-    ok(remove['5062'].inputs.audio.join('|') === '5088|1' && remove['5062'].inputs.fps.join('|') === '5088|2', 'the mux carries the ORIGINAL audio + source fps (audio never regenerates in this family)')
-    ok(remove['5090'].inputs.latents.join('|') === '5074|2', 'the decode reads the guide-cropped latent only')
-    ok(remove['5058'].inputs.noise_seed === 424242 && remove['5078'].inputs.noise_seed === 29, 'stage-1 seed is the caller\'s, stage-2 noise is the template\'s fixed 29')
-    const watermark = buildLtx23UtilityGraph(LTX23_MATRIX[2].request, LTX23_MATRIX[2].models)
-    ok(watermark['5087'].inputs.lora_name === 'ltx2.3-ic-watermark-remove-general.safetensors' && watermark['5087'].inputs.strength_model === 1.5, 'watermark IC-LoRA @1.5 — the ONLY delta from the subtitles template')
-    const archival = buildLtx23UtilityGraph(LTX23_MATRIX[3].request, LTX23_MATRIX[3].models)
-    ok(archival['5087'].inputs.lora_name === 'ltx-2.3-dearchive-lora_weights_step_05000.safetensors' && archival['5087'].inputs.strength_model === 1, 'dearchive IC-LoRA @1.0')
-    ok(archival['5091'].inputs.text === LTX23_PROMPTS.archival, 'archival prompt defaults to the template\'s restoration target text')
-
-    const obscura = buildLtx23UtilityGraph(LTX23_MATRIX[4].request, LTX23_MATRIX[4].models)
-    ok(obscura['15'].inputs.lora_name === 'ltx23-obscura_remova.safetensors' && obscura['15'].inputs.strength_model === 2 && obscura['15'].inputs.model.join('|') === '5|0', 'obscura @2.0 wraps the transformer')
-    ok(obscura['14'].inputs.lora_name === 'ltx-2.3-22b-distilled-lora-384-1.1.safetensors' && obscura['14'].inputs.strength_model === 0.4 && obscura['19'].inputs.model.join('|') === '14|0', 'distilled-384-1.1 @0.4 wraps obscura; KSampler samples the composed chain (template order)')
-    ok(obscura['19'].inputs.sampler_name === 'euler_ancestral_cfg_pp' && obscura['19'].inputs.scheduler === 'linear_quadratic' && obscura['19'].inputs.steps === 8 && obscura['19'].inputs.cfg === 1, 'the single-pass KSampler pin')
-    ok(obscura['4'].inputs.clip_name1 === 'gemma_3_12B_it_fp4_mixed.safetensors' && obscura['4'].inputs.clip_name2 === 'ltx-2.3_text_projection_bf16.safetensors' && obscura['4'].inputs.type === 'ltxv', 'the split DualCLIPLoader (Gemma fp4 + projection, ltxv type)')
-    ok(obscura['36'].inputs.audio.join('|') === '13|0', 'obscura muxes the REGENERATED audio (the decoded sampled latent)')
-
-    const outpaint = buildLtx23UtilityGraph(LTX23_MATRIX[6].request, LTX23_MATRIX[6].models)
-    ok(outpaint['5146'].inputs.lora_name === 'ltx-2.3-22b-ic-lora-outpaint.safetensors' && outpaint['5134'].inputs.lora_name === 'ltx-2.3-22b-distilled-lora-384.safetensors' && outpaint['5134'].inputs.strength_model === 0.5, 'outpaint IC-LoRA @1.0 over distilled-384 @0.5 (template pins)')
-    ok(outpaint['5144'].inputs.gamma === 2 && outpaint['5144'].inputs.image.join('|') === '5130|0' && outpaint['5142'].inputs.image.join('|') === '5144|0', 'the padded guide is gamma-2 corrected before the IC-LoRA attach (radiance, load-bearing)')
-    ok(outpaint['5139'].inputs.target_width.join('|') === '5149|1' && outpaint['5139'].inputs.target_height.join('|') === '5150|1', 'the aspect pad consumes the max()-derived target canvas')
-    ok(outpaint['5129'].inputs['resize_type.multiplier'] === 0.5 && outpaint['5130'].inputs['resize_type.multiple'] === 32, 'the half-res + multiple-of-32 grid pipeline')
-    ok(outpaint['5159'].inputs.audio.join('|') === '5157|1', 'outpaint muxes the ORIGINAL audio')
-    const outpaintSquare = buildLtx23UtilityGraph(LTX23_MATRIX[7].request, LTX23_MATRIX[7].models)
-    ok(outpaintSquare['5148'].inputs['values.a'] === 1 && outpaintSquare['5148'].inputs['values.b'] === 1 && outpaintSquare['5138'].inputs.text.includes('sunlit meadow'), 'the square aspect + prompt override flow through')
-
-    const ia2vGraph = buildLtx23UtilityGraph(LTX23_MATRIX[8].request, LTX23_MATRIX[8].models)
-    ok(ia2vGraph['325'].inputs.strength === 0.7 && ia2vGraph['296'].inputs.strength === 1, 'image anchors: 0.7 stage 1, 1.0 for the refine')
-    ok(ia2vGraph['333'].inputs.value === 0 && ia2vGraph['327'].inputs.mask.join('|') === '333|0', 'the audio latent is fully noised (SolidMask 0) before joint AV sampling')
-    ok(ia2vGraph['332'].inputs.duration === 9 && ia2vGraph['329'].inputs['values.a'] === 9 && ia2vGraph['329'].inputs['values.b'] === 24, 'trim duration + a*b+1 frame count at 24 fps')
-    ok(ia2vGraph['285'].inputs.noise_seed === 42 && ia2vGraph['286'].inputs.noise_seed === 225158785956033, 'stage-2 noise fixed at 42, stage-1 seed from the caller (template seeds)')
-    ok(ia2vGraph['312'].inputs.audio.join('|') === '303|0' && ia2vGraph['303'].inputs.samples.join('|') === '311|1', 'ia2v muxes the GENERATED audio (decoded sampled latent)')
-    const ia2vPortrait = buildLtx23UtilityGraph(LTX23_MATRIX[9].request, LTX23_MATRIX[9].models)
-    ok(ia2vPortrait['332'].inputs.start_index === 1.5 && ia2vPortrait['332'].inputs.duration === 4 && ia2vPortrait['329'].inputs['values.b'] === 25, 'the portrait config threads audio offset + duration + fps')
-  }
-})
-
-maybe('(g5) LTX-2.3 builder validation — the loud-refusal contract', () => {
-  {
-    const throwsWith = (fn, needle, label) => {
-      let threw = ''
-      try { fn() } catch (error) { threw = error instanceof Error ? error.message : String(error) }
-      ok(threw.includes(needle), `${label} (got: ${threw.slice(0, 90)})`)
-    }
-    const removeConfig = LTX23_MATRIX[0]
-    throwsWith(() => buildLtx23UtilityGraph({ ...removeConfig.request, width: 1000, height: 1000 }, removeConfig.models), 'multiples of 64', 'remove-family canvas must keep stage 1 on the 32 grid')
-    throwsWith(() => buildLtx23UtilityGraph({ ...removeConfig.request, video: undefined }, removeConfig.models), 'input video', 'the remove family refuses to build without the video')
-    throwsWith(() => buildLtx23UtilityGraph(removeConfig.request, { ...removeConfig.models, checkpoint: '' }), 'cannot build', 'an unresolved checkpoint refuses to build — never a silent empty filename')
-    const ia2vConfig = LTX23_MATRIX[8]
-    throwsWith(() => buildLtx23UtilityGraph({ ...ia2vConfig.request, audio: undefined }, ia2vConfig.models), 'input audio', 'ia2v refuses to build without audio')
-    throwsWith(() => buildLtx23UtilityGraph({ ...ia2vConfig.request, fps: 0 }, ia2vConfig.models), 'fps', 'ia2v validates fps')
-    throwsWith(() => buildLtx23UtilityGraph({ ...ia2vConfig.request, durationSeconds: 0 }, ia2vConfig.models), 'duration', 'ia2v validates duration')
-    const outpaintConfig = LTX23_MATRIX[6]
-    throwsWith(() => buildLtx23UtilityGraph({ ...outpaintConfig.request, aspectW: 0, aspectH: 16 }, outpaintConfig.models), 'aspect ratio', 'outpaint validates the aspect pair')
-    throwsWith(() => buildLtx23UtilityGraph({ tool: 'nope', seed: 1, filenamePrefix: 'x' }, outpaintConfig.models), 'unknown', 'the dispatcher refuses unknown tools')
-  }
-})
-
-maybe('(g6) LTX-2.3 availability gating per tool (engine combos + scan)', () => {
-  {
-    const ltx23File = (kind, name) => ({ kind, name, bytes: 1 })
-    const comboInfo = (entries) => {
-      const info = {}
-      for (const [node, field, values] of entries) info[node] = { input: { required: { [field]: [values, {}] } } }
-      return info
-    }
-    const FULL_INFO = comboInfo([
-      ['CheckpointLoaderSimple', 'ckpt_name', [LTX23_MODELS.checkpoint, LTX23_MODELS.checkpointFp8]],
-      ['LatentUpscaleModelLoader', 'model_name', [LTX23_MODELS.latentUpscaler]],
-      ['LTXICLoRALoaderModelOnly', 'lora_name', []],
-      ['LTXAddVideoICLoRAGuide', 'frame_idx', []],
-      ['LTXVSetAudioRefTokens', 'positive', []],
-      ['LTXVTiledVAEDecode', 'vae', []],
-      ['LTXFloatToInt', 'a', []],
-      ['GetImageSizeAndCount', 'image', []],
-      ['ImagePadKJ', 'image', []],
-      ['VAELoaderKJ', 'vae_name', []],
-      ['Float32ColorCorrect', 'image', []],
-      ['LoadVideo', 'file', []],
-      ['CreateVideo', 'images', []],
-    ])
-    const FULL_SCAN = [
-      ltx23File('text_encoders', LTX23_MODELS.textEncoder),
-      ltx23File('text_encoders', LTX23_MODELS.textEncoderFp4),
-      ltx23File('loras', LTX23_MODELS.distilled384_1_1),
-      ltx23File('loras', LTX23_MODELS.distilled384),
-      ltx23File('loras', LTX23_MODELS.distilledRank111),
-      ltx23File('loras', LTX23_MODELS.subtitlesLora),
-      ltx23File('loras', LTX23_MODELS.watermarkLora),
-      ltx23File('loras', LTX23_MODELS.archivalLora),
-      ltx23File('loras', LTX23_MODELS.obscuraLora),
-      ltx23File('loras', LTX23_MODELS.outpaintLora),
-      ltx23File('diffusion_models', LTX23_MODELS.transformer),
-      ltx23File('text_encoders', LTX23_MODELS.textProjection),
-      ltx23File('vae', LTX23_MODELS.videoVae),
-      ltx23File('vae', LTX23_MODELS.audioVae),
-    ]
-    const detected = detectLtx23Utilities(FULL_INFO, FULL_SCAN)
-    const byId = {}
-    for (const { utility, detection } of detected) byId[utility.id] = detection
-    ok(detected.length === 6, 'six utilities detected')
-    for (const utility of LTX23_UTILITIES) {
-      ok(byId[utility.id].available === true, `${utility.id} available on a full stack`)
-      ok(byId[utility.id].missingNodes.length === 0 && byId[utility.id].missingModels.length === 0, `${utility.id} reports nothing missing on a full stack`)
-    }
-    ok(byId['ltx23.remove-subtitles'].resolved.checkpoint === LTX23_MODELS.checkpoint, 'the bf16 dev checkpoint resolves first (the remove-family template pin)')
-
-    const bare = detectLtx23Utilities({}, FULL_SCAN)
-    const bareById = {}
-    for (const { utility, detection } of bare) bareById[utility.id] = detection
-    ok(Object.values(bareById).every((detection) => detection.available === false), 'a bare engine gates every utility off')
-    ok(bareById['ltx23.remove-subtitles'].missingNodes.join() === 'LTXICLoRALoaderModelOnly,LTXAddVideoICLoRAGuide,LTXVSetAudioRefTokens,LTXVTiledVAEDecode,LTXFloatToInt,GetImageSizeAndCount', 'the remove family names its missing LTXVideo + KJNodes nodes in order')
-    ok(bareById['ltx23.ia2v'].missingNodes.length === 0, 'ia2v needs no packs — its gate is models only')
-    ok(bareById['ltx23.outpaint'].missingNodes.includes('Float32ColorCorrect'), 'outpaint names the radiance node')
-
-    const noWeights = detectLtx23Utilities(FULL_INFO, [])
-    const noWeightsById = {}
-    for (const { utility, detection } of noWeights) noWeightsById[utility.id] = detection
-    ok(Object.values(noWeightsById).every((detection) => detection.available === false), 'no weights → every utility gated')
-    ok(noWeightsById['ltx23.remove-subtitles'].missingModels.some((label) => label.includes('Gemma 3 12B text encoder')), 'the encoder guidance names the file')
-    ok(noWeightsById['ltx23.remove-subtitles'].missingModels.some((label) => label.includes('subtitles-remove')), 'the per-tool LoRA guidance names the file')
-    ok(noWeightsById['ltx23.remove-object'].missingModels.some((label) => label.includes('transformer-only')), 'obscura guidance names the split transformer')
-
-    // With no engine combos either, the checkpoint + upscaler guidance
-    // surfaces (those two slots read the loader combo lists).
-    const noEngine = detectLtx23Utilities(comboInfo([['LTXICLoRALoaderModelOnly', 'lora_name', []], ['LTXAddVideoICLoRAGuide', 'frame_idx', []], ['LTXVSetAudioRefTokens', 'positive', []], ['LTXVTiledVAEDecode', 'vae', []], ['LTXFloatToInt', 'a', []], ['GetImageSizeAndCount', 'image', []]]), FULL_SCAN.filter((file) => file.kind !== 'loras'))
-    const noEngineById = {}
-    for (const { utility, detection } of noEngine) noEngineById[utility.id] = detection
-    ok(noEngineById['ltx23.remove-subtitles'].missingModels.some((label) => label.includes('ltx-2.3-22b-dev checkpoint')), 'the checkpoint guidance names the file + folder')
-    ok(noEngineById['ltx23.remove-subtitles'].missingModels.some((label) => label.includes('spatial-upscaler')), 'the upscaler guidance names the file')
-
-    const fp8OnlyInfo = comboInfo([
-      ['CheckpointLoaderSimple', 'ckpt_name', [LTX23_MODELS.checkpointFp8]],
-      ['LatentUpscaleModelLoader', 'model_name', [LTX23_MODELS.latentUpscaler]],
-      ['LTXICLoRALoaderModelOnly', 'lora_name', []],
-      ['LTXAddVideoICLoRAGuide', 'frame_idx', []],
-      ['LTXVSetAudioRefTokens', 'positive', []],
-      ['LTXVTiledVAEDecode', 'vae', []],
-      ['LTXFloatToInt', 'a', []],
-      ['GetImageSizeAndCount', 'image', []],
-    ])
-    const fp8Selection = resolveLtx23Selection(fp8OnlyInfo, FULL_SCAN)
-    ok(fp8Selection.checkpoint === LTX23_MODELS.checkpointFp8, 'the fp8 checkpoint satisfies the slot when bf16 is absent (documented deviation D7)')
-    const obscuraGated = detectLtx23Utilities(FULL_INFO, FULL_SCAN.filter((file) => file.kind !== 'vae'))
-    const obscuraGatedById = {}
-    for (const { utility, detection } of obscuraGated) obscuraGatedById[utility.id] = detection
-    ok(obscuraGatedById['ltx23.remove-object'].available === false && obscuraGatedById['ltx23.remove-object'].missingModels.some((label) => label.includes('video VAE')), 'obscura is gated on the split VAEs with guidance')
-    ok(obscuraGatedById['ltx23.remove-subtitles'].available === true, 'the obscura VAE gate does not leak into the checkpoint family')
-  }
-  console.log(`PASS: optimization registry (${checks} assertions) — inertness vs pre-registry goldens across the ${GOLDEN_MATRIX.length}-config matrix, transform correctness (plain + dedicated larryvrh pairing swap, LBH/LTX/RTX chains, preview override), detection against mock object_info/scans, family pairing contracts (steps/sampler enforced, 8-step keeps res_multistep+simple), family-ranked selection inference (official > lightx2v newest-first, explicit family constraint, Ref2VA 8-step fast tier — larryvrh v4 default per bake-off 2026-09-15), painless expansion (a hypothetical 5-step family registered, detected, transformed, paired and proven inert via registry data alone), the five Krea 2 edit families (base-t2i inertness, per-family goldens, research-pinned recipes, hand-asserted dual-conditioning/AnyPaint wiring, E-K1 honesty-label + scene-style prompt-contract pins, recipe-triple audit incl. the t=0 carrier trap + the E-K1 index-pairing rule + no-composite rule + patcher mutual exclusion, dial validation at the research limits, and per-family availability gating with low-VRAM LoRA fallback), and the six LTX-2.3 one-graph utilities (official-template goldens + class-census fidelity vs the template subgraphs with documented D1–D8 deltas, topology audit, template-pinned sigmas/strengths/samplers/seeds, hand-asserted two-stage + IC-LoRA wiring, loud-refusal validation, and per-tool availability gating through engine combos + scan)`)
+// The suite's tail summary (was inside the removed LTX g6 block; kept as its
+// own final test — Phase 0, 2026-09-20).
+maybe('suite summary', () => {
+  console.log(`PASS: optimization registry (${checks} assertions) — inertness vs pre-registry goldens across the ${GOLDEN_MATRIX.length}-config matrix, transform correctness (plain + dedicated larryvrh pairing swap, LBH/RTX chains, preview override), detection against mock object_info/scans, family pairing contracts (steps/sampler enforced, 8-step keeps res_multistep+simple), family-ranked selection inference (official > lightx2v newest-first, explicit family constraint, Ref2VA 8-step fast tier — larryvrh v4 default per bake-off 2026-09-15), painless expansion (a hypothetical 5-step family registered, detected, transformed, paired and proven inert via registry data alone), and the five Krea 2 edit families (base-t2i inertness, per-family goldens, research-pinned recipes, hand-asserted dual-conditioning/AnyPaint wiring, E-K1 honesty-label + scene-style prompt-contract pins, recipe-triple audit incl. the t=0 carrier trap + the E-K1 index-pairing rule + no-composite rule + patcher mutual exclusion, dial validation at the research limits, and per-family availability gating with low-VRAM LoRA fallback). (The six LTX-2.3 utility sections g1-g6 were removed with LTX — Phase 0, 2026-09-20.)`)
 })

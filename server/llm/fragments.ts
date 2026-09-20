@@ -109,8 +109,6 @@ const ROLE_PARSE_STRUCTURED = 'Split the supplied freeform MiniMax H3 video prom
 
 // Layer 3 — output_format rows for the studio's target engines.
 const OF_MINIMAX_H3 = 'Write natural production language in this order when relevant: subject/identity, starting state, environment, literal chronological action, shot size, camera angle, lens/depth of field, camera movement, lighting, visual treatment, continuity, dialogue, ambient sound/effects, and reference assignments. Depict the finished shot as vivid, chronological prose.'
-const OF_LTX25 = 'Write flowing natural-language prose for fast distilled LTX 2.5 video synthesis — subject, starting state, literal chronological action, composition, camera, lighting, and mood — keeping one clear continuous shot.'
-const OF_ZIMAGE = 'Write the prompt as vivid natural-language prose depicting the finished still image — its subject, pose, composition, environment, lighting, materials, palette, and mood.'
 const OF_MUSIC3 = 'Keep the caption in its three-section structure — Global Metadata, Vocal Details, Arrangement — using concrete, musical, depictable terms (genre, tempo, key, instrumentation, voice character, form, and mix).'
 
 const OUTPUT_CONTRACT_FINAL_PROMPT = 'Output ONLY the final image prompt, wrapped in <final_prompt>…</final_prompt>. Begin immediately with the prompt and make the entire response the prompt itself.'
@@ -163,8 +161,6 @@ export const SEED_FRAGMENT_ROWS: FragmentRow[] = [
   row('factory:output_format:family:krea2', 'output_format', OF_KREA2, { targetFamily: 'krea2' }),
   // output_format — studio target engines.
   row('factory:output_format:family:minimax-h3', 'output_format', OF_MINIMAX_H3, { targetFamily: 'minimax-h3' }),
-  row('factory:output_format:family:ltx25', 'output_format', OF_LTX25, { targetFamily: 'ltx25' }),
-  row('factory:output_format:family:zimage', 'output_format', OF_ZIMAGE, { targetFamily: 'zimage' }),
   row('factory:output_format:family:music3', 'output_format', OF_MUSIC3, { targetFamily: 'music3' }),
   // output_format — generic fallback.
   row('factory:output_format:default', 'output_format', OF_GENERIC),

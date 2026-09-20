@@ -691,7 +691,7 @@ routesMaybe('(i) routes against the real built server: catalog GET, 403 without 
     await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...current, engine: { ...current.engine, mode: 'managed', checkoutPath: checkout } } }) })
 
     const catalog = await api('/api/lan/fetch/catalog')
-    ok(catalog.status === 200 && catalog.body.entries.length === FETCH_CATALOG.length, 'GET catalog lists every entry with statuses')
+    ok(catalog.status === 200 && catalog.body.entries.length === FETCH_CATALOG.filter((entry) => !entry.removedAt).length, 'GET catalog lists every live entry with statuses (removedAt history rows excluded — Phase 0, 2026-09-20)')
     ok(catalog.body.entries.every((entry) => ['present', 'placed', 'cached', 'absent'].includes(entry.state)), 'every catalog row carries a state')
     ok(catalog.body.entries.every((entry) => typeof entry.licenseSpdx === 'string'), 'every catalog row surfaces its license (the consent contract)')
 
