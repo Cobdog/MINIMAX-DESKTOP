@@ -108,9 +108,31 @@ to the instance listing), the local scan in `/api/lan/bootstrap`, the
 
 ## 5. Verification (AC-4)
 
+All numbers are on the final merged tree (Phase-0 commits + main's tmz8vh7
+critical fixes merged in — the merge resolution keeps the T=1 decoder-class
+routing and drops its ltx25/ltx23 loop arms).
+
 - `pnpm typecheck` / `pnpm lint` / `pnpm license:audit` / `pnpm build` — green.
 - `pnpm test` — 19 files, 243 passed, 2 NOTE-skips.
 - `pnpm smoke:server` — green.
-- `pnpm test:e2e` — 99 passed, including the fake-engine end-to-end proofs: H3-1F still renders through the fake engine and lands its take, image+control hands off to the workbench Edit surface, a structured submit lands a real job whose engine prompt is the composed bytes, audio docks gate honestly, F6 live progress surfaces on the generating tile.
-- `pnpm test:vision` — captured (bundle `20260920-192652-577451-mxm8`), judged, reported — see the task record for the verdict.
-- CI: both legs queued on the removal commits (run links in the task record).
+- `pnpm test:e2e` — 101 passed (the merged tree carries main's two new
+  tests), including the fake-engine end-to-end proofs: H3-1F renders through
+  the fake engine and lands its take, image+control hands off to the
+  workbench Edit surface, a structured submit lands a real job whose engine
+  prompt is the composed bytes, audio docks gate honestly, F6 live progress
+  surfaces on the generating tile. (The datasets caption-editor aspect-chip
+  flake is the documented shared-home accumulation — testing.md — cleaned
+  through the app's own trash API both times it surfaced locally; CI's fresh
+  homes never see it.)
+- `pnpm test:vision` — bundle `20260920-195058-621784-06dm`, judged 29/30
+  PASS with one FAIL arbitrated as a judge misread: the timeline gap-menu's
+  "Hard cut" verdict was read as "9.6 dB"; the code constant (plan.ts:55)
+  says 9.8, no 9.6 exists anywhere in src, and an independent zoomed pixel
+  re-read of the screenshot confirms 9.8 — the documented small-dark-text
+  misread class (the same class that motivated the DOM-truth assertions in
+  twmpu4m). Every Phase-0 surface change verified visually: no studios
+  button/chip, no LTX override families, the registry-only inventory row
+  with no path inputs, the two-dock cascade, the amended first-run card.
+- CI (PR #33): Engine CI (Windows) green; the ubuntu leg green after the
+  fixture-path follow-up (one missed readFileSync still naming the removed
+  radiance pack folder).
