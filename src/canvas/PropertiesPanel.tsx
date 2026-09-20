@@ -26,7 +26,7 @@ import { SmartPromptEditor, type SmartPromptEditorHandle } from '../components/S
 import { StructuredPromptEditor } from '../components/StructuredPromptEditor'
 import { PromptLibraryBrowser } from '../components/PromptLibraryBrowser'
 import { detectOptimizations } from '../lib/graph'
-import { inferredOverrideSlotFile, modelFamilyInfo, overridePickOutcome, SLOT_LABELS, type ModelFamilyId, type ModelOverrideSlotName } from '../lib/modelOverrides'
+import { inferredOverrideSlotFile, migrateLegacyModelOverrideSlots, modelFamilyInfo, overridePickOutcome, SLOT_LABELS, type ModelFamilyId, type ModelOverrideSlotName } from '../lib/modelOverrides'
 import { guideFrameWarning } from '../lib/workflow'
 import { buildPromptAssistantContext } from '../lib/promptComposer'
 import { composeStructuredPrompt, mergeStructuredDraft, parseFlowRows, parseStructuredPrompt, type StructuredPromptDraft } from '../lib/structuredPrompt'
@@ -458,6 +458,10 @@ export function PropertiesPanel() {
     ? (draft.audio.engine === 'acestep' ? 'acestep' : 'music3')
     : draft.engine === 'ltx25' ? 'ltx25' : 'minimax'
   const modelFamily = modelFamilyInfo(modelFamilyId)!
+  // Legacy chains may still store a single 'checkpoint' pick — the migrated
+  // view keeps it VISIBLE on its new lanes (the resolution seam applies the
+  // same migration at submit time).
+  const chainSlots = migrateLegacyModelOverrideSlots(modelFamilyId, draft.modelOverrides ?? {})
   const setChainModelOverride = (slot: ModelOverrideSlotName, value: string) => {
     const next: ModelOverrideSlots = { ...(draft.modelOverrides ?? {}) }
     if (value) next[slot] = value
@@ -739,7 +743,7 @@ export function PropertiesPanel() {
         {draft.mediaType !== 'image' && <details className="canvas-properties-models" data-canvas-section="models">
           <summary>models <span className="canvas-properties-hint">{modelFamily.label} · auto (inferred)</span></summary>
           {modelFamily.slots.map((slot) => {
-            const value = draft.modelOverrides?.[slot] ?? ''
+            const value = chainSlots[slot] ?? ''
             const kind = modelFamily.slotKinds[slot] ?? 'diffusion_models'
             const candidates = models.filter((model) => model.kind === kind)
             const globalPick = useSessionStore.getState().settings?.modelOverrides?.[modelFamilyId]?.[slot]
@@ -753,9 +757,10 @@ export function PropertiesPanel() {
               </select>
               {outcome?.state === 'refused' && <p className="canvas-properties-warning" data-canvas-model-override-problem role="alert">Refused — {outcome.reason}</p>}
               {outcome?.state === 'degraded' && <p className="canvas-properties-warning" data-canvas-model-override-problem role="status">{outcome.warning}</p>}
+              {outcome?.state === 'applied' && outcome.warning && <p className="canvas-properties-warning" data-canvas-model-override-problem role="status">{outcome.warning}</p>}
             </div>
           })}
-          <p className="canvas-properties-note">A pick here beats the global Settings pick, which beats auto inference. Picks are exact scanned filenames; the resolved files ride the take's manifest.</p>
+          <p className="canvas-properties-note">A pick here beats the global Settings pick, which beats auto inference. Picks are exact scanned filenames; the resolved files ride the take's manifest. The H3 lanes pin FL2VA / Ref2VA separately; the merged pick is one pre-merged checkpoint for both and wins when set.</p>
         </details>}
         <div className="canvas-properties-row">
           <label htmlFor="canvas-duration">seconds</label>

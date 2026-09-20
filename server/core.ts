@@ -796,13 +796,20 @@ export function createStudioServer(paths: StudioServerPaths) {
       // Model overrides (task euxwdva): shape-tolerant, family-agnostic —
       // the family registry lives renderer-side (src/lib/modelOverrides.ts);
       // unknown family keys stay inert there, so the server only guards the
-      // SHAPE: per family, at most the three slot keys, non-empty bounded
+      // SHAPE: per family, at most the six slot keys, non-empty bounded
       // strings. Absent/empty = auto (inference) — nothing changes for
-      // existing settings files.
+      // existing settings files. The H3 families split their checkpoint
+      // into the per-lane trio (task rq0lsax, 2026-09-20): a legacy single
+      // 'checkpoint' pick drove BOTH lanes, so it migrates onto fl2va AND
+      // ref2va — fill-if-unset, never silently dropped (mirrors
+      // migrateLegacyModelOverrideSlots in src/lib/modelOverrides.ts,
+      // reimplemented because the server never imports the renderer
+      // registry).
       modelOverrides: (() => {
-        const slots = ['checkpoint', 'textEncoder', 'vae'] as const
+        const slots = ['checkpoint', 'fl2va', 'ref2va', 'merged', 'textEncoder', 'vae'] as const
+        const laneFamilies = new Set(['minimax', 'h3image'])
         const rawOverrides = (raw.modelOverrides && typeof raw.modelOverrides === 'object' ? raw.modelOverrides : {}) as Record<string, unknown>
-        const normalized: Record<string, { checkpoint?: string; textEncoder?: string; vae?: string }> = {}
+        const normalized: Record<string, Partial<Record<(typeof slots)[number], string>>> = {}
         for (const family of Object.keys(rawOverrides).slice(0, 64)) {
           const rawSlots = (rawOverrides[family] && typeof rawOverrides[family] === 'object' ? rawOverrides[family] : null) as Record<string, unknown> | null
           if (!rawSlots) continue
@@ -810,6 +817,11 @@ export function createStudioServer(paths: StudioServerPaths) {
           for (const slot of slots) {
             const value = rawSlots[slot]
             if (typeof value === 'string' && value.trim()) familySlots[slot] = value.trim().slice(0, 512)
+          }
+          if (familySlots.checkpoint && laneFamilies.has(family)) {
+            if (!familySlots.fl2va) familySlots.fl2va = familySlots.checkpoint
+            if (!familySlots.ref2va) familySlots.ref2va = familySlots.checkpoint
+            delete familySlots.checkpoint
           }
           if (Object.keys(familySlots).length) normalized[family] = familySlots
         }

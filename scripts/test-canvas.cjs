@@ -329,6 +329,12 @@ console.log('(l) L4 — selection decides the surface (effectiveMode)')
   eq('lora' in overridesRead.modelOverrides, false, 'settings: unknown slot keys are not invented')
   const noOverrides = generation.readChainSettings({})
   eq(Object.keys(noOverrides.modelOverrides || {}).length, 0, 'settings: absent modelOverrides reads as the empty (auto) set')
+  // Per-lane slots (rq0lsax): the H3 trio parses with the same tolerance —
+  // strings survive (trimmed), junk drops to auto.
+  const laneRead = generation.readChainSettings({ modelOverrides: { fl2va: 'fl2va-pick.safetensors', ref2va: ' ref.safetensors ', merged: 42 } })
+  eq(laneRead.modelOverrides.fl2va, 'fl2va-pick.safetensors', 'settings: the per-lane fl2va slot survives the tolerant read')
+  eq(laneRead.modelOverrides.ref2va, 'ref.safetensors', 'settings: a padded ref2va slot trims through')
+  eq('merged' in laneRead.modelOverrides, false, 'settings: a non-string merged slot drops to auto')
 }
 
 console.log('(m) fork substrates → input refs (§2 outputRef)')
