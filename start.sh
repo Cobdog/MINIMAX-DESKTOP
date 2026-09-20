@@ -347,7 +347,8 @@ build_stale() {
   [ "${SRC_NEWEST%.*}" -gt "${DIST_NEWEST%.*}" ]
 }
 
-check_pull_freshness() {
+check_pull_freshness() { # $1 = "true" when booting the dev pipeline (server-only refresh)
+  FRESH_MODE="${1:-false}"
   # Dependency drift: a pulled lockfile newer than node_modules = re-install.
   if [ -d "$SCRIPT_DIR/node_modules" ] && [ -f "$SCRIPT_DIR/pnpm-lock.yaml" ]; then
     LOCK_MTIME=$(stat -c '%Y' "$SCRIPT_DIR/pnpm-lock.yaml" 2>/dev/null || echo 0)
@@ -358,9 +359,17 @@ check_pull_freshness() {
     fi
   fi
   # Build staleness: sources newer than the built outputs = a pull landed.
+  # Dev boots node --watch against dist-server immediately, so a stale
+  # dist-server serves the PREVIOUS build through tsc --watch's initial
+  # compile window — refresh it first. Dev refreshes the server only (vite
+  # serves the UI from source); production does the full build.
   if build_stale; then
     echo "$PROG: sources changed since the last build (a pull or edit landed after dist/ was built)."
-    AUTO_ACT "pnpm build" "rebuild" || return 1
+    if [ "$FRESH_MODE" = "true" ]; then
+      AUTO_ACT "pnpm run build:server" "recompile the server (dev mode)" || return 1
+    else
+      AUTO_ACT "pnpm build" "rebuild" || return 1
+    fi
   fi
   return 0
 }
@@ -754,12 +763,18 @@ check_node_and_deps || {
   exit 1
 }
 
-# Pull freshness (maintainer 2026-09-19): after deps exist and before any
-# boot, detect a pulled lockfile (re-install) and sources-newer-than-build
-# (rebuild). Skipped entirely in dev mode (the watch pipeline compiles
-# fresh) and in dry runs (side-effect free).
-if [ "$CFG_DEV" != "true" ] && [ "$DO_PRINT" != 1 ]; then
-  check_pull_freshness || {
+# Pull freshness (maintainer 2026-09-19; amended 2026-09-20: "the start
+# script needs to rebuild even if I am in dev mode — it is starting based on
+# the previous build"): after deps exist and before any boot, detect a pulled
+# lockfile (re-install) and sources-newer-than-build (rebuild). Dev mode is
+# NO LONGER skipped — the watch pipeline boots node --watch against
+# dist-server IMMEDIATELY (tsc --watch's initial compile takes seconds), so
+# a stale dist serves the previous build through that window; refreshing
+# dist-server first closes it. In dev the refresh builds the SERVER only
+# (vite serves the UI from source); production does the full build. Dry
+# runs stay side-effect free.
+if [ "$DO_PRINT" != 1 ]; then
+  check_pull_freshness "${CFG_DEV}" || {
     echo "$PROG: refresh declined — booting the EXISTING build/dependencies as-is." >&2
   }
 fi
