@@ -285,39 +285,37 @@ test('M9/M10/M11: dock geometry — actions reachable at 420px, close reachable 
   await page.locator('[data-canvas-settings-close]').click()
   await expect(page.locator('[data-canvas-settings-dock]')).toHaveCount(0)
 
-  // Three docks in the NATURAL order (settings → studios → diagnostics):
-  // distinct cascaded positions, every header band directly hittable, and
-  // raise-on-grab lifts a covered dock above its siblings.
+  // Two docks in the NATURAL order (settings → diagnostics): distinct
+  // cascaded positions, every header band directly hittable, and
+  // raise-on-grab lifts a covered dock above its sibling. (The studios dock
+  // was removed with the Studios — Phase 0, 2026-09-20.)
   await page.setViewportSize({ width: 1920, height: 1080 })
   await page.goto('/')
   await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
   await openSettings(page)
-  await page.locator('[data-canvas-studios-button]').click()
-  await expect(page.locator('[data-canvas-studios-dock]')).toBeVisible()
   await page.locator('[data-canvas-diagnostics-button]').click()
   await expect(page.locator('[data-canvas-diagnostics-dock]')).toBeVisible()
 
   const ownerAt = (x: number, y: number) => page.evaluate(({ x, y }) => {
     const element = document.elementFromPoint(x, y)
-    const dockElement = element?.closest('[data-canvas-settings-dock],[data-canvas-studios-dock],[data-canvas-diagnostics-dock]') as HTMLElement | null
+    const dockElement = element?.closest('[data-canvas-settings-dock],[data-canvas-diagnostics-dock]') as HTMLElement | null
     if (!dockElement) return ''
     if (dockElement.hasAttribute('data-canvas-settings-dock')) return 'settings'
-    if (dockElement.hasAttribute('data-canvas-studios-dock')) return 'studios'
     if (dockElement.hasAttribute('data-canvas-diagnostics-dock')) return 'diagnostics'
     return ''
   }, { x, y })
 
   const positions: Array<{ x: number; y: number }> = []
-  for (const selector of ['[data-canvas-settings-dock]', '[data-canvas-studios-dock]', '[data-canvas-diagnostics-dock]']) {
+  for (const selector of ['[data-canvas-settings-dock]', '[data-canvas-diagnostics-dock]']) {
     const box = await page.locator(selector).boundingBox()
     expect(box, `${selector} exists`).not.toBeNull()
     positions.push({ x: box!.x, y: box!.y })
   }
-  expect(new Set(positions.map((position) => `${position.x},${position.y}`)).size, 'no two open docks share a position (cascade)').toBe(3)
+  expect(new Set(positions.map((position) => `${position.x},${position.y}`)).size, 'no two open docks share a position (cascade)').toBe(2)
 
   // Natural order + the 48px y-steps: each dock's header band is the top
-  // hit at its own icon — all three titles directly reachable.
-  for (const selector of ['[data-canvas-settings-dock]', '[data-canvas-studios-dock]', '[data-canvas-diagnostics-dock]']) {
+  // hit at its own icon — both titles directly reachable.
+  for (const selector of ['[data-canvas-settings-dock]', '[data-canvas-diagnostics-dock]']) {
     const icon = page.locator(`${selector} .canvas-inspector-header svg`).first()
     const box = await icon.boundingBox()
     expect(box, `${selector} header icon has geometry`).not.toBeNull()
@@ -325,12 +323,12 @@ test('M9/M10/M11: dock geometry — actions reachable at 420px, close reachable 
   }
 
   // Raise-on-grab: settings (lowest z, its band visible) gets grabbed —
-  // after the grab it covers the later docks' header bands, proving z moved.
-  const studiosIcon = await page.locator('[data-canvas-studios-dock] .canvas-inspector-header svg').first().boundingBox()
-  expect(await ownerAt(studiosIcon!.x + 2, studiosIcon!.y + 2)).toBe('studios')
+  // after the grab it covers the later dock's header band, proving z moved.
+  const diagnosticsIcon = await page.locator('[data-canvas-diagnostics-dock] .canvas-inspector-header svg').first().boundingBox()
+  expect(await ownerAt(diagnosticsIcon!.x + 2, diagnosticsIcon!.y + 2)).toBe('diagnostics')
   const settingsBox = await page.locator('[data-canvas-settings-dock]').boundingBox()
   await page.mouse.click(settingsBox!.x + 60, settingsBox!.y + 8)
-  expect(await ownerAt(studiosIcon!.x + 2, studiosIcon!.y + 2), 'a grabbed settings dock now covers the studios header band (raise-on-grab)').toBe('settings')
+  expect(await ownerAt(diagnosticsIcon!.x + 2, diagnosticsIcon!.y + 2), 'a grabbed settings dock now covers the diagnostics header band (raise-on-grab)').toBe('settings')
 })
 
 // M13 — the boot-time 400: the debounced persist used to fire an empty

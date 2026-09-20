@@ -39,10 +39,11 @@ export function FirstRunNotice() {
 
   const openSettings = () => {
     setSettingsDock(true)
-    // The Model locations section is the destination; the dock scrolls
-    // internally, so give SettingsView a beat to mount first.
+    // The engine connection section is the destination (the registry-only
+    // decision: the engine's own listing is the model source); the dock
+    // scrolls internally, so give SettingsView a beat to mount first.
     window.setTimeout(() => {
-      document.querySelector('.settings-page .path-table')?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      document.querySelector('.settings-page #comfy-url')?.scrollIntoView({ block: 'center', behavior: 'smooth' })
     }, 300)
   }
 
@@ -56,17 +57,16 @@ export function FirstRunNotice() {
   return <div className="canvas-first-run" role="note" aria-label="Model setup guidance" data-canvas-first-run>
     <HardDrive size={16} />
     <div className="canvas-first-run-body">
-      <strong>No models found — one setup step before the first render.</strong>
+      <strong>No models visible — one setup step before the first render.</strong>
       <span>
-        The studio's model folders are empty. Point <em>Settings → Model locations</em> at an existing
-        ComfyUI install's models folders (files are indexed in place, never moved — a managed engine
-        mirrors them into its checkout as extra_model_paths.yaml), or fetch what you need from the
-        consent-gated fetcher below. When the engine is connected, its own model listing is merged in
-        automatically — an external instance needs no local roots at all. Input and output default
-        under the app's own data folder (<em>&lt;app&gt;/data/input</em>, <em>&lt;app&gt;/data/output</em>) — nothing lands in Documents.
+        The model source of truth is the connected ComfyUI engine's own registry — the studio uses
+        what the engine can see, nothing else. Connect the engine in Settings (a running install's
+        address, or the managed runtime), or fetch weights through the consent-gated fetcher below
+        and they land where the engine reads them. Input and output default under the app's own data
+        folder (<em>&lt;app&gt;/data/input</em>, <em>&lt;app&gt;/data/output</em>) — nothing lands in Documents.
       </span>
       <div className="canvas-first-run-actions">
-        <button type="button" onClick={openSettings}>Open settings — model locations</button>
+        <button type="button" onClick={openSettings}>Open settings — engine connection</button>
         <button type="button" onClick={openFetcher}>Browse fetchable items</button>
       </div>
     </div>

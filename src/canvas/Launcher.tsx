@@ -9,7 +9,7 @@
  * launcher comes alive, no mode switch; a refused engine surfaces honestly.
  */
 import { useEffect, useRef, useState } from 'react'
-import { AudioLines, Clapperboard, FileVideo, ImagePlus, MessageSquareOff, Music2, Plus, Sparkles, Upload, Users } from 'lucide-react'
+import { AudioLines, Clapperboard, FileVideo, ImagePlus, MessageSquareOff, Music2, Plus, Sparkles, Upload } from 'lucide-react'
 import { PromptLibraryBrowser } from '../components/PromptLibraryBrowser'
 import { FirstRunNotice } from './FirstRunNotice'
 import { useCanvasStore } from './store'
@@ -124,13 +124,6 @@ export function Launcher({ onPickFile }: { onPickFile(): void }) {
             beside the bar; a pick fills it. */}
         <button type="button" className="canvas-chip" data-canvas-chip="prompt-library" title="Search public Civitai generation metadata for reusable prompts" onClick={() => setLibraryOpen(true)}>
           <Sparkles size={13} /> prompt library
-        </button>
-        {/* Phase 5: the kept authoring surfaces dock from the launcher too
-            (dated decisions in StudiosDock.tsx). The movie-plan chip re-pointed
-            2026-09-17 (Phase 5b): MoviePlanner retired — the planning surface
-            is the timeline projection + plan documents (V). */}
-        <button type="button" className="canvas-chip" data-canvas-chip="studios" title="Asset authoring studios — characters, hair, wardrobe, accessories, locations" onClick={() => useCanvasStore.getState().setStudiosDock({ tab: 'characters' })}>
-          <Users size={13} /> studios
         </button>
         {/* The datasets chip was RETIRED 2026-09-18 (QOL wave rrxlw2r): the
             surface switcher in the titlebar is the one entry point per

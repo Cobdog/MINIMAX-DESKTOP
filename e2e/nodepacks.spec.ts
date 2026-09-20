@@ -99,7 +99,7 @@ test('node-pack status board — badges, versions, managed notices, refresh, no 
     const cnrDir = path.join(externalDir, 'comfyui-krea2-controlnet')
     fs.mkdirSync(cnrDir, { recursive: true })
     fs.writeFileSync(path.join(cnrDir, 'pyproject.toml'), '[project]\nname = "comfyui-krea2-controlnet"\nversion = "1.4.2"\n\n[tool.comfy]\nPublisherId = "facok"\n')
-    const gitSha = craftGitPackFixture(path.join(externalDir, 'ComfyUI-LTXVideo'))
+    const gitSha = craftGitPackFixture(path.join(externalDir, 'ComfyUI_MinimaxH3_AutoContext'))
     const plainDir = path.join(externalDir, 'krea2-anypaint')
     fs.mkdirSync(plainDir, { recursive: true })
     fs.writeFileSync(path.join(plainDir, 'user-file.py'), '# theirs\n')
@@ -128,23 +128,23 @@ test('node-pack status board — badges, versions, managed notices, refresh, no 
     // Branch pin (main) vs a registry semver: no relation claimed, no notice.
     await expect(cnrRow.locator('.node-pack-managed-notice')).toHaveCount(0)
 
-    const ltxRow = page.locator('.node-pack-row').filter({ hasText: 'ComfyUI-LTXVideo' })
-    await expect(ltxRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'managed by ComfyUI')
-    await expect(ltxRow.locator('[data-node-pack-version]')).toHaveText(`${gitSha.slice(0, 12)} · differs from pin`)
+    const gitRow = page.locator('.node-pack-row').filter({ hasText: 'ComfyUI_MinimaxH3_AutoContext' })
+    await expect(gitRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'managed by ComfyUI')
+    await expect(gitRow.locator('[data-node-pack-version]')).toHaveText(`${gitSha.slice(0, 12)} · differs from pin`)
     // ---- AC-4: the managed-instance notice names both versions + says the
     // update happens instance-side (the studio never touches the folder).
-    const ltxNotice = ltxRow.locator('.node-pack-managed-notice')
-    await expect(ltxNotice).toBeVisible()
-    await expect(ltxNotice).toContainText('managed by the ComfyUI instance')
-    await expect(ltxNotice).toContainText(gitSha.slice(0, 12))
-    await expect(ltxNotice).toContainText('15d09abb5a18')
-    await expect(ltxNotice).toContainText('instance side')
+    const gitNotice = gitRow.locator('.node-pack-managed-notice')
+    await expect(gitNotice).toBeVisible()
+    await expect(gitNotice).toContainText('managed by the ComfyUI instance')
+    await expect(gitNotice).toContainText(gitSha.slice(0, 12))
+    await expect(gitNotice).toContainText('f1062d34e3c2')
+    await expect(gitNotice).toContainText('instance side')
 
     const anypaintRow = page.locator('.node-pack-row').filter({ hasText: 'krea2-anypaint' })
     await expect(anypaintRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'present — not studio-managed')
     const hybridRow = page.locator('.node-pack-row').filter({ hasText: 'ComfyUI_MinimaxH3HybridLoader' })
     await expect(hybridRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'installed on instance')
-    const radianceRow = page.locator('.node-pack-row').filter({ hasText: 'radiance' })
+    const radianceRow = page.locator('.node-pack-row').filter({ hasText: 'ComfyUI-MiniMax-H3-Turbo' })
     await expect(radianceRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'missing', { timeout: 15_000 })
 
     // ---- AC-1: no path prompts anywhere once the target is known ----------
@@ -160,7 +160,7 @@ test('node-pack status board — badges, versions, managed notices, refresh, no 
     await expect(anypaintRow.getByRole('button', { name: /^Install$/ })).toHaveCount(0)
 
     // ---- AC-2: Refresh re-scans the folder and re-resolves every row -----
-    const lateDir = path.join(externalDir, 'radiance')
+    const lateDir = path.join(externalDir, 'ComfyUI-MiniMax-H3-Turbo')
     fs.mkdirSync(lateDir, { recursive: true })
     fs.writeFileSync(path.join(lateDir, 'their-file.py'), '# theirs\n')
     await expect(radianceRow.locator('[data-node-pack-chip]')).toHaveAttribute('data-node-pack-chip', 'missing')

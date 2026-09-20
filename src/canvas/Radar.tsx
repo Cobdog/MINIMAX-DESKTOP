@@ -9,7 +9,7 @@
  * is here per the spec; Phase 1 renders the chip honestly as not-yet-wired
  * (the canvas consumes no engine — generation is Phase 2).
  */
-import { Activity, Briefcase, LayoutList, Library, Settings, Stethoscope } from 'lucide-react'
+import { Activity, LayoutList, Library, Settings, Stethoscope } from 'lucide-react'
 import { useJobsStore } from '../state/jobsStore'
 import { SurfaceSwitcher } from '../surfaces/SurfaceSwitcher'
 import { attention } from './derive'
@@ -103,9 +103,6 @@ export function Radar() {
     </button>
     <button type="button" className="canvas-index-button" data-canvas-library-button onClick={() => useCanvasStore.getState().setLibraryOpen(true)} title="The library projection — every completed output across the session (V)">
       <Library size={12} /> library <kbd>V</kbd>
-    </button>
-    <button type="button" className="canvas-index-button" data-canvas-studios-button onClick={() => useCanvasStore.getState().setStudiosDock({ tab: 'characters' })} title="Studios — asset authoring (characters, hair, wardrobe, accessories, locations) + the movie planner, docked">
-      <Briefcase size={12} /> studios
     </button>
     <button type="button" className="canvas-index-button" data-canvas-diagnostics-button onClick={() => useCanvasStore.getState().setDiagnosticsDock(true)} title="Diagnostics — the PII-scrubbed report surface, docked">
       <Stethoscope size={12} /> diagnostics
