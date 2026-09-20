@@ -365,18 +365,18 @@ check_pull_freshness() {
   return 0
 }
 
-AUTO_ACT() { # $1 command, $2 description — run automatically (maintainer's ask); interactive confirm when a TTY, auto-yes otherwise (CI/scripts)
-  local cmd="$1" desc="$2"
+AUTO_ACT() { # $1 command, $2 description — run automatically (maintainer's ask); interactive confirm when a TTY, auto-yes otherwise (CI/scripts). POSIX sh: positional only, no `local`.
+  AUTO_CMD="$1"; AUTO_DESC="$2"
   command -v pnpm >/dev/null 2>&1 || die "pnpm is not on PATH — install it first (https://pnpm.io)"
   if [ -t 0 ]; then
-    printf 'Run "%s" to %s now? [Y/n] ' "$cmd" "$desc"
+    printf 'Run "%s" to %s now? [Y/n] ' "$AUTO_CMD" "$AUTO_DESC"
     ANSWER=""
     read -r ANSWER || true
     case $ANSWER in n|N|no|No|NO) return 1 ;; esac
   else
-    echo "$PROG: running '%s' automatically to %s..." "$cmd" "$desc"
+    echo "$PROG: running '$AUTO_CMD' automatically to $AUTO_DESC..."
   fi
-  (cd "$SCRIPT_DIR" && $cmd) || die "$cmd failed"
+  (cd "$SCRIPT_DIR" && $AUTO_CMD) || die "$AUTO_CMD failed"
   return 0
 }
 
@@ -659,6 +659,13 @@ boot_dev() {
     command -v pnpm >/dev/null 2>&1 || die "pnpm is not on PATH — install it first (https://pnpm.io)"
     pnpm run build:server || die "pnpm build:server failed"
   fi
+  # Terminal hygiene (maintainer flag 2026-09-19: "Ctrl+C leaves the terminal
+  # in a dirty state, key presses become raw unicode; I have to hit enter once
+  # more to full quit"): the watch-mode children (vite, tsc, node --watch)
+  # each put the tty in raw mode and hold stdin; killing them without waiting
+  # leaves the tty raw and a pending read. Snapshot the state before boot,
+  # restore it after teardown.
+  TTY_SAVED=$(stty -g 2>/dev/null || true)
   node_modules/.bin/tsc -p tsconfig.server.json --watch &
   DEV_TSC_PID=$!
   node_modules/.bin/vite --port "$R_VITE_PORT" --strictPort &
@@ -669,13 +676,33 @@ boot_dev() {
     node --watch dist-server/server/index.js &
   fi
   DEV_NODE_PID=$!
+  # Teardown: kill the recorded children, give them a beat to actually exit
+  # (so none still holds the tty when we restore it), then restore the saved
+  # tty state. Idempotent — the trap and the normal-exit path both call it.
+  cleanup_dev() {
+    kill "$DEV_TSC_PID" "$DEV_VITE_PID" "$DEV_NODE_PID" 2>/dev/null
+    _i=0
+    while [ "$_i" -lt 20 ]; do
+      kill -0 "$DEV_TSC_PID" 2>/dev/null || kill -0 "$DEV_VITE_PID" 2>/dev/null || kill -0 "$DEV_NODE_PID" 2>/dev/null || break
+      sleep 0.1
+      _i=$((_i + 1))
+    done
+    if [ -n "$TTY_SAVED" ]; then
+      stty "$TTY_SAVED" 2>/dev/null || stty sane 2>/dev/null || true
+    else
+      stty sane 2>/dev/null || true
+    fi
+  }
   # All three PIDs are recorded, so a signal to THIS script (Ctrl-C delivers
   # to the whole foreground group anyway; a bare kill targets only the shell)
-  # still tears the entire pipeline down.
-  trap 'kill "$DEV_TSC_PID" "$DEV_VITE_PID" "$DEV_NODE_PID" 2>/dev/null; exit 130' INT TERM
+  # still tears the entire pipeline down. The trap runs cleanup and RETURNS —
+  # wait then unblocks with the signal status and the normal path finishes
+  # (a second, idempotent cleanup) and exits; exiting inside the trap left a
+  # pending stdin read behind (the extra-Enter symptom).
+  trap 'cleanup_dev' INT TERM
   wait "$DEV_NODE_PID"
   DEV_STATUS=$?
-  kill "$DEV_TSC_PID" "$DEV_VITE_PID" 2>/dev/null
+  cleanup_dev
   exit "$DEV_STATUS"
 }
 
