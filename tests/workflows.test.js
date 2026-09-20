@@ -198,12 +198,11 @@ test('model overrides take 1 (euxwdva): consulted picks, auto-unchanged, precede
   const noForm = resolveModelOverrides('minimax', overrideScan, { checkpoint: 'community_noform_transformer.safetensors' })
   assert.equal(noForm.slots.fl2va.state, 'refused')
   assert.ok(noForm.refusals[0].reason.includes('form'), 'reason names the missing H3 form: ' + noForm.refusals[0].reason)
-  // The T=1 image VAE refuses for the video family — via the legacy 'vae'
-  // key (epdvxd4 migration lands it on videoVae, which refuses) AND via the
-  // decoder-split videoVae key directly (take 3 owns the trio's full matrix).
-  const t1Vae = resolveModelOverrides('minimax', overrideScan, { vae: 'minimax_h3_t1_image_vae_step1597.safetensors' })
-  assert.equal(t1Vae.slots.videoVae.state, 'refused', 'the T=1 image VAE refuses for the video family (legacy key migrates onto videoVae)')
-  assert.ok(t1Vae.refusals[0].reason.includes('T=1'))
+  // The T=1 image VAE refuses for the video family via the decoder-split
+  // videoVae key directly (an explicit POST-split pick). The legacy 'vae' key
+  // no longer lands there at all (tmz8vh7 decoder-class routing — see take 3
+  // for the full matrix); the maintainer's first-session wedge was exactly
+  // that legacy landing refusing every video render.
   const t1VaeDirect = resolveModelOverrides('minimax', overrideScan, { videoVae: 'minimax_h3_t1_image_vae_step1597.safetensors' })
   assert.equal(t1VaeDirect.slots.videoVae.state, 'refused', 'the T=1 image VAE refuses on the videoVae slot directly')
   const unexposedSlot = resolveModelOverrides('music3', overrideScan, { imageVae: 'minimax_h3_t1_image_vae_step1597.safetensors' })
@@ -481,6 +480,41 @@ test('model overrides take 3 (epdvxd4): the decoder-split VAE trio — resolutio
   }
   const explicitWins = overridesModule.migrateLegacyModelOverrideSlots('minimax', { vae: 'legacy.safetensors', videoVae: 'new.safetensors' })
   assert.equal(explicitWins.videoVae, 'new.safetensors', 'an explicit split pick wins its slot over the legacy value')
+  // 19b. DECODER-CLASS ROUTING (tmz8vh7, dated 2026-09-20): the pre-split
+  //      slot's dropdown listed EVERY scanned VAE, so the pick's NAME routes
+  //      it — a marked name never migrates onto a slot its class refuses
+  //      (the maintainer's first-session wedge: a legacy T=1 pick on
+  //      videoVae refusing every video render with the T=1 message).
+  //      Failing-without-it: on the pre-routing migration each of these
+  //      lands on the family-meaning slot and REFUSES at the gate.
+  const t1File = 'minimax_h3_t1_image_vae_step1597.safetensors'
+  const videoFamilyInferred = {
+    minimax: () => inferSelections(vaeSplitScan, 'off'),
+    ltx25: () => inferLtx25Selections(vaeSplitScan, []),
+    ltx23: () => inferLtx23Selections(vaeSplitScan, { checkpoints: [], latentUpscalers: [] }),
+  }
+  for (const family of ['minimax', 'ltx25', 'ltx23']) {
+    const dropped = overridesModule.migrateLegacyModelOverrideSlots(family, { vae: t1File })
+    assert.equal('vae' in dropped, false, `${family}: the T=1-named legacy pick is consumed`)
+    assert.equal(dropped.videoVae, undefined, `${family}: a T=1-named legacy pick never lands on videoVae`)
+    assert.equal(dropped.imageVae, undefined, `${family}: no imageVae slot exists to catch it`)
+    const throughSeam = resolveModels(family, videoFamilyInferred[family](), vaeSplitScan, { vae: t1File })
+    assert.equal(throughSeam.resolution.refusals.length, 0, `${family}: the T=1 legacy pick no longer refuses anything (the maintainer's video render proceeds)`)
+    assert.notEqual(throughSeam.selection.videoVae, t1File, `${family}: the T=1 file never reaches the video decoder field`)
+    if (family === 'minimax') assert.equal(throughSeam.selection.videoVae, 'minimax_h3_video_vae_fp16.safetensors', 'minimax: video decode falls back to the inferred pick')
+  }
+  const t1ToImageSlot = overridesModule.migrateLegacyModelOverrideSlots('h3image', { vae: t1File })
+  assert.equal(t1ToImageSlot.imageVae, t1File, 'h3image: a T=1-named legacy pick routes to imageVae — the one slot where that decoder is legal')
+  assert.equal(t1ToImageSlot.videoVae, undefined, 'h3image: it never touches videoVae')
+  const t1ToImageSeam = resolveModels('h3image', h3imageGraphModule.inferH3ImgSelection(vaeSplitScan), vaeSplitScan, { vae: t1File })
+  assert.equal(t1ToImageSeam.selection.t1ImageVae, t1File, 'h3image: the routed legacy pick drives the T=1 profile decoder through the seam')
+  assert.equal(t1ToImageSeam.resolution.refusals.length, 0)
+  const audioNamed = overridesModule.migrateLegacyModelOverrideSlots('minimax', { vae: 'minimax_h3_audio_vae_fp32.safetensors' })
+  assert.equal(audioNamed.audioVae, 'minimax_h3_audio_vae_fp32.safetensors', 'an audio-named legacy pick routes to audioVae on the video family (its real decoder class)')
+  assert.equal(audioNamed.videoVae, undefined, 'it never lands on videoVae where the marker gate would refuse it')
+  const videoNamedOnAudio = overridesModule.migrateLegacyModelOverrideSlots('music3', { vae: 'minimax_h3_video_vae_fp16.safetensors' })
+  assert.equal(videoNamedOnAudio.audioVae, undefined, 'a video-named legacy pick on an audio family has no legal slot — dropped, not wedged onto audioVae')
+  assert.equal('vae' in videoNamedOnAudio, false)
   const legacyThroughSeam = resolveModels('music3', music3Module.inferMusic3Selection(vaeSplitScan), vaeSplitScan, { vae: 'music3_dav.safetensors' })
   assert.equal(legacyThroughSeam.selection.vae, 'music3_dav.safetensors', 'a legacy music3 vae pick still reaches the DAV field through the seam')
   assert.equal(legacyThroughSeam.resolution.refusals.length, 0)

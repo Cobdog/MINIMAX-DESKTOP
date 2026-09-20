@@ -84,6 +84,15 @@
 - Stale docs are archived, not deleted; task refs pointing at moved docs get
   fixed in the same pass that moves them.
 
+## The modularity test (every architectural decision)
+
+The remediation program (epic 4lphxv8) settled the modularity contract:
+**"pulling out and removing old tools should be as easy as buying a new one."**
+Before landing any change that adds or couples surface area, answer: *could this
+be pulled tomorrow without collateral?* If the change welds a surface, engine,
+or model story to another, stop and decouple first. The removal-cost question
+is part of every wave's acceptance and belongs in review comments when spotted.
+
 ## Session behavior (maintainer's standing expectation)
 
 - Continuous autonomous work until explicitly told to stop; after a task,

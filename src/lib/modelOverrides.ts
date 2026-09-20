@@ -217,7 +217,24 @@ const AUDIO_VAE_FAMILIES: ReadonlySet<string> = new Set(['music3', 'acestep'])
  *  videoVae where the old slot drove the video decoder (the H3/LTX video
  *  families), audioVae where the family's one decoder is audio-class
  *  (music3/acestep). Fill-if-unset; the consumed key never re-refuses as
- *  an unexposed slot; an empty/absent pick is a no-op. */
+ *  an unexposed slot; an empty/absent pick is a no-op.
+ *
+ *  DECODER-CLASS ROUTING (tmz8vh7, dated decision 2026-09-20): the pre-split
+ *  slot's dropdown listed EVERY scanned VAE file, so the pick's NAME is the
+ *  only evidence of which decoder the user actually pinned — and a pick that
+ *  migrates onto a slot its class REFUSES wedges every render in the family.
+ *  This is the maintainer's first-session T=1 report verbatim: a pre-split
+ *  pick of the Mamad8 T=1 decoder migrated onto videoVae and refused every
+ *  video submit ("Model override refused — videoVae: … Mamad8 T=1 image
+ *  decoder…"), invisible in the UI (no 'vae' row exists post-split, and the
+ *  chain panel only verdicts the chain's OWN pick). Marked names therefore
+ *  route to the slot where they are LEGAL: T=1-named onto imageVae (only
+ *  h3image exposes it), audio-named onto audioVae on the video families,
+ *  video-named onto videoVae; a marked name NO slot in the family can load
+ *  (T=1 on a pure video family, video-class on an audio family) drops — it
+ *  was already unrenderable pre-split (the factory guard threw), so dropping
+ *  restores the honest state instead of propagating the wedge. Unmarked
+ *  names keep the family-meaning landing above. */
 export function migrateLegacyModelOverrideSlots(familyId: string, slots?: ModelOverrideSlots): ModelOverrideSlots {
   if (!slots) return {}
   let next: ModelOverrideSlots | null = null
@@ -228,13 +245,26 @@ export function migrateLegacyModelOverrideSlots(familyId: string, slots?: ModelO
     if (!next.ref2va) next.ref2va = slots.checkpoint.trim()
   }
   if (typeof slots.vae === 'string' && slots.vae.trim()) {
+    const legacyVae = slots.vae.trim()
+    const t1Class = T1_IMAGE_VAE_PATTERN.test(legacyVae)
+    const audioClass = AUDIO_VAE_MARKER.test(legacyVae)
+    const videoClass = VIDEO_VAE_MARKER.test(legacyVae)
     if (VIDEO_VAE_FAMILIES.has(familyId)) {
       next = next ?? { ...slots }
-      if (!next.videoVae) next.videoVae = slots.vae.trim()
+      if (t1Class && familyId === 'h3image') {
+        if (!next.imageVae) next.imageVae = legacyVae
+      } else if (audioClass && !t1Class) {
+        if (!next.audioVae) next.audioVae = legacyVae
+      } else if (!t1Class) {
+        if (!next.videoVae) next.videoVae = legacyVae
+      }
+      // A T=1-named pick on a pure video family has no legal slot — dropped.
       delete next.vae
     } else if (AUDIO_VAE_FAMILIES.has(familyId)) {
       next = next ?? { ...slots }
-      if (!next.audioVae) next.audioVae = slots.vae.trim()
+      if (!videoClass) {
+        if (!next.audioVae) next.audioVae = legacyVae
+      }
       delete next.vae
     }
     // Any other family never exposed a 'vae' pick (it refused as unexposed

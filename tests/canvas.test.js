@@ -426,6 +426,18 @@ test('(n) typed-hole option menus (§3 filtering + hints)', () => {
   ok(consume.find((row) => row.id === 'consume:first-frame').available, 'consume(image): first-frame role offered')
   ok(!options.endpointOptions('consume', ['video'], ready).some((row) => row.id === 'consume:first-frame'), 'consume(video): first-frame role filtered out for video sources')
   ok(options.endpointOptions('consume', ['video'], ready).find((row) => row.id === 'consume:reference').available, 'consume(video): reference role accepts any media kind')
+
+  // (tmz8vh7 / audit P1-2) Image-target gating: last-frame and reference are
+  // H3 VIDEO concepts — offered on an image chain they flipped effectiveMode
+  // and the stills predicate fell through to the video ladder (a spawned
+  // image object silently rendering a 6-second video). Failing-without-it:
+  // the 4th arg is new; on the ungated menu both rows appear.
+  const imageTarget = options.endpointOptions('consume', ['image'], ready, 'image')
+  ok(imageTarget.find((row) => row.id === 'consume:first-frame').available, 'consume(image→image chain): first-frame stays — it is the Edit-surface handoff binding')
+  ok(!imageTarget.some((row) => row.id === 'consume:last-frame'), 'consume(image→image chain): last-frame never offered — frames mode is a video concept')
+  ok(!imageTarget.some((row) => row.id === 'consume:reference'), 'consume(image→image chain): reference never offered — ref2v is a video concept')
+  ok(imageTarget.find((row) => row.id === 'consume:pose-rig').available, 'consume(image→image chain): the pose rig stays (a control input, not a mode flip)')
+  ok(options.endpointOptions('consume', ['image'], ready, 'video').some((row) => row.id === 'consume:reference'), 'consume(image→video chain): reference still offered for video chains')
 })
 
 // (n2) the fetch deep-link mapping test was removed with LTX (Phase 0,

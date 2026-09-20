@@ -244,6 +244,15 @@ Both engine addresses, every model directory, and the ComfyUI output directory c
 
 ## Workflow compatibility
 
+> **REMEDIATION IN PROGRESS (2026-09-20, epic 4lphx8):** the foundation is under a
+> full audit-and-remediation program — see [docs/audit/remediation-plan.md](docs/audit/remediation-plan.md).
+> **LTX and Z-Image are being fully removed** (Phase 0, in flight): any LTX/Z-Image
+> capability text below is historical pending that landing. The settled architecture:
+> models and nodes are discovered exclusively through the connected ComfyUI instance's
+> registry (instance-invisible = nonexistent); the destination is a workshop of three
+> surfaces — wiring (canvas), control (control center, post-foundation), creation
+> (workbench, post-foundation).
+
 MiniMax generation is built from ComfyUI's official T2V/I2V/Ref2V core graph: native H3 conditioning, `RandomNoise`, `BasicGuider`, `res_multistep`, `simple`, joint video/audio latent decoding, and `CreateVideo`/`SaveVideo`. The app prefers the official pruned INT8 ConvRot diffusion safetensors, NVFP4-AWQ text encoder, FP16 video VAE, and FP32 audio VAE when multiple matching files exist. Live preview and LTX/RTX upscaling are separate output branches and do not alter the base H3 sampling path.
 
 Turbo sampling uses the official sampler/scheduler pair unless custom sampling is explicitly enabled; custom combinations remain marked experimental because they are not equivalent to the published template.
