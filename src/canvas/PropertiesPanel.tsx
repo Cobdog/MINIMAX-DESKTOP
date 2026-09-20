@@ -748,16 +748,22 @@ export function PropertiesPanel() {
             const candidates = models.filter((model) => model.kind === kind)
             const globalPick = useSessionStore.getState().settings?.modelOverrides?.[modelFamilyId]?.[slot]
             const autoFile = inferredOverrideSlotFile(modelFamilyId, slot, models)
-            const outcome = value ? overridePickOutcome(modelFamilyId, slot, value, models) : null
+            // (tmz8vh7): the verdict runs on the EFFECTIVE pick — the chain's
+            // own, else the global Settings one. Verdicting only the chain's
+            // pick rendered a refusing GLOBAL pick as an innocent "auto —
+            // global: X" label while every submit refused with no pointer to
+            // where the pick lives (audit P1-1's UX wedge).
+            const layer: 'chain' | 'global' | null = value ? 'chain' : globalPick ? 'global' : null
+            const outcome = (value || globalPick) ? overridePickOutcome(modelFamilyId, slot, value || globalPick || '', models) : null
             return <div className="canvas-properties-row" key={slot} data-canvas-model-override={slot}>
               <label htmlFor={`canvas-model-${slot}`}>{SLOT_LABELS[slot]}</label>
               <select id={`canvas-model-${slot}`} data-canvas-model-override-select={slot} value={value} onChange={(event) => setChainModelOverride(slot, event.target.value)}>
                 <option value="">{globalPick ? `auto — global: ${globalPick}` : autoFile ? `auto — ${autoFile}` : 'auto — nothing detected'}</option>
                 {candidates.map((model) => <option key={model.name} value={model.name}>{model.name}</option>)}
               </select>
-              {outcome?.state === 'refused' && <p className="canvas-properties-warning" data-canvas-model-override-problem role="alert">Refused — {outcome.reason}</p>}
-              {outcome?.state === 'degraded' && <p className="canvas-properties-warning" data-canvas-model-override-problem role="status">{outcome.warning}</p>}
-              {outcome?.state === 'applied' && outcome.warning && <p className="canvas-properties-warning" data-canvas-model-override-problem role="status">{outcome.warning}</p>}
+              {outcome?.state === 'refused' && <p className="canvas-properties-warning" data-canvas-model-override-problem role="alert">Refused {layer === 'global' ? '(the global Settings pick — clear it in Settings → Model overrides)' : '(this chain\'s pick — clear it to render on auto)'} — {outcome.reason}</p>}
+              {outcome?.state === 'degraded' && <p className="canvas-properties-warning" data-canvas-model-override-problem role="status">{layer === 'global' ? 'The global Settings pick ' : 'This chain\'s pick '}{outcome.warning}</p>}
+              {outcome?.state === 'applied' && outcome.warning && <p className="canvas-properties-warning" data-canvas-model-override-problem role="status">{layer === 'global' ? 'The global Settings pick ' : 'This chain\'s pick '}{outcome.warning}</p>}
             </div>
           })}
           <p className="canvas-properties-note">A pick here beats the global Settings pick, which beats auto inference. Picks are exact scanned filenames; the resolved files ride the take's manifest. The H3 lanes pin FL2VA / Ref2VA separately; the merged pick is one pre-merged checkpoint for both and wins when set. The VAE picks are decoder-specific (video / audio) — the image decoder is workbench-only.</p>

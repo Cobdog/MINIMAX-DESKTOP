@@ -1276,6 +1276,9 @@ test('the pose rig docks as a canvas panel and exports a control track (§5.2)',
   await expect(dock).toBeVisible({ timeout: 15_000 })
   await expect(dock.locator('[data-poserig="app"]')).toBeVisible({ timeout: 15_000 })
   await expect(dock.locator('[data-poserig-preview]')).toBeVisible()
+  // (tmz8vh7) The dock keeps its grid containment against react-rnd's inline
+  // display — the 6f656ca scroll-lock class, audited onto this surface.
+  await expect.poll(() => dock.evaluate((element) => getComputedStyle(element).display)).toBe('grid')
 
   // Export-to-control-track: the rendered frames land as a blob + a
   // canvas_control_track row on the target chain (§2.1).
@@ -3083,4 +3086,333 @@ test('the LoRA timeline compiles painted ranges into per-LoRA segment chains (fa
     await new Promise<void>((resolve) => engine.close(() => resolve()))
   }
 })
+
+// ---------------------------------------------------------------------------
+// tmz8vh7 — THE T=1 MISROUTE REGRESSION. The maintainer's first-session wedge:
+// a pre-split legacy `vae` override pick naming the Mamad8 T=1 image VAE (the
+// single slot's dropdown listed every scanned VAE) migrated onto videoVae and
+// REFUSED every video render — "a T=1 error on a video generation [attempt]"
+// — with zero UI pointer to where the pick lived. The decoder-class routing
+// (modelOverrides.ts migration) never lands a marked name on a slot its class
+// refuses. Failing-without-it: on the unmigrated seam the exact maintainer
+// sequence below submits NOTHING (validateH3Render refuses with the T=1
+// message) and the tile never parks running.
+test('a legacy pre-split vae pick of the T=1 decoder never refuses the video path (tmz8vh7)', async ({ page, request }) => {
+  const problems = await trackErrors(page)
+  const { mkdirSync, writeFileSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const http = await import('node:http')
+
+  const T1_FILE = 'minimax_h3_t1_image_vae_step1597.safetensors'
+  const modelRoot = join(process.cwd(), 'test-home', 't1wedge-models')
+  for (const [kind, files] of Object.entries({
+    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
+    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
+    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors', T1_FILE],
+    loras: ['minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', 'MaxiMin-HHH-R2V-ThisIsFine.safetensors'],
+  })) {
+    mkdirSync(join(modelRoot, kind), { recursive: true })
+    for (const file of files as string[]) writeFileSync(join(modelRoot, kind, file), 'x')
+  }
+
+  const PROMPT_ID = 't1wedge-1'
+  const submitted: Array<Record<string, { class_type: string; inputs: Record<string, unknown> }>> = []
+  const engine = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://engine.local')
+    if (url.pathname === '/system_stats') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ system: {}, devices: [] }))
+      return
+    }
+    if (url.pathname === '/object_info') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ MiniMaxH3HybridLoader: {}, KSamplerSelect: {}, BasicScheduler: {}, VAELoader: {} }))
+      return
+    }
+    if (url.pathname === '/prompt' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (chunk: Buffer) => { body += chunk })
+      req.on('end', () => {
+        submitted.push((JSON.parse(body) as { prompt: Record<string, { class_type: string; inputs: Record<string, unknown> }> }).prompt)
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ prompt_id: PROMPT_ID, number: 1, node_errors: {} }))
+      })
+      return
+    }
+    if (url.pathname === `/history/${PROMPT_ID}`) {
+      // Still running — the job parks running on the chain (the honest state).
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ [PROMPT_ID]: { prompt: [], outputs: {}, status: { completed: false } } }))
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  const enginePort = await new Promise<number>((resolve) => engine.listen(0, '127.0.0.1', () => resolve((engine.address() as { port: number }).port)))
+
+  const originalSettings = ((await (await request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
+  try {
+    const listed = await (await request.get('/api/lan/jobs')).json() as { jobs?: Array<Record<string, unknown>> }
+    const stale = (listed.jobs ?? []).filter((job) => job.status === 'queued' || job.status === 'running').map((job) => ({ ...job, status: 'cancelled' }))
+    if (stale.length) await request.post('/api/lan/jobs', { data: { jobs: stale } })
+    // THE WEDGE, exactly as a pre-split install stored it: the legacy single
+    // 'vae' key naming the T=1 decoder on the video family.
+    await request.post('/api/lan/settings', { data: { settings: {
+      ...originalSettings,
+      comfyUrl: `http://127.0.0.1:${enginePort}`,
+      modelOverrides: { ...(originalSettings.modelOverrides as Record<string, Record<string, string>> ?? {}), minimax: { vae: T1_FILE } },
+      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: join(modelRoot, 'diffusion_models'), text_encoders: join(modelRoot, 'text_encoders'), vae: join(modelRoot, 'vae'), loras: join(modelRoot, 'loras') },
+    } } })
+    await request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+
+    // THE MAINTAINER'S EXACT SEQUENCE: fresh boot → prompt → video chip → Enter.
+    await page.goto('/?canvas=1')
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    await page.locator('[data-canvas-prompt]').fill('a lone drummer on a night train, tracking shot')
+    await page.locator('[data-canvas-chip="video"]').click()
+    await page.locator('[data-canvas-prompt]').press('Enter')
+
+    const tile = page.locator('[data-canvas-tile]').first()
+    await expect(tile).toBeVisible({ timeout: 10_000 })
+    // The video submission goes THROUGH: the real ladder accepts it and the
+    // job parks running (pre-fix this is where the T=1 refusal surfaced and
+    // nothing was ever submitted).
+    await expect(tile).toHaveAttribute('data-tile-status', 'running', { timeout: 20_000 })
+    await expect(page.locator('[data-canvas-engine]')).toHaveAttribute('data-engine-connected', 'true')
+    await expect.poll(() => submitted.length, { timeout: 10_000 }).toBeGreaterThanOrEqual(1)
+
+    // The engine received the VIDEO graph: the video+audio VAELoader pair,
+    // multi-frame decode — and the T=1 decoder nowhere in it.
+    const nodes = Object.values(submitted[0]!)
+    const classes = nodes.map((node) => node.class_type)
+    expect(classes).toContain('CreateVideo')
+    const vaeNames = nodes.filter((node) => node.class_type === 'VAELoader').map((node) => String(node.inputs.vae_name))
+    expect(vaeNames).toContain('minimax_h3_video_vae_fp16.safetensors')
+    expect(vaeNames).toContain('minimax_h3_audio_vae_fp32.safetensors')
+    expect(vaeNames).not.toContain(T1_FILE)
+
+    // ARM 2 — the maintainer's CURRENT on-disk shape: the pre-tmz8vh7 server
+    // normalization already rewrote the legacy key into an explicit
+    // videoVae pick of the T=1 file. That stored wedge heals at load; the
+    // same exact sequence must still submit a video graph.
+    await request.post('/api/lan/settings', { data: { settings: {
+      ...originalSettings,
+      comfyUrl: `http://127.0.0.1:${enginePort}`,
+      modelOverrides: { ...(originalSettings.modelOverrides as Record<string, Record<string, string>> ?? {}), minimax: { videoVae: T1_FILE } },
+      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: join(modelRoot, 'diffusion_models'), text_encoders: join(modelRoot, 'text_encoders'), vae: join(modelRoot, 'vae'), loras: join(modelRoot, 'loras') },
+    } } })
+    const graphsBeforeArm2 = submitted.length
+    await page.reload()
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    // The canvas is no longer empty — the contextual bar's prompt is the
+    // entry (video intent, like the chip).
+    await page.locator('[data-canvas-bar-prompt]').fill('the drummer steps off at dawn')
+    await page.locator('[data-canvas-bar-prompt]').press('Enter')
+    await expect.poll(() => submitted.length, { timeout: 20_000 }).toBeGreaterThan(graphsBeforeArm2)
+    const arm2VaeNames = Object.values(submitted[submitted.length - 1]!).filter((node) => node.class_type === 'VAELoader').map((node) => String(node.inputs.vae_name))
+    expect(arm2VaeNames).not.toContain(T1_FILE)
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
+    await request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
+    await import('node:fs').then((fs) => { fs.rmSync(modelRoot, { recursive: true, force: true }) })
+    await new Promise<void>((resolve) => engine.close(() => resolve()))
+  }
+})
+
+// ---------------------------------------------------------------------------
+// tmz8vh7 / audit P1-2 — THE INVERSE MISROUTE. An image-intent chain with a
+// reference binding used to fall through the stills predicate into the H3
+// VIDEO ladder: a spawned-image object silently rendered a 6-second video.
+// The predicate now covers every image chain and the video-only input roles
+// are not offered on image chains. Failing-without-it: pre-fix the generate
+// click submits a VIDEO graph (SaveVideo/CreateVideo present) and no refusal
+// ever surfaces.
+test('an image-intent chain with a reference binding refuses honestly — never a silent H3 video render (tmz8vh7)', async ({ page, request }) => {
+  const problems = await trackErrors(page)
+  const { mkdirSync, writeFileSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const http = await import('node:http')
+
+  const modelRoot = join(process.cwd(), 'test-home', 'p12-models')
+  for (const [kind, files] of Object.entries({
+    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
+    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
+    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors', 'minimax_h3_t1_image_vae_step1597.safetensors'],
+    loras: ['minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors'],
+  })) {
+    mkdirSync(join(modelRoot, kind), { recursive: true })
+    for (const file of files as string[]) writeFileSync(join(modelRoot, kind, file), 'x')
+  }
+
+  const PROMPT_ID = 'p12-still-1'
+  const submitted: Array<Record<string, { class_type: string; inputs: Record<string, unknown> }>> = []
+  const engine = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://engine.local')
+    if (url.pathname === '/system_stats') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ system: {}, devices: [] }))
+      return
+    }
+    if (url.pathname === '/object_info') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ MiniMaxH3HybridLoader: {}, KSamplerSelect: {}, BasicScheduler: {}, VAELoader: {} }))
+      return
+    }
+    if (url.pathname === '/prompt' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (chunk: Buffer) => { body += chunk })
+      req.on('end', () => {
+        submitted.push((JSON.parse(body) as { prompt: Record<string, { class_type: string; inputs: Record<string, unknown> }> }).prompt)
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ prompt_id: PROMPT_ID, number: 1, node_errors: {} }))
+      })
+      return
+    }
+    if (url.pathname === `/history/${PROMPT_ID}`) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ [PROMPT_ID]: { prompt: [], outputs: {}, status: { completed: false } } }))
+      return
+    }
+    if (url.pathname === '/queue' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ queue_running: [['entry', PROMPT_ID]], queue_pending: [] }))
+      return
+    }
+    if (url.pathname === '/interrupt' && req.method === 'POST') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ cancelled: true, state: 'canceled' }))
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  const enginePort = await new Promise<number>((resolve) => engine.listen(0, '127.0.0.1', () => resolve((engine.address() as { port: number }).port)))
+
+  const originalSettings = ((await (await request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
+  try {
+    const listed = await (await request.get('/api/lan/jobs')).json() as { jobs?: Array<Record<string, unknown>> }
+    const stale = (listed.jobs ?? []).filter((job) => job.status === 'queued' || job.status === 'running').map((job) => ({ ...job, status: 'cancelled' }))
+    if (stale.length) await request.post('/api/lan/jobs', { data: { jobs: stale } })
+    await request.post('/api/lan/settings', { data: { settings: {
+      ...originalSettings,
+      comfyUrl: `http://127.0.0.1:${enginePort}`,
+      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: join(modelRoot, 'diffusion_models'), text_encoders: join(modelRoot, 'text_encoders'), vae: join(modelRoot, 'vae'), loras: join(modelRoot, 'loras') },
+    } } })
+    await resetSession(page)
+    await page.goto('/?canvas=1')
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+
+    // The image-intent chain first (the launcher unmounts once the canvas
+    // has objects), then the media object to bind as the reference.
+    await page.locator('[data-canvas-chip="image"]').click()
+    await page.locator('[data-canvas-prompt]').fill('a lighthouse over a black sea')
+    await page.locator('[data-canvas-submit]').click()
+    await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+    await expect.poll(() => submitted.length, { timeout: 20_000 }).toBeGreaterThanOrEqual(1)
+    await dropPng(page, 'p12-reference.png')
+    await expect(page.locator('[data-canvas-tile]')).toHaveCount(2, { timeout: 10_000 })
+
+    // Bind the reference through the documents API (the input-menu write,
+    // seeded directly — the menu itself is asserted below to not offer it).
+    const document = await activeDocument(page)
+    const imageChain = document.chains.find((chain) => chain.kind === 'generation')!
+    const mediaChain = document.chains.find((chain) => chain.kind === 'media')!
+    const sourceOutput = mediaChain.outputs[0]!.id
+    await request.post('/api/lan/documents/chains/update', { data: { id: imageChain.id, settings: { ...imageChain.settings, referenceOutputIds: [sourceOutput] } } })
+
+    // Reload, select the image chain: the validation readout refuses the
+    // state BEFORE any generate (the honest pre-submit signal).
+    await page.reload()
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    await page.locator(`[data-canvas-tile="${imageChain.id}"]`).click()
+    await expect(page.locator('[data-canvas-properties]')).toBeVisible()
+    await expect(page.locator('[data-canvas-validation]')).toContainText('image intent has no first+last-frame or reference mode')
+
+    // The consume menu on the image chain never offers the video-only roles.
+    await page.locator(`[data-canvas-tile="${mediaChain.id}"]`).click()
+    await page.waitForTimeout(300)
+    await page.locator(`[data-canvas-tile="${imageChain.id}"]`).locator('[data-canvas-endpoint="head"]').click()
+    const consume = page.locator('[data-canvas-endpoint-menu="consume"]')
+    await expect(consume).toBeVisible()
+    await expect(consume.locator('[data-canvas-menu-row="consume:first-frame"]')).toBeVisible()
+    await expect(consume.locator('[data-canvas-menu-row="consume:reference"]')).toHaveCount(0)
+    await expect(consume.locator('[data-canvas-menu-row="consume:last-frame"]')).toHaveCount(0)
+    await page.keyboard.press('Escape')
+
+    // Generate: the refusal surfaces and NO video graph is ever submitted —
+    // the stills graph from the spawn is all the engine ever received. The
+    // spawn's stills job parks running (the fake engine never completes):
+    // stop it first so the generate control returns.
+    await page.locator(`[data-canvas-tile="${imageChain.id}"]`).click()
+    await expect(page.locator('[data-canvas-properties]')).toBeVisible()
+    const stop = page.locator('[data-canvas-cancel]')
+    if (await stop.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await stop.click()
+      await expect(page.locator('[data-canvas-generate]')).toBeVisible({ timeout: 15_000 })
+    }
+    await page.locator('[data-canvas-generate]').click()
+    await expect(page.locator('[data-canvas-toast="error"]').first()).toContainText('image intent has no', { timeout: 10_000 })
+    const stillsAfterGenerate = submitted.length
+    await page.waitForTimeout(2_000)
+    expect(submitted.length).toBe(stillsAfterGenerate)
+    for (const graph of submitted) {
+      const classes = Object.values(graph).map((node) => node.class_type)
+      expect(classes, 'no video graph is ever built for an image-intent chain').not.toContain('CreateVideo')
+      expect(classes).not.toContain('SaveVideo')
+    }
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
+    await resetSession(page).catch(() => undefined)
+    await import('node:fs').then((fs) => { fs.rmSync(modelRoot, { recursive: true, force: true }) })
+    await new Promise<void>((resolve) => engine.close(() => resolve()))
+  }
+})
+
+// ---------------------------------------------------------------------------
+// tmz8vh7 — THE DOCK SCROLL LOCK CLASS (6f656ca): react-rnd writes
+// `display: inline-block` as an INLINE style, which beats a plain stylesheet
+// `display: grid` on the same element — the grid rows never apply, the body
+// never gets constrained by minmax(0,1fr), and the panel becomes an
+// unscrollable clip. The settings-dock class was fixed in 6f656ca; the audit
+// found the same latent lock on the properties panel and the audio dock
+// (plus the pose rig dock, asserted in its own test below). Computed display
+// is the containment contract. Failing-without-it: inline-block wins.
+test('the floating docks keep their grid containment against react-rnd inline display (tmz8vh7)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+
+  // The audio dock via the launcher chip (the launcher unmounts once the
+  // canvas has objects — open it first, assert, close it).
+  await page.locator('[data-canvas-chip="music3"]').click()
+  const audioDock = page.locator('[data-canvas-audio-dock]')
+  await expect(audioDock).toBeVisible()
+  await expect.poll(() => audioDock.evaluate((element) => getComputedStyle(element).display)).toBe('grid')
+  await page.locator('[data-canvas-audio-close]').click()
+  await expect(audioDock).toHaveCount(0)
+
+  // The properties panel (the node sidebar) opens on the spawned seed.
+  await page.locator('[data-canvas-prompt]').fill('dock containment probe')
+  await page.locator('[data-canvas-submit]').click()
+  await expect(page.locator('[data-canvas-tile]').first()).toBeVisible({ timeout: 10_000 })
+  const properties = page.locator('[data-canvas-properties]')
+  await expect(properties).toBeVisible()
+  await expect.poll(() => properties.evaluate((element) => getComputedStyle(element).display)).toBe('grid')
+
+  // The body of the properties panel is the scrolling surface the grid rows
+  // exist to constrain — with the containment intact it reports a bounded
+  // (scrollable) box. (grid-template-rows computes to used pixel values, so
+  // display + overflow is the stable contract here.)
+  const bodyFacts = await page.evaluate(() => {
+    const root = document.querySelector('[data-canvas-properties]')
+    const body = root?.querySelector('.canvas-inspector-body') ?? root?.querySelector('.canvas-settings-body')
+    return body ? { overflowY: getComputedStyle(body).overflowY } : null
+  })
+  expect(bodyFacts?.overflowY).toBe('auto')
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
 

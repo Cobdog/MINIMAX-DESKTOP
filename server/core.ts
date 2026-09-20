@@ -810,11 +810,37 @@ export function createStudioServer(paths: StudioServerPaths) {
       // migrateLegacyModelOverrideSlots in src/lib/modelOverrides.ts,
       // reimplemented because the server never imports the renderer
       // registry).
+      //
+      // DECODER-CLASS ROUTING (tmz8vh7, dated 2026-09-20): this seam runs on
+      // every settings LOAD, so it is the one that already rewrote the
+      // maintainer's pre-split legacy 'vae' pick of the Mamad8 T=1 decoder
+      // onto videoVae — the stored pick wedged EVERY video render with the
+      // T=1 refusal and no UI pointer to it (the post-split Settings page
+      // has no 'vae' row). Marked names route to the slot where they are
+      // legal, both for the legacy key AND for the already-normalized
+      // cross-class picks this seam itself produced (an unrouteable marked
+      // name drops — it is unrenderable in the family by construction, the
+      // factory ban; keeping it wedges every render). Mirrors the same
+      // dated rule in migrateLegacyModelOverrideSlots.
       modelOverrides: (() => {
         const slots = ['checkpoint', 'fl2va', 'ref2va', 'merged', 'textEncoder', 'vae', 'videoVae', 'audioVae', 'imageVae'] as const
         const laneFamilies = new Set(['minimax', 'h3image'])
+        const imageVaeFamilies = new Set(['h3image'])
         const videoVaeFamilies = new Set(['minimax', 'h3image', 'ltx25', 'ltx23'])
         const audioVaeFamilies = new Set(['music3', 'acestep'])
+        const t1Marker = /^minimax_h3_t1_image_vae/i
+        const audioMarker = /audio|dav/i
+        const videoMarker = /video/i
+        /** Decoder-class landing for one pick on a video family: T=1-named
+         *  onto imageVae where the family exposes it, audio-named onto
+         *  audioVae, else videoVae; a T=1 name with no imageVae slot has no
+         *  legal landing (undefined = drop). */
+        const routeOnVideoFamily = (family: string, pick: string): 'imageVae' | 'audioVae' | 'videoVae' | null => {
+          const t1Class = t1Marker.test(pick)
+          if (t1Class) return imageVaeFamilies.has(family) ? 'imageVae' : null
+          if (audioMarker.test(pick)) return 'audioVae'
+          return 'videoVae'
+        }
         const rawOverrides = (raw.modelOverrides && typeof raw.modelOverrides === 'object' ? raw.modelOverrides : {}) as Record<string, unknown>
         const normalized: Record<string, Partial<Record<(typeof slots)[number], string>>> = {}
         for (const family of Object.keys(rawOverrides).slice(0, 64)) {
@@ -832,14 +858,27 @@ export function createStudioServer(paths: StudioServerPaths) {
           }
           if (familySlots.vae) {
             if (videoVaeFamilies.has(family)) {
-              if (!familySlots.videoVae) familySlots.videoVae = familySlots.vae
-              delete familySlots.vae
+              const landing = routeOnVideoFamily(family, familySlots.vae)
+              if (landing && !familySlots[landing]) familySlots[landing] = familySlots.vae
             } else if (audioVaeFamilies.has(family)) {
-              if (!familySlots.audioVae) familySlots.audioVae = familySlots.vae
-              delete familySlots.vae
-            } else {
-              delete familySlots.vae
+              if (!videoMarker.test(familySlots.vae) && !familySlots.audioVae) familySlots.audioVae = familySlots.vae
             }
+            delete familySlots.vae
+          }
+          // The already-normalized cross-class picks (this seam's pre-
+          // tmz8vh7 output): heal them with the same routing so a stored
+          // wedge unwedges on the next load.
+          if (familySlots.videoVae && videoVaeFamilies.has(family)) {
+            const landing = routeOnVideoFamily(family, familySlots.videoVae)
+            if (landing && landing !== 'videoVae') {
+              if (!familySlots[landing]) familySlots[landing] = familySlots.videoVae
+              delete familySlots.videoVae
+            } else if (!landing) {
+              delete familySlots.videoVae
+            }
+          }
+          if (familySlots.audioVae && audioVaeFamilies.has(family) && videoMarker.test(familySlots.audioVae)) {
+            delete familySlots.audioVae
           }
           if (Object.keys(familySlots).length) normalized[family] = familySlots
         }
