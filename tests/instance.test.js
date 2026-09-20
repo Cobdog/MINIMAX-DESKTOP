@@ -547,13 +547,11 @@ routesMaybe('(d) app-relative io defaults through the real settings pipeline + (
       const t1Overrides = await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...fresh, modelOverrides: {
         minimax: { vae: t1File },
         h3image: { vae: t1File },
-        ltx25: { videoVae: t1File },
         music3: { vae: 'a-video-vae.safetensors' },
       } } }) })
       const t1norm = t1Overrides.body.settings.modelOverrides ?? {}
       ok(!t1norm.minimax?.videoVae && !('vae' in (t1norm.minimax ?? {})), `minimax: a T=1-named legacy pick has no legal slot — dropped, never wedged onto videoVae (got ${JSON.stringify(t1norm.minimax)})`)
       ok(t1norm.h3image?.imageVae === t1File && !t1norm.h3image?.videoVae, `h3image: a T=1-named legacy pick routes to imageVae — the one legal slot (got ${JSON.stringify(t1norm.h3image)})`)
-      ok(!t1norm.ltx25?.videoVae, `ltx25: a stored videoVae wedge naming the T=1 file heals (dropped) at load (got ${JSON.stringify(t1norm.ltx25)})`)
       ok(!t1norm.music3?.audioVae, `music3: a video-named legacy pick on an audio family has no legal slot — dropped (got ${JSON.stringify(t1norm.music3)})`)
       await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: fresh }) })
 

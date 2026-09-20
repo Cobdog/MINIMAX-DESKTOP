@@ -833,12 +833,9 @@ export function createStudioServer(paths: StudioServerPaths) {
       modelOverrides: (() => {
         const slots = ['checkpoint', 'fl2va', 'ref2va', 'merged', 'textEncoder', 'vae', 'videoVae', 'audioVae', 'imageVae'] as const
         const laneFamilies = new Set(['minimax', 'h3image'])
-<<<<<<< HEAD
-        const videoVaeFamilies = new Set(['minimax', 'h3image'])
-=======
         const imageVaeFamilies = new Set(['h3image'])
-        const videoVaeFamilies = new Set(['minimax', 'h3image', 'ltx25', 'ltx23'])
->>>>>>> origin/main
+        // (ltx25/ltx23 dropped from this set with LTX — Phase 0, 2026-09-20.)
+        const videoVaeFamilies = new Set(['minimax', 'h3image'])
         const audioVaeFamilies = new Set(['music3', 'acestep'])
         const t1Marker = /^minimax_h3_t1_image_vae/i
         const audioMarker = /audio|dav/i

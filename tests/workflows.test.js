@@ -488,12 +488,12 @@ test('model overrides take 3 (epdvxd4): the decoder-split VAE trio — resolutio
   //      Failing-without-it: on the pre-routing migration each of these
   //      lands on the family-meaning slot and REFUSES at the gate.
   const t1File = 'minimax_h3_t1_image_vae_step1597.safetensors'
+  // (The ltx25/ltx23 arms of this loop were removed with LTX — Phase 0,
+  // 2026-09-20; the minimax arm carries the routing contract.)
   const videoFamilyInferred = {
     minimax: () => inferSelections(vaeSplitScan, 'off'),
-    ltx25: () => inferLtx25Selections(vaeSplitScan, []),
-    ltx23: () => inferLtx23Selections(vaeSplitScan, { checkpoints: [], latentUpscalers: [] }),
   }
-  for (const family of ['minimax', 'ltx25', 'ltx23']) {
+  for (const family of ['minimax']) {
     const dropped = overridesModule.migrateLegacyModelOverrideSlots(family, { vae: t1File })
     assert.equal('vae' in dropped, false, `${family}: the T=1-named legacy pick is consumed`)
     assert.equal(dropped.videoVae, undefined, `${family}: a T=1-named legacy pick never lands on videoVae`)
