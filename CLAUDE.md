@@ -21,6 +21,10 @@ This repo is tracked by Flux. Project: **MINIMAX-DESKTOP** (`r2lnrfw`). All work
 
 Destructive shell commands are blocked by the maintainer's global hook. A block is standing policy, NEVER an obstacle to route around — do not retry with a different tool, flag, or path (substituting one deletion method for another is exactly what the ban stops). If a deletion is genuinely necessary, stop and ask.
 
+## The remediation program (the active frame)
+
+**The foundation is under remediation** (epic 4lphxv8; the maintainer's 2026-09-20 verdict). Before ANY non-trivial build work: read [docs/audit/remediation-plan.md](docs/audit/remediation-plan.md) — the four-wave build order — and the epic's directives (the settled architecture: registry-only models/nodes, node-level model dials, the debug suite, the three-surface workshop, the modularity contract). Work belongs to the plan's waves unless the maintainer directs otherwise; the settled directives are never re-litigated. **The modularity contract governs every decision**: pulling out a tool should be as easy as buying a new one — if your change welds something in, stop and reconsider.
+
 ## THE FRESHNESS DOCTRINE
 
 Before doing anything non-trivial (building, benchmarking, graph-writing), ask: **"Is this the right way to do this TODAY?"** This space changes daily; king today may be dead tomorrow. Default practice: research local docs AND the web; challenge assumptions whenever there is even slight reason — ambiguity, or a question that makes you doubt X. BALANCED: not everything through this lens — the trigger is ambiguity or doubt, not paranoia. Every important finding gets documented (`docs/research/` + `docs/library/` per protocol). Accuracy and truth over convenience.

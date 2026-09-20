@@ -22,14 +22,17 @@ update the file, not to memorize it.
 
 **Repo map (orientation, one line each):** `server/` the Node server
 (core, runtime, fetcher, realtime, LLM layer) · `src/` the React SPA
-(views/, hooks/, components/, lib/ incl. the graph factory + camera
-compiler, canvas/ the in-flight new surface, prototypes/ the direction
-references, poserig/ the IK rig) · `scripts/` the test harness suites and
+(hooks/, components/, lib/ incl. the graph factory + camera compiler,
+canvas/ THE app — the infinite-graph surface; images/ the workbench seed;
+datasets/ the dataset manager; prototypes/ the direction references;
+poserig/ the IK rig) · `tests/` the vitest unit suites (the port allocator
+lives in `tests/lib/`) · `scripts/` the gate runner, vision harness, and
 fixtures · `docs/` everything documented (see README's Documentation table;
-[../ROADMAP.md](../ROADMAP.md) for state of play,
-[../LEARNINGS.md](../LEARNINGS.md) for operational lessons,
+[../ROADMAP.md](../ROADMAP.md) for state of play — the remediation program
+is the active frame; [../LEARNINGS.md](../LEARNINGS.md) for operational
+lessons; [../audit/](../audit/) the audits + remediation plan;
 [../library/](../library/README.md) the external-source research library) ·
-`benchmarks/` the in-flight benchmark-harness working tree (untracked) ·
-`vendor/nodes/` permissively-licensed vendored node packs · `custom-nodes/`
+`benchmarks/` the benchmark harness · `vendor/nodes/`
+permissively-licensed vendored node packs · `custom-nodes/`
 first-party node packs · `e2e/` Playwright specs · `test-results/`
 committed experiment/vision artifacts.
