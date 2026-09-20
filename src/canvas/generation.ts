@@ -192,12 +192,13 @@ export function readChainSettings(raw: Record<string, unknown>, settings?: AppSe
   const upscale = raw.upscaleMode === 'ltx' || raw.upscaleMode === 'rtx' || raw.upscaleMode === 'lbh2d' || raw.upscaleMode === 'lbh3d' ? raw.upscaleMode : 'off'
   // Model overrides (task euxwdva): per-slot strings only; anything else
   // (wrong type, empty) drops to auto — external data never crashes the read.
-  // The H3 per-lane slots (rq0lsax) parse here too; a legacy 'checkpoint'
-  // pick on a stored chain migrates at the resolution seam, not here, so
-  // the stored settings never rewrite behind the user's back.
+  // The H3 per-lane slots (rq0lsax) and the decoder-split VAE trio (epdvxd4)
+  // parse here too; legacy 'checkpoint'/'vae' picks on stored chains migrate
+  // at the resolution seam, not here, so the stored settings never rewrite
+  // behind the user's back.
   const modelOverrides: ModelOverrideSlots = {}
   const rawOverrides = (raw.modelOverrides && typeof raw.modelOverrides === 'object' ? raw.modelOverrides : {}) as Record<string, unknown>
-  for (const slot of ['checkpoint', 'fl2va', 'ref2va', 'merged', 'textEncoder', 'vae'] as const) {
+  for (const slot of ['checkpoint', 'fl2va', 'ref2va', 'merged', 'textEncoder', 'vae', 'videoVae', 'audioVae', 'imageVae'] as const) {
     const value = rawOverrides[slot]
     if (typeof value === 'string' && value.trim()) modelOverrides[slot] = value.trim()
   }

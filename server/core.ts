@@ -796,18 +796,25 @@ export function createStudioServer(paths: StudioServerPaths) {
       // Model overrides (task euxwdva): shape-tolerant, family-agnostic —
       // the family registry lives renderer-side (src/lib/modelOverrides.ts);
       // unknown family keys stay inert there, so the server only guards the
-      // SHAPE: per family, at most the six slot keys, non-empty bounded
+      // SHAPE: per family, at most the nine slot keys, non-empty bounded
       // strings. Absent/empty = auto (inference) — nothing changes for
       // existing settings files. The H3 families split their checkpoint
       // into the per-lane trio (task rq0lsax, 2026-09-20): a legacy single
       // 'checkpoint' pick drove BOTH lanes, so it migrates onto fl2va AND
-      // ref2va — fill-if-unset, never silently dropped (mirrors
+      // ref2va — fill-if-unset, never silently dropped. The VAE pick split
+      // by decoder class (task epdvxd4, 2026-09-20): a legacy 'vae' pick
+      // migrates onto videoVae where the old slot meant the video decoder
+      // (the H3/LTX video families) and onto audioVae where the family's
+      // one decoder is audio-class (music3/acestep) — same
+      // meaning-preserving rule (mirrors
       // migrateLegacyModelOverrideSlots in src/lib/modelOverrides.ts,
       // reimplemented because the server never imports the renderer
       // registry).
       modelOverrides: (() => {
-        const slots = ['checkpoint', 'fl2va', 'ref2va', 'merged', 'textEncoder', 'vae'] as const
+        const slots = ['checkpoint', 'fl2va', 'ref2va', 'merged', 'textEncoder', 'vae', 'videoVae', 'audioVae', 'imageVae'] as const
         const laneFamilies = new Set(['minimax', 'h3image'])
+        const videoVaeFamilies = new Set(['minimax', 'h3image', 'ltx25', 'ltx23'])
+        const audioVaeFamilies = new Set(['music3', 'acestep'])
         const rawOverrides = (raw.modelOverrides && typeof raw.modelOverrides === 'object' ? raw.modelOverrides : {}) as Record<string, unknown>
         const normalized: Record<string, Partial<Record<(typeof slots)[number], string>>> = {}
         for (const family of Object.keys(rawOverrides).slice(0, 64)) {
@@ -822,6 +829,17 @@ export function createStudioServer(paths: StudioServerPaths) {
             if (!familySlots.fl2va) familySlots.fl2va = familySlots.checkpoint
             if (!familySlots.ref2va) familySlots.ref2va = familySlots.checkpoint
             delete familySlots.checkpoint
+          }
+          if (familySlots.vae) {
+            if (videoVaeFamilies.has(family)) {
+              if (!familySlots.videoVae) familySlots.videoVae = familySlots.vae
+              delete familySlots.vae
+            } else if (audioVaeFamilies.has(family)) {
+              if (!familySlots.audioVae) familySlots.audioVae = familySlots.vae
+              delete familySlots.vae
+            } else {
+              delete familySlots.vae
+            }
           }
           if (Object.keys(familySlots).length) normalized[family] = familySlots
         }

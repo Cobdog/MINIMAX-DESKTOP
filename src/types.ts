@@ -308,8 +308,12 @@ export type FetchProgress = {
  *  beats global beats auto; picks are exact scanned filenames. The H3
  *  families expose the per-lane fl2va/ref2va/merged trio instead of the
  *  generic 'checkpoint' (task rq0lsax); a legacy 'checkpoint' pick on them
- *  migrates onto fl2va+ref2va (migrateLegacyModelOverrideSlots). */
-export type ModelOverrideSlots = { checkpoint?: string; fl2va?: string; ref2va?: string; merged?: string; textEncoder?: string; vae?: string }
+ *  migrates onto fl2va+ref2va (migrateLegacyModelOverrideSlots). The VAE
+ *  pick split by DECODER CLASS (task epdvxd4): videoVae / audioVae /
+ *  imageVae (the Mamad8 T=1 decoder) — the old single 'vae' key is legacy,
+ *  consumed by the same migration (videoVae on the video-bearing families,
+ *  audioVae on the audio-only ones — the old slot's meaning per family). */
+export type ModelOverrideSlots = { checkpoint?: string; fl2va?: string; ref2va?: string; merged?: string; textEncoder?: string; vae?: string; videoVae?: string; audioVae?: string; imageVae?: string }
 
 export type AppSettings = {
   comfyUrl: string

@@ -240,9 +240,14 @@ test('model overrides take 1 (euxwdva): consulted picks, auto-unchanged, precede
   const noForm = resolveModelOverrides('minimax', overrideScan, { checkpoint: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors' })
   assert.equal(noForm.slots.fl2va.state, 'refused')
   assert.ok(noForm.refusals[0].reason.includes('form'), 'reason names the missing H3 form: ' + noForm.refusals[0].reason)
+  // The T=1 image VAE refuses for the video family — via the legacy 'vae'
+  // key (epdvxd4 migration lands it on videoVae, which refuses) AND via the
+  // decoder-split videoVae key directly (take 3 owns the trio's full matrix).
   const t1Vae = resolveModelOverrides('minimax', overrideScan, { vae: 'minimax_h3_t1_image_vae_step1597.safetensors' })
-  assert.equal(t1Vae.slots.vae.state, 'refused', 'the T=1 image VAE refuses for the video family')
+  assert.equal(t1Vae.slots.videoVae.state, 'refused', 'the T=1 image VAE refuses for the video family (legacy key migrates onto videoVae)')
   assert.ok(t1Vae.refusals[0].reason.includes('T=1'))
+  const t1VaeDirect = resolveModelOverrides('minimax', overrideScan, { videoVae: 'minimax_h3_t1_image_vae_step1597.safetensors' })
+  assert.equal(t1VaeDirect.slots.videoVae.state, 'refused', 'the T=1 image VAE refuses on the videoVae slot directly')
   const unexposedSlot = resolveModelOverrides('ltx23', overrideScan, { checkpoint: mergeName })
   assert.equal(unexposedSlot.slots.checkpoint.state, 'refused', 'a slot the family does not expose refuses, never silently drops')
 
@@ -422,6 +427,303 @@ test('model overrides take 2 (rq0lsax): instance-source form arm, per-lane resol
   assert.equal(inferredOverrideSlotFile('minimax', 'fl2va', overrideScan), 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'the fl2va auto label shows the FL2VA inference')
   assert.equal(inferredOverrideSlotFile('minimax', 'ref2va', overrideScan), 'minimax_h3_ref2va_pruned_int8_convrot.safetensors', 'the ref2va auto label shows the Ref2VA inference')
   assert.equal(inferredOverrideSlotFile('minimax', 'merged', overrideScan), '', 'the merged slot never infers — community merges are name-invisible by design')
+})
+
+// ---------------------------------------------------------------------------
+// Model overrides, take 3 (task epdvxd4, 2026-09-20) — the VAE slots split
+// by DECODER CLASS: videoVae / audioVae / imageVae (the Mamad8 T=1 decoder).
+// Failing-without-it: on the pre-split layer the three slot keys did not
+// exist (every family refused them as unexposed), the audio VAE was
+// unreachable by pick on EVERY family (the old 'vae' slot drove only the
+// video decoder where one existed), and the T=1 legality map was implicit.
+// ---------------------------------------------------------------------------
+const h3imageGraphModule = load('src/lib/graph/h3image.ts')
+const ltx23GraphModule = load('src/lib/graph/ltx23.ts')
+const music3Module = load('src/lib/music3Workflow.ts')
+const aceModule = load('src/lib/aceStepWorkflow.ts')
+const OVERRIDE_SLOT_KEYS = overridesModule.OVERRIDE_SLOTS
+const t1Alt = 'minimax_h3_t1_image_vae_step2048.safetensors'
+const vaeSplitScan = overrideScan.concat([
+  // The audio VAEs of the LTX engines — reachable by pick only via the split.
+  { kind: 'vae', name: 'ltx-2.5-audio-vae-bf16.safetensors' },
+  { kind: 'vae', name: 'LTX23_audio_vae_bf16.safetensors' },
+  // A newer-step Mamad8 decoder: matches the T1 pattern (the image class)
+  // but NO inference pattern — only a pick can select it.
+  { kind: 'vae', name: t1Alt },
+  // The unmarked-class file: no video/audio/dav/T1 marker — the documented
+  // heuristic limit (applies, engine stays arbiter).
+  { kind: 'vae', name: 'ace_1.5_vae.safetensors' },
+  // The FL2VA turbo LoRA — the T=1 Fast profile's pinned recipe LoRA.
+  { kind: 'loras', name: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors' },
+])
+
+test('model overrides take 3 (epdvxd4): the decoder-split VAE trio — resolution, per-family legality, marker refusals, legacy migration', () => {
+  // 16. THE TRIO RESOLVES (AC-1): each slot independently overrides its own
+  //     decoder; unset slots stay on inference.
+  const split = resolveModels('minimax', inferSelections(vaeSplitScan, 'off'), vaeSplitScan, {
+    videoVae: 'minimax_h3_audio_vae_fp32.safetensors', // refused below — proves independence
+  })
+  assert.equal(split.resolution.slots.videoVae.state, 'refused', 'a cross-class pick refuses instead of landing')
+  const videoOnly = resolveModels('minimax', inferSelections(vaeSplitScan, 'off'), vaeSplitScan, { videoVae: 'minimax_h3_video_vae_fp16.safetensors' })
+  assert.equal(videoOnly.selection.audioVae, 'minimax_h3_audio_vae_fp32.safetensors', 'the audio lane stays on inference under a video-only pick')
+  const audioPicked = resolveModels('minimax', inferSelections(vaeSplitScan, 'off'), vaeSplitScan, { audioVae: 'minimax_h3_audio_vae_fp32.safetensors' })
+  assert.equal(audioPicked.resolution.slots.audioVae.state, 'applied')
+  assert.equal(audioPicked.selection.audioVae, 'minimax_h3_audio_vae_fp32.safetensors')
+  // THE GRAPH: the two picks feed the graph's TWO VAELoader nodes (3/4).
+  for (const [mode, uploads] of [['text', { images: [], videos: [], audios: [] }], ['reference', { images: [{ name: 'ref.png' }], videos: [], audios: [] }]]) {
+    const graph = buildMiniMaxWorkflow({ mode, width: 352, height: 608, prompt: 'vae trio', duration: 5, seed: 7, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', filenamePrefix: 'test', refImageSize: 'match', ...(mode === 'reference' ? { referenceImages: ['ref.png'] } : {}) }, videoOnly.selection, uploads)
+    assert.equal(graph['3'].inputs.vae_name, 'minimax_h3_video_vae_fp16.safetensors', `${mode}: node 3 loads the video VAE`)
+    assert.equal(graph['4'].inputs.vae_name, 'minimax_h3_audio_vae_fp32.safetensors', `${mode}: node 4 loads the audio VAE`)
+  }
+
+  // 17. THE WORKBENCH TRIO (AC-1): video/audio at nodes 3/4 on the packet
+  //     profile; the image VAE pick is the T=1 profile's decoder (node 3,
+  //     the profile's own decode override) and ONLY exists on h3image.
+  const h3imgInferred = h3imageGraphModule.inferH3ImgSelection(vaeSplitScan)
+  const h3imgResolved = resolveModels('h3image', h3imgInferred, vaeSplitScan, {
+    videoVae: 'minimax_h3_video_vae_fp16.safetensors',
+    audioVae: 'minimax_h3_audio_vae_fp32.safetensors',
+    imageVae: t1Alt,
+  })
+  assert.equal(h3imgResolved.resolution.slots.imageVae.state, 'applied', 'the imageVae pick applies on the workbench family')
+  assert.equal(h3imgResolved.selection.t1ImageVae, t1Alt, 'the pick drives the t1ImageVae field (the T=1 profile decoder)')
+  const packetGraph = h3imageGraphModule.buildH3ImageGraph({ family: 'h3img.generate.packet', prompt: 'audit', width: 768, height: 768, seed: 1, tier: 5, refs: [], loras: [], filenamePrefix: 't' }, h3imgResolved.selection)
+  assert.equal(packetGraph['3'].inputs.vae_name, 'minimax_h3_video_vae_fp16.safetensors', 'the packet profile decodes through the video VAE node')
+  assert.equal(packetGraph['4'].inputs.vae_name, 'minimax_h3_audio_vae_fp32.safetensors', 'the audio VAE pick reaches node 4')
+  const t1Graph = h3imageGraphModule.buildH3ImageGraph({ family: 'h3img.generate.t1', prompt: 'audit', width: 768, height: 768, seed: 1, tier: 1, refs: [], loras: [], filenamePrefix: 't' }, h3imgResolved.selection)
+  assert.equal(t1Graph['3'].inputs.vae_name, t1Alt, 'the T=1 profile decodes through the PICKED image VAE at node 3')
+  assert.equal(h3imageGraphModule.h3imgGraphAudit(t1Graph, { frames: 1 }).length, 0, 'the picked T=1 decoder stays legal in its single-frame graph')
+
+  // 18. LEGALITY (AC-2/AC-4): the marker gate — cross-class picks refuse,
+  //     the legality map caps the imageVae slot to the workbench, and the
+  //     unmarked-class limit applies (documented: no VAE header-shape
+  //     detection exists; the engine stays arbiter).
+  assert.deepEqual([...overridesModule.IMAGE_VAE_FAMILIES].sort(), ['h3image'], 'the T=1 legality map: only the workbench accepts an imageVae pick')
+  const videoFamilyImagePick = resolveModelOverrides('minimax', vaeSplitScan, { imageVae: t1Alt })
+  assert.equal(videoFamilyImagePick.slots.imageVae.state, 'refused', 'the video family refuses the imageVae slot outright — every video graph is multi-frame (the factory ban)')
+  const ltxImagePick = resolveModelOverrides('ltx25', vaeSplitScan, { imageVae: t1Alt })
+  assert.equal(ltxImagePick.slots.imageVae.state, 'refused', 'the LTX families never expose the imageVae slot')
+  const videoIntoImage = resolveModelOverrides('h3image', vaeSplitScan, { imageVae: 'minimax_h3_video_vae_fp16.safetensors' })
+  assert.equal(videoIntoImage.slots.imageVae.state, 'refused', 'a video-class pick refuses on the imageVae slot')
+  assert.ok(videoIntoImage.refusals[0].reason.includes('Mamad8'), 'the reason names the decoder class: ' + videoIntoImage.refusals[0].reason)
+  const audioIntoVideo = resolveModelOverrides('minimax', vaeSplitScan, { videoVae: 'minimax_h3_audio_vae_fp32.safetensors' })
+  assert.equal(audioIntoVideo.slots.videoVae.state, 'refused', 'an audio-class pick refuses on the videoVae slot')
+  assert.ok(audioIntoVideo.refusals[0].reason.includes('audio'))
+  const videoIntoAudio = resolveModelOverrides('minimax', vaeSplitScan, { audioVae: 'minimax_h3_video_vae_fp16.safetensors' })
+  assert.equal(videoIntoAudio.slots.audioVae.state, 'refused', 'a video-class pick refuses on the audioVae slot')
+  assert.ok(videoIntoAudio.refusals[0].reason.includes('video'))
+  const davIntoVideo = resolveModelOverrides('music3', vaeSplitScan, { videoVae: 'music3_dav.safetensors' })
+  assert.equal(davIntoVideo.slots.videoVae.state, 'refused', 'music3 exposes no videoVae slot — its one decoder is audio-class')
+  const unmarked = resolveModelOverrides('minimax', vaeSplitScan, { audioVae: 'ace_1.5_vae.safetensors' })
+  assert.equal(unmarked.slots.audioVae.state, 'applied', 'an unmarked-class VAE applies (the documented heuristic limit — the engine decides)')
+
+  // 19. LEGACY MIGRATION (AC-5): the pre-split 'vae' pick lands on the slot
+  //     that preserves its meaning PER FAMILY — videoVae on the video-bearing
+  //     families, audioVae on the audio-only ones — never dropped.
+  for (const family of ['minimax', 'h3image', 'ltx25', 'ltx23']) {
+    const migrated = overridesModule.migrateLegacyModelOverrideSlots(family, { vae: 'legacy-decoder.safetensors' })
+    assert.equal(migrated.videoVae, 'legacy-decoder.safetensors', `${family}: the legacy vae pick lands on videoVae (the old slot's meaning)`)
+    assert.equal('vae' in migrated, false, `${family}: the consumed key never re-refuses`)
+  }
+  for (const family of ['music3', 'acestep']) {
+    const migrated = overridesModule.migrateLegacyModelOverrideSlots(family, { vae: 'legacy-dav.safetensors' })
+    assert.equal(migrated.audioVae, 'legacy-dav.safetensors', `${family}: the legacy vae pick lands on audioVae — the family's one decoder IS audio-class`)
+    assert.equal('vae' in migrated, false)
+  }
+  const explicitWins = overridesModule.migrateLegacyModelOverrideSlots('minimax', { vae: 'legacy.safetensors', videoVae: 'new.safetensors' })
+  assert.equal(explicitWins.videoVae, 'new.safetensors', 'an explicit split pick wins its slot over the legacy value')
+  const legacyThroughSeam = resolveModels('music3', music3Module.inferMusic3Selection(vaeSplitScan), vaeSplitScan, { vae: 'music3_dav.safetensors' })
+  assert.equal(legacyThroughSeam.selection.vae, 'music3_dav.safetensors', 'a legacy music3 vae pick still reaches the DAV field through the seam')
+  assert.equal(legacyThroughSeam.resolution.refusals.length, 0)
+  // The layering seam carries the legacy key to the migration (never drops
+  // it ahead of it) — the same contract that keeps legacy 'checkpoint' alive.
+  const layeredLegacy = mergeModelOverrides({}, { vae: 'kept.safetensors' })
+  assert.equal(layeredLegacy.vae, 'kept.safetensors', 'mergeModelOverrides carries the legacy key to the resolution seam')
+  assert.equal(mergeModelOverrides({ videoVae: 'chain.safetensors' }, { vae: 'global-legacy.safetensors' }).videoVae, 'chain.safetensors', 'a chain-level split pick beats the legacy global')
+
+  // 20. The auto labels name each decoder's own inference.
+  assert.equal(inferredOverrideSlotFile('minimax', 'videoVae', vaeSplitScan), 'minimax_h3_video_vae_fp16.safetensors')
+  assert.equal(inferredOverrideSlotFile('minimax', 'audioVae', vaeSplitScan), 'minimax_h3_audio_vae_fp32.safetensors')
+  assert.equal(inferredOverrideSlotFile('h3image', 'imageVae', vaeSplitScan), 'minimax_h3_t1_image_vae_step1597.safetensors', 'the imageVae auto label shows the inferred Mamad8 file')
+  assert.equal(inferredOverrideSlotFile('music3', 'audioVae', vaeSplitScan), 'music3_dav.safetensors', "the audio-only family's audioVae label reads its DAV inference")
+  assert.equal(inferredOverrideSlotFile('minimax', 'imageVae', vaeSplitScan), '', 'a slot the family does not expose has no auto label')
+})
+
+// ---------------------------------------------------------------------------
+// Model overrides, take 4 (task epdvxd4, AC-3) — THE WORKFLOW-POPULATION
+// AUDIT as a test: every family's every EXPOSED slot traced pick →
+// resolveModels → the graph factory → the concrete node input. Each pick is
+// a file NO inference pattern matches, so a green row proves the OVERRIDE
+// reached the node — not the ladder. Failing-without-it: on the pre-split
+// layer the audioVae rows were unresolvable (no such slot existed) and the
+// h3image imageVae row could never leave the inference pin.
+// ---------------------------------------------------------------------------
+const auditScan = vaeSplitScan.concat([
+  { kind: 'diffusion_models', name: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors' },
+  { kind: 'text_encoders', name: 'gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors' },
+  { kind: 'vae', name: 'ltx-2.5-video-vae-bf16.safetensors' },
+  { kind: 'text_encoders', name: 'gemma_3_12B_it.safetensors' },
+  { kind: 'text_encoders', name: 'ltx-2.3_text_projection_bf16.safetensors' },
+  { kind: 'diffusion_models', name: 'ltx-2.3-22b-dev_transformer_only_bf16.safetensors' },
+  { kind: 'vae', name: 'LTX23_video_vae_bf16.safetensors' },
+  { kind: 'loras', name: 'ltx23-obscura_remova.safetensors' },
+  { kind: 'loras', name: 'ltx-2.3-22b-distilled-lora-384-1.1.safetensors' },
+  { kind: 'loras', name: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors' },
+  { kind: 'diffusion_models', name: 'acestep_v1.5_xl_base_bf16.safetensors' },
+  { kind: 'diffusion_models', name: 'acestep_v1.5_xl_sft_bf16.safetensors' },
+  // The audit's own picks — community-style files NO inference pattern
+  // matches (the H3 merge carries the curve form so the form gate passes).
+  { kind: 'diffusion_models', name: 'community-merge-audit.safetensors', h3Form: 'curve' },
+  { kind: 'text_encoders', name: 'community-encoder-audit.safetensors' },
+  { kind: 'vae', name: 'h3-community-video-decoder.safetensors' },
+  { kind: 'vae', name: 'h3-community-audio-decoder.safetensors' },
+  { kind: 'vae', name: 'ltx25-community-video-decoder.safetensors' },
+  { kind: 'vae', name: 'ltx25-community-audio-decoder.safetensors' },
+  { kind: 'vae', name: 'LTX23-community-video-decoder.safetensors' },
+  { kind: 'vae', name: 'LTX23-community-audio-decoder.safetensors' },
+  { kind: 'diffusion_models', name: 'music3-community-dit.safetensors' },
+  { kind: 'vae', name: 'music3-community-dav.safetensors' },
+  { kind: 'diffusion_models', name: 'acestep-community-xl.safetensors' },
+  { kind: 'vae', name: 'ace-community-audio-vae.safetensors' },
+])
+// The audit's picks: community-style names the inference ladder is blind to.
+const auditPicks = {
+  checkpoint: 'community-merge-audit.safetensors',
+  textEncoder: 'community-encoder-audit.safetensors',
+  videoVae: 'h3-community-video-decoder.safetensors',
+  audioVae: 'h3-community-audio-decoder.safetensors',
+  imageVae: t1Alt,
+}
+
+test('the workflow-population audit (epdvxd4, AC-3): every family × every slot lands its resolved pick at the graph node', () => {
+  // The audit picks are scanned files no pattern matches (the override
+  // layer's whole reason to exist) — plus the T=1 alt, pattern-class legal.
+  for (const name of [auditPicks.checkpoint, auditPicks.textEncoder, auditPicks.videoVae, auditPicks.audioVae]) {
+    assert.ok(auditScan.some((file) => file.name === name), `the audit pick '${name}' is a scanned file`)
+  }
+  const at = (graph, id, input) => graph[String(id)].inputs[input]
+  const assertAt = (label, graph, id, input, expected) => assert.equal(at(graph, id, input), expected, `${label}: node ${id}.${input}`)
+
+  // --- minimax (H3 video): fl2va/ref2va/merged → UNETLoader 1 per mode
+  //     (take 2 §12-13 proves the per-mode routing; here the merged pick +
+  //     the shared slots land in one text-mode graph), TE → 2, VAEs → 3/4.
+  const minimaxResolved = resolveModels('minimax', inferSelections(auditScan, 'off'), auditScan, {
+    merged: mergeName,
+    textEncoder: auditPicks.textEncoder,
+    videoVae: auditPicks.videoVae,
+    audioVae: auditPicks.audioVae,
+  })
+  assert.equal(minimaxResolved.resolution.refusals.length, 0, 'minimax audit picks all apply: ' + JSON.stringify(minimaxResolved.resolution.refusals))
+  const minimaxGraph = buildMiniMaxWorkflow({ mode: 'text', width: 352, height: 608, prompt: 'audit', duration: 5, seed: 7, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', filenamePrefix: 't', refImageSize: 'match' }, minimaxResolved.selection, { images: [], videos: [], audios: [] })
+  assertAt('minimax merged', minimaxGraph, 1, 'unet_name', mergeName)
+  assertAt('minimax textEncoder', minimaxGraph, 2, 'clip_name', auditPicks.textEncoder)
+  assertAt('minimax videoVae', minimaxGraph, 3, 'vae_name', auditPicks.videoVae)
+  assertAt('minimax audioVae', minimaxGraph, 4, 'vae_name', auditPicks.audioVae)
+
+  // --- h3image (the workbench): the merged pick is the hybrid line's plain
+  //     loader; TE → 2; video/audio VAEs → 3/4 (packet profile); the
+  //     imageVae pick → node 3 on the T=1 profile (its only legal graph).
+  const h3imgAudit = resolveModels('h3image', h3imageGraphModule.inferH3ImgSelection(auditScan), auditScan, {
+    merged: mergeName,
+    textEncoder: auditPicks.textEncoder,
+    videoVae: auditPicks.videoVae,
+    audioVae: auditPicks.audioVae,
+    imageVae: auditPicks.imageVae,
+  })
+  assert.equal(h3imgAudit.resolution.refusals.length, 0, 'h3image audit picks all apply')
+  const workbenchPacket = h3imageGraphModule.buildH3ImageGraph({ family: 'h3img.generate.packet', prompt: 'audit', width: 768, height: 768, seed: 1, tier: 5, refs: [], loras: [], filenamePrefix: 't' }, h3imgAudit.selection)
+  assertAt('h3image merged', workbenchPacket, 1, 'unet_name', mergeName)
+  assertAt('h3image textEncoder', workbenchPacket, 2, 'clip_name', auditPicks.textEncoder)
+  assertAt('h3image videoVae', workbenchPacket, 3, 'vae_name', auditPicks.videoVae)
+  assertAt('h3image audioVae', workbenchPacket, 4, 'vae_name', auditPicks.audioVae)
+  const workbenchT1 = h3imageGraphModule.buildH3ImageGraph({ family: 'h3img.generate.t1', prompt: 'audit', width: 768, height: 768, seed: 1, tier: 1, refs: [], loras: [], filenamePrefix: 't' }, h3imgAudit.selection)
+  assertAt('h3image imageVae (T=1 profile)', workbenchT1, 3, 'vae_name', auditPicks.imageVae)
+
+  // --- ltx25: checkpoint → 1, TE → 2, videoVae → 3, audioVae → 4.
+  const ltx25Audit = resolveModels('ltx25', inferLtx25Selections(auditScan, []), auditScan, {
+    checkpoint: auditPicks.checkpoint,
+    textEncoder: auditPicks.textEncoder,
+    videoVae: 'ltx25-community-video-decoder.safetensors',
+    audioVae: 'ltx25-community-audio-decoder.safetensors',
+  })
+  assert.equal(ltx25Audit.resolution.refusals.length, 0, 'ltx25 audit picks all apply — the audio VAE pick exists only since the split')
+  const ltx25Graph = buildLtx25Workflow({ mode: 'text', prompt: 'audit', width: 768, height: 512, duration: 5, seed: 7, preset: 'turbo', filenamePrefix: 't' }, ltx25Audit.selection)
+  assertAt('ltx25 checkpoint', ltx25Graph, 1, 'unet_name', auditPicks.checkpoint)
+  assertAt('ltx25 textEncoder', ltx25Graph, 2, 'clip_name', auditPicks.textEncoder)
+  assertAt('ltx25 videoVae', ltx25Graph, 3, 'vae_name', 'ltx25-community-video-decoder.safetensors')
+  assertAt('ltx25 audioVae', ltx25Graph, 4, 'vae_name', 'ltx25-community-audio-decoder.safetensors')
+
+  // --- ltx23 (the Obscura Remova lane — the split-weights family whose
+  //     graph carries the scan-anchored VAE loaders): TE → DualCLIPLoader 4
+  //     (clip_name1), videoVae → VAELoaderKJ 1, audioVae → VAELoaderKJ 2.
+  const ltx23Audit = resolveModels('ltx23', ltx23GraphModule.resolveLtx23Selection(undefined, auditScan), auditScan, {
+    textEncoder: auditPicks.textEncoder,
+    videoVae: 'LTX23-community-video-decoder.safetensors',
+    audioVae: 'LTX23-community-audio-decoder.safetensors',
+  })
+  assert.equal(ltx23Audit.resolution.refusals.length, 0, 'ltx23 audit picks all apply')
+  const ltx23Graph = ltx23GraphModule.buildLtx23UtilityGraph({ tool: 'remove-object', seed: 7, filenamePrefix: 't', video: { name: 'in.mp4' } }, ltx23Audit.selection)
+  assertAt('ltx23 textEncoder', ltx23Graph, 4, 'clip_name1', auditPicks.textEncoder)
+  assertAt('ltx23 videoVae', ltx23Graph, 1, 'vae_name', 'LTX23-community-video-decoder.safetensors')
+  assertAt('ltx23 audioVae', ltx23Graph, 2, 'vae_name', 'LTX23-community-audio-decoder.safetensors')
+
+  // --- music3: checkpoint → 1, TE → 2, the audioVae pick (the family's one
+  //     decoder, the DAV) → 3 — through both decode arms.
+  const music3Audit = resolveModels('music3', music3Module.inferMusic3Selection(auditScan), auditScan, {
+    checkpoint: 'music3-community-dit.safetensors',
+    textEncoder: auditPicks.textEncoder,
+    audioVae: 'music3-community-dav.safetensors',
+  })
+  assert.equal(music3Audit.resolution.refusals.length, 0, 'music3 audit picks all apply')
+  for (const tiled of [true, false]) {
+    const music3Graph = music3Module.buildMusic3Workflow({ caption: 'audit', lyrics: '', duration: 30, seed: 7, tiledDecode: tiled, filenamePrefix: 't' }, music3Audit.selection)
+    assertAt(`music3 checkpoint (tiled=${tiled})`, music3Graph, 1, 'unet_name', 'music3-community-dit.safetensors')
+    assertAt(`music3 textEncoder (tiled=${tiled})`, music3Graph, 2, 'clip_name', auditPicks.textEncoder)
+    assertAt(`music3 audioVae (tiled=${tiled})`, music3Graph, 3, 'vae_name', 'music3-community-dav.safetensors')
+  }
+
+  // --- acestep: the checkpoint pick drives BOTH cuts (base and SFT — the
+  //     model choice decides which loads); the audioVae pick → 3.
+  const aceAudit = resolveModels('acestep', aceModule.inferAceStepSelections(auditScan), auditScan, {
+    checkpoint: 'acestep-community-xl.safetensors',
+    audioVae: 'ace-community-audio-vae.safetensors',
+  })
+  assert.equal(aceAudit.resolution.refusals.length, 0, 'acestep audit picks all apply')
+  assert.equal(aceAudit.selection.base, 'acestep-community-xl.safetensors', 'the checkpoint pick fills the base cut')
+  assert.equal(aceAudit.selection.sft, 'acestep-community-xl.safetensors', 'the checkpoint pick fills the SFT cut too')
+  for (const model of ['base', 'sft']) {
+    const aceGraph = aceModule.buildAceStepWorkflow({ model, tags: 'audit', lyrics: '', instrumental: true, duration: 30, bpm: 120, timeSignature: '4/4', language: 'en', keyScale: 'C', seed: 7, generateAudioCodes: false, filenamePrefix: 't' }, aceAudit.selection)
+    assertAt(`acestep checkpoint (${model})`, aceGraph, 1, 'unet_name', 'acestep-community-xl.safetensors')
+    assertAt(`acestep audioVae (${model})`, aceGraph, 3, 'vae_name', 'ace-community-audio-vae.safetensors')
+  }
+
+  // --- THE AUDIT'S COMPLETENESS CONTRACT: every slot every family EXPOSES
+  //     appears above; every slot NOT exposed refuses (nothing silently
+  //     no-ops). acestep's textEncoder stays the honest two-file omission.
+  const expectedSlots = {
+    minimax: ['fl2va', 'ref2va', 'merged', 'textEncoder', 'videoVae', 'audioVae'],
+    h3image: ['fl2va', 'ref2va', 'merged', 'textEncoder', 'videoVae', 'audioVae', 'imageVae'],
+    ltx25: ['checkpoint', 'textEncoder', 'videoVae', 'audioVae'],
+    ltx23: ['textEncoder', 'videoVae', 'audioVae'],
+    music3: ['checkpoint', 'textEncoder', 'audioVae'],
+    acestep: ['checkpoint', 'audioVae'],
+  }
+  for (const family of MODEL_FAMILIES) {
+    assert.deepEqual([...family.slots].sort(), [...expectedSlots[family.id]].sort(), `${family.id}: the exposed slot set matches the audit table`)
+    // Legacy keys ('vae' everywhere; 'checkpoint' on the lane families) are
+    // CONSUMED by migration — they migrate, never re-refuse — so the honest
+    // unexposed-set is the live keys the family does not list.
+    const legacyHere = (slot) => slot === 'vae' || (slot === 'checkpoint' && (family.id === 'minimax' || family.id === 'h3image'))
+    const unexposed = OVERRIDE_SLOT_KEYS.filter((slot) => !family.slots.includes(slot) && !legacyHere(slot))
+    for (const slot of unexposed) {
+      const refused = resolveModelOverrides(family.id, auditScan, { [slot]: auditScan[0].name })
+      assert.equal(refused.slots[slot].state, 'refused', `${family.id}: the unexposed ${slot} slot refuses, never silently drops`)
+    }
+  }
+  // The audit picks that only some families consume still had to be scanned
+  // files for their rows to be honest (scan-anchored picks, not strings).
+  assert.ok(auditScan.some((file) => file.name === 'ltx25-community-video-decoder.safetensors' && file.kind === 'vae'))
+  assert.ok(auditScan.some((file) => file.name === 'acestep-community-xl.safetensors' && file.kind === 'diffusion_models'))
 })
 
 test('LTX-2.3 utility inference (068xwy3): checkpoint combos + per-tool LoRAs + ladder preferences', () => {
