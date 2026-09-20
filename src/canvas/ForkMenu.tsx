@@ -70,7 +70,7 @@ export function ForkMenu() {
           onClick={() => chainOutputId && void fork({ chainId: tile.id, outputId: chainOutputId, substrate: 'decoded', withUpscale: true })}
         >
           <span className="canvas-menu-row-label">Fork — upscaled</span>
-          <span className="canvas-menu-row-note">A new chain with the LTX 2× engine upscale preset (switchable in its properties).</span>
+          <span className="canvas-menu-row-note">A new chain with the engine upscale preset (switchable in its properties).</span>
         </button>
       </div>
       {earlier.length > 0 && (

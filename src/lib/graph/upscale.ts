@@ -7,11 +7,6 @@ import { choices, type ObjectInfo } from '../comfyInfo'
 import type { ComfyPrompt, GraphContext, OptimizationEntry, TransformOptions } from './types'
 import { H3 } from './ids'
 
-const LTX_UPSCALE_REQUIRED_NODES = [
-  'VAEEncodeTiled', 'LatentUpscaleModelLoader', 'LTXVLatentUpsampler',
-  'VAEDecodeTiled', 'ImageFromBatch', 'RepeatImageBatch', 'ImageBatch',
-] as const
-
 const LBH_REQUIRED_NODES_2D = ['MinimaxH3LatentUpscalerNode2D'] as const
 const LBH_REQUIRED_NODES_3D = ['MinimaxH3LatentUpscaler3D'] as const
 
@@ -20,33 +15,6 @@ function upscaleTransform(apply: (graph: ComfyPrompt, ctx: GraphContext, opts: T
     if (!opts.upscale) return
     apply(graph, ctx, opts)
   }
-}
-
-/** LTX-2.5 latent spatial 2×: encode the finished H3 frames into the LTX
- * video latent domain, apply the learned x2 upscaler, decode, remux the
- * untouched H3 audio. Padding to 8n+1 satisfies the LTX VAE temporal layout
- * and is trimmed after decoding so duration cannot drift. */
-function applyLtx2x(graph: ComfyPrompt, ctx: GraphContext, opts: TransformOptions): void {
-  const upscale = opts.upscale
-  if (!upscale || upscale.type !== 'ltx') return
-  let images = ctx.link('decode')
-  const frames = opts.frameCount
-  const pad = (8 - ((frames - 1) % 8)) % 8
-  if (pad) {
-    graph[H3.ltxPadTail] = { class_type: 'ImageFromBatch', inputs: { image: images, batch_index: frames - 1, length: 1 } }
-    graph[H3.ltxPadRepeat] = { class_type: 'RepeatImageBatch', inputs: { image: [H3.ltxPadTail, 0], amount: pad } }
-    graph[H3.ltxPadBatch] = { class_type: 'ImageBatch', inputs: { image1: images, image2: [H3.ltxPadRepeat, 0] } }
-    images = [H3.ltxPadBatch, 0]
-  }
-  graph[H3.ltxVae] = { class_type: 'VAELoader', inputs: { vae_name: upscale.vae } }
-  graph[H3.ltxEncode] = { class_type: 'VAEEncodeTiled', inputs: { pixels: images, vae: [H3.ltxVae, 0], tile_size: 512, overlap: 64, temporal_size: 64, temporal_overlap: 8 } }
-  graph[H3.ltxUpscaleModel] = { class_type: 'LatentUpscaleModelLoader', inputs: { model_name: upscale.model } }
-  graph[H3.ltxLatentUpscale] = { class_type: 'LTXVLatentUpsampler', inputs: { samples: [H3.ltxEncode, 0], upscale_model: [H3.ltxUpscaleModel, 0], vae: [H3.ltxVae, 0] } }
-  graph[H3.ltxDecode] = { class_type: 'VAEDecodeTiled', inputs: { samples: [H3.ltxLatentUpscale, 0], vae: [H3.ltxVae, 0], tile_size: 512, overlap: 64, temporal_size: 64, temporal_overlap: 8 } }
-  graph[H3.ltxTrim] = { class_type: 'ImageFromBatch', inputs: { image: [H3.ltxDecode, 0], batch_index: 0, length: frames } }
-  graph[H3.ltxCreateVideo] = { class_type: 'CreateVideo', inputs: { images: [H3.ltxTrim, 0], audio: ctx.link('audioDecode'), fps: 24, bit_depth: 8, color_space: 'sRGB' } }
-  graph[H3.ltxSaveVideo] = { class_type: 'SaveVideo', inputs: { video: [H3.ltxCreateVideo, 0], filename_prefix: `${opts.filenamePrefix}_LTX25_2x`, format: 'auto', codec: 'auto' } }
-  ctx.bind('ltxSaveVideo', H3.ltxSaveVideo)
 }
 
 /** LBH-123-AI community two-stage hires-fix: the first sampler runs a split
@@ -88,12 +56,6 @@ function applyRtx(graph: ComfyPrompt, ctx: GraphContext, opts: TransformOptions)
   ctx.bind('rtxSaveVideo', H3.rtxSaveVideo)
 }
 
-function ltxDetect(info: ObjectInfo | undefined) {
-  const missingNodes = info ? LTX_UPSCALE_REQUIRED_NODES.filter((node) => !info[node]) : Array.from(LTX_UPSCALE_REQUIRED_NODES)
-  const model = info ? choices(info, 'LatentUpscaleModelLoader', 'model_name').find((name) => /ltx-2\.5.*spatial.*x2/i.test(name)) : undefined
-  return { available: Boolean(info) && missingNodes.length === 0 && Boolean(model), model, missingNodes }
-}
-
 function lbhDetect(nodeClass: 'MinimaxH3LatentUpscalerNode2D' | 'MinimaxH3LatentUpscaler3D', required: readonly string[]) {
   return (info: ObjectInfo | undefined) => {
     const missingNodes = info ? required.filter((node) => !info[node]) : Array.from(required)
@@ -108,19 +70,6 @@ function rtxDetect(info: ObjectInfo | undefined) {
 }
 
 export const UPSCALE_ENTRIES: OptimizationEntry[] = [
-  {
-    id: 'upscale.ltx2x',
-    label: 'LTX-2.5 latent 2×',
-    kind: 'upscale',
-    appliesTo: ['minimax'],
-    wraps: 'output',
-    detect: ltxDetect,
-    transform: upscaleTransform(applyLtx2x),
-    ui: {
-      description: 'Non-generative: re-encodes into the LTX latent domain, applies the learned spatial x2 upscaler, remuxes H3 audio.',
-      installHint: 'LTX-2.5 video VAE + ltx-2.5-latent-spatial-upscaler-x2 from the LTX-2.5 ComfyUI models.',
-    },
-  },
   {
     id: 'upscale.lbh2d',
     label: 'LBH latent 2D 2×',
@@ -162,7 +111,7 @@ export const UPSCALE_ENTRIES: OptimizationEntry[] = [
   },
 ]
 
-export function upscaleEntryFor(type: 'ltx' | 'lbh2d' | 'lbh3d' | 'rtx'): OptimizationEntry | undefined {
-  const id = type === 'ltx' ? 'upscale.ltx2x' : type === 'rtx' ? 'upscale.rtx' : `upscale.${type}`
+export function upscaleEntryFor(type: 'lbh2d' | 'lbh3d' | 'rtx'): OptimizationEntry | undefined {
+  const id = type === 'rtx' ? 'upscale.rtx' : `upscale.${type}`
   return UPSCALE_ENTRIES.find((entry) => entry.id === id)
 }

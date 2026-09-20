@@ -64,7 +64,13 @@ const SCANNER_KINDS = new Set<string>(['diffusion_models', 'text_encoders', 'vae
  *  settings. Scanner kinds use the user's configured root; extra roots
  *  (model_patches, vdn, geometry_estimation, …) sit under settings.modelRoot. */
 export function fetchModelRootPath(root: FetchModelRoot, settings: AppSettings): string {
-  if (SCANNER_KINDS.has(root)) return resolve((settings.paths as Record<string, string>)[root] ?? join(settings.modelRoot, root))
+  // An EMPTY scanner path (the registry-only default) means unset — the
+  // fetch destination falls back to the shared modelRoot (Phase 0,
+  // 2026-09-20), never resolves against the CWD.
+  if (SCANNER_KINDS.has(root)) {
+    const configured = (settings.paths as Record<string, string>)[root]
+    return resolve(configured || join(settings.modelRoot, root))
+  }
   return resolve(join(settings.modelRoot, root as Exclude<FetchModelRoot, ModelKind>))
 }
 
@@ -115,9 +121,6 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   nodePackEntry('h3-audio-t8'),
   nodePackEntry('krea2edit'),
   nodePackEntry('krea2-anypaint'),
-  nodePackEntry('ltxvideo'),
-  nodePackEntry('kjnodes'),
-  nodePackEntry('radiance'),
   // supElement's segmented-inference pack (task p8oyfy1, deep-read
   // docs/research/autocontext-deepread.md §7): sha-pinned Apache-2.0 row,
   // single-sourced from ENGINE_NODE_PACKS like every pack entry.
@@ -375,16 +378,17 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
     homepage: 'https://huggingface.co/lllyasviel/Annotators',
   },
 
-  // ---- LTX-2.3 one-graph utilities (task 068xwy3) --------------------------
-  // The keep-utilities-only verdict (docs/research/ltx-vs-h3-verdict.md):
-  // these weights ARE the LTX engine path's surviving purpose. Filenames are
-  // the official template_ltx2_3_* widget values; pins verified against the
-  // HF APIs on 2026-09-15 (sizes + x-linked-etag sha256; repo HEAD shas).
-  // License verdicts: Lightricks/Comfy-Org/Kijai/oumoumad/WepeNerd all carry
-  // the LTX-2 Community License via their LTX-2 derivative weights
-  // (docs/LICENSES.md §5); joyfox's ICEdit-Insight pair is Apache-2.0.
+  // ---- LTX-2.3 one-graph utilities — REMOVED (Phase 0, 2026-09-20) --------
+  // LTX is fully removed from the runtime app (task z8bc21p; the
+  // keep-utilities-only verdict it superseded: docs/research/
+  // ltx-vs-h3-verdict.md). The rows below stay as catalog HISTORY, each
+  // marked `removedAt` and filtered out of the served catalog: nothing
+  // fetches, nothing surfaces, install records on disk still resolve their
+  // entry ids. Restore path: docs/audit/removals-phase0.md.
   {
     id: 'ltx23-dev-checkpoint',
+    // REMOVED 2026-09-20 (Phase 0, task z8bc21p) — LTX fully removed; history row.
+    removedAt: '2026-09-20',
     name: 'LTX-2.3 22B dev checkpoint (bf16, 46 GB)',
     group: 'weights',
     description: 'The full-precision single-file dev checkpoint the remove-subtitles / remove-watermark / restore-archival templates pin (CheckpointLoaderSimple + LTXVAudioVAELoader + the text-projection half of LTXAVTextEncoderLoader all read THIS one file — diffusion model, video VAE, audio VAE and projection in one). The fp8 entry below is the 29 GB alternative for smaller disks; either satisfies the utilities\' checkpoint slot.',
@@ -401,6 +405,8 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   },
   {
     id: 'ltx23-dev-fp8',
+    // REMOVED 2026-09-20 (Phase 0, task z8bc21p) — LTX fully removed; history row.
+    removedAt: '2026-09-20',
     name: 'LTX-2.3 22B dev checkpoint (fp8, 29 GB)',
     group: 'weights',
     description: 'The official fp8 quant of the same single-file dev checkpoint — the exact file the outpaint and img+audio→video templates pin. Satisfies every LTX-2.3 utility\'s checkpoint slot at 63% of the bf16 size; the remove family template pins bf16 but the graph is identical on this file.',
@@ -417,6 +423,8 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   },
   {
     id: 'ltx23-gemma-encoders',
+    // REMOVED 2026-09-20 (Phase 0, task z8bc21p) — LTX fully removed; history row.
+    removedAt: '2026-09-20',
     name: 'Gemma 3 12B text encoders (bf16 + fp4_mixed)',
     group: 'weights',
     description: 'The LTX-2.3 text encoders: gemma_3_12B_it.safetensors (bf16, the remove-family/outpaint pick) and gemma_3_12B_it_fp4_mixed.safetensors (the fp4 cut the Obscura and IA2V templates pin). Fetch both in one pass or either alone — the utilities resolve whichever is present.',
@@ -436,6 +444,8 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   },
   {
     id: 'ltx23-latent-upscaler',
+    // REMOVED 2026-09-20 (Phase 0, task z8bc21p) — LTX fully removed; history row.
+    removedAt: '2026-09-20',
     name: 'LTX-2.3 spatial upscaler x2 v1.1',
     group: 'weights',
     description: 'The latent spatial upscaler the remove family and img+audio→video templates pin for their two-stage ladders (stage 1 at half resolution, this model doubles the latents, stage 2 refines). Lands in models/latent_upscale_models.',
@@ -452,6 +462,8 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   },
   {
     id: 'ltx23-distilled-loras',
+    // REMOVED 2026-09-20 (Phase 0, task z8bc21p) — LTX fully removed; history row.
+    removedAt: '2026-09-20',
     name: 'LTX-2.3 distilled LoRAs (384 + 384-1.1)',
     group: 'weights',
     description: 'Lightricks\' distilled-acceleration LoRAs: 384-1.1 (pinned by the Obscura template @0.4) and 384 (pinned by the outpaint template @0.5). The img+audio→video template instead pairs the Comfy-Org rank-111 repack (separate entry below) — any official variant satisfies the distilled slot.',
@@ -471,6 +483,8 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   },
   {
     id: 'ltx23-distilled-rank111',
+    // REMOVED 2026-09-20 (Phase 0, task z8bc21p) — LTX fully removed; history row.
+    removedAt: '2026-09-20',
     name: 'LTX-2.3 distilled 1.1 LoRA (Comfy-Org rank-111 repack)',
     group: 'weights',
     description: 'The rank-111 rank-reduced repack the official img+audio→video workflow pins (dynamic-fro09 averaged, bf16) — the smaller distilled alternative the IA2V template actually ships with.',
@@ -487,6 +501,8 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   },
   {
     id: 'ltx23-icedit-remove-pair',
+    // REMOVED 2026-09-20 (Phase 0, task z8bc21p) — LTX fully removed; history row.
+    removedAt: '2026-09-20',
     name: 'ICEdit-Insight remove pair (subtitles + watermark)',
     group: 'weights',
     description: 'joyfox\'s task-aware IC-LoRA pair the official remove templates pin: ltx2.3-ic-subtitles-remove-general.safetensors @1.2 and ltx2.3-ic-watermark-remove-general.safetensors @1.5 — the exact filenames in the templates\' LTXICLoRALoaderModelOnly widgets. The one Apache-2.0 line in the LTX-2.3 utility stack.',
@@ -506,6 +522,8 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   },
   {
     id: 'ltx23-dearchive',
+    // REMOVED 2026-09-20 (Phase 0, task z8bc21p) — LTX fully removed; history row.
+    removedAt: '2026-09-20',
     name: 'dearchive — LTX-2.3 archival restoration IC-LoRA',
     group: 'weights',
     description: 'oumoumad\'s dearchive IC-LoRA (step 05000) — the exact weights the official restore-archival template pins @1.0: rewrites real archive footage (B&W broadcast, low-bitrate rips, sepia prints) as modern-looking video. The template renames this file to ltx-2.3-dearchive-lora_weights_step_05000.safetensors on placement; the model inference accepts both names.',
@@ -522,6 +540,8 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   },
   {
     id: 'ltx23-obscura-remova',
+    // REMOVED 2026-09-20 (Phase 0, task z8bc21p) — LTX fully removed; history row.
+    removedAt: '2026-09-20',
     name: 'Obscura Remova (remove-object LoRA)',
     group: 'weights',
     description: 'WepeNerd\'s Obscura Remova LoRA — the remove-object template\'s engine, pinned @2.0 on the Kijai split stack with the distilled-384-1.1 @0.4. Prompt form "Remove the {object} from the foreground.", strength band 1.3–2.0 per the author card. Fetched from the HF mirror for integrity pinning (the template embeds a civitai download link instead).',
@@ -538,6 +558,8 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   },
   {
     id: 'ltx23-ic-outpaint',
+    // REMOVED 2026-09-20 (Phase 0, task z8bc21p) — LTX fully removed; history row.
+    removedAt: '2026-09-20',
     name: 'LTX-2.3 outpaint IC-LoRA',
     group: 'weights',
     description: 'oumoumad\'s outpaint IC-LoRA — the exact ltx-2.3-22b-ic-lora-outpaint.safetensors the official video-outpainting template pins @1.0 (with distilled-384 @0.5). Aspect-ratio canvas growth on the half-res grid pipeline.',
@@ -554,6 +576,8 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   },
   {
     id: 'ltx23-kijai-transformer',
+    // REMOVED 2026-09-20 (Phase 0, task z8bc21p) — LTX fully removed; history row.
+    removedAt: '2026-09-20',
     name: 'Kijai LTX-2.3 transformer-only split (bf16)',
     group: 'weights',
     description: 'The transformer-only bf16 cut of the LTX-2.3 22B dev weights — the diffusion-model half of the Obscura Remova tool\'s split stack (lands in models/diffusion_models; the projection and VAE splits are separate entries).',
@@ -570,6 +594,8 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   },
   {
     id: 'ltx23-kijai-projection',
+    // REMOVED 2026-09-20 (Phase 0, task z8bc21p) — LTX fully removed; history row.
+    removedAt: '2026-09-20',
     name: 'Kijai LTX-2.3 text projection (bf16)',
     group: 'weights',
     description: 'The text-projection split (ltx-2.3_text_projection_bf16.safetensors, models/text_encoders) — the second DualCLIPLoader input of the Obscura Remova tool\'s stack (the Gemma encoder is the first).',
@@ -586,6 +612,8 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   },
   {
     id: 'ltx23-kijai-vaes',
+    // REMOVED 2026-09-20 (Phase 0, task z8bc21p) — LTX fully removed; history row.
+    removedAt: '2026-09-20',
     name: 'Kijai LTX23 video + audio VAE splits (bf16)',
     group: 'weights',
     description: 'The separate bf16 VAE pair (models/vae) the Obscura Remova tool loads through VAELoaderKJ: LTX23_video_vae_bf16.safetensors and LTX23_audio_vae_bf16.safetensors.',

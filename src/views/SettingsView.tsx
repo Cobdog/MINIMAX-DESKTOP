@@ -2,14 +2,12 @@
  *  H3 stack report, generation defaults, the LLM layer (llama.cpp router +
  *  Ollama fallback), model locations, and output/clip paths. */
 import { useEffect, useState } from 'react'
-import { Eraser, GitBranch, Wand2 } from 'lucide-react'
+import { GitBranch, Wand2 } from 'lucide-react'
 import { Activity, AlertCircle, Check, ChevronDown, Cpu, Eye, Folder, FolderOpen, Gauge, HardDrive, Info, Layers, LoaderCircle, Power, RefreshCw, Save, Scale, ServerCog, SlidersHorizontal, Sparkles, Stethoscope, Unplug } from 'lucide-react'
-import type { AppSettings, ComfyStatus, LlmModelsResult, MediaFile, ModelFile, ModelKind, NodePackStatus, OllamaModel, UpscaleMode } from '../types'
+import type { AppSettings, ComfyStatus, LlmModelsResult, ModelFile, ModelKind, NodePackStatus, OllamaModel, UpscaleMode } from '../types'
 import { choices, type ObjectInfo } from '../lib/comfyInfo'
 import { inferredOverrideSlotFile, MODEL_FAMILIES, overridePickOutcome, SLOT_LABELS, type ModelOverrideSlotName } from '../lib/modelOverrides'
 import { detectKrea2EditFamilies, detectOptimizations, KREA2_RECIPE_PINS } from '../lib/graph'
-import { detectLtx23Utilities } from '../lib/graph/ltx23'
-import type { Ltx23UtilityKind } from '../lib/graph/ltx23'
 import type { h3StackReport } from '../lib/h3Stack'
 import { SelectField, NumberField } from '../components/form'
 import { formatBytes } from '../lib/format'
@@ -45,7 +43,7 @@ function PathCheckNote({ path }: { path: string }) {
     : <><AlertCircle size={13} /> {detail || 'Path check failed.'}</>}</p>
 }
 
-export function SettingsView({ settings, setSettings, info, models, h3Report, scanning, status, checking, diagnosticRunning, ollamaModels, onRefreshOllama, onScan, onCheck, onSave, onRunDiagnostics, onRunLtxUtility, fetchFocusEntryIds, onFetchFocusConsumed }: { settings: AppSettings; setSettings(value: AppSettings): void; info: ObjectInfo; models: ModelFile[]; h3Report: ReturnType<typeof h3StackReport>; scanning: boolean; status: ComfyStatus; checking: boolean; diagnosticRunning: boolean; ollamaModels: OllamaModel[]; onRefreshOllama(): void; onScan(): void; onCheck(): void; onSave(): void | Promise<void>; onRunDiagnostics(): void; onRunLtxUtility?: (options: { tool: Ltx23UtilityKind; input: MediaFile | null; audio?: MediaFile | null; prompt?: string }) => Promise<string | null>; fetchFocusEntryIds?: ReadonlyArray<string>; onFetchFocusConsumed?(): void }) {
+export function SettingsView({ settings, setSettings, info, models, h3Report, scanning, status, checking, diagnosticRunning, ollamaModels, onRefreshOllama, onScan, onCheck, onSave, onRunDiagnostics }: { settings: AppSettings; setSettings(value: AppSettings): void; info: ObjectInfo; models: ModelFile[]; h3Report: ReturnType<typeof h3StackReport>; scanning: boolean; status: ComfyStatus; checking: boolean; diagnosticRunning: boolean; ollamaModels: OllamaModel[]; onRefreshOllama(): void; onScan(): void; onCheck(): void; onSave(): void | Promise<void>; onRunDiagnostics(): void }) {
   const pathRows: Array<{ kind: ModelKind; label: string; note: string }> = [
     { kind: 'diffusion_models', label: 'Diffusion models', note: 'FL2VA and Ref2VA checkpoints' },
     { kind: 'text_encoders', label: 'Text encoders', note: 'Qwen3-VL MiniMax encoder' },
@@ -64,16 +62,6 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
   const krea2EditModes = detectKrea2EditFamilies(info, models)
   const editModesReady = krea2EditModes.filter(({ detection }) => detection.available).length
   const [selectedKrea2EditMode, setSelectedKrea2EditMode] = useState('krea2edit.instruct')
-  // LTX-2.3 one-graph utilities (task 068xwy3): the same thin-surface pattern
-  // — availability-gated tool list over the template-faithful builders in
-  // src/lib/graph/ltx23.ts, with a minimal pick-input + run row.
-  const ltx23Tools = detectLtx23Utilities(info, models)
-  const ltx23Ready = ltx23Tools.filter(({ detection }) => detection.available).length
-  const [selectedLtx23Utility, setSelectedLtx23Utility] = useState('ltx23.remove-subtitles')
-  const [ltx23Input, setLtx23Input] = useState<MediaFile | null>(null)
-  const [ltx23Audio, setLtx23Audio] = useState<MediaFile | null>(null)
-  const [ltx23Prompt, setLtx23Prompt] = useState('')
-  const [ltx23Running, setLtx23Running] = useState(false)
   const defaults = settings.generationDefaults
   const updateDefaults = (patch: Partial<AppSettings['generationDefaults']>) => setSettings({ ...settings, generationDefaults: { ...defaults, ...patch } })
   // Model overrides (task euxwdva): one pick per family + slot; clearing a
@@ -354,7 +342,7 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
       {nodePackError && <div className="llm-test-result fail" role="status"><AlertCircle size={14} /><span>{nodePackError}</span></div>}
       <p className="settings-note">Uninstall deletes only folders the studio placed (a marker install) — never a pack that was already there: pre-existing folders in the target are reported as "present — not studio-managed" (or "managed by ComfyUI" when the folder carries a git checkout or a Comfy-Registry pyproject), refused for install-over, and never deleted. A revision bump refetches at the pin. "Restart to activate" means the files are in place but the running instance has not loaded them yet. Packs without a license are never vendored — they install only through the consent-gated fetcher below.</p>
     </section>
-    <FetchBrowser settings={settings} setSettings={setSettings} onAfterFetch={onScan} onAdoptCheckout={(path) => updateEngine({ checkoutPath: path })} focusEntryIds={packFetchFocus ?? fetchFocusEntryIds} onFocusConsumed={() => { setPackFetchFocus(null); onFetchFocusConsumed?.() }} />
+    <FetchBrowser settings={settings} setSettings={setSettings} onAfterFetch={onScan} onAdoptCheckout={(path) => updateEngine({ checkoutPath: path })} focusEntryIds={packFetchFocus ?? undefined} onFocusConsumed={() => setPackFetchFocus(null)} />
     <section className="settings-section h3-stack-section">
       <div className="settings-heading"><div><Gauge size={19} /><span><strong>H3 engine stack</strong><small>Compares the selected files with the validated official ComfyUI stack.</small></span></div><span className={`health-pill ${h3Report.validated ? 'online' : ''}`}>{h3Report.validated ? 'Validated' : h3Report.ready ? 'Custom' : 'Incomplete'}</span></div>
       <div className="h3-stack-list">{h3Report.rows.map((row) => <div key={row.label} className={row.validated ? 'validated' : 'custom'}><span>{row.validated ? <Check size={14} /> : <AlertCircle size={14} />}</span><div><strong>{row.label}</strong><small title={row.selected || row.expected}>{row.selected || `Missing · expected ${row.expected}`}</small></div><em>{row.override ? 'Override' : row.validated ? 'Recommended' : row.selected ? 'Non-standard' : 'Missing'}</em></div>)}</div>
@@ -441,45 +429,6 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
         </div>
       })()}
     </section>
-    <section className="settings-section ltx23-utilities-section" aria-label="LTX video utilities">
-      <div className="settings-heading"><div><Eraser size={19} /><span><strong>LTX video utilities</strong><small>One-graph LTX-2.3 editing tools — official ComfyUI template topologies, availability-gated here. The canvas redesign owns the real pick-and-run surface; this thin run row exists so the tools are usable today (verdict docs/research/ltx-vs-h3-verdict.md: keep-utilities-only).</small></span></div><span className={`health-pill ${ltx23Ready === ltx23Tools.length ? 'online' : ''}`}>{ltx23Ready} of {ltx23Tools.length} ready</span></div>
-      <div className="preset-row" aria-label="LTX utility picker">
-        {ltx23Tools.map(({ utility, detection }) => <button type="button" className={selectedLtx23Utility === utility.id ? 'tier-selected' : ''} key={utility.id} onClick={() => setSelectedLtx23Utility(utility.id)}><strong>{utility.label}</strong><small>{detection.available ? 'template graph ready' : 'Needs setup'}</small></button>)}
-      </div>
-      {(() => {
-        const selected = ltx23Tools.find(({ utility }) => utility.id === selectedLtx23Utility) ?? ltx23Tools[0]
-        if (!selected) return null
-        const { utility, detection } = selected
-        const missing = [...detection.missingNodes.map((nodeClass) => `node ${nodeClass} (node pack)`), ...detection.missingModels]
-        const needsVideo = utility.kind !== 'ia2v'
-        const canRun = detection.available && onRunLtxUtility && ((needsVideo && ltx23Input) || (utility.kind === 'ia2v' && ltx23Input && ltx23Audio))
-        const pick = async (kind: 'video' | 'image' | 'audio') => {
-          try {
-            const picked = await window.minimax.chooseMedia(kind)
-            if (!picked) return
-            if (kind === 'audio') setLtx23Audio({ ...picked, kind })
-            else setLtx23Input({ ...picked, kind })
-          } catch { /* the bridge reports picker failures; a cancel is silent */ }
-        }
-        return <div className={`doctor-check ${detection.available ? 'ok' : 'warn'}`}>
-          <span>{detection.available ? <Check size={14} /> : <AlertCircle size={14} />}</span>
-          <div>
-            <strong>{utility.label}{detection.resolved?.checkpoint ? ` — ${detection.resolved.checkpoint}` : ''}</strong>
-            <small>{utility.ui.description}</small>
-            {utility.ui.promptGuidance && <p>Prompting: {utility.ui.promptGuidance}</p>}
-            <p>Input: {utility.ui.input}{utility.kind === 'ia2v' ? ' + an audio clip' : ''} · negative prompt pinned by the template</p>
-            {utility.ui.warning && <p>{utility.ui.warning}</p>}
-            {missing.length > 0 && <p>Missing: {missing.join('; ')}. {utility.ui.installHint}</p>}
-            {detection.available && onRunLtxUtility && <div className="connection-row">
-              <div className="field-group grow"><label htmlFor={`ltx23-input-${utility.id}`}>Input</label><button id={`ltx23-input-${utility.id}`} className="secondary-button" onClick={() => void pick(needsVideo ? 'video' : 'image')}>{ltx23Input ? ltx23Input.name : `Choose ${needsVideo ? 'video' : 'image'}…`}</button></div>
-              {utility.kind === 'ia2v' && <div className="field-group grow"><label htmlFor={`ltx23-audio-${utility.id}`}>Audio</label><button id={`ltx23-audio-${utility.id}`} className="secondary-button" onClick={() => void pick('audio')}>{ltx23Audio ? ltx23Audio.name : 'Choose audio…'}</button></div>}
-              <div className="field-group grow"><label htmlFor={`ltx23-prompt-${utility.id}`}>Prompt (optional — template default applies)</label><input id={`ltx23-prompt-${utility.id}`} value={ltx23Prompt} placeholder={utility.promptDefault.slice(0, 80)} onChange={(event) => setLtx23Prompt(event.target.value)} /></div>
-              <button className="primary-button" disabled={!canRun || ltx23Running} onClick={() => { setLtx23Running(true); void onRunLtxUtility({ tool: utility.kind, input: ltx23Input, audio: ltx23Audio, prompt: ltx23Prompt.trim() || undefined }).finally(() => setLtx23Running(false)) }}>{ltx23Running ? 'Queueing…' : 'Run'}</button>
-            </div>}
-          </div>
-        </div>
-      })()}
-    </section>
     <section className="settings-section gpu-tier-section">
       <div className="settings-heading"><div><Gauge size={19} /><span><strong>GPU tier guidance</strong><small>Community quant and workload recommendations per VRAM tier. Stored with settings; guidance only.</small></span></div></div>
       <div className="preset-row" aria-label="GPU tiers">
@@ -499,7 +448,7 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
         <SelectField label="Default quality" value={defaults.turbo === '4' ? '8' : defaults.turbo} onChange={(turbo) => updateDefaults({ turbo: turbo as 'off' | '8', ...(turbo === 'off' ? { steps: 30 } : {}) })} options={[["off", 'Native quality · 30 steps'], ["8", 'Official Turbo 8']]} />
         <NumberField label="Full-quality steps" value={defaults.steps} min={16} max={30} onChange={(steps) => updateDefaults({ steps })} />
         <SelectField label="Reference image fidelity" value={defaults.refImageSize} onChange={(refImageSize) => updateDefaults({ refImageSize: refImageSize as 'match' | 'max' })} options={[["match", 'Match output · faster'], ["max", 'Maximum identity · slower']]} />
-        <SelectField label="Default post-render upscale" value={defaults.upscaleMode} onChange={(upscaleMode) => updateDefaults({ upscaleMode: upscaleMode as UpscaleMode })} options={[["off", 'Off · recommended for diagnosis'], ["ltx", 'LTX 2.5 latent · 2×'], ["rtx", 'RTX/CUDA frames · 2× · experimental']]} />
+        <SelectField label="Default post-render upscale" value={defaults.upscaleMode} onChange={(upscaleMode) => updateDefaults({ upscaleMode: upscaleMode as UpscaleMode })} options={[["off", 'Off · recommended for diagnosis'], ["rtx", 'RTX/CUDA frames · 2× · experimental']]} />
         <label className="settings-check"><input type="checkbox" checked={defaults.livePreview} onChange={(event) => updateDefaults({ livePreview: event.target.checked })} /><span><strong>Live preview by default</strong><small>Uses ComfyUI progress and preview events.</small></span></label>
       </div>
       <details className="experimental-settings"><summary><AlertCircle size={15} /><span><strong>Experimental sampling</strong><small>Custom samplers, shifts, LoRA strength, and 4-step FL2V can make output less stable.</small></span><ChevronDown size={15} /></summary><div className="generation-defaults-grid"><label className="settings-check"><input type="checkbox" checked={defaults.experimentalSampling} onChange={(event) => updateDefaults({ experimentalSampling: event.target.checked })} /><span><strong>Enable custom sampler</strong><small>Otherwise res_multistep + simple is forced.</small></span></label><SelectField label="Experimental Turbo override" value={defaults.turbo} onChange={(turbo) => updateDefaults({ turbo: turbo as 'off' | '4' | '8' })} options={[["off", 'Off'], ["8", 'Official 8-step'], ["4", '4-step preview testing']]} /><NumberField label="Turbo LoRA strength" value={defaults.loraStrength} min={0} max={2} step={0.05} onChange={(loraStrength) => updateDefaults({ loraStrength })} /><SelectField label="Sampler" value={defaults.experimentalSampling ? defaults.sampler : 'res_multistep'} disabled={!defaults.experimentalSampling} onChange={(sampler) => updateDefaults({ sampler })} options={samplerOptions.map((value) => [value, value])} /><SelectField label="Scheduler" value={defaults.experimentalSampling ? defaults.scheduler : 'simple'} disabled={!defaults.experimentalSampling} onChange={(scheduler) => updateDefaults({ scheduler })} options={schedulerOptions.map((value) => [value, value])} /><SelectField label="Sigma shifts" value={defaults.sigmaShiftMode} onChange={(sigmaShiftMode) => updateDefaults({ sigmaShiftMode: sigmaShiftMode as 'model' | 'custom' })} options={[["model", 'Native model defaults · 12 / 3'], ["custom", 'Custom MiniMaxH3SigmaShift node']]} /><NumberField label="Video sigma shift" value={defaults.shiftVideo} min={0.01} max={100} step={0.01} disabled={defaults.sigmaShiftMode !== 'custom'} onChange={(shiftVideo) => updateDefaults({ shiftVideo })} /><NumberField label="Audio sigma shift" value={defaults.shiftAudio} min={0.01} max={100} step={0.01} disabled={defaults.sigmaShiftMode !== 'custom'} onChange={(shiftAudio) => updateDefaults({ shiftAudio })} /></div></details>
@@ -561,7 +510,7 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
       </div>
       <p className="settings-note">Prompts go directly to the local Ollama server. Embedding and cloud-backed models are excluded.</p>
     </section>
-    <section className="settings-section"><div className="settings-heading"><div><HardDrive size={19} /><span><strong>Model locations</strong><small>Local roots are indexed in place and never moved or copied — and when the engine is connected, its own model listing is merged in (tagged "instance"), so an external instance needs no local roots at all.</small></span></div><button className="secondary-button" onClick={onScan} disabled={scanning}>{scanning ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}{scanning ? 'Scanning…' : 'Rescan'}</button></div><div className="path-table">{pathRows.map((row) => { const kindModels = models.filter((model) => model.kind === row.kind); const instanceCount = kindModels.filter((model) => model.source === 'instance' || model.source === 'both').length; const localCount = kindModels.length - kindModels.filter((model) => model.source === 'instance').length; return <div className="path-row" key={row.kind}><div className="path-kind"><Folder size={17} /><span><strong>{row.label}</strong><small>{row.note}</small></span></div><div className="path-input"><input value={settings.paths[row.kind]} onChange={(event) => setSettings({ ...settings, paths: { ...settings.paths, [row.kind]: event.target.value } })} /><PathCheckNote path={settings.paths[row.kind]} /></div><span className="file-count" data-model-kind-count={row.kind}>{kindModels.length} files{instanceCount > 0 ? ` · ${instanceCount} instance · ${localCount} local` : ''}</span></div>})}</div></section>
+    <section className="settings-section"><div className="settings-heading"><div><HardDrive size={19} /><span><strong>Model inventory</strong><small>The connected engine's own registry is the model source of truth (instance-invisible = nonexistent). Local roots are gone from the user surface — refresh reads the engine's listing again.</small></span></div><button className="secondary-button" onClick={onScan} disabled={scanning}>{scanning ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}{scanning ? 'Refreshing…' : 'Refresh from engine'}</button></div><div className="path-table">{pathRows.map((row) => { const kindModels = models.filter((model) => model.kind === row.kind); const instanceCount = kindModels.filter((model) => model.source === 'instance' || model.source === 'both').length; const localCount = kindModels.length - kindModels.filter((model) => model.source === 'instance').length; return <div className="path-row" key={row.kind}><div className="path-kind"><Folder size={17} /><span><strong>{row.label}</strong><small>{row.note}</small></span></div><span className="file-count" data-model-kind-count={row.kind}>{kindModels.length} files{instanceCount > 0 ? ` · ${instanceCount} instance` : ''}{localCount > 0 && instanceCount > 0 ? ` · ${localCount} local` : ''}</span></div>})}</div></section>
     <section className="settings-section"><div className="settings-heading"><div><FolderOpen size={19} /><span><strong>Input &amp; output</strong><small>Renders and prepared media stay local, under the app folder by default.</small></span></div></div><div className="connection-row"><div className="field-group grow"><label htmlFor="input-path">Input directory</label><input id="input-path" data-input-path value={settings.inputDirectory} onChange={(event) => setSettings({ ...settings, inputDirectory: event.target.value })} /><PathCheckNote path={settings.inputDirectory} /></div></div><div className="connection-row"><div className="field-group grow"><label htmlFor="output-path">Output directory</label><input id="output-path" value={settings.outputDirectory} onChange={(event) => setSettings({ ...settings, outputDirectory: event.target.value })} /><PathCheckNote path={settings.outputDirectory} /></div></div><div className="connection-row clip-tool-path"><div className="field-group grow"><label htmlFor="ffmpeg-path">FFmpeg executable</label><input id="ffmpeg-path" value={settings.ffmpegPath} onChange={(event) => setSettings({ ...settings, ffmpegPath: event.target.value })} /></div></div><p className="settings-note">Unset, both default under the app's own data folder (<code>&lt;app&gt;/data/input</code>, <code>&lt;app&gt;/data/output</code>) — nothing lands in Documents. An absolute path you set is kept as-is. The clip editor uses FFmpeg for frame extraction, trim points, joining, and full-project export.</p></section>
     <section className="settings-section license-source-section" aria-label="License and source">
       <div className="settings-heading"><div><Scale size={19} /><span><strong>License &amp; source</strong><small>This app is free software — its source belongs to everyone who uses it.</small></span></div></div>

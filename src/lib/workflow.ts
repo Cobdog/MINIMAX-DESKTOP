@@ -321,9 +321,9 @@ export function buildMiniMaxWorkflow(
 export type ComfyOutputFile = { filename: string; subfolder?: string; type?: string }
 
 /** The exact output file ComfyUI reported for a finished prompt, preferring
- *  the RTX-upscale save node ('84'), then the LTX-upscale node ('70'), then
- *  anything matching the media type. Callers use this descriptor to resolve
- *  the local output path — never a newest-file-on-disk guess. */
+ *  the RTX-upscale save node ('84'), then anything matching the media type.
+ *  Callers use this descriptor to resolve the local output path — never a
+ *  newest-file-on-disk guess. */
 export function extractOutputFile(history: Record<string, unknown>, promptId: string, mediaType: 'video' | 'audio' | 'image' = 'video'): ComfyOutputFile | undefined {
   const entry = history[promptId] as { outputs?: Record<string, Record<string, unknown>> } | undefined
   if (!entry?.outputs) return undefined
@@ -346,7 +346,6 @@ export function extractOutputFile(history: Record<string, unknown>, promptId: st
   }
   if (entry.outputs['84']) visit(entry.outputs['84'])
   else if (entry.outputs['99']) visit(entry.outputs['99'])
-  else if (entry.outputs['70']) visit(entry.outputs['70'])
   else visit(entry.outputs)
   const expected = mediaType === 'audio' ? /\.(flac|wav|mp3|ogg|m4a|aac|opus)$/i : mediaType === 'image' ? /\.(png|jpe?g|webp)$/i : /\.(mp4|webm|mov|mkv|gif)$/i
   return candidates.find((candidate) => expected.test(candidate.filename)) ?? candidates[0]

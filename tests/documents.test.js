@@ -263,11 +263,14 @@ beforeAll(async () => {
     { id: 'user.prompt-2', label: 'Rooftops', prompt: 'Neon rooftops after rain.', savedAt: 10 },
   ] })
   check(promptsPosted.status === 200, 'legacy user prompts seed via the old surface')
-  const charactersPosted = await api.post('/api/lan/characters', { characters: [
+  // (The mobile companion's /api/lan/characters sync route was removed
+  // 2026-09-20, Phase 0 — the character arm of the §6 import is exercised
+  //  through the explicit documents import route instead.)
+  const charactersPosted = await api.post('/api/lan/documents/import/legacy', { characters: [
     { id: 'char-mara', name: 'Mara', description: 'a courier with a lantern', referenceImages: ['/inputs/mara-1.png', '/inputs/mara-2.png'] },
     { id: 'char-olio', name: 'Olio', referenceImages: [] },
   ] })
-  check(charactersPosted.status === 200 && charactersPosted.body.synced === 2, 'legacy character library syncs via the old surface')
+  check(charactersPosted.status === 200 && charactersPosted.body.import.counts.characters === 2, 'legacy character library imports via the explicit documents import route')
 })
 
 afterAll(() => { killAllServers() })

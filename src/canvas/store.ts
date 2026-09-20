@@ -9,13 +9,12 @@
  * workspace singleton, completed jobs land as takes on their chains, and
  * dropped bytes ingest into content-addressed blobs. Phase 3 adds the OP
  * STACK surface (§5.1: the modal editor's store actions — add/edit/reorder/
- * bake/undo, canonical-pointer switching, locks), the LTX-2.3 utility
- * invocation through the shared core (lib/ltx23UtilitySubmit.ts), and the
- * pose-rig dock state. The stills intent (34afx79, 2026-09-19) renders H3-1F
- * — the h3image Generate-T=1 family through the workbench's shared submit
- * core (images/submit.ts), engine-selected per chain via the two-slot seam
- * in canvas/stillIntent.ts; Z-Image is retired (lib/zImageSubmit.ts deleted
- * — the asset studios keep their own lib/zimage.ts reference generation).
+ * bake/undo, canonical-pointer switching, locks) and the pose-rig dock
+ * state. The stills intent (34afx79, 2026-09-19) renders H3-1F — the
+ * h3image Generate-T=1 family through the workbench's shared submit core
+ * (images/submit.ts), engine-selected per chain via the two-slot seam in
+ * canvas/stillIntent.ts. (LTX and Z-Image are fully removed — Phase 0,
+ * 2026-09-20; git history is the archive.)
  *
  * The camera is deliberately NOT here (camera.ts owns it, outside React) —
  * the store only emits rare `cameraCommands` that the substrate executes.
@@ -30,10 +29,6 @@
  */
 import { create } from 'zustand'
 
-/** Phase 5: which kept surface the Studios dock shows (the asset-authoring
- *  studios — dated decisions live in StudiosDock.tsx; the movie tab retired
- *  with MoviePlanner in Phase 5b: the plan surface is the timeline). */
-export type StudiosDockTab = 'characters' | 'hair' | 'wardrobes' | 'accessories' | 'locations'
 import { documentsApi, DocumentsHttpError, type ProjectMeta } from './api'
 import { isWorkbenchJob, landWorkbenchTake } from '../images/landing'
 import { sessionContract } from '../images/session'
@@ -47,7 +42,6 @@ import {
   deriveEdges,
   deriveTiles,
   seedSpawnPoint,
-  TILE_H_MEDIA,
   TILE_W,
   type Tile,
   type Edge,
@@ -92,10 +86,8 @@ import { DEFAULT_SETTINGS, type OpKind } from './ops'
 import type { EndpointDirection, EndpointOption, OptionAvailability } from './options'
 import { findH3PreviewOverrideNode } from '../lib/h3Stack'
 import { mergeModelOverrides, resolveModelOverrides, resolveModels, type ModelFamilyId, type OverrideResolution } from '../lib/modelOverrides'
-import { inferLtx25Selections, inferSelections } from '../lib/modelSelection'
+import { inferSelections } from '../lib/modelSelection'
 import { submitH3Render, validateH3Render } from '../lib/h3Submit'
-import { submitLtx23Utility, validateLtx23Utility } from '../lib/ltx23UtilitySubmit'
-import { submitLtx25, validateLtx25, LTX25_NATIVE_REQUIRED_NODES } from '../lib/ltx25Submit'
 import { submitWorkbenchGeneration, validateWorkbenchRequest } from '../images/submit'
 import { canvasEditHandoff, canvasH3OneFrameRequest, queuedImageEngineRefusal, stashCanvasEditHandoff } from './stillIntent'
 import { buildH3ImageGraph, H3IMG_RECIPE_PINS } from '../lib/graph/h3image'
@@ -103,15 +95,12 @@ import { submitMusic3, validateMusic3 } from '../lib/music3Submit'
 import { submitAceStep, validateAceStep } from '../lib/aceStepSubmit'
 import { buildMusic3Workflow, inferMusic3Selection, type Music3GenerationOptions } from '../lib/music3Workflow'
 import { buildAceStepWorkflow, inferAceStepSelections } from '../lib/aceStepWorkflow'
-import { buildLtx25Workflow } from '../lib/ltx25Workflow'
-import { choices } from '../lib/comfyInfo'
-import { buildLtx23UtilityGraph, findLtx23Utility } from '../lib/graph/ltx23'
 import { characterReferences, loadCharacterProjects } from '../lib/characterLibrary'
 import { locationReferences, loadLocationProjects } from '../lib/locationLibrary'
 import { loadWardrobeProjects } from '../lib/wardrobeLibrary'
 import { useJobsStore } from '../state/jobsStore'
 import { useSessionStore } from '../state/sessionStore'
-import type { AceStepGenerationOptions, FetchEntryStatus, GenerationJob, MediaFile, ModelOverrideSlots, ModelSelection } from '../types'
+import type { AceStepGenerationOptions, GenerationJob, MediaFile, ModelOverrideSlots, ModelSelection } from '../types'
 
 /** The camera singleton for this route — attach in Substrate, never subscribe
  *  per-frame in React. */
@@ -151,19 +140,6 @@ function characterReferencesOf(character: ReturnType<typeof loadCharacterProject
 
 function locationReferencesOf(location: ReturnType<typeof loadLocationProjects>[number]): string[] {
   return locationReferences(location).map((file) => file.path)
-}
-
-/** The LTX-2.5 component selection for the current engine (the upscaler
- *  choices come from object-info exactly like the old surface computes it).
- *  Model overrides (euxwdva) consult through the shared seam: chain-level
- *  picks beat the global Settings picks beat inference. */
-function ltx25SelectionOf(chainOverrides?: ModelOverrideSlots) {
-  const { models, info, settings } = engineFacts()
-  return resolveModels('ltx25',
-    inferLtx25Selections(models, choices(info, 'LatentUpscaleModelLoader', 'model_name')),
-    models,
-    mergeModelOverrides(chainOverrides, settings?.modelOverrides?.ltx25),
-  ).selection
 }
 
 /** Motion-Context readiness: all four node classes reported by the engine. */
@@ -290,18 +266,6 @@ type CanvasState = {
    *  z with DOM order deciding the winner. Each dock keeps its own assigned
    *  value; only this counter is shared. */
   dockZ: number
-  /** QOL wave (rrxlw2r): the fetch-catalog snapshot feeding the availability
-   *  facts' fetch-deep-link targets (loaded on boot, refreshed when the
-   *  settings dock opens; null = not loaded — rows degrade to install
-   *  guidance, never dead links). */
-  fetchCatalog: FetchEntryStatus[] | null
-  /** Catalog entry ids an unavailable row's fetch affordance asked the
-   *  FetchBrowser to highlight; consumed once by the dock (cleared after). */
-  fetchFocus: string[] | null
-  /** Phase 5: the asset-authoring studios docked (the kept surfaces' canvas
-   *  home until their full absorption — dated decisions in StudiosDock.tsx;
-   *  the movie tab retired with MoviePlanner in Phase 5b). */
-  studiosDock: { tab: StudiosDockTab } | null
   /** Phase 5: the PII-scrubbed diagnostics surface docked (inventory row 10:
    *  "diagnostics ride the radar/engine chip"). */
   diagnosticsDock: boolean
@@ -366,7 +330,6 @@ type CanvasActions = {
   /** Dock stacking (review M11): take the next z for a dock opening or
    *  being grabbed; returns the value to apply. */
   raiseDock(): number
-  setStudiosDock(dock: { tab: StudiosDockTab } | null): void
   setDiagnosticsDock(open: boolean): void
   setAudioDock(dock: { engine: 'music3' | 'acestep'; chainId?: string } | null): void
   /** One audio chain submit (Music 3 / ACE-Step as ops): the dock creates
@@ -440,13 +403,6 @@ type CanvasActions = {
   persistView(): void
   /** Availability facts for the typed-hole menus (registry-driven). */
   optionAvailability(): OptionAvailability
-  /** QOL wave (rrxlw2r): reload the fetch-catalog snapshot (boot + dock). */
-  refreshFetchCatalog(): Promise<void>
-  /** QOL wave (rrxlw2r): open the settings dock with the FetchBrowser
-   *  highlighting these catalog entries (an unavailable row's affordance —
-   *  the click gets TO consent, never past it). */
-  openFetchBrowser(entryIds: string[]): void
-  setFetchFocus(ids: string[] | null): void
   /** The chain's resolved reference bindings (the panel + submit read this). */
   chainBindings(chainId: string): ReturnType<typeof resolveChainReferences>
 }
@@ -819,8 +775,6 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     toasts: [],
     inspectorOpen: false,
     indexOpen: false,
-    fetchCatalog: null,
-    fetchFocus: null,
     endpointMenu: null,
     forkMenu: null,
     opEditor: null,
@@ -831,7 +785,6 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     gapMenu: null,
     settingsDock: false,
     dockZ: 60,
-    studiosDock: null,
     diagnosticsDock: false,
     audioDock: null,
     cameraCommands: [],
@@ -840,7 +793,6 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
 
     boot: async () => {
       get().refreshLibraries()
-      void get().refreshFetchCatalog()
       void get().syncLibraryAssets().then(() => get().refreshAssets()).catch(() => undefined)
       void get().refreshAssets()
       try {
@@ -1309,29 +1261,12 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
 
     setSettingsDock: (open) => {
       set({ settingsDock: open })
-      // States change as the user fetches; re-snapshot on open so the menu's
-      // fetch affordances reflect what is actually on disk.
-      if (open) void get().refreshFetchCatalog()
     },
     raiseDock: () => {
       const next = get().dockZ + 1
       set({ dockZ: next })
       return next
     },
-    refreshFetchCatalog: async () => {
-      try {
-        const { entries } = await window.minimax.listFetchCatalog()
-        set({ fetchCatalog: entries })
-      } catch {
-        // Offline/failed snapshot: the menus degrade to install guidance.
-      }
-    },
-    openFetchBrowser: (entryIds) => {
-      set({ fetchFocus: entryIds, settingsDock: true })
-      void get().refreshFetchCatalog()
-    },
-    setFetchFocus: (ids) => set({ fetchFocus: ids }),
-    setStudiosDock: (dock) => set({ studiosDock: dock }),
     setDiagnosticsDock: (open) => set({ diagnosticsDock: open }),
     setAudioDock: (dock) => set({ audioDock: dock }),
 
@@ -1624,32 +1559,6 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       const selection = selectionFor(settings.turbo, settings.turboFamily, settings.modelOverrides)
       const facts = engineFacts()
       if (!facts.settings) return { ok: false, message: 'Studio settings are still loading.' }
-      // §5.4 (Phase 4): the LTX-2.5 GENERAL graph as an engine-op — the
-      // typed-hole produce row created this chain with engine='ltx25'; the
-      // workspace itself greyed out with the nav model (keep-utilities-only).
-      if (settings.engine === 'ltx25') {
-        const result = await submitLtx25(
-          {
-            mode: 'image', prompt: settings.prompt, width: Number(settings.resolution.split('x')[0]) || 1344,
-            height: Number(settings.resolution.split('x')[1]) || 768, duration: settings.duration,
-            preset: settings.turbo === 'off' ? 'quality' : 'turbo', seed: settings.seed,
-            filenamePrefix: `video/Canvas_LTX25_${Date.now()}`,
-          },
-          firstFrame,
-          { settings: facts.settings, connected: facts.connected, info: facts.info, selection: ltx25SelectionOf(settings.modelOverrides), clientId: engineBridge.clientId },
-          {
-            notify: (tone, text) => get().toast(tone === 'neutral' ? 'neutral' : tone, text),
-            setJobs: (update) => useJobsStore.getState().setJobs(update),
-            cancellationRequests: engineBridge.cancellationRequests ?? { current: new Set<string>() },
-            onJobCreated: (jobId) => {
-              set((current) => ({ chainJobs: { ...current.chainJobs, [chainId]: jobId } }))
-              recomputeTiles()
-            },
-          },
-          { manifestExtra: { canvas: { chainId, projectId } } },
-        )
-        return result.ok ? { ok: true } : { ok: false, message: result.message }
-      }
       // Phase 4 latent-fork gate: a substrate=latents fork renders through
       // the Motion-Context machinery — the source take's saved clip loads as
       // never-denoised conditioning (no re-encode). Honest refusals first.
@@ -1725,14 +1634,6 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         return validateWorkbenchRequest(
           canvasH3OneFrameRequest(chainId, settings),
           { settings: facts.settings, connected: facts.connected, models: facts.models, info: facts.info },
-        )
-      }
-      // The LTX-2.5 general surface (§5.4 Phase 4).
-      if (settings.engine === 'ltx25') {
-        return validateLtx25(
-          { mode: 'image', prompt: settings.prompt, width: 1344, height: 768, duration: settings.duration, seed: settings.seed, preset: 'quality', filenamePrefix: 'video/plan' },
-          firstFrame,
-          { connected: facts.connected, info: facts.info, selection: ltx25SelectionOf(settings.modelOverrides) },
         )
       }
       // The latent-fork gate (Phase 4): honest refusals before the H3 ladder.
@@ -1938,112 +1839,10 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         await get().fork({ chainId, outputId, substrate: action.substrate })
         return
       }
-      if (action.kind === 'utility') {
-        // §5.4 engines-as-ops (Phase 3): a REAL utility run — a new chain
-        // consuming this tile's output (the edge is what it consumes), the
-        // official-template graph through the SHARED core (the Settings
-        // utilities and this surface submit through one code path), the job
-        // linked to the chain so the result lands as its take.
-        const sourceChain = doc.chains.find((entry) => entry.id === chainId)
-        const outputId = sourceChain?.outputs[0]?.id ?? null
-        if (!outputId) {
-          get().toast('error', 'That object has no output yet — generate or drop media first.')
-          return
-        }
-        const media = mediaForOutput(buildOutputIndex(doc).get(outputId))
-        if (!media) {
-          get().toast('error', 'That object’s output has no renderable media to run the utility over.')
-          return
-        }
-        const settings = readChainSettings(sourceChain?.settings ?? {})
-        try {
-          const utility = findLtx23Utility(`ltx23.${action.tool}`)
-          const utilityChain = await documentsApi.createChain({
-            projectId: doc.project.id,
-            kind: 'generation',
-            inputSpec: forkInputSpec({ outputId, takeId: null, substrate: 'decoded' }),
-            settings: {
-              ...chainSettingsDefaults(useSessionStore.getState().settings),
-              prompt: utility?.promptDefault ?? '',
-              mediaType: 'video',
-            } as unknown as Record<string, unknown>,
-          })
-          set({ viewDirty: true })
-          const sourceTile = get().tiles.find((tile) => tile.id === chainId)
-          // Cluster-on-parent (L25), stacked BELOW the fork row so a fork and
-          // a utility from the same source never overlap.
-          const place = sourceTile ? { x: sourceTile.x + TILE_W + 140, y: sourceTile.y + TILE_H_MEDIA + 60, w: TILE_W } : { x: 120, y: 96, w: TILE_W }
-          set((current) => ({ layout: { ...(current.layout ?? {}), [utilityChain.id]: place } }))
-          const refreshed = await loadDocument(doc.project.id)
-          if (refreshed) recomputeTiles()
-          set({ selection: { tileIds: [utilityChain.id] }, inspectorOpen: true })
-          get().requestCamera({ kind: 'fly', tileId: utilityChain.id })
-          get().persistView()
-          const facts = engineFacts()
-          if (!facts.settings) {
-            get().toast('error', 'Studio settings are still loading.')
-            return
-          }
-          const result = await submitLtx23Utility(
-            { tool: action.tool as never, video: media.media, prompt: settings.prompt || undefined, manifestExtra: { canvas: { chainId: utilityChain.id, projectId: doc.project.id }, utility: action.tool } },
-            { settings: facts.settings, connected: facts.connected, info: facts.info, models: facts.models, clientId: engineBridge.clientId },
-            {
-              notify: (tone, text) => get().toast(tone === 'neutral' ? 'neutral' : tone, text),
-              setJobs: (update) => useJobsStore.getState().setJobs(update),
-              onJobCreated: (jobId) => {
-                set((current) => ({ chainJobs: { ...current.chainJobs, [utilityChain.id]: jobId } }))
-                recomputeTiles()
-              },
-            },
-          )
-          if (result.ok) get().toast('success', `The ${utility?.label ?? action.tool} chain is running — the result lands here as its take.`)
-        } catch (error) {
-          get().toast('error', `The utility chain could not start: ${error instanceof Error ? error.message : String(error)}`)
-        }
-        return
-      }
       if (action.kind === 'pose-rig') {
         // §5.2 (Phase 3): the pose rig docks as a floating canvas panel; its
         // export lands as this chain's control track.
         set({ endpointMenu: null, poseRig: { chainId } })
-        return
-      }
-      if (action.kind === 'ltx25') {
-        // §5.4 (Phase 4): the LTX-2.5 GENERAL surface as an engine-op — a new
-        // chain consuming this image as its first frame, engine='ltx25'. The
-        // submit + its controls live in the chain's properties panel.
-        try {
-          const sourceChain = doc.chains.find((entry) => entry.id === chainId)
-          const sourceOutput = sourceChain?.outputs[0]?.id ?? null
-          if (!sourceOutput) {
-            get().toast('error', 'That object has no output yet — generate or drop media first.')
-            return
-          }
-          const sourceSettings = readChainSettings(sourceChain?.settings ?? {})
-          const chain = await documentsApi.createChain({
-            projectId: doc.project.id,
-            kind: 'generation',
-            settings: {
-              ...chainSettingsDefaults(useSessionStore.getState().settings),
-              prompt: sourceSettings.prompt,
-              mediaType: 'video',
-              engine: 'ltx25',
-              firstFrameOutputId: sourceOutput,
-            } as unknown as Record<string, unknown>,
-          })
-          set({ viewDirty: true })
-          const sourceTile = get().tiles.find((tile) => tile.id === chainId)
-          const place = sourceTile ? { x: sourceTile.x + TILE_W + 140, y: sourceTile.y + TILE_H_MEDIA + 120, w: TILE_W } : { x: 120, y: 96, w: TILE_W }
-          set((current) => ({ layout: { ...(current.layout ?? {}), [chain.id]: place } }))
-          const refreshed = await loadDocument(doc.project.id)
-          if (refreshed) recomputeTiles()
-          set({ selection: { tileIds: [chain.id] }, inspectorOpen: true })
-          get().requestCamera({ kind: 'fly', tileId: chain.id })
-          get().persistView()
-          get().toast('success', 'LTX-2.5 chain created — its properties carry the engine controls; generate submits through the shared core.')
-        } catch (error) {
-          get().toast('error', `The LTX-2.5 chain could not be created: ${error instanceof Error ? error.message : String(error)}`)
-        }
         return
       }
     },
@@ -2110,7 +1909,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
             referenceOutputIds,
             // Upscale dual-mode (§5.1): the FORK side records the engine
             // upscale on the new chain (the stack side is the upscale op).
-            ...(source.withUpscale ? { upscaleMode: 'ltx' as const } : {}),
+            ...(source.withUpscale ? { upscaleMode: 'rtx' as const } : {}),
           } as unknown as Record<string, unknown>,
         })
         set((current) => ({ layout: { ...(current.layout ?? {}), [fork.id]: { x: 0, y: 0, w: TILE_W } }, viewDirty: true }))
@@ -2189,7 +1988,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         // the mode the H3 request builder reads) — the op is its visible
         // stack entry; both stay in sync through this action + the editor.
         if (kind === 'upscale') {
-          const mode = (settings && typeof settings.mode === 'string' ? settings.mode : 'ltx') as CanvasChainSettings['upscaleMode']
+          const mode = (settings && typeof settings.mode === 'string' ? settings.mode : 'rtx') as CanvasChainSettings['upscaleMode']
           await get().setChainSettings(chainId, { upscaleMode: mode })
         }
         const op = await documentsApi.addOp(chainId, kind, settings ?? DEFAULT_SETTINGS[kind]() as unknown as Record<string, unknown>)
@@ -2208,7 +2007,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     updateStackOp: async (chainId, opId, settings) => {
       try {
         await documentsApi.updateOpSettings(opId, settings)
-        if (typeof settings.mode === 'string' && ['ltx', 'rtx', 'lbh2d', 'lbh3d'].includes(settings.mode)) {
+        if (typeof settings.mode === 'string' && ['rtx', 'lbh2d', 'lbh3d'].includes(settings.mode)) {
           await get().setChainSettings(chainId, { upscaleMode: settings.mode as CanvasChainSettings['upscaleMode'] })
         }
         const doc = activeDocument()
@@ -2357,29 +2156,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
 
     optionAvailability: () => {
       const facts = engineFacts()
-      const utilities = [
-        'remove-subtitles', 'remove-watermark', 'restore-archival', 'remove-object', 'outpaint', 'ia2v',
-      ].map((tool) => {
-        const utility = findLtx23Utility(`ltx23.${tool}`)
-        if (!utility) return { tool, label: tool, available: false, missing: ['unknown utility'] }
-        const detection = utility.detect(facts.info, facts.models)
-        return {
-          tool,
-          label: utility.label,
-          available: Boolean(facts.connected && detection.available),
-          missing: [...detection.missingNodes.map((node) => `node ${node}`), ...detection.missingModels],
-          installHint: utility.ui.installHint,
-          // QOL wave (rrxlw2r): the structured form for the fetch deep-link.
-          missingSlots: detection.missingSlots,
-          missingNodes: detection.missingNodes,
-        }
-      })
       const selection = selectionFor('off', '')
-      // The LTX-2.5 GENERAL graph (§5.4 Phase 4 — the workspace greyed out;
-      // the engine survives as this typed-hole op).
-      const ltx25Selection = ltx25SelectionOf()
-      const ltx25MissingNodes = LTX25_NATIVE_REQUIRED_NODES.filter((node) => !facts.info[node])
-      const ltx25ModelsReady = Boolean(ltx25Selection.diffusion && ltx25Selection.textEncoder && ltx25Selection.videoVae && ltx25Selection.audioVae && ltx25Selection.latentUpscaler)
       // The audio engines (§5.4 Phase 4): detection over the shared infer*,
       // with global overrides consulted (euxwdva).
       const music3Selection = music3SelectionOf()
@@ -2387,12 +2164,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       return {
         connected: facts.connected,
         h3Ready: modelReadyFor(selection, 'off'),
-        utilities,
         motionContextReady: MOTION_CONTEXT_NODES.every((node) => Boolean(facts.info[node])),
-        ltx25: {
-          available: Boolean(facts.connected && ltx25ModelsReady && !ltx25MissingNodes.length),
-          missing: [...(ltx25ModelsReady ? [] : ['LTX-2.5 models']), ...ltx25MissingNodes.map((node) => `node ${node}`)],
-        },
         music3: {
           available: Boolean(facts.connected && music3Selection.diffusion && music3Selection.textEncoder && music3Selection.vae),
           missing: [music3Selection.diffusion ? '' : 'Music 3 diffusion model', music3Selection.textEncoder ? '' : 'Music 3 text encoder', music3Selection.vae ? '' : 'Music 3 DAV VAE'].filter(Boolean),
@@ -2401,9 +2173,6 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
           available: Boolean(facts.connected && (aceSelection.base || aceSelection.sft) && aceSelection.vae && aceSelection.textEncoderSmall && aceSelection.textEncoderLarge),
           missing: [(aceSelection.base || aceSelection.sft) ? '' : 'ACE-Step XL model', aceSelection.vae ? '' : 'ACE audio VAE', (aceSelection.textEncoderSmall && aceSelection.textEncoderLarge) ? '' : 'Qwen ACE text encoders'].filter(Boolean),
         },
-        // QOL wave (rrxlw2r): the snapshot the options module intersects
-        // the deep-link mapping against (null until loaded = no targets).
-        fetchCatalog: get().fetchCatalog,
       }
     },
 
@@ -2623,14 +2392,14 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
    *  refusal string). This is what the e2e suite asserts per mode. The
    *  stills intent (34afx79) routes through the H3-1F seam — `imageEngine`
    *  selects the slot. Phase 4: `mediaType: 'audio'` routes through the
-   *  audio cores; `engine: 'ltx25'` through the LTX-2.5 general plan;
-   *  `latentFrom` builds the Motion-Context latent-fork graph. */
+   *  audio cores; `latentFrom` builds the Motion-Context latent-fork
+   *  graph. */
   Object.defineProperty(window, '__canvasSubmitPlan', {
     configurable: true,
     value: (spec: {
       prompt?: string
       mediaType?: 'video' | 'image' | 'audio'
-      engine?: 'h3' | 'ltx25'
+      engine?: 'h3'
       imageEngine?: 'h3-1f' | 'krea2'
       audioEngine?: 'music3' | 'acestep'
       firstFrameOutputId?: string | null
@@ -2668,7 +2437,7 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
             { caption: settings.prompt, lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'audio/plan' },
             { connected: facts.connected, selection: music3SelectionOf() },
           )
-          const graph = buildMusic3Workflow({ caption: settings.prompt, lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'audio/LTX_plan' }, { diffusion: 'TEST-music3.safetensors', textEncoder: 'TEST-music3-te.safetensors', vae: 'TEST-music3-dav.safetensors' })
+          const graph = buildMusic3Workflow({ caption: settings.prompt, lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'audio/MUSIC3_plan' }, { diffusion: 'TEST-music3.safetensors', textEncoder: 'TEST-music3-te.safetensors', vae: 'TEST-music3-dav.safetensors' })
           const nodes = Object.values(graph)
           return {
             mode: 'music3',
@@ -2701,24 +2470,10 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
           },
         }
       }
-      // The LTX-2.5 general engine (§5.4 Phase 4).
-      if (settings.engine === 'ltx25' && settings.mediaType === 'video') {
-        const facts = engineFacts()
-        const request = { mode: 'image' as const, prompt: settings.prompt, width: 1344, height: 768, duration: settings.duration, seed: 1, preset: 'quality' as const, filenamePrefix: 'video/LTX25_plan' }
-        const validation = validateLtx25(request, null, { connected: facts.connected, info: facts.info, selection: ltx25SelectionOf() })
-        const graph = buildLtx25Workflow(request, { diffusion: 'TEST-ltx25.safetensors', textEncoder: 'TEST-gemma.safetensors', videoVae: 'TEST-ltx25-vae.safetensors', audioVae: 'TEST-ltx25-avae.safetensors', latentUpscaler: 'TEST-ltx25-up.safetensors' }, { name: 'plan-first.png' } as never)
-        const nodes = Object.values(graph)
-        return {
-          mode: 'ltx25',
-          validation,
-          graph: {
-            nodeClasses: nodes.map((node) => node.class_type),
-            manualSigmasCount: nodes.filter((node) => node.class_type === 'ManualSigmas').length,
-            saveVideo: nodes.some((node) => node.class_type === 'SaveVideo' || node.class_type === 'SaveAnimatedWEBP'),
-            total: nodes.length,
-          },
-        }
-      }
+      // The LTX-2.5 general engine plan branch was removed with LTX
+      // (Phase 0, 2026-09-20) — H3 and the audio engines remain the plan
+      // seams below.
+
       // The stills intent (34afx79): the seam's plan — the queued engine
       // refuses, image+control reports the Edit-surface handoff (no graph is
       // the honest answer there), and H3-1F maps through the same request the
@@ -2833,64 +2588,6 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
           },
           total: nodes.length,
         },
-      }
-    },
-  })
-
-  /** Engine-free UTILITY-plan probe (Phase 3, §5.4): the typed-hole → graph
-   *  construction seam. Returns the honest availability refusal against the
-   *  live engine (offline → detection refuses) AND the official-template
-   *  graph facts built through the REAL factory with a fully-resolved TEST
-   *  selection — construction never needs an engine. */
-  Object.defineProperty(window, '__canvasUtilityPlan', {
-    configurable: true,
-    value: (tool: string) => {
-      const facts = engineFacts()
-      const isIa2v = tool === 'ia2v'
-      const request = {
-        tool: tool as never,
-        seed: 1,
-        video: isIa2v ? null : { path: '/plan/source.mp4', name: 'source.mp4', kind: 'video' as const },
-        image: isIa2v ? { path: '/plan/portrait.png', name: 'portrait.png', kind: 'image' as const } : null,
-        audio: isIa2v ? { path: '/plan/voice.wav', name: 'voice.wav', kind: 'audio' as const } : null,
-      }
-      const validation = validateLtx23Utility(request, { connected: facts.connected, info: facts.info, models: facts.models })
-      const utility = findLtx23Utility(`ltx23.${tool}`)
-      if (!utility) return { tool, validation, graph: null, refusal: `unknown utility ${tool}` }
-      // Every slot the registry requires, resolved to TEST names — the exact
-      // contract requireSlots enforces, so the factory builds for real.
-      const fakeSelection = Object.fromEntries(utility.modelSlots.map((slot) => [slot, `TEST-${String(slot)}.safetensors`])) as never
-      try {
-        const graph = buildLtx23UtilityGraph({
-          tool: request.tool,
-          seed: 1,
-          filenamePrefix: 'video/LTX23_plan',
-          video: request.video ? { name: 'plan-source.mp4' } : undefined,
-          image: request.image ? { name: 'plan-portrait.png' } : undefined,
-          audio: request.audio ? { name: 'plan-voice.wav' } : undefined,
-        }, fakeSelection)
-        const nodes = Object.values(graph)
-        const audioSourceClass = Object.values(graph)
-          .filter((node) => node.class_type === 'CreateVideo')
-          .map((node) => {
-            if (!Array.isArray(node.inputs.audio)) return null
-            const sourceId = String((node.inputs.audio as [string, number])[0])
-            return graph[sourceId]?.class_type ?? null
-          })
-        return {
-          tool,
-          validation,
-          graph: {
-            nodeClasses: nodes.map((node) => node.class_type),
-            loadVideoCount: nodes.filter((node) => node.class_type === 'LoadVideo').length,
-            manualSigmasCount: nodes.filter((node) => node.class_type === 'ManualSigmas').length,
-            saveVideo: nodes.some((node) => node.class_type === 'SaveVideo'),
-            audioSourceClass,
-            total: nodes.length,
-          },
-        }
-      } catch (error) {
-        return { tool, validation, graph: null, refusal: error instanceof Error ? error.message : String(error) }
       }
     },
   })

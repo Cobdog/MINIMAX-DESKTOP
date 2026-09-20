@@ -295,10 +295,8 @@ const localStorageStub = {
 }
 const generation = loadTs('src/canvas/generation.ts', { localStorage: localStorageStub, window: { dispatchEvent: () => undefined, addEventListener: () => undefined } })
 const options = loadTs('src/canvas/options.ts')
-const fetchDeepLink = loadTs('src/lib/fetchDeepLink.ts')
 const h3Submit = loadTs('src/lib/h3Submit.ts', { localStorage: localStorageStub })
 const ops = loadTs('src/canvas/ops.ts')
-const ltx23Submit = loadTs('src/lib/ltx23UtilitySubmit.ts', { localStorage: localStorageStub })
 
 const media = (path, kind) => ({ path, name: path.split('/').pop(), kind })
 const take = (id, overrides) => ({ id, outputId: 'out-1', jobId: null, artifacts: [], latentPath: null, metrics: null, createdAt: 1, supersededBy: null, evicted: false, contentHash: null, ...overrides })
@@ -401,7 +399,7 @@ test('(m) fork substrates → input refs (§2 outputRef)', () => {
 })
 
 test('(n) typed-hole option menus (§3 filtering + hints)', () => {
-  const ready = { connected: true, h3Ready: true, motionContextReady: true, ltx25: { available: true, missing: [] }, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] }, utilities: [{ tool: 'remove-subtitles', label: 'Remove subtitles', available: true, missing: [] }, { tool: 'ia2v', label: 'Image + audio → video', available: false, missing: ['node LTXICLoRALoaderModelOnly'] }] }
+  const ready = { connected: true, h3Ready: true, motionContextReady: true, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] } }
   const produce = options.endpointOptions('produce', ['image'], ready)
   const produceIds = produce.map((row) => row.id)
   ok(produceIds.includes('produce:i2v'), 'produce(image): i2v offered')
@@ -418,19 +416,10 @@ test('(n) typed-hole option menus (§3 filtering + hints)', () => {
   const produceVideo = options.endpointOptions('produce', ['video'], ready)
   ok(!produceVideo.some((row) => row.id === 'produce:i2v'), 'produce(video): i2v filtered out — image-only route')
   ok(produceVideo.find((row) => row.id === 'produce:fork-frame').available, 'produce(video): frame extraction offered')
-  const utility = produceVideo.find((row) => row.id === 'produce:utility:remove-subtitles')
-  ok(utility && utility.available, 'produce(video): an available LTX-2.3 utility is offered')
-  const missing = produce.find((row) => row.id === 'produce:utility:ia2v')
-  ok(missing && !missing.available && missing.reason.includes('node LTXICLoRALoaderModelOnly'), 'produce: install guidance names the missing node')
-  ok(!produceVideo.some((row) => row.id === 'produce:utility:ia2v'), 'produce(video): the image+audio utility is filtered out')
-
-  const offline = options.endpointOptions('produce', ['image'], { connected: false, h3Ready: false, utilities: [], motionContextReady: true, ltx25: { available: true, missing: [] }, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] } })
+  const offline = options.endpointOptions('produce', ['image'], { connected: false, h3Ready: false, motionContextReady: true, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] } })
   ok(offline.find((row) => row.id === 'produce:i2v').available, 'produce(offline): chain creation still offered — the refusal surfaces at submit')
   ok(offline.find((row) => row.id === 'produce:fork-decoded').available, 'produce(offline): forking still offered — no engine needed')
-  const offlineVideo = options.endpointOptions('produce', ['video'], { connected: false, h3Ready: false, motionContextReady: true, ltx25: { available: true, missing: [] }, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] }, utilities: [{ tool: 'remove-subtitles', label: 'Remove subtitles', available: true, missing: [] }] })
-  ok(!offlineVideo.find((row) => row.id === 'produce:utility:remove-subtitles').available, 'produce(offline): utilities stay gated on the engine')
-  ok(offlineVideo.find((row) => row.id === 'produce:utility:remove-subtitles').reason.includes('offline'), 'produce(offline): the utility reason says the engine is offline')
-  const offlineConsume = options.endpointOptions('consume', ['image'], { connected: false, h3Ready: false, utilities: [], motionContextReady: true, ltx25: { available: true, missing: [] }, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] } })
+  const offlineConsume = options.endpointOptions('consume', ['image'], { connected: false, h3Ready: false, motionContextReady: true, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] } })
   ok(offlineConsume.find((row) => row.id === 'consume:first-frame').available, 'consume(offline): input roles are pure document edits — always available')
 
   const consume = options.endpointOptions('consume', ['image'], ready)
@@ -439,55 +428,10 @@ test('(n) typed-hole option menus (§3 filtering + hints)', () => {
   ok(options.endpointOptions('consume', ['video'], ready).find((row) => row.id === 'consume:reference').available, 'consume(video): reference role accepts any media kind')
 })
 
-// QOL wave (rrxlw2r) — the one-click fetch affordance (nits idg8ui4):
-// missing-deps → catalog mapping + unavailable rows carrying fetch targets.
-test('(n2) fetch deep-link mapping — slots/nodes → catalog entries', () => {
-  const entry = (id, state) => ({ id, name: `name of ${id}`, state, group: 'weights' })
-  const catalog = [
-    entry('ltx23-dev-checkpoint', 'absent'),
-    entry('ltx23-dev-fp8', 'absent'),
-    entry('ltx23-gemma-encoders', 'placed'),
-    entry('ltx23-kijai-vaes', 'absent'),
-    entry('pack:ltxvideo', 'absent'),
-    entry('pack:kjnodes', 'present'),
-    entry('unrelated-entry', 'absent'),
-  ]
-  const targets = fetchDeepLink.fetchTargetsForMissing(
-    { slots: ['checkpoint', 'textEncoder', 'videoVae', 'outpaintLora', 'madeUpSlot'], nodes: ['LTXICLoRALoaderModelOnly', 'GetImageSizeAndCount', 'MiniMaxH3MotionContext'] },
-    catalog,
-  )
-  const ids = targets.map((target) => target.id).join('|')
-  ok(ids === 'ltx23-dev-checkpoint|ltx23-dev-fp8|ltx23-kijai-vaes|pack:ltxvideo', `mapping: slots+nodes resolve to the live catalog, catalog order, alternatives kept (${ids})`)
-  ok(!ids.includes('ltx23-gemma-encoders'), 'mapping: an already-PLACED entry is never offered (fetching it again fixes nothing)')
-  ok(!ids.includes('pack:kjnodes'), 'mapping: an already-PRESENT pack is never offered')
-  ok(!ids.includes('unrelated-entry'), 'mapping: unrelated catalog entries stay out')
-  ok(!ids.includes('ltx23-ic-outpaint'), 'mapping: a slot whose entry id is not in the live catalog degrades to nothing (no dead links)')
-  ok(targets.every((target) => typeof target.name === 'string' && target.name.length > 0), 'mapping: every target carries its display name')
-  eq(fetchDeepLink.fetchTargetsForMissing({ slots: ['checkpoint'], nodes: [] }, null), [], 'mapping: no catalog snapshot → no targets (rows degrade to install guidance)')
-  eq(fetchDeepLink.fetchTargetsForMissing({ slots: [], nodes: [] }, catalog), [], 'mapping: nothing missing → no targets')
-
-  // Rows: an unavailable utility with catalog coverage carries fetchTargets;
-  // the manual wording surfaces where no catalog entry can satisfy the gap.
-  const facts = {
-    connected: true, h3Ready: true, motionContextReady: false,
-    ltx25: { available: false, missing: ['LTX-2.5 models'] },
-    music3: { available: true, missing: [] }, acestep: { available: true, missing: [] },
-    fetchCatalog: catalog,
-    utilities: [{ tool: 'remove-subtitles', label: 'Remove subtitles', available: false, missing: ['ltx-2.3-22b-dev checkpoint'], missingSlots: ['checkpoint'], missingNodes: [] }],
-  }
-  const rows = options.endpointOptions('produce', ['video'], facts)
-  const utilityRow = rows.find((row) => row.id === 'produce:utility:remove-subtitles')
-  ok(utilityRow && !utilityRow.available, 'rows: the unavailable utility stays disabled')
-  ok(utilityRow.fetchTargets && utilityRow.fetchTargets.map((target) => target.id).join('|') === 'ltx23-dev-checkpoint|ltx23-dev-fp8', 'rows: the unavailable utility carries its fetch targets (consent still separate)')
-  const latentsRow = rows.find((row) => row.id === 'produce:fork-latents')
-  ok(latentsRow && !latentsRow.available && /install the pack manually/.test(latentsRow.reason), 'rows: Motion-Context (no catalog entry) keeps the honest manual wording')
-  ok(!latentsRow.fetchTargets, 'rows: manual cases carry no fetch targets')
-  const ltx25Row = options.endpointOptions('produce', ['image'], facts).find((row) => row.id === 'produce:ltx25')
-  ok(ltx25Row && !ltx25Row.available && /install them manually/.test(ltx25Row.reason), 'rows: LTX-2.5 (no catalog entries) says install manually')
-  ok(!ltx25Row.fetchTargets, 'rows: LTX-2.5 carries no fetch targets')
-  const covered = options.endpointOptions('produce', ['video'], { ...facts, utilities: [{ ...facts.utilities[0], available: true, missingSlots: [], missingNodes: [], missing: [] }] })
-  ok(!covered.find((row) => row.id === 'produce:utility:remove-subtitles').fetchTargets, 'rows: an AVAILABLE utility needs no fetch affordance')
-})
+// (n2) the fetch deep-link mapping test was removed with LTX (Phase 0,
+// 2026-09-20): fetchDeepLink.ts existed to map LTX-2.3 model slots to
+// catalog entries. The Motion-Context row's honest manual wording is
+// covered in (n).
 
 test('(o) reference binding allocation (the promptComposer model, per chain)', () => {
   const character = { id: 'char-1', name: 'Ada', description: '', wardrobe: '', voiceNotes: '', visualStyle: '', referencePrompt: '', createdAt: 1, updatedAt: 1, referenceMode: 'set', referenceImages: [media('/lib/ada-1.png', 'image'), media('/lib/ada-2.png', 'image')], wardrobeIds: ['ward-1'], accessoryIds: [], hairStyleIds: [], identityTemplate: 'custom', hairPreset: '', skinTone: '' }
@@ -651,8 +595,8 @@ test('(r) op-stack model — kinds, tolerant settings, live-preview composition'
   eq(ops.opSummary('adjust', { brightness: 1, contrast: 1, saturation: 1 }), 'neutral', 'summary: a neutral adjust reads neutral')
 })
 
-test('(s) typed-hole surface — the pose rig row (§5.2) + utility rows', () => {
-  const facts = { connected: false, h3Ready: false, utilities: [], motionContextReady: true, ltx25: { available: true, missing: [] }, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] } }
+test('(s) typed-hole surface — the pose rig row (§5.2)', () => {
+  const facts = { connected: false, h3Ready: false, motionContextReady: true, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] } }
   const consume = options.endpointOptions('consume', [], facts)
   const poseRig = consume.find((row) => row.id === 'consume:pose-rig')
   ok(poseRig && poseRig.available, 'options: the pose rig row is offered on the consume side (engine-free)')
@@ -662,30 +606,9 @@ test('(s) typed-hole surface — the pose rig row (§5.2) + utility rows', () =>
   ok(!produce.some((row) => row.id === 'consume:pose-rig'), 'options: the pose rig row never leaks to the produce side')
 })
 
-test('(t) the LTX-2.3 utility validation ladder + official-template plan', () => {
-  const video = { path: '/out/scene.mp4', name: 'scene.mp4', kind: 'video' }
-  const offlineFacts = { connected: false, info: {}, models: [] }
-  eq(ltx23Submit.validateLtx23Utility({ tool: 'remove-subtitles', video }, offlineFacts), 'Start ComfyUI and verify the server connection in Settings.', 'ladder: offline refuses with the honest message')
-  eq(ltx23Submit.validateLtx23Utility({ tool: 'remove-subtitles', video: null }, { connected: true, info: {}, models: [] }).length > 0, true, 'ladder: no detection offline → the refusal names what is missing')
-  const noVideo = ltx23Submit.validateLtx23Utility({ tool: 'outpaint', video: null }, { connected: true, info: { LTXAddVideoICLoRAGuide: 1, ImagePadKJ: 1, Float32ColorCorrect: 1 }, models: [] })
-  // The registry gate leads the input gate: with no models resolved the
-  // refusal names the missing stack (install guidance), not the input.
-  ok(String(noVideo).includes('not ready'), 'ladder: unresolved weights refuse with install guidance before the input check')
-  const ia2v = ltx23Submit.validateLtx23Utility({ tool: 'ia2v', video: null, image: null, audio: null }, { connected: true, info: {}, models: [] })
-  ok(String(ia2v).includes('both an input image and an audio file') || String(ia2v).includes('not ready'), 'ladder: ia2v names its two inputs or its missing stack')
-
-  // The plan builds the REAL official template with a resolved TEST selection
-  // — construction is pure (the typed-hole seam the e2e probe asserts too).
-  const plan = ltx23Submit.planLtx23UtilityGraph(
-    { tool: 'remove-subtitles', video },
-    { info: {}, models: [] },
-    { video: 'scene.mp4' },
-  )
-  // Offline facts cannot resolve the models, so the plan refuses honestly —
-  // the factory half is exercised through the fully-resolved path below.
-  eq(plan.graph, null, 'plan: unresolved models refuse the plan (honest)')
-  ok(plan.refusal.includes('not ready'), 'plan: the refusal names the missing stack')
-})
+// (t) the LTX-2.3 utility ladder test was removed with LTX (Phase 0,
+// 2026-09-20 — lib/ltx23UtilitySubmit.ts deleted; git history is the
+// archive).
 
 // The H3 image stack the T=1 family resolves (34afx79) — shared by the (u)
 // ladder block and the (u-run) submission leg below.
@@ -780,8 +703,7 @@ test('(u) H3-1F as the image op — the two-slot seam, the T=1 request, the Edit
 
 // ---------------------------------------------------------------------------
 // Phase 4 — latent continuation (the Motion-Context engine seam), the global
-// asset bindings, the LocationStudio H3-Ref2V migration, and the extracted
-// engine submit cores' ladders.
+// asset bindings, and the extracted engine submit cores' ladders.
 // ---------------------------------------------------------------------------
 test('(t) latent continuation — chain options + Motion-Context graph shape', () => {
   const mc = take('take-mc', { metrics: { kind: 'video', motionContext: { folder: 'h3_context/src/clip', clipIndex: 3 } }, latentPath: 'h3_context/src/clip_00004.safetensors' })
@@ -839,34 +761,11 @@ test('(u) global asset bindings (§2 asset, F3 — consent-gated)', () => {
   eq(withDead.length, 0, 'assets: dropped/tombstoned assets are skipped honestly — never a hole in <Picture N>')
 })
 
-test('(v) LocationStudio migration — H3 Ref2V walkthrough (the LTX-only consumer leaves LTX)', () => {
-  const walkthrough = loadTs('src/lib/locationWalkthrough.ts')
-  const project = { name: 'The Mill', description: 'a stone mill by the creek', atmosphere: 'cold morning fog', timeOfDay: 'dawn', continuityAnchors: 'the broken wheel', visualStyle: 'documentary', environmentMode: 'built' }
-  const nature = { ...project, environmentMode: 'nature' }
-  const prompt = walkthrough.locationWalkthroughPrompt(project)
-  ok(prompt.includes('walkthrough reference video of The Mill'), 'walkthrough: the built-mode direction names the location')
-  ok(prompt.includes('cold morning fog') && prompt.includes('the broken wheel'), 'walkthrough: the location profile rides the prompt')
-  ok(walkthrough.locationWalkthroughPrompt(nature).includes('natural-landscape survey'), 'walkthrough: nature mode enforces the structure-exclusion survey')
-  ok(walkthrough.locationWalkthroughPrompt(project, { cameraLanguage: 'Orbit slowly.' }).includes('Camera language: Orbit slowly.'), 'walkthrough: the guided camera preset passes verbatim')
-
-  const request = walkthrough.locationWalkthroughRequest(project, media('/refs/mill-master.png', 'image'), 42, { duration: 20 })
-  eq(request.mode, 'reference', 'walkthrough request: the approved image rides Ref2V (<Picture 1>)')
-  eq(request.referenceImages.length, 1, 'walkthrough request: exactly one reference picture')
-  eq(request.duration, 15, 'walkthrough request: duration clamps to the H3 15s ceiling (LTX allowed 20)')
-  eq(request.seed, 42, 'walkthrough request: the seed is the caller\'s reproducibility seed')
-  const facts = { connected: false, modelReady: false, selection: {}, h3PreviewOverrideNode: undefined }
-  const h3 = loadTs('src/lib/h3Submit.ts')
-  eq(h3.validateH3Render(request, facts), 'Start ComfyUI and verify the server connection in Settings.', 'walkthrough request: validates through the shared H3 ladder (offline refusal)')
-})
+// (v) the LocationStudio walkthrough test was removed with the Studios
+// (Phase 0, 2026-09-20 — lib/locationWalkthrough.ts deleted; git history is
+// the archive).
 
 test('(w) the extracted engine cores — ladders stay verbatim (one code path, both surfaces)', () => {
-  const ltx25 = loadTs('src/lib/ltx25Submit.ts')
-  const option = { mode: 'image', prompt: 'a wide survey', width: 1344, height: 768, duration: 10, seed: 1, preset: 'quality', filenamePrefix: 'video/plan' }
-  eq(ltx25.validateLtx25(option, null, { connected: false, info: {}, selection: {} }), 'Start ComfyUI and verify the server connection in Settings.', 'ltx25 ladder: offline refuses first')
-  eq(ltx25.validateLtx25({ ...option, prompt: '' }, null, { connected: true, info: {}, selection: {} }), 'Add an LTX prompt before generating.', 'ltx25 ladder: empty prompt refuses')
-  eq(ltx25.validateLtx25(option, null, { connected: true, info: {}, selection: {} }), 'Choose a first frame for LTX image-to-video.', 'ltx25 ladder: i2v without a frame refuses')
-  ok(ltx25.LTX25_NATIVE_REQUIRED_NODES.includes('ManualSigmas'), 'ltx25: the node contract ships with the core (the workspace\'s gate, shared)')
-
   const music3 = loadTs('src/lib/music3Submit.ts')
   eq(music3.validateMusic3({ caption: '', lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'a' }, { connected: true, selection: {} }), 'Write at least one caption section before generating.', 'music3 ladder: empty caption refuses')
   eq(music3.validateMusic3({ caption: 'warm jazz', lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'a' }, { connected: true, selection: { diffusion: '', textEncoder: '', vae: '' } }), 'The Music 3 diffusion model, text encoder, and DAV VAE are required. Install them, then rescan in Settings.', 'music3 ladder: missing models refuse with the install hint')
@@ -877,25 +776,9 @@ test('(w) the extracted engine cores — ladders stay verbatim (one code path, b
   eq(ace.validateAceStep(aceOption, { connected: true, info: {}, selection: { base: '', sft: '', vae: '', textEncoderSmall: '', textEncoderLarge: '' } }), 'The ACE-Step BASE model, audio VAE, and both Qwen ACE text encoders are required.', 'acestep ladder: missing models refuse naming the variant')
 })
 
-// ---------------------------------------------------------------------------
-// Phase 5 (task 7mcp11b) — the deletion wave's extracted cores: the character
-// contact-sheet submission (ContactSheet-REQUIRED — the LTX survey fallback
-// died with the shell). The MoviePlanner latent scene-chain core died with
-// its only caller in Phase 5b (MoviePlanner retired — the scene-chain
-// successor is the store's submitPlanEpisode over canvas chains; its ladder
-// reuses submitH3Render's, asserted in (p)). Async (the submission is an
-// async function); the suite's tail summary moved inside the runner.
-// ---------------------------------------------------------------------------
-test('(x) Phase-5 extracted cores — contact sheet (ContactSheet-only)', async () => {
-  const contact = loadTs('src/lib/contactSheetSubmit.ts')
-  const contactFacts = (overrides = {}) => ({ settings: { comfyUrl: 'http://x' }, connected: true, models: [], selection: { ref2va: 'r', textEncoder: 't', videoVae: 'v' }, clientId: 'c', ...overrides })
-  const project = { id: 'char-1', name: 'Mira', baseImage: media('/refs/mira.png', 'image') }
-  const noop = () => {}
-  const io = { notify: noop, setJobs: () => { throw new Error('no job should be created by a refused submission') } }
-  eq(await contact.submitCharacterContactSheet(project, contactFacts({ connected: false }), io), 'Start ComfyUI and verify the server connection in Settings.', 'contact sheet: offline refuses first (the shared ladder)')
-  eq(await contact.submitCharacterContactSheet({ id: 'char-2', name: 'Mira' }, contactFacts(), io), 'Approve a character identity image first.', 'contact sheet: no approved identity image refuses')
-  eq(await contact.submitCharacterContactSheet(project, contactFacts(), io), 'Install the ComfyUI-H3-ContactSheet nodes and the five-view turnaround LoRA (minimax_h3_five_view_*), then refresh the engine.', 'contact sheet: the ContactSheet nodes + turnaround LoRA are REQUIRED (Phase-4 cleanup applied — the LTX survey fallback is gone)')
-})
+// (x) the contact-sheet core test was removed with the Studios (Phase 0,
+// 2026-09-20 — lib/contactSheetSubmit.ts deleted; git history is the
+// archive).
 
 // ---------------------------------------------------------------------------
 // (l–r) The structured H3 prompt editor's pure layer (fh94g76): the concat

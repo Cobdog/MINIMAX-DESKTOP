@@ -17,7 +17,7 @@
  * timeline / audio pass with the streaming preview + suggestion flow), and
  * vision captioning of bound reference pictures — plus the global asset
  * store in the reference bindings (§2 asset, consent-gated first bind) and
- * the engine readouts for the audio + LTX-2.5 engine-ops (§5.4).
+ * the engine readouts for the audio engine-ops (§5.4).
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Rnd } from 'react-rnd'
@@ -456,7 +456,7 @@ export function PropertiesPanel() {
   // pick > auto (inference).
   const modelFamilyId: ModelFamilyId = draft.mediaType === 'audio'
     ? (draft.audio.engine === 'acestep' ? 'acestep' : 'music3')
-    : draft.engine === 'ltx25' ? 'ltx25' : 'minimax'
+    : 'minimax'
   const modelFamily = modelFamilyInfo(modelFamilyId)!
   // Legacy chains may still store a single 'checkpoint' pick — the migrated
   // view keeps it VISIBLE on its new lanes (the resolution seam applies the
@@ -690,7 +690,7 @@ export function PropertiesPanel() {
       </section>
 
       <section className="canvas-properties-section" data-canvas-section="engine">
-        <label>Engine — {draft.mediaType === 'audio' ? (draft.audio.engine === 'music3' ? 'MiniMax Music 3' : 'ACE-Step XL 1.5') : draft.mediaType === 'image' ? (IMAGE_ENGINES.find((engine) => engine.id === draft.imageEngine) ?? IMAGE_ENGINES[0]).label : draft.engine === 'ltx25' ? 'LTX-2.5 general' : 'MiniMax H3'}</label>
+        <label>Engine — {draft.mediaType === 'audio' ? (draft.audio.engine === 'music3' ? 'MiniMax Music 3' : 'ACE-Step XL 1.5') : draft.mediaType === 'image' ? (IMAGE_ENGINES.find((engine) => engine.id === draft.imageEngine) ?? IMAGE_ENGINES[0]).label : 'MiniMax H3'}</label>
         {draft.mediaType === 'image' && (
           <p className="canvas-properties-note" data-canvas-image-engine-note>
             {IMAGE_ENGINES.find((engine) => engine.id === draft.imageEngine)?.note ?? IMAGE_ENGINES[0].note} The image intent renders one H3-1F still per take; image-with-reference hands off to the workbench's Edit surface.
@@ -702,11 +702,6 @@ export function PropertiesPanel() {
               edit in the audio dock…
             </button>
           </div>
-        )}
-        {draft.engine === 'ltx25' && draft.mediaType === 'video' && (
-          <p className="canvas-properties-note" data-canvas-engine-note>
-            This chain renders through the LTX-2.5 general engine (the workspace retired — the engine lives on as this op). Tier selects quality vs turbo; the first frame rides the LTX image conditioning.
-          </p>
         )}
         <div className="canvas-properties-row">
           <span>tier</span>

@@ -31,12 +31,13 @@ function config(name, options, models = MODELS, uploads = noUploads) {
 
 const matrix = []
 
-// 1. The engine×duration×turbo×ltx surface (mirrors the pre-registry suite).
+// 1. The engine×duration×turbo×upscale surface (mirrors the pre-registry
+//    suite; the LTX arm became RTX when LTX was removed — Phase 0, 2026-09-20).
 for (const mode of ['text', 'image', 'frames', 'reference']) {
   for (const duration of [2, 5, 15]) {
-    matrix.push(config(`ltx-${mode}-${duration}s`, {
+    matrix.push(config(`upscale-${mode}-${duration}s`, {
       mode, duration, turbo: '8',
-      upscale: { type: 'ltx', model: 'ltx-upscale', vae: 'ltx-vae' },
+      upscale: { type: 'rtx', model: 'rtx-upscale.pth' },
     }, MODELS, mode === 'image' || mode === 'frames'
       ? { first: image('first.png'), last: mode === 'frames' ? image('last.png') : undefined, images: [], videos: [], audios: [] }
       : mode === 'reference'

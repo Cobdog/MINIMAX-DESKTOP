@@ -45,6 +45,8 @@ export type H3RenderRequest = {
   sigmaShift?: { video: number; audio: number }
   upscale:
     | { mode: UpscaleMode; model: string; vae: string; lbhModel: string; missingNodes: readonly string[] }
+  /* `model`/`vae` fed the removed LTX 2× mode (Phase 0, 2026-09-20) and are
+   * kept as always-empty fields so callers stay shape-stable. */
   /** The chosen AI-upscale model (RTX path) — the old surface reads it from
    *  the workspace store, the canvas from chain settings. */
   rtxModel: string
@@ -68,8 +70,7 @@ export type H3RenderRequest = {
   movieLink?: GenerationJob['movieLink']
   characterProjectId?: string
   /** The location a render belongs to (the Phase-4 walkthrough migration —
-   *  jobRecords' automation display keys on it, exactly like the LTX path
-   *  did). */
+   *  jobRecords' automation display keys on it). */
   locationProjectId?: string
 }
 
@@ -113,12 +114,6 @@ export type H3SubmitIo = {
  */
 export function validateH3Render(request: H3RenderRequest, facts: Pick<H3SubmitFacts, 'connected' | 'modelReady' | 'selection' | 'h3PreviewOverrideNode' | 'modelOverrides'>): string | null {
   const { upscale } = request
-  if (upscale.mode === 'ltx' && (!upscale.model || !upscale.vae)) {
-    return 'LTX 2.5 spatial upscaler and video VAE must be available in ComfyUI.'
-  }
-  if (upscale.mode === 'ltx' && upscale.missingNodes.length) {
-    return `Update ComfyUI before using LTX 2× upscale. Missing nodes: ${upscale.missingNodes.join(', ')}.`
-  }
   if (upscale.mode === 'rtx' && !request.rtxModel) {
     return 'Choose an AI upscale model installed in ComfyUI first.'
   }
@@ -231,7 +226,7 @@ export async function submitH3Render(
       loraStrength: request.loraStrength,
       sampler: request.experimentalSampling ? request.sampler : 'res_multistep',
       scheduler: request.experimentalSampling ? request.scheduler : 'simple',
-      upscale: upscale.mode === 'ltx' ? { type: 'ltx', model: upscale.model, vae: upscale.vae } : upscale.mode === 'rtx' ? { type: 'rtx', model: request.rtxModel } : upscale.mode === 'lbh2d' || upscale.mode === 'lbh3d' ? { type: upscale.mode, model: upscale.lbhModel } : undefined,
+      upscale: upscale.mode === 'rtx' ? { type: 'rtx', model: request.rtxModel } : upscale.mode === 'lbh2d' || upscale.mode === 'lbh3d' ? { type: upscale.mode, model: upscale.lbhModel } : undefined,
       refImageSize: request.refImageSize,
       sigmaShift: request.sigmaShift,
       previewOverride: request.livePreview.enabled && request.livePreview.mode === 'h3-override' && facts.h3PreviewOverrideNode ? { frames: 50, fps: 12, nodeType: facts.h3PreviewOverrideNode, vaeName: facts.selection.previewVae, jpegQuality: 85 } : undefined,
@@ -252,7 +247,7 @@ export async function submitH3Render(
       loraStrength: request.loraStrength,
       sampler: request.experimentalSampling ? request.sampler : 'res_multistep', scheduler: request.experimentalSampling ? request.scheduler : 'simple',
       refImageSize: request.refImageSize, sigmaShift: request.sigmaShift,
-      upscale: upscale.mode === 'off' ? undefined : upscale.mode === 'ltx' ? { type: 'ltx', model: upscale.model, vae: upscale.vae } : { type: 'rtx', model: request.rtxModel },
+      upscale: upscale.mode === 'off' ? undefined : { type: 'rtx', model: request.rtxModel },
       referenceImages: request.referenceImages.map((item) => item.path), referenceVideos: request.referenceVideos.map((item) => item.path), referenceAudios: request.referenceAudios.map((item) => item.path),
       timelineGuides: guides.length ? guides.map((guide) => ({ frameIndex: frameIndexForSeconds(guide.seconds) })) : undefined,
       filenamePrefix,

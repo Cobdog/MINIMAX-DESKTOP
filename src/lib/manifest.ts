@@ -13,7 +13,7 @@ export type RenderManifest = {
   manifestVersion: 1
   graphFamily: string
   createdAt: number
-  provider: 'minimax' | 'ltx25' | 'acestep'
+  provider: 'minimax' | 'acestep'
   mode: string
   prompt: string
   seed: number

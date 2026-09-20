@@ -18,16 +18,14 @@ export type LivePreview = {
 /**
  * Thin adapter over the realtime fabric (wave 1). Public interface unchanged:
  * `useLivePreview(comfyUrl, enabled, onProgress) -> { clientId, preview,
- * connected }` — CreateView/Ltx25Workspace keep their props. Internally the
- * transport is gone: ONE fabric connection to the app's own server carries
- * the job channel (normalized ComfyUI lifecycle) and binary preview frames.
+ * connected }`. Internally the transport is gone: ONE fabric connection to
+ * the app's own server carries the job channel (normalized ComfyUI
+ * lifecycle) and binary preview frames.
  *
  * `preview` is METADATA plus a legacy-compat object-URL feed, coalesced to
- * one update per animation frame (newest frame only) because Ltx25Workspace
- * still renders `<img src={preview.url}>`. CreateView paints preview frames
- * through onPreviewFrame directly — bytes that never enter React state (the
- * Wave-2a transient discipline); the compat feed here retires when LTX
- * rewires to the same painter.
+ * one update per animation frame (newest frame only). Canvas-side painters
+ * paint preview frames through onPreviewFrame directly — bytes that never
+ * enter React state (the Wave-2a transient discipline).
  */
 export function useLivePreview(url: string | undefined, enabled: boolean, onProgress: (id: string, update: LiveProgress) => void) {
   const [clientId] = useState(createId)

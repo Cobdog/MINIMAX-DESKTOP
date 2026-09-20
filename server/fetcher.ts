@@ -526,7 +526,8 @@ export class FetchManager {
     const settings = await this.options.loadSettings()
     const target = resolveNodePackTarget(settings.engine).target
     const state = await this.readState()
-    return Promise.all(FETCH_CATALOG.map(async (entry) => this.statusFor(entry, settings, target, state)))
+    // Catalog HISTORY rows (removedAt, Phase 0 2026-09-20) never surface.
+    return Promise.all(FETCH_CATALOG.filter((entry) => !entry.removedAt).map(async (entry) => this.statusFor(entry, settings, target, state)))
   }
 
   private async statusFor(entry: FetchCatalogEntry, settings: AppSettings, target: NodePackTarget | null, state: FetchStateFile): Promise<FetchEntryStatus> {
@@ -602,6 +603,7 @@ export class FetchManager {
   async start(entryId: string, startOptions: { destinationDir?: string } = {}): Promise<{ started: boolean; id: string; reason?: string }> {
     const entry = findFetchEntry(entryId)
     if (!entry) return { started: false, id: entryId, reason: 'Unknown fetchable item id.' }
+    if (entry.removedAt) return { started: false, id: entry.id, reason: 'This item was removed from the catalog — its feature is retired.' }
     if (this.inFlight.has(entry.id)) return { started: false, id: entry.id, reason: 'A fetch for this item is already running.' }
     const settings = await this.options.loadSettings()
     const consent = this.consentState(entry, settings)

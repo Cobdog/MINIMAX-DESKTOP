@@ -12,7 +12,8 @@
  *   10-19    conditioning, sampler core, decode, publish
  *   20-28    i2v/FLF loaders, Motion-Context chain, trimmed publish
  *   30/40/50 reference image/video/audio loaders (index-suffixed)
- *   60-70    timeline-guide loaders (60x/65x) + LTX latent 2× post-process
+ *   60x/65x  timeline-guide loaders (index-suffixed prefixes; the former
+ *            LTX latent 2× block at 60-70 was removed 2026-09-20, Phase 0)
  *   71-72    standard preview frame publish
  *   80-84    RTX/CUDA pixel-space 2× post-process
  *   90-99    LBH latent 2D/3D two-stage hires-fix post-process
@@ -51,17 +52,6 @@ export const H3 = {
   refImageLoaderPrefix: '30',
   refVideoLoaderPrefix: '40',
   refAudioLoaderPrefix: '50',
-  ltxPadTail: '60',
-  ltxPadRepeat: '61',
-  ltxPadBatch: '62',
-  ltxVae: '63',
-  ltxEncode: '64',
-  ltxUpscaleModel: '65',
-  ltxLatentUpscale: '66',
-  ltxDecode: '67',
-  ltxTrim: '68',
-  ltxCreateVideo: '69',
-  ltxSaveVideo: '70',
   rtxModel: '80',
   rtxUpscale: '81',
   rtxScale: '82',

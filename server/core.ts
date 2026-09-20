@@ -53,9 +53,6 @@ export type StudioServerPaths = {
 
 export type StudioServer = ReturnType<typeof createStudioServer>
 
-const ltxUpscaleRequiredNodes = ['VAEEncodeTiled', 'LatentUpscaleModelLoader', 'LTXVLatentUpsampler', 'VAEDecodeTiled', 'ImageFromBatch', 'RepeatImageBatch', 'ImageBatch']
-const ltxNativeRequiredNodes = ['LTXVConditioning', 'LTXVEmptyLatentAudio', 'EmptyLTXVLatentVideo', 'LTXVDualCFGGuider', 'LTXVSeparateAVLatent', 'LTXVConcatAVLatent', 'LTXVLatentUpsampler', 'LTXVAudioVAEDecode', 'ManualSigmas', 'VAEDecodeTiled', 'CLIPTextEncode', 'KSamplerSelect', 'SamplerCustomAdvanced']
-
 const modelKinds: ModelKind[] = ['diffusion_models', 'text_encoders', 'vae', 'loras', 'vae_approx', 'clip_vision']
 const modelExtensions = new Set(['.safetensors', '.pt', '.pth', '.gguf', '.onnx'])
 const mediaExtensions = new Set(['.mp4', '.webm', '.mov', '.mkv'])
@@ -429,7 +426,6 @@ async function ensureSelfSignedCertificate(directory: string, lanIp: string): Pr
 
 export function createStudioServer(paths: StudioServerPaths) {
   let lanToken = ''
-  let mobileCharacterLibrary: unknown[] = []
   let lanServer: Server | null = null
   let lanStatus: LanStatus = { running: false }
   // Origin-guard allowlist mirror (security hardening 1): refreshed whenever
@@ -470,7 +466,10 @@ export function createStudioServer(paths: StudioServerPaths) {
     if (!studioRepo || documentsImportEnsured) return
     documentsImportEnsured = true
     try {
-      const report = studioRepo.documents.importLegacy({ characters: mobileCharacterLibrary })
+      // (The mobile companion's synced character library fed this arm; the
+      // mobile route was removed 2026-09-20, Phase 0 — characters import
+      // stays available through the explicit import/legacy route.)
+      const report = studioRepo.documents.importLegacy({ characters: [] })
       if (!report.alreadyImported) logEvent({ kind: 'documents.legacy-import', ...report.counts })
     } catch (error) {
       documentsImportEnsured = false
@@ -556,6 +555,15 @@ export function createStudioServer(paths: StudioServerPaths) {
 
   function defaultSettings(): AppSettings {
     const root = join(paths.documentsDirectory, 'ComfyUI', 'models')
+    // Registry-only defaults (maintainer directive 2987ef3e, 2026-09-20):
+    // the six scanner paths default to EMPTY — no local-scan-first root
+    // pointing at an app-internal dir nobody populated. The engine's own
+    // registry (object_info enums + /models) is the model source; modelRoot
+    // below remains the FETCH-DESTINATION root (where consented fetches
+    // land so the engine can see them), not a scan default. The internal
+    // scan/merge machinery stays for the remediation build to simplify as
+    // one piece (the vitest suites still boot scratch homes with local
+    // roots); the hand-typed path ROWS are gone from the Settings surface.
     // App-relative io defaults (task 9om4bi9, dated decision 2026-09-19):
     // the APP FOLDER ROOT is the studio home — the directory holding
     // settings.json (MINIMAX_STUDIO_HOME, default ~/.minimax-studio). It is
@@ -575,7 +583,7 @@ export function createStudioServer(paths: StudioServerPaths) {
       ollamaUrl: 'http://127.0.0.1:11434',
       ollamaModel: 'qwen3:latest',
       modelRoot: root,
-      paths: Object.fromEntries(modelKinds.map((kind) => [kind, join(root, kind)])) as Record<ModelKind, string>,
+      paths: Object.fromEntries(modelKinds.map((kind) => [kind, ''])) as Record<ModelKind, string>,
       outputDirectory: join(home, 'data', 'output'),
       inputDirectory: join(home, 'data', 'input'),
       ffmpegPath: existsSync('C:\\FFMPEG\\bin\\ffmpeg.exe') ? 'C:\\FFMPEG\\bin\\ffmpeg.exe' : 'ffmpeg',
@@ -804,7 +812,7 @@ export function createStudioServer(paths: StudioServerPaths) {
       // ref2va — fill-if-unset, never silently dropped. The VAE pick split
       // by decoder class (task epdvxd4, 2026-09-20): a legacy 'vae' pick
       // migrates onto videoVae where the old slot meant the video decoder
-      // (the H3/LTX video families) and onto audioVae where the family's
+      // (the H3 video families) and onto audioVae where the family's
       // one decoder is audio-class (music3/acestep) — same
       // meaning-preserving rule (mirrors
       // migrateLegacyModelOverrideSlots in src/lib/modelOverrides.ts,
@@ -813,7 +821,7 @@ export function createStudioServer(paths: StudioServerPaths) {
       modelOverrides: (() => {
         const slots = ['checkpoint', 'fl2va', 'ref2va', 'merged', 'textEncoder', 'vae', 'videoVae', 'audioVae', 'imageVae'] as const
         const laneFamilies = new Set(['minimax', 'h3image'])
-        const videoVaeFamilies = new Set(['minimax', 'h3image', 'ltx25', 'ltx23'])
+        const videoVaeFamilies = new Set(['minimax', 'h3image'])
         const audioVaeFamilies = new Set(['music3', 'acestep'])
         const rawOverrides = (raw.modelOverrides && typeof raw.modelOverrides === 'object' ? raw.modelOverrides : {}) as Record<string, unknown>
         const normalized: Record<string, Partial<Record<(typeof slots)[number], string>>> = {}
@@ -1531,10 +1539,6 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
             await comfyFetch(settings.comfyUrl, '/system_stats')
             const info = await comfyFetch(settings.comfyUrl, '/object_info').catch((error: unknown) => { logFailure('bootstrap/object-info', error, undefined, 'debug'); return {} }) as Record<string, unknown>
             const upscalers = comfyChoices(info, 'UpscaleModelLoader', 'model_name')
-            const latentUpscalers = comfyChoices(info, 'LatentUpscaleModelLoader', 'model_name')
-            const vaes = comfyChoices(info, 'VAELoader', 'vae_name')
-            const ltxUpscaleMissing = ltxUpscaleRequiredNodes.filter((node) => !info[node])
-            const ltxNativeMissing = ltxNativeRequiredNodes.filter((node) => !info[node])
             // Instance-sourced inventory (task 9om4bi9): the engine's own
             // listing merges with the local-root scan — union by (kind,
             // name), each row tagged with its source. With zero local roots
@@ -1547,16 +1551,10 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
             // full filesystem paths are a recon leak to anyone who can reach the API.
             // The h3Form tag (when detected) rides along for LoRA×base guidance.
             const models = merged.map((model) => ({ name: model.name, kind: model.kind, bytes: model.bytes, ...(model.h3Form ? { h3Form: model.h3Form } : {}), ...(model.source ? { source: model.source } : {}) }))
-            return sendJson(response, 200, { connected: true, latencyMs: Date.now() - started, models, upscalers, ltxModel: latentUpscalers.find((name) => /ltx-2\.5.*spatial.*x2/i.test(name)) ?? '', ltxVae: vaes.find((name) => /ltx-2\.5.*video.*vae/i.test(name)) ?? '', ltxUpscaleReady: ltxUpscaleMissing.length === 0, ltxUpscaleMissing, ltxNativeReady: ltxNativeMissing.length === 0, ltxNativeMissing, ollamaModels, ollamaModel: settings.ollamaModel })
+            return sendJson(response, 200, { connected: true, latencyMs: Date.now() - started, models, upscalers, ollamaModels, ollamaModel: settings.ollamaModel })
           } catch (error) {
             return sendJson(response, 200, { connected: false, latencyMs: Date.now() - started, models: groups.flat().map((model) => ({ name: model.name, kind: model.kind, bytes: model.bytes, ...(model.h3Form ? { h3Form: model.h3Form } : {}) })), error: error instanceof Error ? error.message : String(error) })
           }
-        }
-        if (url.pathname === '/api/lan/characters' && request.method === 'GET') return sendJson(response, 200, { characters: mobileCharacterLibrary })
-        if (url.pathname === '/api/lan/characters' && request.method === 'POST') {
-          const body = await readJson(request, 36_000_000)
-          mobileCharacterLibrary = Array.isArray(body.characters) ? body.characters : []
-          return sendJson(response, 200, { synced: mobileCharacterLibrary.length })
         }
         // ---- Studio storage (wave 1): jobs / projects / workspace / FTS ---
         // SQLite-backed persistence for the renderer's durable state. All
@@ -1647,7 +1645,10 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
         if (url.pathname.startsWith('/api/lan/documents')) {
           if (!studioRepo) return sendJson(response, 503, { error: 'The studio database is unavailable; canvas documents cannot be accessed.' })
           const documents = studioRepo.documents
-          ensureDocumentsImported()
+          // The EXPLICIT import route runs the import itself (with its own
+          // characters payload) — pre-running the auto-import would set the
+          // marker first and turn the explicit non-force call into a no-op.
+          if (url.pathname !== '/api/lan/documents/import/legacy') ensureDocumentsImported()
           // Unknown-newer versions are a LOUD refusal (400), never a silent
           // downgrade; plan write conflicts answer 409 with the current
           // document (the clean rebase surface); everything else propagates
@@ -2234,7 +2235,7 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
           // jobs/workspace/prompts are marker-gated, characters upsert by id).
           if (url.pathname === '/api/lan/documents/import/legacy' && request.method === 'POST') {
             const body = await readJson(request, 36_000_000)
-            const characters = Array.isArray(body.characters) ? body.characters : mobileCharacterLibrary
+            const characters = Array.isArray(body.characters) ? body.characters : []
             try {
               return sendJson(response, 200, { import: documents.importLegacy({ characters, force: true }) })
             } catch (error) {
@@ -3554,7 +3555,6 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
      *  boot reconcile. External mode never fires its side effects. */
     runtime,
     status: () => lanStatus,
-    syncCharacters: (characters: unknown[]) => { mobileCharacterLibrary = Array.isArray(characters) ? characters : []; return { synced: mobileCharacterLibrary.length } },
     rotateToken: async () => {
       lanToken = randomUUID().replace(/-/g, '')
       await saveLanToken(lanToken)
