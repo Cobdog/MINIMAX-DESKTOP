@@ -198,6 +198,8 @@ export function FetchBrowser({ settings, setSettings, onAfterFetch, onAdoptCheck
     <StudioDialog
       open={consentFor !== null}
       onClose={() => setConsentFor(null)}
+      backdropClassName="fetch-consent-backdrop"
+      centerClassName="fetch-consent-center"
       popupClassName="clip-modal fetch-consent-modal"
       labelledBy="fetch-consent-title"
       describedBy="fetch-consent-summary"
