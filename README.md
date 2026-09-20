@@ -69,16 +69,15 @@ Runs the entire verification chain in canonical order, each suite in its own
 process with wall-clock timing, known-benign output filtered (pino logs,
 chunk-size advisories, pnpm bookkeeping — the tally is printed so nothing
 disappears silently), and a final summary table. Non-zero exit on any
-failure; a failed `build` skips only its dependents (smoke/e2e/vision).
+failure; a failed `build` skips only its dependents (unit/smoke/e2e/vision).
 
-Order: `typecheck` → `lint` → `license:audit` → `test` → `test:registry` →
-`test:h3img` → `test:storage` → `test:documents` → `test:realtime` →
-`test:filmstrip` → `test:llm` → `test:engine` → `test:runtime` →
-`test:fetcher` → `test:instance` → `test:lora-form` → `test:poserig` →
-`test:camera` → `test:canvas` → `test:benchmarks` → `test:datasets` →
-`build` → `test:launcher` → `smoke:server` →
-e2e (Playwright) → vision-capture (Playwright). `pnpm test:all` is the same
-chain without the harness niceties. `license:audit` classifies every direct
+Order: `typecheck` → `lint` → `license:audit` → `build` → `unit` (ONE vitest
+run — every suite in `tests/` as a parallel worker process; the serial
+per-script chain this replaced is task z7ogmig, 2026-09-20) →
+`smoke:server` → e2e (Playwright) → vision-capture (Playwright). `pnpm
+test:all` is the same chain without the harness niceties; `pnpm test:watch`
+(vitest watch) is the TDD loop; per-suite aliases (`pnpm test:registry`, …)
+run one suite for iteration. `license:audit` classifies every direct
 dependency's SPDX against the AGPLv3 allowlist and enforces the
 never-vendor-what-we-can't-ship registry invariant (see
 [docs/LICENSES.md](docs/LICENSES.md)). `test:fetcher` covers the local-first

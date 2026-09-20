@@ -1,8 +1,16 @@
-# Testing — the gate, the vision loop, CI
+# Testing — the gate, the vitest unit phase, the vision loop, CI
 
 > Trigger: read this BEFORE running, extending, or debugging the test suites
 > or CI. The user-facing summary lives in the README's Testing section; this
 > is the operator's view with the gotchas.
+>
+> **Vitest migration (task z7ogmig, 2026-09-20):** the unit suites moved from
+> 19 serially-chained `scripts/test-*.cjs` scripts to `tests/*.test.js` under
+> ONE vitest invocation with parallel worker processes. Assertion bodies
+> carried over verbatim (node:assert + the suites' own ok()/check() helpers —
+> deliberately NOT rewritten to expect(); zero-drift by construction). The
+> VM harness (scripts/lib/ts-vm.cjs) is kept as the environment for the pure
+> client modules. Playwright e2e + vision are untouched.
 
 ## TMPDIR first
 
@@ -13,13 +21,28 @@ tmpfs is full — this is the machine's recurring failure mode. Run with
 to. CI runners have fresh /tmp; the flake is local-only and never caused by
 your change (verify by looking at what the failing write was).
 
+## The dev loop — vitest watch (the point of the migration)
+
+```bash
+pnpm test:watch        # vitest watch: re-runs the files you touch, instantly
+pnpm test:registry     # one suite (alias = vitest filter) while iterating
+pnpm test              # all unit suites, one vitest run, parallel workers
+```
+
+Tests within a file run SEQUENTIALLY (a suite's sections share state by
+design); files run in PARALLEL fork processes (process-per-file — same
+isolation the old per-script node processes had, and process.env mutations
+like runtime's NODE_TLS_REJECT_UNAUTHORIZED stay contained). `vitest.config.ts`
+pins the shape: forks pool, maxForks 8 (the shared dev box is polite; CI
+runners use their natural core count), 20-minute test ceiling.
+
 ## Local-only e2e flakes from shared-home accumulation (learned 2026-09-18, fh94g76)
 
 The e2e datasets tests are NOT idempotent against their own accumulation in
 the shared `test-home`: every run of the caption-editor test seeds another
 `e2e-clip` layer set on the same master, and once an OLD 4:3-aspect layer
-becomes the list's `.first()`, the 4:3 chip is already-active (disabled) and
-the click times out. Reproduces on `main`; passes on CI (fresh homes). If
+becomes the list's `.first()`, the 4:3 chip is already-active (disabled)
+and the click times out. Reproduces on `main`; passes on CI (fresh homes). If
 `datasets.spec.ts` fails locally on an aspect-chip click, clean the
 synthetic fixtures through the app's own API — boot a scratch server on
 `test-home`, `POST /api/lan/datasets/sources/trash` for each `e2e-clip` /
@@ -35,61 +58,66 @@ TMPDIR=/home/agent/tmp-gpu pnpm gate
 ```
 
 Runs the entire verification chain in canonical order — `typecheck` →
-`lint` → `license:audit` → unit suites (`test`, `test:registry`,
-`test:h3img`, `test:storage`, `test:documents`, `test:realtime`,
-`test:filmstrip`, `test:llm`, `test:engine`, `test:runtime`, `test:fetcher`,
-`test:instance`, `test:lora-form`, `test:poserig`, `test:camera`,
-`test:canvas`, `test:benchmarks`, `test:datasets`) → `build` →
-`test:launcher` → `smoke:server` → e2e → vision-capture — each in its own
-process, wall-clock timed,
-known-benign output filtered (the filter tally prints so nothing disappears
-silently), one summary table, non-zero exit on any failure. A failed
-`build` skips only its dependents (smoke/e2e/vision). `pnpm test:all` is the
-same chain without the harness niceties. Individual suites run directly
-(`pnpm test:registry`, …) while iterating.
+`lint` → `license:audit` → `build` → `unit` (ONE `vitest run` covering every
+`tests/*.test.js` suite: workflows, registry, h3img, storage, documents,
+realtime, filmstrip, llm, engine-process, runtime, fetcher, instance,
+lora-form, poserig, camera, canvas, benchmarks, launcher, datasets) →
+`smoke:server` → e2e → vision-capture — each gate step in its own process,
+wall-clock timed, known-benign output filtered (the filter tally prints so
+nothing disappears silently), one summary table, non-zero exit on any
+failure. A failed `build` skips only its dependents (unit/smoke/e2e/vision).
 
+- **Build runs BEFORE the unit phase** (dated z7ogmig, 2026-09-20): the
+  old order ran the dist-server-booting suites against whatever dist was
+  lying around — a stale-dist false-green hazard. A fresh build now always
+  precedes them. The launcher suite (which needs dist for its real-boot
+  leg) rides inside the unit phase for the same reason.
 - `test:registry` proves the optimization-registry inertness contract
   against golden fixtures — regenerate deliberately
-  (`node scripts/test-registry.cjs --update-golden`) and review the diff;
-  the fixture IS the contract.
-- `test:h3img` (k9vu6t0) proves the H3 image workbench families: golden
-  snapshots (`node scripts/test-h3img.cjs --update-golden`), the
-  research-pinned recipe table, the Mamad8 never-in-video-graphs factory
-  guard (with the failing-without-it proof), the first-party scorer on
-  crafted frames, the burst-fuse never-worse fallback + tone-lock DSP, VRAM
-  staging plans, and the session model's packet-take projections.
+  (`pnpm test:registry:update` = `MINIMAX_UPDATE_GOLDEN=1 vitest run
+  registry`; on PowerShell set the env var first) and review the diff; the
+  fixture IS the contract. Same pattern for `pnpm test:h3img:update`.
+  (Vitest swallows forwarded CLI flags, so the env VAR is the mechanism —
+  the `--` passthrough does not reach process.argv.)
 - `test:lora-form` needs `python3` + `numpy` (skips loudly without python,
   fails loudly with python but no numpy).
 - `test:datasets` (sv14rt0) boots the built server on a scratch home and
   drives the dataset manager with SYNTHETIC ffmpeg testsrc clips (never
-  committed media); it needs ffmpeg on PATH and exercises ingest/health/
-  layers/captions/bake/gates/exports/curation/FTS/scale end to end, plus
-  pure-model units (grid math, floors, budget goldens vs the envelope
-  table, trigger validation, aspect mirror/hard-stops) loaded straight from
-  dist-server.
-- `test:camera` needs no Python (goldens are committed).
-- `test:instance` (9om4bi9) covers the external-instance integration:
-  instance inventory parsing against crafted object_info + /models payloads,
-  the external custom-nodes install target (path construction + foreign
-  refusal), live pack detection, the app-relative io defaults through the
-  real settings pipeline, and the routes against a local fake engine. The
+  committed media); it needs ffmpeg on PATH.
+- `test:instance` (9om4bi9) covers the external-instance integration: the
   route sections self-skip without the web build (the Windows-leg NOTE
-  pattern).
+  pattern — runtime/fetcher share it).
 - `test:launcher` (ukyxwfa) drives the real `start.sh` under `sh` with
-  hermetic scratch configs (MINIMAX_START_CONFIG) and probed 7000–7099
-  ports: seeding, --set/--print round-trips, flag parsing, env precedence,
-  busy-port/missing-deps honesty, the prompts-configure save path (engine
-  URL write + token regen), dev-vs-prod plan selection, and a real
-  production boot + SIGTERM teardown. Runs after `build` in the gate so the
-  boot leg always has dist; NOTE-skips on win32 (POSIX sh only).
+  hermetic scratch configs and probed 7000–7099 ports; NOTE-skips on win32.
+  Every section pins a probed MINIMAX_VITE_PORT (dated z7ogmig fix —
+  main's sections (b)/(c)/(e)/(f) probed the default 5173, which a foreign
+  listener squats on this box; never assume 4178/5173 are free).
 
-## VM-harness pitfalls (scripts/test-*.cjs)
+## Writing / porting unit suites (tests/*.test.js)
 
-The harness transpiles TS to an ES3-ish target: `matchAll` loops and
-iterator spreads (`[...map.entries()]`, `[...new Set()]`) silently no-op —
-use regex `exec` loops and `Array.from`. Cross-realm arrays fail
-`deepEqual`; compare `.join('|')` strings. Relative-import modules need the
-two-file loader pattern (see the promptLibraryStorage test block).
+- ESM header with a `createRequire` shim so ported `require()` lines and
+  `__dirname`/REPO anchors keep working; see any existing port
+  (`tests/filmstrip.test.js` is the smallest server-suite example,
+  `tests/h3img.test.js` the VM-harness example).
+- **Ports, not fixtures**: every server-booting suite draws ports from
+  `tests/lib/ports.cjs` (`makePortAllocator('<suite>')`) — DISJOINT
+  per-suite ranges, each allocation probe-verified (something on this box
+  squats on 4321) and never reused within a process. The old random
+  ranges OVERLAPPED (storage∩filmstrip∩realtime∩documents, llm∩datasets),
+  which was only safe under the serial gate. Register a new suite's range
+  in that file; never assume 4178/5173/4199 are free (shared box).
+- Homes are `mkdtemp` per file (TMPDIR discipline above); suites must never
+  share scratch state across files.
+- Skip patterns are conditional test registration (`const maybe = cond ?
+  test : test.skip`) with the NOTE console.log preserved — never
+  `process.exit`.
+- The VM-harness pitfalls still apply to anything loaded through
+  `scripts/lib/ts-vm.cjs`: the harness transpiles TS to an ES3-ish target —
+  `matchAll` loops and iterator spreads (`[...map.entries()]`,
+  `[...new Set()]`) silently no-op — use regex `exec` loops and
+  `Array.from`. Cross-realm arrays fail `deepEqual`; compare `.join('|')`
+  strings. Relative-import modules need the two-file loader pattern (see
+  the promptLibraryStorage test block in tests/workflows.test.js).
 
 ## Vision-in-the-loop QA (three phases; no test code calls any model)
 
@@ -126,33 +154,38 @@ fallback).
 
 ## CI (two legs)
 
-- **Ubuntu** (`.github/workflows/ci.yml`): typecheck, lint, license:audit,
-  unit suites, build, smoke, e2e, vision-capture on every push/PR.
+- **Ubuntu** (`.github/workflows/ci.yml`): python+numpy + ffmpeg installs →
+  typecheck, lint, license:audit, build, `pnpm test` (the ONE vitest unit
+  run — every suite, including the ones the pre-migration ci.yml omitted),
+  smoke, e2e, vision-capture on every push/PR.
 - **Windows Engine** (`.github/workflows/engine-windows.yml`): server build
-  + the OS-sensitive suites (engine/runtime/fetcher — link placement and tar
+  + the OS-sensitive suites as vitest filters (`pnpm test:engine`,
+  `test:runtime`, `test:fetcher`, `test:instance`, `test:lora-form`,
+  `test:benchmarks` with BENCH_PYTHON=python — link placement and tar
   extraction; transport mocked).
 - Verify BOTH legs before calling landed work done (run links go into the
   Flux closure comment). The e2e error guard filters engine-connectivity
   noise (`environmental` in e2e/app.spec.ts) — CI has no engine. To simulate
   CI locally: point test-home settings' comfyUrl at a dead port, restore
   after.
-- **Benchmark harness (LANDED — cp96zdm/cq67hpj; note updated 2026-09-19,
-  conformance audit u7rxi2e, per this paragraph's own instruction)**: the
-  committed-suite + candidate-CLI harness ("the snake-oil detector") lives at
-  `benchmarks/` + `scripts/test-benchmarks.cjs` and runs in the gate chain
-  (`test:benchmarks`). It enforces the eol-pin invariant on byte-compared
-  artifacts (no i/crlf in the index; LEADERBOARD.md pinned `eol=lf`).
+- **Benchmark harness (LANDED — cp96zdm/cq67hpj)**: the committed-suite +
+  candidate-CLI harness ("the snake-oil detector") lives at `benchmarks/` +
+  `tests/benchmarks.test.js` and runs in the gate chain. It enforces the
+  eol-pin invariant on byte-compared artifacts (no i/crlf in the index;
+  LEADERBOARD.md pinned `eol=lf`).
 
 ## Scratch ports
 
-Something on this box squats on port 4321 — always probe-and-verify free
-ports (freePort pattern in test-storage/test-realtime).
+Something on this box squats on port 4321 AND (2026-09-20, z7ogmig) on 5173 —
+always draw suite ports through `tests/lib/ports.cjs` (probe-verified,
+per-suite disjoint ranges) and never assume 4178/5173/4199 are free: other
+agents and the maintainer's own studio live on this box.
 
 ## Windows-leg failure classes (learned 2026-09-16 — read before writing file-generating or file-importing code)
 
 The Windows CI leg catches what a Linux checkout structurally cannot. Two classes so far; both have standing fixes — use them proactively:
 
-1. **ESM `import()` of absolute paths** — Windows rejects `import('D:\...\x.mjs')` style absolute specifiers. Fix: `pathToFileURL(p).href` (committed pattern in benchmarks/run.mjs). Applies to ANY dynamic import built from `path.join`/`__dirname`.
-2. **CRLF vs byte-identity** — git autocrlf converts text files on Windows checkout; any test asserting byte-identity of a *committed generated artifact* (leaderboards, goldens, fixtures) will pass on Linux and fail on Windows. Fix: pin the file in `.gitattributes` (`eol=lf`) when you commit generated artifacts; the repo currently has zero CRLF-exposed files — keep it that way. the invariant is the eol PIN on byte-compared artifacts plus a clean index — asserted in test:benchmarks as: no i/crlf in the index, and LEADERBOARD.md explicitly pinned eol=lf. (Working-tree w/crlf on ordinary text=auto files is the NORMAL benign Windows autocrlf condition — git normalizes back on commit — and is deliberately not checked.)
+1. **ESM `import()` of absolute paths** — Windows rejects `import('D:\...\x.mjs')` style absolute specifiers. Fix: `pathToFileURL(p).href` (committed pattern in benchmarks/run.mjs and tests/benchmarks.test.js). Applies to ANY dynamic import built from `path.join`/`__dirname`.
+2. **CRLF vs byte-identity** — git autocrlf converts text files on Windows checkout; any test asserting byte-identity of a *committed generated artifact* (leaderboards, goldens, fixtures) will pass on Linux and fail on Windows. Fix: pin the file in `.gitattributes` (`eol=lf`) when you commit generated artifacts; the repo currently has zero CRLF-exposed files — keep it that way. the invariant is the eol PIN on byte-compared artifacts plus a clean index — asserted in the benchmarks suite as: no i/crlf in the index, and LEADERBOARD.md explicitly pinned eol=lf. (Working-tree w/crlf on ordinary text=auto files is the NORMAL benign Windows autocrlf condition — git normalizes back on commit — and is deliberately not checked.)
 
 Rule of thumb: if your code builds a filesystem path dynamically and either imports it or byte-compares it, assume the Windows leg will treat it differently — fix preemptively, don't wait for the red.
