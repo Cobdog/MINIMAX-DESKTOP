@@ -166,13 +166,13 @@ const overrideScan = [
 const inferredH3 = () => inferSelections(overrideScan, 'off')
 
 // 1. The override is CONSULTED: a scanned file no pattern matches becomes the
-//    resolved pick — both H3 checkpoint slots (the one user-facing
-//    checkpoint; only the mode's slot loads).
+//    resolved pick — both H3 checkpoint lanes (the legacy single-checkpoint
+//    pick migrates onto fl2va+ref2va; only the mode's slot loads).
 assert.equal(inferredH3().fl2va, 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'sanity: inference finds the official file, never the merge')
 const mergeResolved = resolveModels('minimax', inferredH3(), overrideScan, { checkpoint: mergeName })
 assert.equal(mergeResolved.selection.fl2va, mergeName, 'the community merge becomes FL2VA via override')
 assert.equal(mergeResolved.selection.ref2va, mergeName, 'the community merge becomes Ref2VA via override')
-assert.equal(mergeResolved.resolution.applied.checkpoint, mergeName)
+assert.equal(mergeResolved.resolution.applied.fl2va, mergeName, 'the legacy pick applies on the migrated lanes')
 assert.equal(mergeResolved.resolution.refusals.length, 0)
 assert.equal(mergeResolved.resolution.warnings.length, 0)
 
@@ -201,14 +201,16 @@ assert.equal(layered.selection.textEncoder, 'music3_text_encoder_bf16.safetensor
 
 // 4. WRONG-KIND REFUSALS — the pick exists in the scan but the family
 //    contract rejects it; the submission refuses, the selection stays auto.
+//    (A legacy checkpoint pick refuses on its MIGRATED lane — the kind and
+//    form checks govern every checkpoint-class slot.)
 const wrongKind = resolveModelOverrides('minimax', overrideScan, { checkpoint: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors' })
-assert.equal(wrongKind.slots.checkpoint.state, 'refused')
+assert.equal(wrongKind.slots.fl2va.state, 'refused')
 assert.ok(wrongKind.refusals[0].reason.includes('text encoder'), 'reason names the kind mismatch: ' + wrongKind.refusals[0].reason)
-assert.equal(wrongKind.applied.checkpoint, undefined)
+assert.equal(wrongKind.applied.fl2va, undefined)
 const wrongKindResolved = resolveModels('minimax', inferredH3(), overrideScan, { checkpoint: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors' })
 assert.equal(wrongKindResolved.selection.fl2va, inferredH3().fl2va, 'a refused pick never reaches the selection')
 const noForm = resolveModelOverrides('minimax', overrideScan, { checkpoint: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors' })
-assert.equal(noForm.slots.checkpoint.state, 'refused')
+assert.equal(noForm.slots.fl2va.state, 'refused')
 assert.ok(noForm.refusals[0].reason.includes('form'), 'reason names the missing H3 form: ' + noForm.refusals[0].reason)
 const t1Vae = resolveModelOverrides('minimax', overrideScan, { vae: 'minimax_h3_t1_image_vae_step1597.safetensors' })
 assert.equal(t1Vae.slots.vae.state, 'refused', 'the T=1 image VAE refuses for the video family')
@@ -219,18 +221,18 @@ assert.equal(unexposedSlot.slots.checkpoint.state, 'refused', 'a slot the family
 // 5. MISSING-FILE DEGRADATION: the file vanished since it was set — auto with
 //    a visible warning, not a refusal.
 const degraded = resolveModelOverrides('minimax', overrideScan, { checkpoint: 'deleted_merge_v2.safetensors' })
-assert.equal(degraded.slots.checkpoint.state, 'degraded')
-assert.equal(degraded.warnings.length, 1)
+assert.equal(degraded.slots.fl2va.state, 'degraded')
+assert.equal(degraded.warnings.length, 2, 'both migrated lanes warn')
 assert.ok(degraded.warnings[0].includes('no longer in the scan'), 'warning states the fallback: ' + degraded.warnings[0])
-assert.equal(degraded.applied.checkpoint, undefined)
+assert.equal(degraded.applied.fl2va, undefined)
 const degradedResolved = resolveModels('minimax', inferredH3(), overrideScan, { checkpoint: 'deleted_merge_v2.safetensors' })
 assert.equal(degradedResolved.selection.fl2va, inferredH3().fl2va, 'degradation falls back to inference')
 
 // 6. CASE CANONICALIZATION: the pick resolves to the SCANNED file's real
 //    name, so a case-drifted pick never outlives its file.
 const caseDrift = resolveModelOverrides('minimax', overrideScan, { checkpoint: 'tenstrip_10eros-max_BETA5_int8.safetensors' })
-assert.equal(caseDrift.slots.checkpoint.state, 'applied')
-assert.equal(caseDrift.slots.checkpoint.file, mergeName)
+assert.equal(caseDrift.slots.fl2va.state, 'applied')
+assert.equal(caseDrift.slots.fl2va.file, mergeName)
 
 // 7. PER-FAMILY FIELD MAPPING (one seam, every family).
 const music3Module = load('src/lib/music3Workflow.ts')
@@ -274,11 +276,122 @@ assert.equal(overrideReport.rows[1].override, false, 'the text-encoder row is un
 // 10. The single-pick outcome helper agrees with resolution (one validation
 //     path for the pickers and the ladder) and the auto label helper reports
 //     what auto resolves to.
-assert.equal(overridePickOutcome('minimax', 'checkpoint', mergeName, overrideScan).state, 'applied')
-assert.equal(overridePickOutcome('minimax', 'checkpoint', 'gone.safetensors', overrideScan).state, 'degraded')
-assert.equal(inferredOverrideSlotFile('minimax', 'checkpoint', overrideScan), 'minimax_h3_fl2va_pruned_int8_convrot.safetensors')
+assert.equal(overridePickOutcome('minimax', 'fl2va', mergeName, overrideScan).state, 'applied')
+assert.equal(overridePickOutcome('minimax', 'fl2va', 'gone.safetensors', overrideScan).state, 'degraded')
+assert.equal(inferredOverrideSlotFile('minimax', 'fl2va', overrideScan), 'minimax_h3_fl2va_pruned_int8_convrot.safetensors')
 assert.equal(inferredOverrideSlotFile('minimax', 'textEncoder', overrideScan), 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors')
 assert.equal(MODEL_FAMILIES.length, 6)
+
+// ---------------------------------------------------------------------------
+// Model overrides, take 2 (task rq0lsax, 2026-09-20) — the per-lane
+// checkpoint split (fl2va / ref2va / merged) and the instance-source form
+// arm. Failing-without-it: on the pre-split layer the fl2va/ref2va/merged
+// slot keys did not exist (the family refused them as unexposed and the
+// picks never reached a selection field), instance rows without h3Form were
+// REFUSED with the misleading "no detectable form" message, and no merged
+// lane existed anywhere.
+// ---------------------------------------------------------------------------
+const instanceScan = overrideScan.concat([
+  // The maintainer's case (rq0lsax): engine-relative names listed by the
+  // connected instance — bytes 0 and structurally NO h3Form (the instance
+  // API lists filenames only; see server/instanceInventory.ts).
+  { kind: 'diffusion_models', name: 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors', bytes: 0, source: 'instance' },
+  { kind: 'diffusion_models', name: 'H3/ssd/minimax_h3_ref2va_pruned_int8_convrot.safetensors', bytes: 0, source: 'instance' },
+  // A 'both' row whose local half never yielded a form tag (unreadable or
+  // exotic header) — same missing-evidence class as the instance arm.
+  { kind: 'diffusion_models', name: 'H3/ssd/community_merged_full.safetensors', bytes: 0, source: 'both' },
+])
+
+// 11. THE INSTANCE-SOURCE FORM ARM (AC-1): a checkpoint pick whose row is
+//     instance-listed and carries no readable header APPLIES with a warning
+//     — missing evidence, not a wrong file. The local arm keeps the refusal.
+const instanceFl2va = resolveModelOverrides('minimax', instanceScan, { fl2va: 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors' })
+assert.equal(instanceFl2va.slots.fl2va.state, 'applied', 'an instance-listed pick with no header read APPLIES (rq0lsax)')
+assert.ok(instanceFl2va.slots.fl2va.warning && instanceFl2va.slots.fl2va.warning.includes('instance-listed'), 'the applied outcome carries the unverifiable-form warning')
+assert.equal(instanceFl2va.refusals.length, 0, 'never a refusal for missing evidence')
+assert.ok(instanceFl2va.warnings.some((warning) => warning.includes('fails loudly')), 'the warning names the engine as the final arbiter')
+assert.equal(instanceFl2va.applied.fl2va, 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors')
+const instanceBoth = resolveModelOverrides('minimax', instanceScan, { merged: 'H3/ssd/community_merged_full.safetensors' })
+assert.equal(instanceBoth.slots.merged.state, 'applied', 'a both-sourced row without a form tag applies with the warning too')
+assert.ok(instanceBoth.slots.merged.warning && instanceBoth.slots.merged.warning.includes('instance-listed'))
+const localNoForm = resolveModelOverrides('minimax', overrideScan, { fl2va: 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors' })
+assert.equal(localNoForm.slots.fl2va.state, 'refused', 'a LOCAL row the header read cleared as not-H3-shaped still refuses')
+assert.ok(localNoForm.refusals[0].reason.includes('form'), 'the local refusal still names the form: ' + localNoForm.refusals[0].reason)
+// The maintainer's exact report shape: the legacy single-checkpoint pick of
+// an instance-listed file resolves (migrates onto both lanes) instead of the
+// old false refusal.
+const maintainerCase = resolveModels('minimax', inferSelections(instanceScan, 'off'), instanceScan, { checkpoint: 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors' })
+assert.equal(maintainerCase.selection.fl2va, 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'the legacy pick of the instance file reaches the FL2VA lane')
+assert.equal(maintainerCase.resolution.refusals.length, 0, 'the H3/ssd refusal is gone')
+
+// 12. PER-MODE RESOLUTION (AC-2): each lane pick owns ITS lane; the other
+//     lane stays on inference — the split is real, not a rename.
+const fl2vaLane = resolveModels('minimax', inferredH3(), overrideScan, { fl2va: mergeName })
+assert.equal(fl2vaLane.selection.fl2va, mergeName, 'the fl2va pick owns the FL2VA lane')
+assert.equal(fl2vaLane.selection.ref2va, inferredH3().ref2va, 'the Ref2VA lane stays on inference under an fl2va-only pick')
+assert.equal(fl2vaLane.selection.merged, undefined, 'no merged field unless the merged pick applies')
+const ref2vaLane = resolveModels('minimax', inferredH3(), overrideScan, { ref2va: mergeName })
+assert.equal(ref2vaLane.selection.ref2va, mergeName, 'the ref2va pick owns the Ref2VA lane')
+assert.equal(ref2vaLane.selection.fl2va, inferredH3().fl2va, 'the FL2VA lane stays on inference under a ref2va-only pick')
+for (const [mode, expected] of [['text', mergeName], ['reference', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors']]) {
+  const graph = buildMiniMaxWorkflow({ mode, width: 352, height: 608, prompt: 'lane probe', duration: 5, seed: 7, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', filenamePrefix: 'test', refImageSize: 'match', ...(mode === 'reference' ? { referenceImages: ['ref.png'] } : {}) }, fl2vaLane.selection, mode === 'reference' ? { images: [{ name: 'ref.png' }], videos: [], audios: [] } : { images: [], videos: [], audios: [] })
+  assert.equal(graph['1'].inputs.unet_name, expected, `${mode} mode loads its OWN lane's resolution (the fl2va pick never leaks into the reference graph)`)
+}
+for (const [mode, expected] of [['text', 'minimax_h3_fl2va_pruned_int8_convrot.safetensors'], ['reference', mergeName]]) {
+  const graph = buildMiniMaxWorkflow({ mode, width: 352, height: 608, prompt: 'lane probe', duration: 5, seed: 7, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', filenamePrefix: 'test', refImageSize: 'match', ...(mode === 'reference' ? { referenceImages: ['ref.png'] } : {}) }, ref2vaLane.selection, mode === 'reference' ? { images: [{ name: 'ref.png' }], videos: [], audios: [] } : { images: [], videos: [], audios: [] })
+  assert.equal(graph['1'].inputs.unet_name, expected, `${mode} mode loads its OWN lane's resolution (the ref2va pick never leaks into the text graph)`)
+}
+
+// 13. THE MERGED LANE (AC-2): a merged pick is ONE checkpoint for both lanes
+//     — it fills fl2va, ref2va AND merged, so both render modes load it and
+//     the readiness gates see a complete stack with zero extra plumbing.
+const mergedResolved = resolveModels('minimax', inferredH3(), overrideScan, { merged: mergeName })
+assert.equal(mergedResolved.selection.merged, mergeName)
+assert.equal(mergedResolved.selection.fl2va, mergeName, 'the merged pick fills the FL2VA lane')
+assert.equal(mergedResolved.selection.ref2va, mergeName, 'the merged pick fills the Ref2VA lane')
+assert.equal(mergedResolved.resolution.applied.merged, mergeName)
+assert.equal(mergedResolved.resolution.warnings.length, 0, 'a lone merged pick warns about nothing')
+for (const mode of ['text', 'reference']) {
+  const graph = buildMiniMaxWorkflow({ mode, width: 352, height: 608, prompt: 'merged probe', duration: 5, seed: 7, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', filenamePrefix: 'test', refImageSize: 'match', ...(mode === 'reference' ? { referenceImages: ['ref.png'] } : {}) }, mergedResolved.selection, mode === 'reference' ? { images: [{ name: 'ref.png' }], videos: [], audios: [] } : { images: [], videos: [], audios: [] })
+  assert.equal(graph['1'].inputs.unet_name, mergeName, `${mode} mode loads the merged checkpoint`)
+}
+const mergedManifest = manifestModule.buildRenderManifest({ mode: 'text', prompt: 'p', width: 352, height: 608, duration: 5, seed: 7, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', refImageSize: 'match', filenamePrefix: 't', referenceImages: [], referenceVideos: [], referenceAudios: [] }, mergedResolved.selection, overrideScan, 'http://engine', buildMiniMaxWorkflow({ mode: 'text', width: 352, height: 608, prompt: 'p', duration: 5, seed: 7, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', filenamePrefix: 't', referenceImages: [], referenceVideos: [], referenceAudios: [] }, mergedResolved.selection, { images: [], videos: [], audios: [] }))
+assert.equal(mergedManifest.models.diffusion.name, mergeName, 'the manifest carries the merged checkpoint')
+// Simultaneously-set lane picks are SUPERSEDED, loudly — never a silent drop.
+const superseded = resolveModelOverrides('minimax', overrideScan, { merged: mergeName, fl2va: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors' })
+assert.ok(superseded.warnings.some((warning) => warning.includes('superseded')), 'a lane pick under a merged pick gets the superseded warning')
+assert.equal(superseded.refusals.length, 0)
+const supersededSelection = resolveModels('minimax', inferredH3(), overrideScan, { merged: mergeName, fl2va: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors' }).selection
+assert.equal(supersededSelection.fl2va, mergeName, 'the merged pick wins its lane when both are set')
+
+// 14. LEGACY MIGRATION (AC-5): the pre-split single-checkpoint pick drives
+//     BOTH lanes exactly as it did before the split (dated decision
+//     2026-09-20: fl2va+ref2va, behavior-preserving — fl2va-only would have
+//     silently re-inferred the reference lane); fill-if-unset lets a new
+//     lane pick win its own lane over the legacy value.
+const migrated = overridesModule.migrateLegacyModelOverrideSlots('minimax', { checkpoint: mergeName })
+assert.equal(migrated.fl2va, mergeName, 'the legacy pick lands on the FL2VA lane')
+assert.equal(migrated.ref2va, mergeName, 'the legacy pick lands on the Ref2VA lane too — behavior preserved')
+assert.equal('checkpoint' in migrated, false, 'the legacy key is consumed, never re-refused as an unexposed slot')
+const migratedPartial = overridesModule.migrateLegacyModelOverrideSlots('minimax', { checkpoint: mergeName, fl2va: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors' })
+assert.equal(migratedPartial.fl2va, 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'an explicit new-lane pick wins its lane over the legacy value')
+assert.equal(migratedPartial.ref2va, mergeName, 'the unset lane inherits the legacy pick')
+assert.equal('checkpoint' in overridesModule.migrateLegacyModelOverrideSlots('ltx25', { checkpoint: 'x.safetensors' }), true, 'non-H3 families keep the generic checkpoint slot untouched')
+const legacyResolution = resolveModelOverrides('minimax', overrideScan, { checkpoint: mergeName })
+assert.equal(legacyResolution.slots.fl2va.state, 'applied', 'the resolution seam migrates a legacy pick at consult time')
+assert.equal(legacyResolution.slots.ref2va.state, 'applied')
+assert.equal(legacyResolution.refusals.length, 0, 'the consumed legacy key never trips the unexposed-slot refusal')
+
+// 15. The per-lane slots ride the layering and pickers like the old one did.
+const laneLayered = mergeModelOverrides({ fl2va: 'chain-lane.safetensors' }, { fl2va: 'global-lane.safetensors', ref2va: 'global-ref.safetensors', merged: 'global-merge.safetensors' })
+assert.equal(laneLayered.fl2va, 'chain-lane.safetensors', 'chain beats global per lane')
+assert.equal(laneLayered.ref2va, 'global-ref.safetensors')
+assert.equal(laneLayered.merged, 'global-merge.safetensors')
+assert.equal(overridePickOutcome('minimax', 'fl2va', mergeName, overrideScan).state, 'applied')
+assert.equal(overridePickOutcome('minimax', 'ref2va', 'gone.safetensors', overrideScan).state, 'degraded')
+assert.equal(inferredOverrideSlotFile('minimax', 'fl2va', overrideScan), 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'the fl2va auto label shows the FL2VA inference')
+assert.equal(inferredOverrideSlotFile('minimax', 'ref2va', overrideScan), 'minimax_h3_ref2va_pruned_int8_convrot.safetensors', 'the ref2va auto label shows the Ref2VA inference')
+assert.equal(inferredOverrideSlotFile('minimax', 'merged', overrideScan), '', 'the merged slot never infers — community merges are name-invisible by design')
 
 
 // LTX-2.3 utility inference (task 068xwy3): a DIFFERENT generation from the
@@ -1233,7 +1346,7 @@ function runComposerTests() {
 
 runComposerTests()
 runKernelTests().then(() => {
-  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction (incl. structural execution-error capture: node id/class + sanitized reason + taxonomy label), quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the segmented-inference prompt discipline (temporal-exclusivity guidance constant, timeline-only scoping, single-shot contexts untouched), the H3 no-dialogue emission (ambience bed, silent score field, retained negation, OFF-state inertness), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference), ContactSheet character sheets (topology, LoRA inference, size clamps, views-first attribution), graph-family versioning + looseness presets, the pure error sanitizer (prompt-text redaction bar, comma-clause redaction, technical-message preservation, stack-path extraction, length cap, fallback constant), the failure taxonomy (ordered human-cause buckets over sanitized reasons), and the diagnostic report (canary-proof blob by construction, version shape allow-list, model-scan counts only, failure histogram by bucket, deterministic output, sanitizer self-test verdict), and the model-override layer (community-merge override consulted across both H3 checkpoint slots, auto unchanged when unset, chain>global>auto precedence, wrong-kind/no-form/T1-VAE/unexposed-slot refusals, missing-file degradation to auto with warning, case canonicalization, per-family field mapping, the graph + manifest carrying the resolved picks, and the stack report validating the user pick)')
+  console.log('PASS: official H3, LTX-2.5 and Z-Image workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction (incl. structural execution-error capture: node id/class + sanitized reason + taxonomy label), quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts (sections, cut times, ordering, reference discipline), the segmented-inference prompt discipline (temporal-exclusivity guidance constant, timeline-only scoping, single-shot contexts untouched), the H3 no-dialogue emission (ambience bed, silent score field, retained negation, OFF-state inertness), the local prompt library storage (technique corpus + save/delete round-trip), multiframe AddGuide chaining (topology, frame indices, classic-graph invariance), the trust layer (manifest fields, topology-sensitive graph hash, tiled-VAE fallback), the LBH latent upscaler presets (two-stage topology, sigma split, audio bypass, output attribution), Motion-Context latent chaining (save/load indices, conditioning wrap, trim), MiniMax Music 3 (official graph, seconds passthrough, tiled decode, caption assembly, INT8 preference), ContactSheet character sheets (topology, LoRA inference, size clamps, views-first attribution), graph-family versioning + looseness presets, the pure error sanitizer (prompt-text redaction bar, comma-clause redaction, technical-message preservation, stack-path extraction, length cap, fallback constant), the failure taxonomy (ordered human-cause buckets over sanitized reasons), and the diagnostic report (canary-proof blob by construction, version shape allow-list, model-scan counts only, failure histogram by bucket, deterministic output, sanitizer self-test verdict), and the model-override layer (community-merge override consulted across the H3 checkpoint lanes, auto unchanged when unset, chain>global>auto precedence, wrong-kind/no-form/T1-VAE/unexposed-slot refusals, missing-file degradation to auto with warning, case canonicalization, per-family field mapping, the graph + manifest carrying the resolved picks, and the stack report validating the user pick; rq0lsax: the per-lane split — fl2va/ref2va/merged slots with per-mode graph routing, the merged pick filling both lanes + superseded warnings, the instance/both-source form arm applying with a warning while local no-form rows keep the refusal, and the legacy checkpoint migration onto both lanes fill-if-unset)')
 }, (error) => {
   console.error(error)
   process.exitCode = 1

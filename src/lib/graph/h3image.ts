@@ -297,6 +297,11 @@ export type H3ImgRequest = {
 export type H3ImgModelSelection = {
   fl2va: string
   ref2va: string
+  /** Pre-merged checkpoint override (task rq0lsax): ONE file carrying the
+   *  b25-49 merge. Set only by the model-override layer (inference cannot
+   *  see community merges); when set the builder loads it through the plain
+   *  UNETLoader — the runtime-merge machinery is for two SEPARATE files. */
+  merged?: string
   textEncoder: string
   videoVae: string
   audioVae: string
@@ -773,12 +778,17 @@ function buildH3StillPipeline(
   const hybridAvailable = Boolean(info && (info as Record<string, unknown>)[HYBRID_LOADER_NODE] !== undefined) && Boolean(selection.fl2va && selection.ref2va)
 
   // --- model chain ---------------------------------------------------------
-  // The hybrid profile (spec §4, decision 10): merge at load, one mmap per
-  // checkpoint, no duplicated multi-GB files. Stock fallback per conditioning
-  // need (refs → ref2va; anchor → fl2va), with the limitation surfaced by
-  // the family detection notes.
+  // The merged override pick (task rq0lsax, dated decision 2026-09-20): the
+  // weights already carry the b25-49 merge, so ONE plain loader on the
+  // pre-merged file feeds the hybrid line's model slot — the runtime-merge
+  // machinery exists to avoid pre-merged duplicates, and re-running it over
+  // an already-merged file is a wasted second mmap. Unset (the default):
+  // this branch is inert and the hybrid/stock logic below is unchanged.
   let modelLink: [string, number]
-  if (hybridAvailable) {
+  if (selection.merged) {
+    graph[H3IMG.unet] = { class_type: 'UNETLoader', inputs: { unet_name: selection.merged, weight_dtype: 'default' } }
+    modelLink = [H3IMG.unet, 0]
+  } else if (hybridAvailable) {
     graph[H3IMG.unet] = {
       class_type: HYBRID_LOADER_NODE,
       inputs: {

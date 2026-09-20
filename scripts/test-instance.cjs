@@ -476,6 +476,30 @@ async function main() {
         const relativeExternal = await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...fresh, engine: { ...fresh.engine, externalCustomNodesDir: 'relative/nodes' } } }) })
         ok(relativeExternal.status === 400 && /externalCustomNodesDir must be an absolute path/.test(relativeExternal.body.error), 'a relative external custom-nodes folder is refused loudly')
 
+        // Model overrides (rq0lsax, 2026-09-20): the H3 per-lane slots
+        // (fl2va/ref2va/merged) normalize through the REAL pipeline, and a
+        // legacy single-checkpoint pick migrates onto fl2va+ref2va
+        // fill-if-unset — never silently dropped. The generic families keep
+        // 'checkpoint'. Failing-without-it: the pre-split normalizer kept
+        // only the three old slot keys — fl2va/ref2va/merged posted as auto
+        // (dropped at save) and the legacy pick stayed a bare checkpoint the
+        // split families no longer expose.
+        const legacyOverrides = await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...fresh, modelOverrides: {
+          minimax: { checkpoint: 'legacy-merge.safetensors', fl2va: 'explicit-fl2va.safetensors', vae: '  ' },
+          h3image: { checkpoint: 'legacy-image.safetensors' },
+          ltx25: { checkpoint: 'ltx-keep.safetensors' },
+        } } }) })
+        const normalized = legacyOverrides.body.settings.modelOverrides ?? {}
+        ok(normalized.minimax?.fl2va === 'explicit-fl2va.safetensors', `minimax: an explicit lane pick wins its lane (got ${JSON.stringify(normalized.minimax)})`)
+        ok(normalized.minimax?.ref2va === 'legacy-merge.safetensors', 'minimax: the legacy pick fills the UNSET lane')
+        ok(!('checkpoint' in (normalized.minimax ?? {})), 'minimax: the consumed legacy key never persists')
+        ok(!('vae' in (normalized.minimax ?? {})), 'minimax: a blank slot drops to auto')
+        ok(normalized.h3image?.fl2va === 'legacy-image.safetensors' && normalized.h3image?.ref2va === 'legacy-image.safetensors', 'h3image: the legacy pick lands on BOTH lanes (behavior-preserving)')
+        ok(normalized.ltx25?.checkpoint === 'ltx-keep.safetensors', 'ltx25: the generic checkpoint family is untouched by the migration')
+        const reread = (await api('/api/lan/settings')).body.settings.modelOverrides ?? {}
+        ok(reread.minimax?.ref2va === 'legacy-merge.safetensors' && !('checkpoint' in (reread.minimax ?? {})), 'the migrated shape is what persists on disk')
+        await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: fresh }) })
+
         // Point the studio at the fake engine + the external folder + local roots.
         const current = (await api('/api/lan/settings')).body.settings
         const configured = await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: {

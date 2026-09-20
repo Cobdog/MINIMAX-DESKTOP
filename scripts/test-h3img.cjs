@@ -157,6 +157,31 @@ eq(h3image.seedvr2BatchCount(39), 37, 'SeedVR2 batch: 39 trims to 37 (tail prese
 eq(h3image.H3IMG_RECIPE_PINS.scorer.sharpness, 0.5, 'scorer: sharpness dominates')
 
 // ---------------------------------------------------------------------------
+console.log('(b2) the merged checkpoint lane (rq0lsax) — one pre-merged file, plain loader')
+// The merged override pick feeds the hybrid-loader LINE as ONE plain
+// UNETLoader: the weights already carry the b25-49 merge, so re-running the
+// runtime-merge machinery would mmap the same file twice for nothing.
+// Failing-without-it: on the pre-split builder no merged selection field
+// existed — this graph would carry MiniMaxH3HybridLoader with the merged
+// file as BOTH base and overlay instead of the single plain loader.
+{
+  const mergedName = 'TenStrip_10Eros-Max_beta5_int8.safetensors'
+  const request = { family: 'h3img.generate.packet', prompt: H3IMG_CONTRACT, width: 1344, height: 768, seed: 90210, tier: 5, refs: [], loras: [], filenamePrefix: 'h3img/merged' }
+  const graph = h3image.buildH3ImageGraph(request, { ...H3IMG_MODELS, merged: mergedName }, HYBRID_INFO)
+  const modelNodes = Object.values(graph).filter((n) => n.class_type === 'UNETLoader' || n.class_type === 'MiniMaxH3HybridLoader')
+  ok(modelNodes.length === 1 && modelNodes[0].class_type === 'UNETLoader', 'the merged pick loads through ONE plain UNETLoader — no runtime merge over an already-merged file')
+  eq(modelNodes[0].inputs.unet_name, mergedName, 'the loader carries the merged file')
+  eq(h3image.h3imgGraphAudit(graph), [], 'the merged-lane graph passes the audit')
+  // Control: with the merged field UNSET the hybrid loader still runs — the
+  // merged slot changes nothing until set ("unused unless needed").
+  const hybridGraph = h3image.buildH3ImageGraph(request, H3IMG_MODELS, HYBRID_INFO)
+  ok(Object.values(hybridGraph).some((n) => n.class_type === 'MiniMaxH3HybridLoader'), 'unset merged keeps the runtime-merge hybrid loader (stock behavior unchanged)')
+  const hybridNode = Object.values(hybridGraph).find((n) => n.class_type === 'MiniMaxH3HybridLoader')
+  eq(hybridNode.inputs.base_model, H3IMG_MODELS.fl2va, 'hybrid base stays the FL2VA pick')
+  eq(hybridNode.inputs.overlay_model, H3IMG_MODELS.ref2va, 'hybrid overlay stays the Ref2VA pick')
+}
+
+// ---------------------------------------------------------------------------
 console.log('(c) the Mamad8 factory guard (AC8) — enforced, not documented')
 // c.1 THE FAILING-WITHOUT-IT PROOF: the VIDEO factory must throw when the
 // T=1 VAE would decode a multi-frame render. Without the guard this build

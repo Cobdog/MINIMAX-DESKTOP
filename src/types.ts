@@ -305,8 +305,11 @@ export type FetchProgress = {
 /** One family's explicit model picks over the inference ladder (task
  *  euxwdva). Absent/empty slots are auto — inference, unchanged. The
  *  resolution contract lives in src/lib/modelOverrides.ts: chain-level
- *  beats global beats auto; picks are exact scanned filenames. */
-export type ModelOverrideSlots = { checkpoint?: string; textEncoder?: string; vae?: string }
+ *  beats global beats auto; picks are exact scanned filenames. The H3
+ *  families expose the per-lane fl2va/ref2va/merged trio instead of the
+ *  generic 'checkpoint' (task rq0lsax); a legacy 'checkpoint' pick on them
+ *  migrates onto fl2va+ref2va (migrateLegacyModelOverrideSlots). */
+export type ModelOverrideSlots = { checkpoint?: string; fl2va?: string; ref2va?: string; merged?: string; textEncoder?: string; vae?: string }
 
 export type AppSettings = {
   comfyUrl: string
@@ -483,6 +486,11 @@ export type MediaFile = {
 export type ModelSelection = {
   fl2va: string
   ref2va: string
+  /** Pre-merged checkpoint override (task rq0lsax): ONE file carrying the
+   *  fl2va+ref2va merge. Set ONLY by the override layer — inference cannot
+   *  see community merges; when set it is the checkpoint every lane loads
+   *  (both lane fields carry it too, so readiness gates need no changes). */
+  merged?: string
   textEncoder: string
   videoVae: string
   audioVae: string

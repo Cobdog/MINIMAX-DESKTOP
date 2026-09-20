@@ -363,7 +363,7 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
       <div className="diagnostic-action"><span><strong>Fixed quality comparison</strong><small>Queues Native Quality and Turbo 8 at 1344 × 768, 5 seconds, seed 12345, with no upscale.</small></span><button className="secondary-button" disabled={!status.connected || diagnosticRunning || !h3Report.ready} onClick={onRunDiagnostics}>{diagnosticRunning ? <LoaderCircle className="spin" size={15} /> : <Activity size={15} />}{diagnosticRunning ? 'Queuing tests…' : 'Run H3 Quality Test'}</button></div>
     </section>
     <section className="settings-section model-overrides-section" aria-label="Model overrides">
-      <div className="settings-heading"><div><Layers size={19} /><span><strong>Model overrides</strong><small>Pin the exact checkpoint, text encoder, or VAE per engine family — for files the name-pattern inference can never find (a community merge, a renamed quant). Auto keeps the inferred pick; a per-chain pick (the chain's properties panel) beats these, which beat auto.</small></span></div></div>
+      <div className="settings-heading"><div><Layers size={19} /><span><strong>Model overrides</strong><small>Pin the exact checkpoint, text encoder, or VAE per engine family — for files the name-pattern inference can never find (a community merge, a renamed quant). Auto keeps the inferred pick; a per-chain pick (the chain's properties panel) beats these, which beat auto. The H3 families expose FL2VA / Ref2VA / merged checkpoint lanes.</small></span></div></div>
       <div className="model-override-list">
         {MODEL_FAMILIES.map((family) => {
           const current = settings.modelOverrides?.[family.id] ?? {}
@@ -386,12 +386,13 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
                 </div>
                 {outcome?.state === 'refused' && <p className="model-override-problem" data-model-override-problem role="alert">Refused — {outcome.reason} Clear the pick to render on auto.</p>}
                 {outcome?.state === 'degraded' && <p className="model-override-problem" data-model-override-problem role="status">{outcome.warning}</p>}
+                {outcome?.state === 'applied' && outcome.warning && <p className="model-override-problem" data-model-override-problem role="status">{outcome.warning}</p>}
               </div>
             })}
           </div>
         })}
       </div>
-      <p className="settings-note">Picks are exact scanned filenames. A pick whose file later disappears falls back to auto with a warning at render time; a pick the family cannot load (wrong folder, no detected H3 form) refuses the render with the reason — never a doomed graph.</p>
+      <p className="settings-note">Picks are exact scanned filenames. A pick whose file later disappears falls back to auto with a warning at render time; a pick the family cannot load (wrong folder, no detected H3 form on a locally-scanned file) refuses the render with the reason — never a doomed graph. Instance-listed files carry no readable header, so their form is unverifiable: the pick applies with a warning and the engine decides at load. The H3 families pin FL2VA and Ref2VA per render lane; the merged pick is ONE pre-merged checkpoint for both lanes and wins when set.</p>
     </section>
     <section className="settings-section setup-doctor-section">
       <div className="settings-heading"><div><Stethoscope size={19} /><span><strong>Setup doctor</strong><small>Verifies FFmpeg, HTTPS tooling, the engine device, and attention backends — with exact fixes.</small></span></div><button className="secondary-button" onClick={() => void runDoctor()} disabled={doctorRunning}>{doctorRunning ? <LoaderCircle size={16} className="spin" /> : <Stethoscope size={16} />}{doctorRunning ? 'Checking…' : 'Run checks'}</button></div>

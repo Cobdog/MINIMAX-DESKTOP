@@ -234,12 +234,13 @@ export const SCENARIOS: VisionScenario[] = [
     ],
   },
   {
-    // Model overrides (task euxwdva) — DOM-truth at capture: the Settings
-    // override card with a real pick applied (a curve-form community merge),
-    // a degraded pick (its file vanished — warning row), and honest auto
-    // labels showing what inference currently resolves to.
+    // Model overrides (task euxwdva; the per-lane split rq0lsax) — DOM-truth
+    // at capture: the Settings override card with a real pick applied (a
+    // curve-form community merge on the FL2VA lane), a degraded pick (its
+    // file vanished — warning row), and honest auto labels showing what
+    // inference currently resolves to per lane.
     id: 'settings-model-overrides',
-    label: 'Settings dock — model overrides card (applied + degraded + auto rows)',
+    label: 'Settings dock — model overrides card (applied + degraded + auto rows, per-lane H3 slots)',
     run: async (page) => {
       const originalSettings = ((await (await page.request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
       ;(page as unknown as { __visionOriginalSettings?: Record<string, unknown> }).__visionOriginalSettings = originalSettings
@@ -262,9 +263,9 @@ export const SCENARIOS: VisionScenario[] = [
       await page.request.post('/api/lan/settings', { data: { settings: {
         ...originalSettings,
         paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: join(modelRoot, 'diffusion_models'), text_encoders: join(modelRoot, 'text_encoders'), vae: join(modelRoot, 'vae') },
-        // checkpoint: APPLIED. vae: names no scanned file — the degraded
-        // warning row. textEncoder: unset — the auto label.
-        modelOverrides: { minimax: { checkpoint: mergeName, vae: 'a_vae_that_was_deleted.safetensors' } },
+        // fl2va: APPLIED. vae: names no scanned file — the degraded
+        // warning row. textEncoder/ref2va/merged: unset — the auto labels.
+        modelOverrides: { minimax: { fl2va: mergeName, vae: 'a_vae_that_was_deleted.safetensors' } },
       } } })
       await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
       await page.goto('/')
@@ -273,8 +274,12 @@ export const SCENARIOS: VisionScenario[] = [
       await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible()
       const section = page.locator('.model-overrides-section')
       await expect(section).toBeVisible({ timeout: 15_000 })
-      // DOM truth before capture: the pick applied, the degradation warned.
-      await expect(section.locator('[data-model-override-family="minimax"] [data-model-override-slot="checkpoint"] select')).toHaveValue(mergeName, { timeout: 15_000 })
+      // DOM truth before capture: the pick applied, the degradation warned,
+      // the three per-lane checkpoint rows present (rq0lsax).
+      await expect(section.locator('[data-model-override-family="minimax"] [data-model-override-slot="fl2va"] select')).toHaveValue(mergeName, { timeout: 15_000 })
+      await expect(section.locator('[data-model-override-family="minimax"] [data-model-override-slot="ref2va"]')).toHaveCount(1)
+      await expect(section.locator('[data-model-override-family="minimax"] [data-model-override-slot="merged"]')).toHaveCount(1)
+      await expect(section.locator('[data-model-override-family="minimax"] [data-model-override-slot="checkpoint"]')).toHaveCount(0)
       await expect(section.locator('[data-model-override-family="minimax"] [data-model-override-slot="vae"] [data-model-override-problem]')).toBeAttached()
       // Pin the card to the TOP of the dock body before capture: the
       // toBeAttached-style checks never scroll, and a minimal scrollIntoView
@@ -293,18 +298,19 @@ export const SCENARIOS: VisionScenario[] = [
     checkpoints: [
       {
         id: 'settings-model-overrides-1080p',
-        label: 'Settings dock — the "Model overrides" card: applied pick, degraded warning, auto label',
+        label: 'Settings dock — the "Model overrides" card: applied pick, degraded warning, auto labels, per-lane H3 slots',
         rubric: [
           SHELL_CONTEXT,
           'A floating Settings DOCK panel over the dimmed canvas (header "Settings — docked" with an × close). The body scrolls INSIDE the panel and this capture is taken with the "Model overrides" card pinned at the TOP of the visible body — its title and the FIRST family block are in frame; sections above the card sit above the fold (intended scrolling, not clipping; judge only what is in frame). The titlebar\'s canvas-tab strip may be EMPTY in this capture (the scenario closes every canvas before opening Settings) — no named tab is not a defect here.',
           'The "Model overrides" card is in frame: a title "Model overrides" with a layers icon and an explanatory sub-line about pinning exact files when name-pattern inference cannot find them (community merges), plus a closing note line about picks being exact scanned filenames.',
-          'Family blocks stack vertically, each with a family name and muted note. The FIRST family reads "MiniMax H3 video" and carries three rows labeled "Checkpoint / diffusion model", "Text encoder", and "VAE", each row a label block plus a dropdown select.',
-          'The checkpoint row\'s select DISPLAYS the picked file "TenStrip_10Eros-Max_beta5_int8.safetensors" (an applied community-merge pick — this is the intended state, not a bug).',
+          'Family blocks stack vertically, each with a family name and muted note. The FIRST family reads "MiniMax H3 video" and carries five rows labeled "FL2VA checkpoint (first-frame lane)", "Ref2VA checkpoint (reference lane)", "Merged checkpoint (both lanes)", "Text encoder", and "VAE", each row a label block plus a dropdown select.',
+          'The FL2VA checkpoint row\'s select DISPLAYS the picked file "TenStrip_10Eros-Max_beta5_int8.safetensors" (an applied community-merge pick — this is the intended state, not a bug).',
           'The VAE row shows a small WARNING line beneath its select mentioning that the picked file is no longer in the scan and renders fall back to auto — an amber/warning-colored degraded notice (the honest degradation contract; its presence is CORRECT).',
-          'The text-encoder row\'s select shows an "auto (inferred) — …" option naming the inferred Qwen file, or "auto (inferred) — nothing detected" — either label is correct.',
-          'Later families ("MiniMax H3 image workbench", "LTX-2.5 video", "LTX-2.3 utilities", "MiniMax Music 3", "ACE-Step XL 1.5") may continue below the fold; LTX-2.3 utilities shows ONLY Text encoder + VAE rows (no checkpoint row) — that absence is the intended honest slot exposure, not a defect.',
-          'Native dropdown selects CLIP a long displayed value at the select\'s right edge without an ellipsis (the full text appears when the dropdown opens) — intended native behavior, not a defect. The checkpoint row\'s applied pick "TenStrip_10Eros-Max_beta5_int8.safetensors" is short enough to display fully.',
-          'Defects to flag: rows without selects, two controls overlapping, a select clipped mid-glyph, the card\'s title truncated, a red/refused notice on the checkpoint row (only the amber degraded notice is expected).',
+          'The text-encoder and Ref2VA rows\' selects show an "auto (inferred) — …" option naming the inferred file, or "auto (inferred) — nothing detected" — either label is correct.',
+          'The MERGED checkpoint row\'s select shows "auto (inferred) — nothing detected" — the intended honest state (inference can never see community merges; that is the override layer\'s reason to exist), not a defect.',
+          'Later families ("MiniMax H3 image workbench", "LTX-2.5 video", "LTX-2.3 utilities", "MiniMax Music 3", "ACE-Step XL 1.5") may continue below the fold; the H3 image workbench family shows the same per-lane trio, and LTX-2.3 utilities shows ONLY Text encoder + VAE rows (no checkpoint row) — that absence is the intended honest slot exposure, not a defect.',
+          'Native dropdown selects CLIP a long displayed value at the select\'s right edge without an ellipsis (the full text appears when the dropdown opens) — intended native behavior, not a defect. The FL2VA row\'s applied pick "TenStrip_10Eros-Max_beta5_int8.safetensors" is short enough to display fully.',
+          'Defects to flag: rows without selects, two controls overlapping, a select clipped mid-glyph, the card\'s title truncated, a red/refused notice on any checkpoint row (only the amber degraded notice is expected).',
         ].join(' '),
       },
     ],

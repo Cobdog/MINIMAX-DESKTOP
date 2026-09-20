@@ -2341,6 +2341,8 @@ test('a model override reaches the engine graph and the job manifest (fake engin
   // The shared official H3 set (plain dummy bytes — inference needs no form)
   // plus the community merge carrying a REAL curve-form header: it matches no
   // selection pattern, which is the entire point of the override layer.
+  // (rq0lsax) the pick rides the FL2VA lane — the split family's per-lane
+  // slot; the reference lane stays on inference underneath it.
   const mergeName = 'TenStrip_10Eros-Max_beta5_int8.safetensors'
   const modelRoot = pathModule.join(process.cwd(), 'test-home', 'override-models')
   for (const [kind, files] of Object.entries({
@@ -2402,7 +2404,7 @@ test('a model override reaches the engine graph and the job manifest (fake engin
       ...originalSettings,
       comfyUrl: `http://127.0.0.1:${enginePort}`,
       paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: pathModule.join(modelRoot, 'diffusion_models'), text_encoders: pathModule.join(modelRoot, 'text_encoders'), vae: pathModule.join(modelRoot, 'vae'), loras: pathModule.join(modelRoot, 'loras') },
-      modelOverrides: { minimax: { checkpoint: mergeName } },
+      modelOverrides: { minimax: { fl2va: mergeName } },
     } } })
     await resetSession(page)
     await page.goto('/?canvas=1')
@@ -2416,8 +2418,11 @@ test('a model override reaches the engine graph and the job manifest (fake engin
     await expect(tile).toBeVisible({ timeout: 10_000 })
     await expect(tile).toHaveAttribute('data-tile-status', 'running', { timeout: 20_000 })
 
-    // THE GRAPH: the community merge (no pattern matches it) is the resolved
-    // checkpoint the engine received; the unset slots stay on inference.
+    // THE GRAPH (per-lane routing, rq0lsax): the community merge (no pattern
+    // matches it) is the resolved checkpoint the FL2VA lane feeds the engine
+    // in this text-mode render; the unset slots stay on inference. A
+    // reference-mode render of the same settings would load the OFFICIAL
+    // Ref2VA file — the lane split, proven per-mode in the unit suite.
     expect(submittedGraphs.length).toBeGreaterThan(0)
     const graph = JSON.parse(submittedGraphs[submittedGraphs.length - 1]) as { prompt: Record<string, { class_type: string; inputs: Record<string, unknown> }> }
     expect(graph.prompt['1'].class_type).toBe('UNETLoader')
@@ -2434,7 +2439,7 @@ test('a model override reaches the engine graph and the job manifest (fake engin
     }, { timeout: 15_000 }).toBe(mergeName)
     const jobs = ((await (await request.get('/api/lan/jobs')).json()) as { jobs: OverrideJobRecord[] }).jobs
     const overrideJob = jobs.find((entry) => entry.promptId === 'ov-e2e-1')!
-    expect(overrideJob.manifest?.modelOverrides).toEqual({ checkpoint: mergeName })
+    expect(overrideJob.manifest?.modelOverrides).toEqual({ fl2va: mergeName })
     expect(overrideJob.manifest?.models?.textEncoder?.name).toBe('qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors')
     expect(problems.filter((entry) => !environmental(entry))).toEqual([])
   } finally {
@@ -2481,9 +2486,21 @@ test('model overrides surface in Settings and the chain properties panel (both s
     await expect(dock).toBeVisible()
     const familyBlock = dock.locator('[data-model-override-family="minimax"]')
     await expect(familyBlock).toBeVisible({ timeout: 15_000 })
-    const checkpointSelect = familyBlock.locator('[data-model-override-slot="checkpoint"] select')
+    // (rq0lsax) the split family exposes THREE checkpoint lanes and no
+    // generic checkpoint row.
+    await expect(familyBlock.locator('[data-model-override-slot="checkpoint"]')).toHaveCount(0)
+    await expect(familyBlock.locator('[data-model-override-slot="fl2va"]')).toHaveCount(1)
+    await expect(familyBlock.locator('[data-model-override-slot="ref2va"]')).toHaveCount(1)
+    await expect(familyBlock.locator('[data-model-override-slot="merged"]')).toHaveCount(1)
+    const checkpointSelect = familyBlock.locator('[data-model-override-slot="fl2va"] select')
     // The AUTO option leads with what auto currently resolves to.
     await expect.poll(async () => checkpointSelect.locator('option').first().textContent(), { timeout: 15_000 }).toContain('minimax_h3_fl2va_pruned_int8_convrot.safetensors')
+    // The ref2va lane's auto label shows the Ref2VA inference — per-lane
+    // labels, not the shared one of the pre-split slot.
+    await expect.poll(async () => familyBlock.locator('[data-model-override-slot="ref2va"] select option').first().textContent(), { timeout: 15_000 }).toContain('minimax_h3_ref2va_pruned_int8_convrot.safetensors')
+    // The merged lane honestly resolves nothing (community merges are
+    // name-invisible to inference — that is the override layer's reason).
+    await expect(familyBlock.locator('[data-model-override-slot="merged"] select option').first()).toContainText('nothing detected')
     // The merge is a pickable option; picking it flips the stack report's
     // FL2VA row to the user's file with the Override verdict.
     await checkpointSelect.selectOption(mergeName)
@@ -2497,7 +2514,7 @@ test('model overrides surface in Settings and the chain properties panel (both s
     await dock.locator('button.primary-button', { hasText: 'Save settings' }).click()
     await expect.poll(async () => {
       const saved = ((await (await request.get('/api/lan/settings')).json()) as { settings: { modelOverrides?: Record<string, Record<string, string>> } }).settings
-      return saved.modelOverrides?.minimax?.checkpoint ?? null
+      return saved.modelOverrides?.minimax?.fl2va ?? null
     }, { timeout: 15_000 }).toBe(mergeName)
 
     // ---- Surface 2: the chain properties panel (per-chain overrides) ----
@@ -2514,20 +2531,144 @@ test('model overrides surface in Settings and the chain properties panel (both s
     await expect(modelsSection).not.toHaveAttribute('open', '')
     await modelsSection.locator('summary').click()
     await expect(modelsSection).toHaveAttribute('open', '')
-    const chainSelect = modelsSection.locator('[data-canvas-model-override-select="checkpoint"]')
+    const chainSelect = modelsSection.locator('[data-canvas-model-override-select="fl2va"]')
     await expect(chainSelect.locator('option').first()).toContainText(/auto/) // the global pick shows as what auto resolves to now
     await chainSelect.selectOption(mergeName)
     // The debounced commit persists the pick on the chain's own settings.
     await expect.poll(async () => {
       const document = await activeDocument(page)
       const chain = document.chains.find((entry) => entry.kind === 'generation')
-      return ((chain?.settings as Record<string, unknown>)?.modelOverrides as Record<string, string> | undefined)?.checkpoint ?? null
+      return ((chain?.settings as Record<string, unknown>)?.modelOverrides as Record<string, string> | undefined)?.fl2va ?? null
     }, { timeout: 15_000 }).toBe(mergeName)
     expect(problems.filter((entry) => !environmental(entry))).toEqual([])
   } finally {
     await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
     await resetSession(page).catch(() => undefined)
     fsModule.rmSync(modelRoot, { recursive: true, force: true })
+  }
+})
+
+// (rq0lsax) The instance-source form arm — the maintainer's H3/ssd bug as an
+// e2e: an engine-relative checkpoint name listed ONLY by the connected
+// instance (no local file, so no readable safetensors header) applies as an
+// override with the unverifiable-form WARNING visible, and the engine
+// receives that exact engine-relative name in the graph. Failing-without-it:
+// the pre-fix layer REFUSED the pick with "carries no detectable MiniMax-H3
+// form" — the row read Refused, no submission could carry the name.
+test('an instance-listed checkpoint pick applies with the unverifiable-form warning (fake engine, engine-relative names)', async ({ page, request }) => {
+  const problems = await trackErrors(page)
+  const fsModule = await import('node:fs')
+  const pathModule = await import('node:path')
+  const http = await import('node:http')
+
+  // Engine-relative subpaths — exactly what /models serves and the graph
+  // loaders accept, and exactly what the name-pattern inference can never
+  // match (the override layer's reason to exist in instance mode).
+  const instanceFl2va = 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors'
+  const instanceRef2va = 'H3/ssd/minimax_h3_ref2va_pruned_int8_convrot.safetensors'
+  // Empty dedicated local roots: EVERYTHING comes from the instance listing,
+  // so both checkpoint rows are source 'instance' with no h3Form.
+  const modelRoot = pathModule.join(process.cwd(), 'test-home', 'instance-override-models')
+  for (const kind of ['diffusion_models', 'text_encoders', 'vae', 'loras', 'vae_approx', 'clip_vision']) {
+    fsModule.mkdirSync(pathModule.join(modelRoot, kind), { recursive: true })
+  }
+
+  const submittedGraphs: string[] = []
+  const engine = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://engine.local')
+    if (url.pathname === '/system_stats') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ system: {}, devices: [] }))
+      return
+    }
+    if (url.pathname === '/object_info') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ MiniMaxH3HybridLoader: {}, KSamplerSelect: {}, BasicScheduler: {}, VAELoader: {}, UNETLoader: {}, CLIPLoader: {} }))
+      return
+    }
+    if (url.pathname.startsWith('/models/') && req.method === 'GET') {
+      const listings: Record<string, string[]> = {
+        diffusion_models: [instanceFl2va, instanceRef2va],
+        text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
+        vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
+        loras: [], vae_approx: [], clip_vision: [],
+      }
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(listings[url.pathname.slice('/models/'.length)] ?? []))
+      return
+    }
+    if (url.pathname === '/prompt' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (chunk) => { body += chunk })
+      req.on('end', () => {
+        submittedGraphs.push(body)
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ prompt_id: 'ov-instance-1', number: 1, node_errors: {} }))
+      })
+      return
+    }
+    if (url.pathname === '/history/ov-instance-1') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ 'ov-instance-1': { prompt: [], outputs: {}, status: { completed: false } } }))
+      return
+    }
+    if (url.pathname === '/queue' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ queue_running: [], queue_pending: [] }))
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  const enginePort = await new Promise<number>((resolve) => engine.listen(0, '127.0.0.1', () => resolve((engine.address() as { port: number }).port)))
+
+  const originalSettings = ((await (await request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
+  try {
+    await request.post('/api/lan/settings', { data: { settings: {
+      ...originalSettings,
+      comfyUrl: `http://127.0.0.1:${enginePort}`,
+      paths: {
+        ...(originalSettings.paths as Record<string, string>),
+        diffusion_models: pathModule.join(modelRoot, 'diffusion_models'),
+        text_encoders: pathModule.join(modelRoot, 'text_encoders'),
+        vae: pathModule.join(modelRoot, 'vae'),
+        loras: pathModule.join(modelRoot, 'loras'),
+      },
+      modelOverrides: { minimax: { fl2va: instanceFl2va, ref2va: instanceRef2va } },
+    } } })
+    await resetSession(page)
+    await page.goto('/?canvas=1')
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    await expect(page.locator('[data-canvas-engine]')).toHaveAttribute('data-engine-connected', 'true', { timeout: 15_000 })
+
+    // The Settings row is APPLIED with the warning — never the old Refused.
+    await page.locator('[data-canvas-settings-button]').click()
+    const dock = page.locator('[data-canvas-settings-dock]')
+    await expect(dock).toBeVisible()
+    const fl2vaRow = dock.locator('[data-model-override-family="minimax"] [data-model-override-slot="fl2va"]')
+    await expect(fl2vaRow.locator('select')).toHaveValue(instanceFl2va, { timeout: 15_000 })
+    await expect(fl2vaRow.locator('[data-model-override-problem]')).toContainText('instance-listed', { timeout: 15_000 })
+    await page.locator('[data-canvas-settings-close]').click()
+
+    // The submission carries the engine-relative names, with the warning
+    // surfaced as a neutral toast at submit time.
+    await page.locator('[data-canvas-prompt]').fill('instance override probe — the engine-relative name must load')
+    await page.locator('[data-canvas-submit]').click()
+    await expect(page.locator('[data-canvas-toast="neutral"]').first()).toContainText('instance-listed', { timeout: 10_000 })
+    const tile = page.locator('[data-canvas-tile]').first()
+    await expect(tile).toBeVisible({ timeout: 10_000 })
+    await expect(tile).toHaveAttribute('data-tile-status', 'running', { timeout: 20_000 })
+    expect(submittedGraphs.length).toBeGreaterThan(0)
+    const graph = JSON.parse(submittedGraphs[submittedGraphs.length - 1]) as { prompt: Record<string, { class_type: string; inputs: Record<string, unknown> }> }
+    expect(graph.prompt['1'].class_type).toBe('UNETLoader')
+    expect(graph.prompt['1'].inputs.unet_name).toBe(instanceFl2va)
+    expect(graph.prompt['2'].inputs.clip_name).toBe('qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors')
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
+    await resetSession(page).catch(() => undefined)
+    fsModule.rmSync(modelRoot, { recursive: true, force: true })
+    await new Promise<void>((resolve) => engine.close(() => resolve()))
   }
 })
 
