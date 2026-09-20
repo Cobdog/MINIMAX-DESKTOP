@@ -98,11 +98,19 @@ const missingModels = (h3Ready: boolean, connected: boolean): string | undefined
  * "what can extend/produce this" only): the head lists what this chain can
  * CONSUME (input roles for the selected source), the tail lists what can be
  * PRODUCED from this tile's output, filtered by the source's media kinds.
+ *
+ * `targetMediaType` is the chain whose head the menu opens on (tmz8vh7,
+ * 2026-09-20): last-frame and reference roles are H3 VIDEO concepts, and an
+ * image-intent chain that binds one silently fell through the stills
+ * predicate into the video ladder (audit P1-2) — they are not OFFERED for
+ * image chains. First-frame stays: on an image chain it is the Edit-surface
+ * handoff binding (the dated 34afx79 decision).
  */
-export function endpointOptions(direction: EndpointDirection, sourceKinds: ReadonlyArray<SourceKind>, availability: OptionAvailability): EndpointOption[] {
+export function endpointOptions(direction: EndpointDirection, sourceKinds: ReadonlyArray<SourceKind>, availability: OptionAvailability, targetMediaType?: 'video' | 'image' | 'audio'): EndpointOption[] {
   const kinds = new Set(sourceKinds)
   const hasImage = kinds.has('image')
   const hasVideo = kinds.has('video')
+  const imageTarget = targetMediaType === 'image'
 
   if (direction === 'consume') {
     // Input roles are pure document edits — they never need the engine (only
@@ -114,12 +122,12 @@ export function endpointOptions(direction: EndpointDirection, sourceKinds: Reado
         id: 'consume:first-frame', group: 'input', label: 'Use as first frame', description: 'This chain continues from the selected image — image → video.',
         action: { kind: 'set-first-frame' }, available: true,
       })
-      rows.push({
+      if (!imageTarget) rows.push({
         id: 'consume:last-frame', group: 'input', label: 'Use as last frame', description: 'Frame-anchored end — first + last frame mode once a first frame is set.',
         action: { kind: 'set-last-frame' }, available: true,
       })
     }
-    rows.push({
+    if (!imageTarget) rows.push({
       id: 'consume:reference', group: 'input', label: 'Add as reference', description: 'Join this chain’s ordered reference set (ref2v, ≤9 pictures).',
       action: { kind: 'add-reference' }, available: true,
       hint: '≤9 pictures · 3 videos · 3 audio',

@@ -11,6 +11,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Download } from 'lucide-react'
 import { useCanvasStore } from './store'
 import { endpointOptions, type SourceKind } from './options'
+import { readChainSettings } from './generation'
 import type { DocumentChain } from './derive'
 
 /** The source media kinds an output tile carries (its canonical take). */
@@ -67,7 +68,9 @@ export function EndpointMenu() {
   }, [menu, context, optionAvailability])
 
   if (!menu || !context) return null
-  const options = endpointOptions(menu.direction, context.kinds, optionAvailability())
+  // The consume menu opens on THIS chain's head — its media type gates the
+  // video-only input roles (tmz8vh7 / audit P1-2).
+  const options = endpointOptions(menu.direction, context.kinds, optionAvailability(), readChainSettings(context.chain?.settings ?? {}).mediaType)
   const hasOutput = Boolean(context.chain?.outputs.length)
   const naturalLeft = Math.min(Math.max(16, (context.tile?.x ?? 0) + (menu.direction === 'consume' ? -180 : (context.tile?.w ?? 0) - 40)), window.innerWidth - 300)
   const naturalTop = Math.max(64, (context.tile?.y ?? 0) + 24)

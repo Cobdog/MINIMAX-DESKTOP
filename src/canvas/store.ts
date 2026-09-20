@@ -1586,9 +1586,19 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       // the workbench's Edit surface with the image anchored as Picture 1 —
       // the dated decision that retired the dead ControlNet-Union path with
       // Z-Image itself. Frames/reference modes remain H3 video concepts.
-      const stillIntent = settings.mediaType === 'image' && (effectiveMode(settings) === 'text' || effectiveMode(settings) === 'image')
-      if (stillIntent) {
+      // (tmz8vh7, 2026-09-20): the predicate covers EVERY image chain. It
+      // used to guard mode∈{text,image}, so a reference or last-frame
+      // binding flipped effectiveMode and the chain fell through to the H3
+      // VIDEO ladder below — a spawned-image object silently rendered a
+      // 6-second video (the inverse-T=1 divergence, audit P1-2). Those
+      // states now refuse honestly at this seam.
+      if (settings.mediaType === 'image') {
         const mode = effectiveMode(settings)
+        if (mode === 'frames' || mode === 'reference') {
+          const refusal = 'The image intent has no first+last-frame or reference mode — those are video concepts. Clear the frame/reference bindings on this object, or re-spawn it as a video prompt.'
+          get().toast('error', refusal)
+          return { ok: false, message: refusal }
+        }
         const facts = engineFacts()
         const queued = queuedImageEngineRefusal(settings.imageEngine)
         if (queued) {
@@ -1713,9 +1723,14 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       // second engine refuses honestly; image+control states the Edit-surface
       // handoff; H3-1F rides the workbench's own ladder (family availability
       // on the H3 stack, exactly like the workbench surface gates it).
-      if (settings.mediaType === 'image' && (effectiveMode(settings) === 'text' || effectiveMode(settings) === 'image')) {
+      // (tmz8vh7): frames/reference bindings on an image chain refuse here
+      // too — never a silent fall-through to the H3 video ladder.
+      if (settings.mediaType === 'image') {
         const queued = queuedImageEngineRefusal(settings.imageEngine)
         if (queued) return queued
+        if (effectiveMode(settings) === 'frames' || effectiveMode(settings) === 'reference') {
+          return 'The image intent has no first+last-frame or reference mode — those are video concepts. Clear the frame/reference bindings on this object, or re-spawn it as a video prompt.'
+        }
         if (effectiveMode(settings) === 'image') {
           return firstFrame
             ? 'Image-with-reference renders on the workbench\'s Edit surface — generate opens it with this image anchored as the source (Picture 1). The canvas ships no control-stills path (dated 2026-09-19, task 34afx79).'
@@ -2724,10 +2739,15 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
       // the honest answer there), and H3-1F maps through the same request the
       // submit core builds (the T=1 graph facts the e2e asserts; the golden
       // for the inline shape lives in the h3img matrix as canvas-t1-inline).
-      if (settings.mediaType === 'image' && (effectiveMode(settings) === 'text' || effectiveMode(settings) === 'image')) {
+      if (settings.mediaType === 'image') {
         const facts = engineFacts()
         const queued = queuedImageEngineRefusal(settings.imageEngine)
         if (queued) return { mode: 'image-queued-engine', validation: queued, graph: null }
+        // (tmz8vh7): frames/reference bindings refuse here exactly like the
+        // real submit ladder — the probe and the ladder stay one contract.
+        if (effectiveMode(settings) === 'frames' || effectiveMode(settings) === 'reference') {
+          return { mode: 'image-intent-refused', validation: 'The image intent has no first+last-frame or reference mode — those are video concepts. Clear the frame/reference bindings on this object, or re-spawn it as a video prompt.', graph: null }
+        }
         const snapshot = useCanvasStore.getState()
         const doc = snapshot.activeProjectId ? snapshot.documents[snapshot.activeProjectId] : null
         const outputs = doc ? buildOutputIndex(doc) : new Map()
