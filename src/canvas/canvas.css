@@ -155,7 +155,7 @@
    style on the same element, which otherwise beats this rule (the 6f656ca dock
    class of bug) — the grid rows never apply, the body never gets constrained by
    minmax(0,1fr), and the properties panel becomes an unscrollable clip. */
-.canvas-inspector { z-index: 40; display: grid !important; grid-template-rows: auto minmax(0, 1fr); border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); box-shadow: 0 18px 48px rgba(0,0,0,.5); overflow: hidden; }
+.canvas-inspector { z-index: 40; display: grid !important; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); box-shadow: 0 18px 48px rgba(0,0,0,.5); overflow: hidden; }
 .canvas-inspector-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 11px; border-bottom: 1px solid var(--line); background: var(--surface-2); cursor: grab; }
 .canvas-inspector-header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .canvas-inspector-header button { display: grid; place-items: center; width: 22px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
