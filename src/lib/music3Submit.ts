@@ -7,6 +7,8 @@
  */
 import { createId } from './createId'
 import { buildMusic3Workflow, type Music3GenerationOptions, type Music3ModelSelection } from './music3Workflow'
+import { preflightOrFail } from './preflight'
+import { dbg } from './dbg'
 import type { ObjectInfo } from './comfyInfo'
 import type { AppSettings, GenerationJob } from '../types'
 
@@ -66,6 +68,10 @@ export async function submitMusic3(
   io.notify('neutral', 'Preparing the official MiniMax Music 3 ComfyUI graph…')
   try {
     const graph = buildMusic3Workflow(options, facts.selection)
+    // R-02 preflight (Wave 1): same seam as H3 video — the graph's
+    // class_types diffed against object_info before submission.
+    const preflight = preflightOrFail(graph, facts.info, 'preflight.music3')
+    if (preflight) throw new Error(preflight)
     const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, facts.clientId)
     if (io.cancellationRequests?.current.has(localId)) {
       await window.minimax.cancelPrompt(settings.comfyUrl, response.prompt_id)
@@ -75,6 +81,7 @@ export async function submitMusic3(
     }
     io.setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: 'Composing locally' } : item))
     io.notify('success', 'MiniMax Music 3 song generation added to ComfyUI.')
+    dbg('submit', { verdict: 'submitted', family: 'music3', jobId: localId, promptId: response.prompt_id })
     return { ok: true, jobId: localId }
   } catch (error) {
     const cancelled = io.cancellationRequests?.current.has(localId) ?? false

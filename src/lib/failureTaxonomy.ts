@@ -51,12 +51,12 @@ export const FAILURE_BUCKETS: Record<FailureBucketId, FailureBucket> = {
   'node-missing': {
     id: 'node-missing',
     label: 'Custom node missing',
-    cause: 'A node class this graph needs is not installed on this engine (or a ComfyUI update renamed it). Install or refresh the node pack, then re-run the H3 Quality Test in Settings.',
+    cause: 'A node class this graph needs is not installed on this engine. Install or refresh the pack that provides it (Settings → Node packs); if the missing class is a stock ComfyUI node, the engine itself is older than the graph — update ComfyUI. The submit-time preflight names the exact class and its pack before this can happen.',
   },
   validation: {
     id: 'validation',
     label: 'Graph validation rejected',
-    cause: 'The engine rejected the graph before rendering — typically a sampler/model value this engine build does not offer, or an updated node changed its inputs. The Graph compatibility row in Settings explains version drift.',
+    cause: 'The engine rejected the graph before rendering — typically a sampler/model value this engine build does not offer, or an updated node changed its inputs (the error type says which: value_not_in_list, required_input_missing, return_type_mismatch). The Graph compatibility row in Settings explains version drift.',
   },
   'output-missing': {
     id: 'output-missing',
@@ -82,8 +82,13 @@ const MATCHERS: Array<{ id: FailureBucketId; pattern: RegExp }> = [
   { id: 'out-of-memory', pattern: /\b(oom|outofmemoryerror|memoryerror|out of memory|cuda out of memory|allocat\w* (?:memory|vram)|vram)\b/i },
   { id: 'engine-unreachable', pattern: /\b(econnrefused|connection refused|fetch failed|not reachable|unreachable|offline|econnreset|socket hang up)\b/i },
   { id: 'timeout', pattern: /\b(timeout|timed out|deadline|still rendering after)\b/i },
-  { id: 'node-missing', pattern: /\b(returned type missing|missing node|is not a registered|node type not found|cannot find module|no module named|importerror|modulenotfounderror)\b/i },
-  { id: 'validation', pattern: /\b(validation|value not in list|required input|invalid (?:value|prompt)|node errors|returned error)\b/i },
+  // node-missing stays ABOVE validation: the structured type tokens are the
+  // ComfyUI builders' own (execution.py: missing_node_type; server.py:
+  // invalid_prompt for unknown ids) and survive sanitization by construction
+  // (snake_case = sanitizer rule 7). The prose phrases need the R-03 KEYWORDS
+  // tokens (type/not/found/registered/module/named) to survive.
+  { id: 'node-missing', pattern: /\b(returned type missing|missing_node_type|missing node|node_not_found|is not a registered|node type not found|cannot find module|no module named|importerror|modulenotfounderror)\b/i },
+  { id: 'validation', pattern: /\b(validation|value_not_in_list|value not in list|required_input_missing|required input|return_type_mismatch|prompt_outputs_failed_validation|invalid (?:value|prompt)|node errors|returned error)\b/i },
   { id: 'output-missing', pattern: /\b(output file never appeared|no output|completed but)\b/i },
   { id: 'cancelled', pattern: /\b(cancelled|canceled|interrupted|aborted)\b/i },
 ]

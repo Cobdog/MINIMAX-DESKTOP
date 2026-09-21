@@ -7,6 +7,8 @@
  */
 import { createId } from './createId'
 import { ACE_STEP_REQUIRED_NODES, buildAceStepWorkflow } from './aceStepWorkflow'
+import { preflightOrFail } from './preflight'
+import { dbg } from './dbg'
 import type { ObjectInfo } from './comfyInfo'
 import type { AppSettings, AceStepGenerationOptions, AceStepModelSelection, GenerationJob } from '../types'
 
@@ -69,6 +71,9 @@ export async function submitAceStep(
   io.notify('neutral', `Preparing the official ACE-Step XL ${options.model.toUpperCase()} ComfyUI graph…`)
   try {
     const graph = buildAceStepWorkflow(options, facts.selection)
+    // R-02 preflight (Wave 1): same seam as H3 video.
+    const preflight = preflightOrFail(graph, facts.info, 'preflight.acestep')
+    if (preflight) throw new Error(preflight)
     const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, facts.clientId)
     if (io.cancellationRequests?.current.has(localId)) {
       await window.minimax.cancelPrompt(settings.comfyUrl, response.prompt_id)
@@ -78,6 +83,7 @@ export async function submitAceStep(
     }
     io.setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: 'Waiting for ComfyUI to start' } : item))
     io.notify('success', `ACE-Step XL ${options.model.toUpperCase()} music generation added to ComfyUI.`)
+    dbg('submit', { verdict: 'submitted', family: 'acestep', jobId: localId, promptId: response.prompt_id })
     return { ok: true, jobId: localId }
   } catch (error) {
     const cancelled = io.cancellationRequests?.current.has(localId) ?? false
