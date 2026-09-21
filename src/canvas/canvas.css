@@ -164,10 +164,10 @@
 
 /* R-15 (Wave 3): the dock's sticky, dirty-aware save footer + the library
    dock + the first-run wizard — structural, token-driven. */
-.canvas-settings-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--color-surface); }
+.canvas-settings-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--surface); }
 .settings-dirty-state { font-size: var(--text-sm); color: var(--muted-2); }
 .settings-dirty-state.dirty { color: var(--warning, #d9a441); font-weight: 600; }
-.canvas-wizard { max-width: 640px; margin: 0 auto 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--color-surface); overflow: hidden; }
+.canvas-wizard { max-width: 640px; margin: 0 auto 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
 .canvas-wizard-header { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .canvas-wizard-header strong { display: grid; }
 .canvas-wizard-step { color: var(--muted-2); font-size: var(--text-sm); font-weight: 500; }

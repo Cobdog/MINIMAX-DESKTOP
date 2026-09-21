@@ -142,7 +142,6 @@ export function SettingsDock() {
           onCheck={() => void checkConnection(settings.comfyUrl)}
           onRunDiagnostics={() => void runDiagnosticsNow()}
           onOpenLibrary={(focusEntryIds) => setLibraryDock(true, focusEntryIds)}
-          focusSection={focusSection ?? undefined}
         />
       </ErrorBoundary>
     </div>

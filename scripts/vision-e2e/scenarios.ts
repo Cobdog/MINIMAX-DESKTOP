@@ -1034,7 +1034,7 @@ export const SCENARIOS: VisionScenario[] = [
     checkpoints: [
       {
         id: 'structured-prompt-editor-top-1080p',
-        label: 'Structured editor — panel scrolled to TOP: the toggle + Concept/Subjects/Setting/Lighting boxes',
+        label: 'Structured editor — panel scrolled to TOP: the toggle + Concept/Subjects/Setting (the fold arbitrates the rest)',
         // The panel scrolls internally; this checkpoint captures the TOP —
         // DOM truth: the scroller's offset is pinned at 0 before capture.
         drive: async (page) => {
@@ -1073,8 +1073,8 @@ export const SCENARIOS: VisionScenario[] = [
           'GROUND TRUTH FOR THIS CAPTURE: the properties panel is scrolled to its TOP — the FIRST thing visible inside the panel body is the "Prompt // presets" label, IMMEDIATELY followed by the segmented freeform/structured toggle. If you can read the words "freeform" and "structured" as two adjoining small buttons near the top of the panel, the toggle clause PASSES — read carefully before judging it missing.',
           'ONE seed tile on the canvas (dark rounded card, head/tail endpoint dots). The panel header carries the object title + a "text → video" mode pill.',
           'The segmented toggle: "structured" is ACTIVE (accent-highlighted, brighter than the muted "freeform").',
-          'Below the toggle, the STRUCTURED EDITOR: a vertical stack of small bordered box sections, each with a collapsible header (a chevron icon, a bold label like Concept / Subjects / Setting / Lighting, a muted hint). In view from the top: Concept, Subjects, Setting, Lighting (and possibly Style).',
-          'Populated content visible: the Concept box\'s textarea contains watchman/observatory prose; the Subjects box shows ONE dashed subject card with a name input reading "Idris", an appearance textarea about a weathered keeper in a wool coat, and wardrobe/features inputs; the Setting and Lighting boxes show readable prose (lighting mentions moonlight); the Style box (its own section, when in view) reads "Cinematic".',
+          'Below the toggle, the STRUCTURED EDITOR: a vertical stack of small bordered box sections, each with a collapsible header (a chevron icon, a bold label like Concept / Subjects / Setting / Lighting, a muted hint). In view from the top: Concept, the Subjects card, and Setting. (Wave-3 density arbitration: with ONE populated subject card — name + appearance + wardrobe + features inputs — Setting is the last box that fits in the ~640px panel viewport at 1080p. Lighting, Style, Camera, Flow, and Audio sit BELOW the panel\'s internal fold — that is the design, never a defect; each has its own scroll checkpoint (Flow, Audio), and the pre-Wave-3 debt this checkpoint guards — the left-edge glyph clip — stays a flaggable defect if it ever reappears.)',
+          'Populated content visible: the Concept box\'s textarea contains watchman/observatory prose; the Subjects box shows ONE dashed subject card with a name input reading "Idris", an appearance textarea about a weathered keeper in a wool coat, and wardrobe/features inputs; the Setting box shows readable prose (mountain observatory / storm clouds); the Style box (its own section, when in view) reads "Cinematic".',
           'Per-box assist buttons ("distill" / "enhance") appear DIMMED — no local LLM in tests, CORRECT. Chip rows (small rounded pills like "a busy city street", "golden hour") may render under the Setting/Lighting boxes.',
           'Blessings: dense small text and muted sub-labels are the design language; dimmed disabled controls are intended offline states; boxes further down (Style, Camera, Flow, Audio, Engine, References…) sit BELOW the panel\'s internal fold — their absence from THIS capture is NOT a defect (a second checkpoint covers them); the bottom bar shows the generate surface.',
           'Defects to flag: the toggle truly absent from the panel top, no box sections at all, empty textareas where populated content is described above, the subject card lacking its input fields, overlapping boxes rendering text unreadably, a pure-white or pure-black dead region.',
@@ -1109,28 +1109,59 @@ export const SCENARIOS: VisionScenario[] = [
       },
       {
         id: 'structured-prompt-editor-audio-1080p',
-        label: 'Structured editor — panel scrolled to the Audio box + the compose preview',
+        label: 'Structured editor — panel scrolled to the Audio box (the preview gets its own checkpoint)',
         // The audio box + the distill pill + the OPEN compose preview — the
         // exact-string contract visible at the panel's foot.
         drive: async (page) => {
           const panel = page.locator('[data-canvas-properties]')
           await expect(panel).toBeVisible()
           // The rubric wants the Audio box AND the open compose preview in
-          // frame — anchoring the AUDIO box to the top pushed the preview
-          // below the fold (judge-confirmed twice). Anchor the PREVIEW
-          // (block:'center'): the audio box sits directly above it.
-          await panel.locator('[data-structured-preview]').evaluate((element) => element.scrollIntoView({ block: 'center' }))
+          // frame. Neither pure anchor can hold both: the preview is
+          // TALLER than the panel body (block:'center' on it centers a
+          // >640px element and throws the whole Audio box above the fold —
+          // the visible region started at the DIALOGUE label, bundle 4),
+          // and the populated Audio box is ~700px on its own (chips rows +
+          // three labeled fields + the helper row), so anchoring IT at the
+          // top fills the body and pushes the preview below the fold
+          // (bundle 5). The honest shape is one state per checkpoint: this
+          // one frames the Audio box; the preview checkpoint below frames
+          // the preview.
+          await panel.locator('[data-structured-box="audio"]').evaluate((element) => element.scrollIntoView({ block: 'start' }))
           await expect.poll(async () => panel.evaluate((element) => (element.querySelector('.canvas-properties-body') as HTMLElement | null)?.scrollTop ?? element.scrollTop)).toBeGreaterThan(0)
           await expect(page.locator('[data-structured-input="audio-soundscape"]')).toBeVisible()
           await expect(page.locator('[data-structured-preview] pre')).toContainText('integrated_multimodal_description:')
         },
         rubric: [
           SHELL_CONTEXT,
-          'GROUND TRUTH FOR THIS CAPTURE: the properties panel is scrolled DOWN so the AUDIO box sits at the top of the visible panel area. Everything above it (the toggle, Concept/Subjects/Setting/Lighting/Style/Camera/Flow) is ABOVE the fold — its absence from THIS capture is NOT a defect (earlier checkpoints cover it).',
+          'GROUND TRUTH FOR THIS CAPTURE: the properties panel is scrolled DOWN so the AUDIO box sits at the top of the visible panel area. Everything above it (the toggle, Concept/Subjects/Setting/Lighting/Style/Camera/Flow) is ABOVE the fold, and the compose preview sits BELOW it — neither absence is a defect (earlier checkpoints cover the top; the next checkpoint frames the preview).',
           'The AUDIO box: three labeled sub-fields — "soundscape" (a small uppercase label with a "→ overall_soundscape" note; its textarea is filled with readable prose about wind and keys), "music" (with a "→ non_diegetic_music" note), and "dialogue" whose textarea contains a readable <d>[English] Almost dawn.</d> fragment. Under the dialogue field: a compact helper row — a small language select, a one-line text input, and a "+ <d>" button. Chip pills (e.g. "room tone", "rain") may render under the soundscape field.',
-          'Below the Audio box: a right-aligned muted "distill into boxes…" pill (may be dimmed — CORRECT offline) and an OPEN "compose preview" block (dashed border; its summary line reads "compose preview — this exact string is submitted") showing monospace composed text that begins "integrated_multimodal_description: [Shot 1] Cinematic,".',
+          'Below the Audio box, a right-aligned muted "distill into boxes…" pill (may be dimmed — CORRECT offline). The compose preview sits BELOW the fold here — the populated Audio box fills the ~830px panel body on its own; that is the design, never a defect (the NEXT checkpoint frames the preview itself).',
           'Blessings: dense small text and muted sub-labels are the design language; dimmed controls are intended offline states; sections below (Engine, References, then the folded Guides/Takes disclosure rows) may sit below the fold — absence is NOT a defect (R-18: Identity and the LoRA timeline are contextual and legitimately absent here); the bottom bar shows the generate surface.',
-          'Defects to flag: the Audio box missing any of its three labeled sub-fields, the soundscape or dialogue textareas empty, the helper row absent, the compose preview absent or empty, overlapping sections rendering text unreadably, a pure-white or pure-black dead region.',
+          'Defects to flag: the Audio box missing any of its three labeled sub-fields, the soundscape or dialogue textareas empty, the helper row absent, overlapping sections rendering text unreadably, a pure-white or pure-black dead region.',
+        ].join(' '),
+      },
+      {
+        id: 'structured-prompt-editor-preview-1080p',
+        label: 'Structured editor — the open compose preview: the exact-string contract at the panel\'s foot',
+        // The Audio box and the preview CANNOT share the ~830px panel body
+        // (see the audio checkpoint's comment) — the preview gets its own
+        // frame. block:'start' on the preview: the distill pill sits just
+        // above the fold (blessed absent), the preview summary + its
+        // monospace body own the frame.
+        drive: async (page) => {
+          const panel = page.locator('[data-canvas-properties]')
+          await expect(panel).toBeVisible()
+          await panel.locator('[data-structured-preview]').evaluate((element) => element.scrollIntoView({ block: 'start' }))
+          await expect.poll(async () => panel.evaluate((element) => (element.querySelector('.canvas-properties-body') as HTMLElement | null)?.scrollTop ?? element.scrollTop)).toBeGreaterThan(0)
+          await expect(page.locator('[data-structured-preview] pre')).toBeVisible()
+          await expect(page.locator('[data-structured-preview] pre')).toContainText('integrated_multimodal_description:')
+        },
+        rubric: [
+          SHELL_CONTEXT,
+          'GROUND TRUTH FOR THIS CAPTURE: the properties panel is scrolled to its BOTTOM region — the OPEN compose preview block owns the visible panel area. Everything above (all eight boxes) is above the fold — absence is NOT a defect (earlier checkpoints cover them); the panel\'s footer (status + generate) stays visible at the panel\'s foot.',
+          'The compose preview: a bordered block with an OPEN state (no chevron fold), its summary/header line reads "compose preview — this exact string is submitted", followed by a MONOSPACE body (light text on dark, small, dense — the design language) showing the composed prompt: it begins "integrated_multimodal_description: [Shot 1] Cinematic," and continues with readable lines for the setting (mountain observatory / storm clouds), the subject (Idris — weathered keeper, wool coat, brass-buttoned coat, scar through one eyebrow), camera prose, audio keys (wind/keys), a <d>[English] Almost dawn.</d> dialogue fragment, and beat/flow lines.',
+          'Blessings: dense small monospace is the design; long composed lines may WRAP within the block (wrapping is correct — the pre-wrap fix); a right-aligned muted "distill into boxes…" pill may sit just above the fold or be scrolled out (its own dimmed offline state is correct); sections below (Engine, References, folded Guides/Takes) may sit below the fold — absence is NOT a defect.',
+          'Defects to flag: the preview block absent or empty, its monospace body clipped at the panel\'s LEFT edge (glyphs cut mid-character — the pre-Wave-3 debt), overlapping sections rendering text unreadably, a pure-white or pure-black dead region.',
         ].join(' '),
       },
     ],

@@ -281,7 +281,7 @@ textarea::placeholder, input::placeholder { color: #58615c; }
 /* R-15 (Wave 3): the three-group IA — the sticky rail + the group bands.
    Structural only (vars + existing tokens) so the shibui retheme restyles
    without touching layout. */
-.settings-nav { position: sticky; top: 0; z-index: 5; display: flex; gap: 8px; padding: 10px 17px; background: var(--color-surface); border-bottom: 1px solid var(--line); }
+.settings-nav { position: sticky; top: 0; z-index: 5; display: flex; gap: 8px; padding: 10px 17px; background: var(--surface); border-bottom: 1px solid var(--line); }
 .settings-nav button { padding: 7px 14px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: var(--text-sm); font-weight: 600; cursor: pointer; }
 .settings-nav button:hover { color: var(--color-text-soft); border-color: var(--accent); }
 .settings-group { padding-top: 6px; }

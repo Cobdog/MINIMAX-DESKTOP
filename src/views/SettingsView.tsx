@@ -43,7 +43,7 @@ function PathCheckNote({ path }: { path: string }) {
     : <><AlertCircle size={13} /> {detail || 'Path check failed.'}</>}</p>
 }
 
-export function SettingsView({ settings, setSettings, info, infoEpoch = 0, models, h3Report, scanning, status, checking, diagnosticRunning, ollamaModels, onRefreshOllama, onScan, onCheck, onRunDiagnostics, onOpenLibrary, focusSection }: { settings: AppSettings; setSettings(value: AppSettings): void; info: ObjectInfo; infoEpoch?: number; models: ModelFile[]; h3Report: ReturnType<typeof h3StackReport>; scanning: boolean; status: ComfyStatus; checking: boolean; diagnosticRunning: boolean; ollamaModels: OllamaModel[]; onRefreshOllama(): void; onScan(): void; onCheck(): void; onRunDiagnostics(): void; onOpenLibrary(focusEntryIds?: string[]): void; focusSection?: string }) {
+export function SettingsView({ settings, setSettings, info, infoEpoch = 0, models, h3Report, scanning, status, checking, diagnosticRunning, ollamaModels, onRefreshOllama, onScan, onCheck, onRunDiagnostics, onOpenLibrary }: { settings: AppSettings; setSettings(value: AppSettings): void; info: ObjectInfo; infoEpoch?: number; models: ModelFile[]; h3Report: ReturnType<typeof h3StackReport>; scanning: boolean; status: ComfyStatus; checking: boolean; diagnosticRunning: boolean; ollamaModels: OllamaModel[]; onRefreshOllama(): void; onScan(): void; onCheck(): void; onRunDiagnostics(): void; onOpenLibrary(focusEntryIds?: string[]): void }) {
   const pathRows: Array<{ kind: ModelKind; label: string; note: string }> = [
     { kind: 'diffusion_models', label: 'Diffusion models', note: 'FL2VA and Ref2VA checkpoints' },
     { kind: 'text_encoders', label: 'Text encoders', note: 'Qwen3-VL MiniMax encoder' },
