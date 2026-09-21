@@ -42,7 +42,7 @@ jobs:
       # ONE vitest run: every unit suite in parallel worker processes — the
       # full tests/ set (workflows, registry, h3img, storage, documents,
       # realtime, filmstrip, llm, engine, runtime, fetcher, instance,
-      # lora-form, poserig, camera, canvas, benchmarks, launcher, datasets;
+      # poserig, camera, canvas, benchmarks, launcher, datasets;
       # per-suite iteration aliases: pnpm test:registry, …; watch: pnpm
       # test:watch).
       - run: pnpm test

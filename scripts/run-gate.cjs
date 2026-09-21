@@ -59,11 +59,11 @@ const SUITES = [
   // ONE vitest invocation, every unit suite in parallel fork workers: the
   // 19 suites the old gate chained serially (workflows, registry, h3img,
   // storage, documents, realtime, filmstrip, llm, engine, runtime, fetcher,
-  // instance, lora-form, poserig, camera, canvas, benchmarks, launcher,
+  // instance, poserig, camera, canvas, benchmarks, launcher,
   // datasets) now live as tests/*.test.js. Per-suite aliases remain for
   // iteration (`pnpm test:registry`, …) and `pnpm test:watch` is the TDD
   // loop. Needs ffmpeg on PATH (filmstrip + datasets), python3+numpy for
-  // lora-form/benchmarks math halves (loud skips otherwise). The launcher
+  // benchmarks math halves (loud skips otherwise). The launcher
   // suite NOTE-skips on win32 (POSIX sh only).
   { name: 'unit', command: 'pnpm run test', timeoutMs: 20 * MINUTE },
   { name: 'smoke:server', command: 'pnpm run smoke:server', timeoutMs: 5 * MINUTE },

@@ -28,7 +28,6 @@
     "test:runtime": "vitest run runtime",
     "test:fetcher": "vitest run fetcher",
     "test:instance": "vitest run instance",
-    "test:lora-form": "vitest run lora-form",
     "test:poserig": "vitest run poserig",
     "test:camera": "vitest run camera",
     "test:canvas": "vitest run canvas",

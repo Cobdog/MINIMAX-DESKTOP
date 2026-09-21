@@ -46,9 +46,9 @@ jobs:
       # symlink/path-sensitive surface. The route sections self-skip without
       # the web build (the NOTE pattern).
       - run: pnpm test:instance
-      # Form-adapter suite (task k271ykk): math + golden (numpy) and the
-      # first-party pack install path on Windows symlinks/junctions.
-      - run: pnpm test:lora-form
+      # (The lora-form suite step was removed with the suite itself — Wave 2
+      # R-12, 2026-09-20: modelForms.ts and its tests died with the local
+      # scan. The python+numpy setup above stays: benchmarks consumes it.)
       # Benchmark harness offline suite (task cp96zdm): registry/leaderboard,
       # CLI, catalog bridge, mock-candidate build smoke (python+numpy above —
       # the suite passes BENCH_PYTHON=python on Windows), metric fixtures.
