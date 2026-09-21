@@ -484,6 +484,14 @@ export const SCENARIOS: VisionScenario[] = [
             const rows = Array.from(document.querySelectorAll<HTMLElement>('.node-packs-section .node-pack-row'))
             const target = rows.find((row) => row.textContent?.includes('comfyui-krea2-controlnet'))
             target?.scrollIntoView({ block: 'start' })
+            // The sticky Settings rail is OPAQUE since the ghost-token fix
+            // (it used to compute transparent — the judge could read rows
+            // through it). block:'start' parks the target row exactly UNDER
+            // the rail band; back off by the rail's height so the row's
+            // header clears it.
+            const scroller = target?.closest('.canvas-settings-body') as HTMLElement | null
+            const rail = scroller?.querySelector('[data-settings-nav]') as HTMLElement | null
+            if (scroller && rail) scroller.scrollTop = Math.max(0, scroller.scrollTop - rail.offsetHeight - 8)
           })
           await page.waitForTimeout(400)
         },
