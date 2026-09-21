@@ -1132,6 +1132,9 @@ test('the H3-1F stills intent gates honestly at the render attempt — both pack
     // graph has not landed, and the stock length=1 path is illegal
     // regardless. A DIFFERENT honest reason, never a doomed submit. ----
     servePack = true
+    // Reset the session first: the launcher (and its image chip) renders on
+    // the EMPTY canvas — the first half's chain would hide it after reload.
+    await resetSession(page)
     await page.reload()
     await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
     await page.locator('[data-canvas-chip="image"]').click()
@@ -3064,7 +3067,12 @@ test('an image-intent chain with a reference binding refuses honestly — never 
     await page.locator('[data-canvas-prompt]').fill('a lighthouse over a black sea')
     await page.locator('[data-canvas-submit]').click()
     await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
-    await expect.poll(() => submitted.length, { timeout: 20_000 }).toBeGreaterThanOrEqual(1)
+    // (d4er4ati) The spawn's stills submission is GATED now — the stock-only
+    // fake engine lacks the H3 Image Studio pack's Prepare class, so the
+    // T=1 family refuses at the render attempt and nothing reaches /prompt
+    // (the old stills submission here was the retired false claim).
+    await page.waitForTimeout(1_000)
+    expect(submitted.length).toBe(0)
     await dropPng(page, 'p12-reference.png')
     await expect(page.locator('[data-canvas-tile]')).toHaveCount(2, { timeout: 10_000 })
 

@@ -60,6 +60,7 @@ const SUITES = {
   datasets: { build: 'server', windows: false, python: false, ffmpeg: true },
   documents: { build: 'server', windows: false, python: false, ffmpeg: false },
   'engine-process': { build: 'server', windows: true, python: false, ffmpeg: false },
+  'engine-families': { build: null, windows: false, python: false, ffmpeg: false },
   enginewatch: { build: null, windows: false, python: false, ffmpeg: false },
   fetcher: { build: 'server', windows: true, python: false, ffmpeg: false },
   filmstrip: { build: 'server', windows: false, python: false, ffmpeg: true },
@@ -83,7 +84,7 @@ const BOOTING = ['datasets', 'documents', 'fetcher', 'filmstrip', 'instance', 'l
 const PORT_USERS = ['datasets', 'documents', 'engine-process', 'fetcher', 'filmstrip', 'instance', 'launcher', 'llm', 'realtime', 'runtime', 'storage']
 
 /** The suites that load client TS through the VM harness (scripts/lib/ts-vm.cjs). */
-const VM_SUITES = ['camera', 'canvas', 'enginewatch', 'h3img', 'poserig', 'registry', 'workflows']
+const VM_SUITES = ['camera', 'canvas', 'engine-families', 'enginewatch', 'h3img', 'poserig', 'registry', 'workflows']
 
 /** Every vitest suite — the FULL fallback set. */
 const ALL_SUITES = Object.keys(SUITES).sort()
@@ -265,6 +266,7 @@ const RULES = [
   { match: ['src/lib/camera/**'], suites: ['camera'], reason: 'camera path model + parity goldens.' },
   { match: ['src/poserig/**'], suites: ['poserig'], reason: 'pose rig domain (logic modules; PoseRigApp.tsx rides the dir).' },
   { match: ['src/lib/graph/h3image.ts'], suites: ['canvas', 'h3img', 'registry', 'workflows'], reason: 'the H3 image graph factory — loaded by four suites.' },
+  { match: ['src/lib/graph/engineFamilies.ts', 'tests/engine-families.test.js'], suites: ['canvas', 'engine-families', 'workflows'], reason: 'the engine-family registry (A-3): the canvas selector/panel seam + its own suite; workflows loads the graph barrel.' },
   { match: ['src/lib/graph/krea2edit.ts'], suites: ['h3img', 'registry'], reason: 'Krea-2 edit families (h3img directly; registry via graph/index re-export + golden).' },
   { match: ['src/lib/graph/**'], suites: ['registry'], reason: 'the optimization registry surface (graph/index re-exports the tree; the registry golden is the contract).' },
   { match: ['src/lib/serverStorage.ts'], suites: ['storage'], reason: 'the client storage layer the storage suite transpiles + drives against the server.' },
