@@ -1,5 +1,5 @@
 {
-  "note": "canonical pose render fingerprints — regenerate with UPDATE=1 node scripts/test-poserig.cjs",
+  "note": "canonical pose render fingerprints — regenerate with UPDATE=1 pnpm test:poserig",
   "poses": [
     {
       "id": "standing",
