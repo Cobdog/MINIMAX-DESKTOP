@@ -60,6 +60,7 @@ const SUITES = {
   datasets: { build: 'server', windows: false, python: false, ffmpeg: true },
   documents: { build: 'server', windows: false, python: false, ffmpeg: false },
   'engine-process': { build: 'server', windows: true, python: false, ffmpeg: false },
+  enginewatch: { build: null, windows: false, python: false, ffmpeg: false },
   fetcher: { build: 'server', windows: true, python: false, ffmpeg: false },
   filmstrip: { build: 'server', windows: false, python: false, ffmpeg: true },
   h3img: { build: null, windows: false, python: false, ffmpeg: false },
@@ -83,7 +84,7 @@ const BOOTING = ['datasets', 'documents', 'fetcher', 'filmstrip', 'instance', 'l
 const PORT_USERS = ['datasets', 'documents', 'engine-process', 'fetcher', 'filmstrip', 'instance', 'launcher', 'llm', 'realtime', 'runtime', 'storage']
 
 /** The suites that load client TS through the VM harness (scripts/lib/ts-vm.cjs). */
-const VM_SUITES = ['camera', 'canvas', 'h3img', 'poserig', 'registry', 'workflows']
+const VM_SUITES = ['camera', 'canvas', 'enginewatch', 'h3img', 'poserig', 'registry', 'workflows']
 
 /** Every vitest suite — the FULL fallback set. */
 const ALL_SUITES = Object.keys(SUITES).sort()
@@ -270,6 +271,21 @@ const RULES = [
   { match: ['src/lib/serverStorage.ts'], suites: ['storage'], reason: 'the client storage layer the storage suite transpiles + drives against the server.' },
   { match: ['src/lib/workspace.ts'], suites: ['registry'], reason: 'workspace selection resolution.' },
   { match: ['src/lib/h3imageContract.ts', 'src/lib/h3imageOps.ts', 'src/lib/h3imageScorer.ts', 'src/lib/h3imageStaging.ts'], suites: ['h3img'], reason: 'H3 image contract/ops/scorer/staging.' },
+  {
+    match: ['src/lib/engineWatch.ts', 'src/lib/fabricWatch.ts', 'src/lib/dbg.ts', 'src/lib/preflight.ts'],
+    suites: ['enginewatch'],
+    reason: 'Wave-1 pure decision modules (jpc96dp: re-check cadence, WS re-probe/resync, the A-DBG tagged logger, submit preflight) — the enginewatch suite drives them through the VM harness.',
+  },
+  {
+    match: ['src/lib/nodePackRegistry.ts'],
+    suites: ['enginewatch', 'fetcher', 'instance', 'lora-form', 'runtime'],
+    reason: 'the node-pack registry DATA (extracted from server/engineNodes, Wave 1 R-02 — one source of truth): every pack flow asserts it, preflight (enginewatch) reads it; also a license-audit input.',
+  },
+  {
+    match: ['src/lib/promptError.ts'],
+    suites: ['workflows'],
+    reason: 'structural prompt-error classification — extracted pure (Wave 1) so the workflows suite drives it; server/core re-imports it.',
+  },
   { match: ['src/lib/aceStepSubmit.ts', 'src/lib/cameraPath.ts', 'src/lib/h3Submit.ts', 'src/lib/music3Submit.ts', 'src/lib/structuredPrompt.ts'], suites: ['canvas'], reason: 'submit/structured-prompt modules the canvas suite loads.' },
   { match: ['src/images/submit.ts'], suites: ['canvas'], reason: 'image submit flow (canvas suite).' },
   { match: ['src/images/session.ts'], suites: ['h3img'], reason: 'image session model (h3img suite).' },
@@ -325,7 +341,7 @@ const RULES = [
 /** License-audit inputs, evaluated independently of the rules (the audit is
  *  cheap but its inputs are exactly these — deps, vendored packs, the
  *  node-pack registry, the recorded decisions). */
-const LICENSE_INPUTS = ['package.json', 'pnpm-lock.yaml', 'vendor/**', 'server/engineNodes.ts', 'docs/LICENSES.md', 'scripts/audit-licenses.cjs']
+const LICENSE_INPUTS = ['package.json', 'pnpm-lock.yaml', 'vendor/**', 'server/engineNodes.ts', 'src/lib/nodePackRegistry.ts', 'docs/LICENSES.md', 'scripts/audit-licenses.cjs']
 
 /** Extensions eslint lints (flat config lints js/ts across the repo). */
 const ESLINT_EXT = new Set(['.js', '.cjs', '.mjs', '.ts', '.tsx'])
