@@ -250,25 +250,47 @@ export const SCENARIOS: VisionScenario[] = [
       const originalSettings = ((await (await page.request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
       ;(page as unknown as { __visionOriginalSettings?: Record<string, unknown> }).__visionOriginalSettings = originalSettings
       const mergeName = 'TenStrip_10Eros-Max_beta5_int8.safetensors'
-      const modelRoot = resolve('test-home/vision-override-models')
-      for (const [kind, files] of Object.entries({
-        diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
+      // (Wave 2 R-12) The fake engine's registry listing replaces the seeded
+      // files: the community merge rides /models — no local files, no form
+      // header (registry rows carry neither).
+      const overrideListings: Record<string, string[]> = {
+        diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors', mergeName],
         text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
         vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors', 'minimax_h3_t1_image_vae_step1597.safetensors'],
-      })) {
-        mkdirSync(join(modelRoot, kind), { recursive: true })
-        for (const file of files as string[]) writeFileSync(join(modelRoot, kind, file), 'x')
+        loras: [], vae_approx: [], clip_vision: [],
       }
-      // A real curve-form header (scan-side form detection reads it) so the
-      // checkpoint pick APPLIES rather than refusing on the no-form rule.
-      const header = JSON.stringify({ __metadata__: {}, 'diffusion_model.adaln_t_table': { dtype: 'F32', shape: [64, 8], data_offsets: [0, 2048] } })
-      const length = Buffer.alloc(8)
-      length.writeBigUInt64LE(BigInt(Buffer.byteLength(header)))
-      writeFileSync(join(modelRoot, 'diffusion_models', mergeName), Buffer.concat([length, Buffer.from(header), Buffer.alloc(2048)]))
+      const engine = http.createServer((req, res) => {
+        const url = new URL(req.url ?? '/', 'http://engine.local')
+        if (url.pathname === '/system_stats') {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ system: { comfyui_version: 'v0.34.0' }, devices: [] }))
+          return
+        }
+        if (url.pathname === '/object_info') {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({}))
+          return
+        }
+        if (url.pathname === '/models') {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify(Object.keys(overrideListings)))
+          return
+        }
+        const folder = /^\/models\/(.+)$/.exec(url.pathname)
+        if (folder) {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify(overrideListings[decodeURIComponent(folder[1]!)] ?? []))
+          return
+        }
+        res.writeHead(404)
+        res.end()
+      })
+      const enginePort = await new Promise<number>((resolvePort) => engine.listen(0, '127.0.0.1', () => resolvePort((engine.address() as { port: number }).port)))
+      ;(page as unknown as { __visionEngine?: http.Server }).__visionEngine = engine
       await page.request.post('/api/lan/settings', { data: { settings: {
         ...originalSettings,
-        paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: join(modelRoot, 'diffusion_models'), text_encoders: join(modelRoot, 'text_encoders'), vae: join(modelRoot, 'vae') },
-        // fl2va: APPLIED. videoVae: names no scanned file — the degraded
+        comfyUrl: `http://127.0.0.1:${enginePort}`,
+        // fl2va: APPLIED. videoVae: names no registry file — the degraded
         // warning row (the legacy 'vae' key would migrate to the same place).
         // textEncoder/ref2va/merged/audioVae: unset — the auto labels.
         modelOverrides: { minimax: { fl2va: mergeName, videoVae: 'a_vae_that_was_deleted.safetensors' } },
@@ -302,7 +324,8 @@ export const SCENARIOS: VisionScenario[] = [
     after: async (page) => {
       const original = (page as unknown as { __visionOriginalSettings?: Record<string, unknown> }).__visionOriginalSettings
       if (original) await page.request.post('/api/lan/settings', { data: { settings: original } }).catch(() => undefined)
-      rmSync(resolve('test-home/vision-override-models'), { recursive: true, force: true })
+      const engine = (page as unknown as { __visionEngine?: http.Server }).__visionEngine
+      engine?.close()
       const close = page.locator('[data-canvas-settings-close]')
       if (await close.count()) await close.click().catch(() => undefined)
     },
@@ -313,10 +336,10 @@ export const SCENARIOS: VisionScenario[] = [
         rubric: [
           SHELL_CONTEXT,
           'A floating Settings DOCK panel over the dimmed canvas (header "Settings — docked" with an × close). The body scrolls INSIDE the panel and this capture is taken with the "Model overrides" card pinned at the TOP of the visible body — its title and the FIRST family block are in frame; sections above the card sit above the fold (intended scrolling, not clipping; judge only what is in frame). The titlebar\'s canvas-tab strip may be EMPTY in this capture (the scenario closes every canvas before opening Settings) — no named tab is not a defect here.',
-          'The "Model overrides" card is in frame: a title "Model overrides" with a layers icon and an explanatory sub-line about pinning exact files when name-pattern inference cannot find them (community merges), plus a closing note line about picks being exact scanned filenames.',
+          'The "Model overrides" card is in frame: a title "Model overrides" with a layers icon and an explanatory sub-line about pinning exact files when name-pattern inference cannot find them (community merges), plus a closing note line about picks being exact names from the connected engine model registry.',
           'Family blocks stack vertically, each with a family name and muted note. The FIRST family reads "MiniMax H3 video" and carries six rows labeled "FL2VA checkpoint (first-frame lane)", "Ref2VA checkpoint (reference lane)", "Merged checkpoint (both lanes)", "Text encoder", "Video VAE", and "Audio VAE", each row a label block plus a dropdown select.',
           'The FL2VA checkpoint row\'s select DISPLAYS the picked file "TenStrip_10Eros-Max_beta5_int8.safetensors" (an applied community-merge pick — this is the intended state, not a bug).',
-          'The Video VAE row shows a small WARNING line beneath its select mentioning that the picked file is no longer in the scan and renders fall back to auto — an amber/warning-colored degraded notice (the honest degradation contract; its presence is CORRECT).',
+          'The Video VAE row shows a small WARNING line beneath its select mentioning that the picked file is not in the engine model registry and renders fall back to auto — an amber/warning-colored degraded notice (the honest degradation contract; its presence is CORRECT).',
           'The text-encoder and Ref2VA rows\' selects show an "auto (inferred) — …" option naming the inferred file, or "auto (inferred) — nothing detected" — either label is correct.',
           'The Audio VAE row\'s select shows an "auto (inferred) — …" option naming the inferred audio VAE file (the video family has NO "Image VAE (T=1)" row at all — that absence is the intended legality map, not a defect).',
           'The MERGED checkpoint row\'s select shows "auto (inferred) — nothing detected" — the intended honest state (inference can never see community merges; that is the override layer\'s reason to exist), not a defect.',
@@ -350,14 +373,23 @@ export const SCENARIOS: VisionScenario[] = [
           res.end(JSON.stringify({ system: { comfyui_version: 'v0.34.0' }, devices: [] }))
           return
         }
+        // (Wave 2 A-8) Both object_info forms — targeted per-class asks are
+        // how the live chips resolve now (key-miss = absence).
+        const targetedClass = /^\/object_info\/(.+)$/.exec(url.pathname)
+        if (targetedClass) {
+          const className = decodeURIComponent(targetedClass[1]!)
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify(className in objectInfo ? { [className]: objectInfo[className] } : {}))
+          return
+        }
         if (url.pathname === '/object_info') {
           res.writeHead(200, { 'content-type': 'application/json' })
           res.end(JSON.stringify(objectInfo))
           return
         }
-        if (url.pathname === '/models/diffusion_models') {
+        if (url.pathname === '/models' || url.pathname === '/models/diffusion_models') {
           res.writeHead(200, { 'content-type': 'application/json' })
-          res.end(JSON.stringify(['instance-h3-fl2va.safetensors', 'instance-h3-ref2va.safetensors']))
+          res.end(JSON.stringify(url.pathname === '/models' ? ['diffusion_models'] : ['instance-h3-fl2va.safetensors', 'instance-h3-ref2va.safetensors']))
           return
         }
         res.writeHead(404)
@@ -387,13 +419,11 @@ export const SCENARIOS: VisionScenario[] = [
       mkdirSync(join(externalDir, 'ComfyUI-MiniMax-H3-Turbo'), { recursive: true })
       writeFileSync(join(externalDir, 'ComfyUI-MiniMax-H3-Turbo', '.studio-node.json'), `${JSON.stringify({ id: 'minimax-h3-turbo', revision: '0123456789abcdef0123456789abcdef01234567', mode: 'user-fetch', installedAt: Date.now(), source: 'vision' }, null, 2)}\n`)
 
-      const modelRoot = resolve('test-home/vision-instance-models')
-      for (const kind of ['diffusion_models', 'text_encoders', 'vae', 'loras', 'vae_approx', 'clip_vision']) mkdirSync(join(modelRoot, kind), { recursive: true })
+      // (Wave 2 R-12) No local model roots: the instance listing is the
+      // whole inventory.
       await page.request.post('/api/lan/settings', { data: { settings: {
         ...originalSettings,
         comfyUrl: `http://127.0.0.1:${enginePort}`,
-        modelRoot,
-        paths: Object.fromEntries(['diffusion_models', 'text_encoders', 'vae', 'loras', 'vae_approx', 'clip_vision'].map((kind) => [kind, join(modelRoot, kind)])),
         engine: { ...(originalSettings.engine as Record<string, unknown>), mode: 'external', externalCustomNodesDir: externalDir },
       } } })
       await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
@@ -615,16 +645,35 @@ export const SCENARIOS: VisionScenario[] = [
     id: 'lora-timeline-surface',
     label: 'LoRA timeline — the paint rail + compiled projection in the properties panel',
     run: async (page) => {
-      // Two dummy LoRA files so the pickers offer real names (local scan
-      // only; the engine stays offline — the honest blessed state).
-      const loraDir = resolve('test-home', 'lora-timeline-vision', 'loras')
-      mkdirSync(loraDir, { recursive: true })
-      writeFileSync(`${loraDir}/vision-style-rain.safetensors`, 'x')
-      writeFileSync(`${loraDir}/vision-style-neon.safetensors`, 'x')
+      // (Wave 2 R-12) A fake engine serves the two style LoRAs through the
+      // registry listing — the pickers offer real names with the engine the
+      // only model source (no local files).
+      const loraEngine = http.createServer((req, res) => {
+        const url = new URL(req.url ?? '/', 'http://engine.local')
+        if (url.pathname === '/system_stats') {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ system: { comfyui_version: 'v0.34.0' }, devices: [] }))
+          return
+        }
+        if (url.pathname === '/object_info') {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({}))
+          return
+        }
+        if (url.pathname === '/models' || url.pathname === '/models/loras') {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify(url.pathname === '/models' ? ['loras'] : ['vision-style-rain.safetensors', 'vision-style-neon.safetensors']))
+          return
+        }
+        res.writeHead(404)
+        res.end()
+      })
+      const loraEnginePort = await new Promise<number>((resolvePort) => loraEngine.listen(0, '127.0.0.1', () => resolvePort((loraEngine.address() as { port: number }).port)))
+      ;(page as unknown as { __visionEngine?: http.Server }).__visionEngine = loraEngine
       const settingsResponse = await page.request.get('/api/lan/settings')
       const original = ((await settingsResponse.json()) as { settings: Record<string, unknown> }).settings
       ;(page as unknown as { __loraVisionSettings?: Record<string, unknown> }).__loraVisionSettings = original
-      await page.request.post('/api/lan/settings', { data: { settings: { ...original, paths: { ...(original.paths as Record<string, string>), loras: loraDir } } } })
+      await page.request.post('/api/lan/settings', { data: { settings: { ...original, comfyUrl: `http://127.0.0.1:${loraEnginePort}` } } })
       await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
       await page.goto('/')
       await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
@@ -658,7 +707,8 @@ export const SCENARIOS: VisionScenario[] = [
       const original = (page as unknown as { __loraVisionSettings?: Record<string, unknown> }).__loraVisionSettings
       if (original) await page.request.post('/api/lan/settings', { data: { settings: original } }).catch(() => undefined)
       await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
-      rmSync(resolve('test-home', 'lora-timeline-vision'), { recursive: true, force: true })
+      const engine = (page as unknown as { __visionEngine?: http.Server }).__visionEngine
+      engine?.close()
     },
     checkpoints: [
       {
@@ -670,7 +720,7 @@ export const SCENARIOS: VisionScenario[] = [
           'Inside the LoRA timeline section: a slim horizontal RAIL graphic — an upper lane with TWO adjacent filled blocks (accent-tinted) labeled "vision-style-rain" and "vision-style-neon" (the second block slightly narrower), and BELOW it a thinner compiled-segment lane (two solid blocks) with ONE small dashed-outline WINDOW band straddling their boundary. Small "0s / 2.5s / 5.0s" tick labels sit under the rail. A thin divider may separate the lanes.',
           'Beneath the rail: a one-line muted note about painted ranges above / compiled segments + transition windows below; TWO range rows (each a bordered box with a "LoRA 1…" dropdown showing vision-style-rain / vision-style-neon, a small strength number input reading "1", "→" span inputs reading "0 → 3" and "3 → 5" with small duration notes, and an × remove button); a "+ paint range" pill; then a TRANSITION row (a small "… →" label, a dropdown reading "FLF splice" — the gap set\'s short menu label, the same string the timeline overlay\'s gap chips use, NOT the longer "FLF continuation splice" menu-entry name — a small number input with the 22-frame default ≈ "0.92", and an "s window" note).',
           'A muted compile summary line reading "2 segments · 5.38s planned (grid-conformed)" (or similar total within 5.3–5.4s), and at the section bottom-right a pill button "compile → 2 segments".',
-          'The engine being OFFLINE (muted chip top-right; possibly a small error toast about ComfyUI being unreachable near the bottom — the honest offline refusal of the launcher auto-submit) is CORRECT, not a defect. Dimmed disabled controls, small muted sub-labels, and the dense dark design language are intentional.',
+          'The engine chip (top-right) may read connected or offline depending on capture timing — either is correct here, not a defect. Dimmed disabled controls, small muted sub-labels, and the dense dark design language are intentional.',
           'Defects to flag: only ONE range row or one rail block, no compiled lane under the painted lane, no dashed window at the boundary, a dropdown showing a different LoRA name than the rail block labels, the apply pill reading "— segments" (disabled-looking with a dash), text clipped mid-glyph by the panel edge, or the section overlapping the References section below it.',
         ].join(' '),
       },

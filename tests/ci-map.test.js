@@ -121,12 +121,12 @@ test('(5c) build tiers ride the suite catalog (the stale-dist rule)', () => {
 })
 
 test('(5d) the Windows leg intersects its OS-sensitive set', () => {
-  eq(resolve(['server/fetcher.ts']).windowsSuites, ['fetcher', 'lora-form'], 'fetcher change runs both Windows suites that load it')
+  eq(resolve(['server/fetcher.ts']).windowsSuites, ['fetcher'], 'fetcher change runs its own Windows suite (lora-form died with the local scan — Wave 2 R-12)')
   eq(resolve(['src/lib/workflow.ts']).windowsSuites, [], 'client graph change skips the Windows leg (nothing OS-sensitive)')
-  eq(resolve(['package.json']).windowsSuites, ['benchmarks', 'engine-process', 'fetcher', 'instance', 'lora-form', 'runtime'], 'infrastructure change runs the full Windows set')
-  eq(resolve(['.github/workflows/engine-windows.yml']).windowsSuites, ['benchmarks', 'engine-process', 'fetcher', 'instance', 'lora-form', 'runtime'], 'changing the Windows workflow runs its full set (the leg verifies itself)')
-  ok(resolve(['.github/workflows/engine-windows.yml']).windowsPython === true, 'the escalated Windows set carries its own python flag (lora-form/benchmarks need numpy)')
-  ok(resolve(['server/fetcher.ts']).windowsPython === true, 'fetcher drags lora-form onto the Windows leg — numpy needed')
+  eq(resolve(['package.json']).windowsSuites, ['benchmarks', 'engine-process', 'fetcher', 'instance', 'runtime'], 'infrastructure change runs the full Windows set')
+  eq(resolve(['.github/workflows/engine-windows.yml']).windowsSuites, ['benchmarks', 'engine-process', 'fetcher', 'instance', 'runtime'], 'changing the Windows workflow runs its full set (the leg verifies itself)')
+  ok(resolve(['.github/workflows/engine-windows.yml']).windowsPython === true, 'the escalated Windows set carries its own python flag (benchmarks needs numpy)')
+  ok(resolve(['server/fetcher.ts']).windowsPython === false, 'the fetcher Windows selection is python-free since lora-form died (Wave 2 R-12)')
   ok(resolve(['server/engineProcess.ts']).windowsPython === false, 'a python-free Windows selection does not drag numpy in')
 })
 

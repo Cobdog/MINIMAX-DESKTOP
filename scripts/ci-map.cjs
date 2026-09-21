@@ -48,7 +48,7 @@ const REPO = path.resolve(__dirname, '..')
  *   windows — runs on the Engine CI (Windows) leg. DORMANT since the
  *             2026-09-21 demotion (scheduled-only leg): the flag stays as
  *             data for the weekly sweep + any future PR-path re-wiring.
- *   python  — needs python3 + numpy (lora-form math half, benchmarks).
+ *   python  — needs python3 + numpy (benchmarks).
  *   ffmpeg  — needs ffmpeg on PATH (filmstrip, datasets synthetic ingest).
  * The ci-map self-test enforces this stays in lockstep with tests/.
  */
@@ -67,7 +67,6 @@ const SUITES = {
   instance: { build: 'full', windows: true, python: false, ffmpeg: false },
   launcher: { build: 'full', windows: false, python: false, ffmpeg: false },
   llm: { build: 'server', windows: false, python: false, ffmpeg: false },
-  'lora-form': { build: 'server', windows: true, python: true, ffmpeg: false },
   poserig: { build: null, windows: false, python: false, ffmpeg: false },
   realtime: { build: 'server', windows: false, python: false, ffmpeg: false },
   registry: { build: null, windows: false, python: false, ffmpeg: false },
@@ -178,13 +177,13 @@ const RULES = [
   },
   {
     match: ['vendor/**'],
-    suites: ['fetcher', 'instance', 'lora-form', 'runtime'],
+    suites: ['fetcher', 'instance', 'runtime'],
     reason: 'vendored node packs: every install/link flow + the license audit (inputs tracked separately).',
   },
   {
     match: ['custom-nodes/**'],
-    suites: ['lora-form'],
-    reason: 'the studio\'s own form-adapter node pack — the lora-form suite\'s subject.',
+    suites: [],
+    reason: 'first-party node-pack payloads (the form adapter): install flows exercise them via engineNodes/fetcher; the lora-form suite that tested them directly died with the local scan (Wave 2 R-12).',
   },
   {
     match: ['benchmarks/**'],
@@ -221,11 +220,11 @@ const RULES = [
   { match: ['server/engineProcess.ts'], suites: ['engine-process', 'runtime'], reason: 'process supervision — its own suite + the runtime manager.' },
   { match: ['server/engineProfiles.ts'], suites: ['runtime'], reason: 'engine profile merge/resolve.' },
   { match: ['server/enginePatch.ts'], suites: ['runtime'], reason: 'engine patch application.' },
-  { match: ['server/engineNodes.ts'], suites: ['fetcher', 'instance', 'lora-form', 'runtime'], reason: 'the node-pack registry: every install/pack flow (also a license-audit input).' },
-  { match: ['server/fetchCatalog.ts'], suites: ['benchmarks', 'fetcher', 'lora-form'], reason: 'fetch catalog: fetcher/lora-form consumers + the benchmarks catalog bridge.' },
-  { match: ['server/fetcher.ts'], suites: ['fetcher', 'lora-form'], reason: 'fetch transport + tar extraction.' },
+  { match: ['server/engineNodes.ts'], suites: ['fetcher', 'instance', 'runtime'], reason: 'the node-pack registry: every install/pack flow (also a license-audit input).' },
+  { match: ['server/fetchCatalog.ts'], suites: ['benchmarks', 'fetcher'], reason: 'fetch catalog: the fetcher consumer + the benchmarks catalog bridge.' },
+  { match: ['server/fetcher.ts'], suites: ['fetcher'], reason: 'fetch transport + tar extraction.' },
   { match: ['server/instanceInventory.ts', 'server/packVersioning.ts'], suites: ['instance'], reason: 'external-instance inventory + pack versioning.' },
-  { match: ['server/modelForms.ts'], suites: ['lora-form'], reason: 'safetensors form detection.' },
+  { match: ['server/objectInfoProbe.ts'], suites: ['fetcher', 'instance'], reason: 'the targeted object_info presence probe (Wave 2 A-8): executes on the engine/nodes + bootstrap routes the instance suite drives; fetcher exercises the pack-board flows that consume it.' },
   { match: ['server/runtime.ts'], suites: ['runtime'], reason: 'managed ComfyUI runtime.' },
   {
     match: ['server/**'],
@@ -278,7 +277,7 @@ const RULES = [
   },
   {
     match: ['src/lib/nodePackRegistry.ts'],
-    suites: ['enginewatch', 'fetcher', 'instance', 'lora-form', 'runtime'],
+    suites: ['enginewatch', 'fetcher', 'instance', 'runtime'],
     reason: 'the node-pack registry DATA (extracted from server/engineNodes, Wave 1 R-02 — one source of truth): every pack flow asserts it, preflight (enginewatch) reads it; also a license-audit input.',
   },
   {

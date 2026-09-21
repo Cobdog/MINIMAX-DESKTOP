@@ -132,21 +132,25 @@ const { mergeModelOverrides, resolveModelOverrides, resolveModels, inferredOverr
 const h3StackModule = load('src/lib/h3Stack.ts')
 const manifestModule = load('src/lib/manifest.ts')
 const mergeName = 'TenStrip_10Eros-Max_beta5_int8.safetensors'
+// (Wave 2 R-12) The fixture IS an instance-registry listing: plain
+// {name, kind, bytes: 0} rows, engine-relative names, no h3Form and no
+// source tags — the scan that once produced the form/source half is gone.
 const overrideScan = [
-  { kind: 'diffusion_models', name: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', h3Form: 'curve' },
-  { kind: 'diffusion_models', name: 'minimax_h3_ref2va_pruned_int8_convrot.safetensors', h3Form: 'curve' },
-  // The maintainer's community merge: H3-shaped (curve form detected at scan
-  // time from tensor shapes) but matching NO selection pattern.
-  { kind: 'diffusion_models', name: mergeName, h3Form: 'curve' },
-  // An H3-family diffusion file with NO detected form — the wrong-kind class.
-  { kind: 'diffusion_models', name: 'community_noform_transformer.safetensors' },
-  { kind: 'text_encoders', name: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors' },
-  { kind: 'vae', name: 'minimax_h3_video_vae_fp16.safetensors' },
-  { kind: 'vae', name: 'minimax_h3_audio_vae_fp32.safetensors' },
-  { kind: 'vae', name: 'minimax_h3_t1_image_vae_step1597.safetensors' },
-  { kind: 'diffusion_models', name: 'music3_dit_int8.safetensors' },
-  { kind: 'text_encoders', name: 'music3_text_encoder_bf16.safetensors' },
-  { kind: 'vae', name: 'music3_dav.safetensors' },
+  { kind: 'diffusion_models', name: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', bytes: 0 },
+  { kind: 'diffusion_models', name: 'minimax_h3_ref2va_pruned_int8_convrot.safetensors', bytes: 0 },
+  // The maintainer's community merge: matching NO selection pattern — the
+  // override layer's whole reason to exist.
+  { kind: 'diffusion_models', name: mergeName, bytes: 0 },
+  // A diffusion file the old form gate would have refused — under
+  // registry-only the engine is the arbiter, so a pick of it applies.
+  { kind: 'diffusion_models', name: 'community_noform_transformer.safetensors', bytes: 0 },
+  { kind: 'text_encoders', name: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', bytes: 0 },
+  { kind: 'vae', name: 'minimax_h3_video_vae_fp16.safetensors', bytes: 0 },
+  { kind: 'vae', name: 'minimax_h3_audio_vae_fp32.safetensors', bytes: 0 },
+  { kind: 'vae', name: 'minimax_h3_t1_image_vae_step1597.safetensors', bytes: 0 },
+  { kind: 'diffusion_models', name: 'music3_dit_int8.safetensors', bytes: 0 },
+  { kind: 'text_encoders', name: 'music3_text_encoder_bf16.safetensors', bytes: 0 },
+  { kind: 'vae', name: 'music3_dav.safetensors', bytes: 0 },
 ]
 const inferredH3 = () => inferSelections(overrideScan, 'off')
 
@@ -198,9 +202,14 @@ test('model overrides take 1 (euxwdva): consulted picks, auto-unchanged, precede
   assert.equal(wrongKind.applied.fl2va, undefined)
   const wrongKindResolved = resolveModels('minimax', inferredH3(), overrideScan, { checkpoint: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors' })
   assert.equal(wrongKindResolved.selection.fl2va, inferredH3().fl2va, 'the cleared pick never reaches the selection')
+  // (Wave 2 R-12) The h3Form gate died with the local scan — the registry
+  // lists filenames only, so nothing app-side clears or clears a file by
+  // its internals: the legacy pick of the no-form file now simply APPLIES
+  // and the engine decides at load.
   const noForm = resolveModelOverrides('minimax', overrideScan, { checkpoint: 'community_noform_transformer.safetensors' })
-  assert.equal(noForm.slots.fl2va.state, 'cleared', 'D3: the migrated no-form pick auto-clears too')
-  assert.ok(noForm.warnings.some((warning) => warning.includes('cannot load')), 'the warning states why it cannot load')
+  assert.equal(noForm.slots.fl2va.state, 'applied', 'registry-only: no app-side form gate exists — the engine is the arbiter')
+  assert.equal(noForm.slots.fl2va.file, 'community_noform_transformer.safetensors')
+  assert.equal(noForm.refusals.length, 0)
   // The T=1 image VAE refuses for the video family via the decoder-split
   // videoVae key directly (an explicit POST-split pick). The legacy 'vae' key
   // no longer lands there at all (tmz8vh7 decoder-class routing — see take 3
@@ -216,7 +225,7 @@ test('model overrides take 1 (euxwdva): consulted picks, auto-unchanged, precede
   const degraded = resolveModelOverrides('minimax', overrideScan, { checkpoint: 'deleted_merge_v2.safetensors' })
   assert.equal(degraded.slots.fl2va.state, 'degraded')
   assert.equal(degraded.warnings.length, 2, 'both migrated lanes warn')
-  assert.ok(degraded.warnings[0].includes('no longer in the scan'), 'warning states the fallback: ' + degraded.warnings[0])
+  assert.ok(degraded.warnings[0].includes('engine\'s model registry'), 'warning states the registry fallback: ' + degraded.warnings[0])
   assert.equal(degraded.applied.fl2va, undefined)
   const degradedResolved = resolveModels('minimax', inferredH3(), overrideScan, { checkpoint: 'deleted_merge_v2.safetensors' })
   assert.equal(degradedResolved.selection.fl2va, inferredH3().fl2va, 'degradation falls back to inference')
@@ -274,46 +283,46 @@ test('model overrides take 1 (euxwdva): consulted picks, auto-unchanged, precede
 })
 
 // ---------------------------------------------------------------------------
-// Model overrides, take 2 (task rq0lsax, 2026-09-20) — the per-lane
-// checkpoint split (fl2va / ref2va / merged) and the instance-source form
-// arm. Failing-without-it: on the pre-split layer the fl2va/ref2va/merged
-// slot keys did not exist (the family refused them as unexposed and the
-// picks never reached a selection field), instance rows without h3Form were
-// REFUSED with the misleading "no detectable form" message, and no merged
-// lane existed anywhere.
+// Model overrides, take 2 (task rq0lsax, 2026-09-20; rewritten Wave 2 R-12)
+// — the per-lane checkpoint split (fl2va / ref2va / merged) over a
+// SUBPATH-RICH registry. Failing-without-it: on the pre-split layer the
+// fl2va/ref2va/merged slot keys did not exist, and the pre-Wave-2 anchors
+// never matched subpathed rows (^-anchored against the full name).
 // ---------------------------------------------------------------------------
 const instanceScan = overrideScan.concat([
-  // The maintainer's case (rq0lsax): engine-relative names listed by the
-  // connected instance — bytes 0 and structurally NO h3Form (the instance
-  // API lists filenames only; see server/instanceInventory.ts).
-  { kind: 'diffusion_models', name: 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors', bytes: 0, source: 'instance' },
-  { kind: 'diffusion_models', name: 'H3/ssd/minimax_h3_ref2va_pruned_int8_convrot.safetensors', bytes: 0, source: 'instance' },
-  // A 'both' row whose local half never yielded a form tag (unreadable or
-  // exotic header) — same missing-evidence class as the instance arm.
-  { kind: 'diffusion_models', name: 'H3/ssd/community_merged_full.safetensors', bytes: 0, source: 'both' },
+  // Engine-relative subpathed names — exactly what the instance /models
+  // contract lists and what the graph loaders accept (the maintainer's
+  // rq0lsax case, now the ONLY shape there is).
+  { kind: 'diffusion_models', name: 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors', bytes: 0 },
+  { kind: 'diffusion_models', name: 'H3/ssd/minimax_h3_ref2va_pruned_int8_convrot.safetensors', bytes: 0 },
+  { kind: 'diffusion_models', name: 'H3/ssd/community_merged_full.safetensors', bytes: 0 },
 ])
 
-test('model overrides take 2 (rq0lsax): instance-source form arm, per-lane resolution, the merged lane, legacy migration', () => {
-  // 11. THE INSTANCE-SOURCE FORM ARM (AC-1): a checkpoint pick whose row is
-  //     instance-listed and carries no readable header APPLIES with a warning
-  //     — missing evidence, not a wrong file. The local arm keeps the refusal.
+test('model overrides take 2 (rq0lsax, R-12): subpathed registry rows resolve everywhere, per-lane resolution, the merged lane, legacy migration', () => {
+  // 11. REGISTRY-ONLY (R-12): every row IS the instance's listing — a pick
+  //     of a subpathed row applies cleanly (no form vocabulary exists, no
+  //     source tags exist), and the INFERENCE finds subpathed rows by their
+  //     basename while returning the full registry name.
   const instanceFl2va = resolveModelOverrides('minimax', instanceScan, { fl2va: 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors' })
-  assert.equal(instanceFl2va.slots.fl2va.state, 'applied', 'an instance-listed pick with no header read APPLIES (rq0lsax)')
-  assert.ok(instanceFl2va.slots.fl2va.warning && instanceFl2va.slots.fl2va.warning.includes('instance-listed'), 'the applied outcome carries the unverifiable-form warning')
-  assert.equal(instanceFl2va.refusals.length, 0, 'never a refusal for missing evidence')
-  assert.ok(instanceFl2va.warnings.some((warning) => warning.includes('fails loudly')), 'the warning names the engine as the final arbiter')
+  assert.equal(instanceFl2va.slots.fl2va.state, 'applied', 'a subpathed registry pick applies')
+  assert.equal(instanceFl2va.slots.fl2va.warning, undefined, 'no warning vocabulary for registry rows — the engine is the arbiter')
+  assert.equal(instanceFl2va.refusals.length, 0)
   assert.equal(instanceFl2va.applied.fl2va, 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors')
   const instanceBoth = resolveModelOverrides('minimax', instanceScan, { merged: 'H3/ssd/community_merged_full.safetensors' })
-  assert.equal(instanceBoth.slots.merged.state, 'applied', 'a both-sourced row without a form tag applies with the warning too')
-  assert.ok(instanceBoth.slots.merged.warning && instanceBoth.slots.merged.warning.includes('instance-listed'))
-  const localNoForm = resolveModelOverrides('minimax', overrideScan, { fl2va: 'community_noform_transformer.safetensors' })
-  assert.equal(localNoForm.slots.fl2va.state, 'refused', 'a LOCAL row the header read cleared as not-H3-shaped still refuses')
-  assert.ok(localNoForm.refusals[0].reason.includes('form'), 'the local refusal still names the form: ' + localNoForm.refusals[0].reason)
-  // The maintainer's exact report shape: the legacy single-checkpoint pick of
-  // an instance-listed file resolves (migrates onto both lanes) instead of the
-  // old false refusal.
+  assert.equal(instanceBoth.slots.merged.state, 'applied', 'the subpathed community merge applies on the merged lane')
+  // The loosened anchors (Wave 2): the ladder matches the BASENAME and
+  // returns the full registry subpath. When flat and subpathed twins are
+  // both listed, either registry row is a legal resolution (both load);
+  // when ONLY the subpathed row exists, it resolves by basename.
+  const subpathInferred = inferSelections(instanceScan, 'off')
+  assert.ok(['minimax_h3_ref2va_pruned_int8_convrot.safetensors', 'H3/ssd/minimax_h3_ref2va_pruned_int8_convrot.safetensors'].includes(subpathInferred.ref2va), 'a registry row resolves for the ref2va slot either way: ' + subpathInferred.ref2va)
+  const onlySubpathed = instanceScan.filter((file) => !(file.kind === 'diffusion_models' && file.name.startsWith('minimax_h3_')))
+  const subpathOnly = inferSelections(onlySubpathed, 'off')
+  assert.equal(subpathOnly.fl2va, 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'a subpath-only listing resolves by basename and returns the FULL registry name (what the loader accepts)')
+  // The maintainer's exact report shape: the legacy single-checkpoint pick
+  // of a subpathed registry file resolves onto both lanes, verbatim.
   const maintainerCase = resolveModels('minimax', inferSelections(instanceScan, 'off'), instanceScan, { checkpoint: 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors' })
-  assert.equal(maintainerCase.selection.fl2va, 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'the legacy pick of the instance file reaches the FL2VA lane')
+  assert.equal(maintainerCase.selection.fl2va, 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'the legacy pick of the subpathed file reaches the FL2VA lane')
   assert.equal(maintainerCase.resolution.refusals.length, 0, 'the H3/ssd refusal is gone')
 
   // 12. PER-MODE RESOLUTION (AC-2): each lane pick owns ITS lane; the other
@@ -545,14 +554,14 @@ test('model overrides take 3 (epdvxd4): the decoder-split VAE trio — resolutio
 // h3image imageVae row could never leave the inference pin.
 // ---------------------------------------------------------------------------
 const auditScan = vaeSplitScan.concat([
-  { kind: 'diffusion_models', name: 'community_noform_transformer.safetensors' },
-  { kind: 'text_encoders', name: 'gemma_3_12B_it.safetensors' },
-  { kind: 'loras', name: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors' },
-  { kind: 'diffusion_models', name: 'acestep_v1.5_xl_base_bf16.safetensors' },
-  { kind: 'diffusion_models', name: 'acestep_v1.5_xl_sft_bf16.safetensors' },
+  { kind: 'diffusion_models', name: 'community_noform_transformer.safetensors', bytes: 0 },
+  { kind: 'text_encoders', name: 'gemma_3_12B_it.safetensors', bytes: 0 },
+  { kind: 'loras', name: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', bytes: 0 },
+  { kind: 'diffusion_models', name: 'acestep_v1.5_xl_base_bf16.safetensors', bytes: 0 },
+  { kind: 'diffusion_models', name: 'acestep_v1.5_xl_sft_bf16.safetensors', bytes: 0 },
   // The audit's own picks — community-style files NO inference pattern
-  // matches (the H3 merge carries the curve form so the form gate passes).
-  { kind: 'diffusion_models', name: 'community-merge-audit.safetensors', h3Form: 'curve' },
+  // matches (registry-only: no form gate exists, the engine decides).
+  { kind: 'diffusion_models', name: 'community-merge-audit.safetensors', bytes: 0 },
   { kind: 'text_encoders', name: 'community-encoder-audit.safetensors' },
   { kind: 'vae', name: 'h3-community-video-decoder.safetensors' },
   { kind: 'vae', name: 'h3-community-audio-decoder.safetensors' },
@@ -671,6 +680,158 @@ test('the workflow-population audit (epdvxd4, AC-3): every family × every slot 
   // files for their rows to be honest (scan-anchored picks, not strings).
   assert.ok(auditScan.some((file) => file.name === 'h3-community-video-decoder.safetensors' && file.kind === 'vae'))
   assert.ok(auditScan.some((file) => file.name === 'acestep-community-xl.safetensors' && file.kind === 'diffusion_models'))
+})
+
+// ---------------------------------------------------------------------------
+// The loosened anchors (Wave 2 R-12 — A-B3(c) folded here): substring
+// fallback + size-class ranking. Failing-without-it: on the pre-Wave-2 exact
+// regexes a renamed quant, a community repack, or a subpathed file NEVER
+// auto-resolved (the maintainer's "auto detection doesn't seem to really
+// work").
+// ---------------------------------------------------------------------------
+test('the loosened inference anchors (R-12 / A-B3(c)): substring fallback + size-class ranking over registry rows', () => {
+  // A renamed quant + a community repack + a subpathed file: NONE match the
+  // official tiers, ALL resolve through the substring fallback.
+  const renamed = [
+    { kind: 'diffusion_models', name: 'h3_fl2va_repack_q4.safetensors', bytes: 0 },
+    { kind: 'text_encoders', name: 'qwen3vl_32b_repack_for_h3.safetensors', bytes: 0 },
+    { kind: 'vae', name: 'h3_video_vae_community.safetensors', bytes: 0 },
+  ]
+  const resolved = inferSelections(renamed, 'off')
+  assert.equal(resolved.fl2va, 'h3_fl2va_repack_q4.safetensors', 'a renamed FL2VA quant resolves through the substring fallback')
+  assert.equal(resolved.textEncoder, 'qwen3vl_32b_repack_for_h3.safetensors', 'a repackaged encoder resolves')
+  assert.equal(resolved.videoVae, 'h3_video_vae_community.safetensors', 'a community-renamed video VAE resolves')
+  // Nothing resembling the family resolves to nothing: an EMPTY registry
+  // yields all-empty selections (readiness gates own the refusal).
+  const none = inferSelections([{ kind: 'loras', name: 'unrelated.safetensors', bytes: 0 }], 'off')
+  assert.equal([none.fl2va, none.ref2va, none.textEncoder, none.videoVae, none.audioVae, none.previewVae].join('|'), '|||||', 'no registry rows of a kind → empty selection, never a guess')
+  // SIZE-CLASS ranking within one tier: the official int8/convrot/pruned cut
+  // beats a bigger fp16 sibling when both match the loose tier.
+  const quantLadder = [
+    { kind: 'diffusion_models', name: 'minimax_h3_fl2va_fp16.safetensors', bytes: 0 },
+    { kind: 'diffusion_models', name: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', bytes: 0 },
+  ]
+  assert.equal(inferSelections(quantLadder, 'off').fl2va, 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'the smaller-quant official cut outranks the fp16 sibling (size-class tokens)')
+  // Tier order still dominates ranking: an exact official name beats a
+  // fallback match even when the fallback candidate has more prefer tokens.
+  assert.equal(inferSelections(overrideScan, 'off').fl2va, 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'the exact official tier still wins the slot')
+})
+
+// ---------------------------------------------------------------------------
+// THE REGISTRY-ONLY INVARIANT (Wave 2 R-12 — the wave's named deliverable):
+// NO GRAPH EVER REFERENCES A MODEL ABSENT FROM THE INSTANCE REGISTRY.
+// Asserted across the workflow-population surface — every family's infer →
+// resolve (auto, every override layer, out-of-registry picks) → graph build,
+// with every model-name input checked against the registry listing for its
+// kind. The epdvxd4 pick→node audit above is the precedent; this is its
+// general form: ANY name that leaves the population surface must be a
+// registry row, or the seam refused/degraded it first.
+// ---------------------------------------------------------------------------
+const INVARIANT_REGISTRY = [
+  // The full official H3 stack, some rows subpathed (the registry shape).
+  { kind: 'diffusion_models', name: 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors', bytes: 0 },
+  { kind: 'diffusion_models', name: 'H3/ssd/minimax_h3_ref2va_pruned_int8_convrot.safetensors', bytes: 0 },
+  { kind: 'diffusion_models', name: 'community_merged_full.safetensors', bytes: 0 },
+  { kind: 'diffusion_models', name: 'music3_dit_int8.safetensors', bytes: 0 },
+  { kind: 'diffusion_models', name: 'acestep_v1.5_xl_base_bf16.safetensors', bytes: 0 },
+  { kind: 'diffusion_models', name: 'acestep_v1.5_xl_sft_bf16.safetensors', bytes: 0 },
+  { kind: 'text_encoders', name: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', bytes: 0 },
+  { kind: 'text_encoders', name: 'TE/qwen3vl_community_repack.safetensors', bytes: 0 },
+  { kind: 'text_encoders', name: 'music3_text_encoder_bf16.safetensors', bytes: 0 },
+  { kind: 'text_encoders', name: 'qwen_0.6b_ace15.safetensors', bytes: 0 },
+  { kind: 'text_encoders', name: 'qwen_4b_ace15.safetensors', bytes: 0 },
+  { kind: 'vae', name: 'minimax_h3_video_vae_fp16.safetensors', bytes: 0 },
+  { kind: 'vae', name: 'minimax_h3_audio_vae_fp32.safetensors', bytes: 0 },
+  { kind: 'vae', name: 'minimax_h3_t1_image_vae_step1597.safetensors', bytes: 0 },
+  { kind: 'vae', name: 'music3_dav.safetensors', bytes: 0 },
+  { kind: 'vae', name: 'ace_1.5_vae.safetensors', bytes: 0 },
+  { kind: 'loras', name: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', bytes: 0 },
+  { kind: 'loras', name: 'community_style_adapter.safetensors', bytes: 0 },
+  { kind: 'vae_approx', name: 'taeh3_decoder.safetensors', bytes: 0 },
+]
+const registryNamesByKind = {}
+for (const file of INVARIANT_REGISTRY) (registryNamesByKind[file.kind] ??= []).push(file.name)
+// Graph input field → registry kind (the loader-node contract; the same
+// mapping the server's object_info probes use). model_name (upscalers) maps
+// to NO tracked kind — the upscale model is engine-resolved separately.
+const MODEL_INPUT_KINDS = { unet_name: 'diffusion_models', clip_name: 'text_encoders', clip_name1: 'text_encoders', clip_name2: 'text_encoders', vae_name: 'vae', lora_name: 'loras' }
+
+test('THE R-12 INVARIANT: no graph ever references a model absent from the instance registry — across the workflow-population surface', () => {
+  const walkGraphModelInputs = (label, graph) => {
+    for (const [id, node] of Object.entries(graph)) {
+      for (const [field, value] of Object.entries(node.inputs ?? {})) {
+        const kind = MODEL_INPUT_KINDS[field]
+        if (!kind || typeof value !== 'string' || value === '') continue
+        assert.ok((registryNamesByKind[kind] ?? []).includes(value),
+          `${label}: node ${id} (${node.class_type}).${field} references '${value}' which the instance registry does not list under ${kind}`)
+      }
+    }
+  }
+
+  // --- AUTO (inference only): every family, every variant graph.
+  for (const turbo of ['off', '8']) {
+    for (const mode of ['text', 'reference']) {
+      const selection = resolveModels('minimax', inferSelections(INVARIANT_REGISTRY, turbo), INVARIANT_REGISTRY).selection
+      const graph = buildMiniMaxWorkflow(
+        { mode, width: 352, height: 608, prompt: 'invariant', duration: 5, seed: 7, steps: 20, turbo, sampler: 'res_multistep', scheduler: 'simple', filenamePrefix: 't', refImageSize: 'match', ...(mode === 'reference' ? { referenceImages: ['ref.png'] } : {}) },
+        selection,
+        mode === 'reference' ? { images: [{ name: 'ref.png' }], videos: [], audios: [] } : { images: [], videos: [], audios: [] },
+      )
+      walkGraphModelInputs(`minimax auto ${mode} turbo=${turbo}`, graph)
+    }
+  }
+  // The LoRA stack (user picks from the registry) rides the graph's stack
+  // loaders — those names must be registry rows too.
+  const stackSelection = resolveModels('minimax', inferSelections(INVARIANT_REGISTRY, 'off'), INVARIANT_REGISTRY).selection
+  const stackGraph = buildMiniMaxWorkflow(
+    { mode: 'text', width: 352, height: 608, prompt: 'invariant', duration: 5, seed: 7, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', filenamePrefix: 't', refImageSize: 'match', loraStack: [{ name: 'community_style_adapter.safetensors', strength: 1 }] },
+    stackSelection,
+    { images: [], videos: [], audios: [] },
+  )
+  walkGraphModelInputs('minimax lora stack', stackGraph)
+
+  // --- OVERRIDE LAYERS: picks that EXIST in the registry land; a pick the
+  //     registry does NOT list degrades to auto and its name never reaches
+  //     the graph.
+  const picked = resolveModels('minimax', inferSelections(INVARIANT_REGISTRY, 'off'), INVARIANT_REGISTRY, { fl2va: 'community_merged_full.safetensors', textEncoder: 'TE/qwen3vl_community_repack.safetensors' }).selection
+  walkGraphModelInputs('minimax overrides', buildMiniMaxWorkflow({ mode: 'text', width: 352, height: 608, prompt: 'invariant', duration: 5, seed: 7, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', filenamePrefix: 't', refImageSize: 'match' }, picked, { images: [], videos: [], audios: [] }))
+  assert.equal(picked.fl2va, 'community_merged_full.safetensors', 'sanity: the registry-listed pick applied')
+  const ghost = resolveModels('minimax', inferSelections(INVARIANT_REGISTRY, 'off'), INVARIANT_REGISTRY, { fl2va: 'ghost/not-in-registry.safetensors' })
+  assert.equal(ghost.resolution.slots.fl2va.state, 'degraded', 'an out-of-registry pick degrades, never applies')
+  const ghostGraph = buildMiniMaxWorkflow({ mode: 'text', width: 352, height: 608, prompt: 'invariant', duration: 5, seed: 7, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', filenamePrefix: 't', refImageSize: 'match' }, ghost.selection, { images: [], videos: [], audios: [] })
+  assert.equal(ghostGraph['1'].inputs.unet_name, 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'the degraded pick fell back to the registry inference')
+  walkGraphModelInputs('minimax ghost pick', ghostGraph)
+  // A bare BASENAME pick never resolves to a subpathed row implicitly —
+  // instance-invisible means the exact listed name or nothing.
+  const bare = resolveModelOverrides('minimax', INVARIANT_REGISTRY, { fl2va: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors' })
+  assert.equal(bare.slots.fl2va.state, 'degraded', 'the bare basename of a subpathed row is NOT in the registry — exact-name anchoring')
+
+  // --- h3image (the workbench): both profile families through the seam.
+  const h3imgSelection = resolveModels('h3image', h3imageGraphModule.inferH3ImgSelection(INVARIANT_REGISTRY), INVARIANT_REGISTRY, { textEncoder: 'TE/qwen3vl_community_repack.safetensors' }).selection
+  for (const [family, tier] of [['h3img.generate.packet', 5], ['h3img.generate.t1', 1]]) {
+    const graph = h3imageGraphModule.buildH3ImageGraph({ family, prompt: 'invariant', width: 768, height: 768, seed: 1, tier, refs: [], loras: [], filenamePrefix: 't' }, h3imgSelection)
+    walkGraphModelInputs(`h3image ${family}`, graph)
+  }
+
+  // --- music3 + acestep (the audio engines), both decode arms / model cuts.
+  const music3Selection = resolveModels('music3', music3Module.inferMusic3Selection(INVARIANT_REGISTRY), INVARIANT_REGISTRY).selection
+  for (const tiled of [true, false]) walkGraphModelInputs(`music3 tiled=${tiled}`, music3Module.buildMusic3Workflow({ caption: 'invariant', lyrics: '', duration: 30, seed: 7, tiledDecode: tiled, filenamePrefix: 't' }, music3Selection))
+  const aceSelection = resolveModels('acestep', aceModule.inferAceStepSelections(INVARIANT_REGISTRY), INVARIANT_REGISTRY).selection
+  for (const model of ['base', 'sft']) walkGraphModelInputs(`acestep ${model}`, aceModule.buildAceStepWorkflow({ model, tags: 'invariant', lyrics: '', instrumental: true, duration: 30, bpm: 120, timeSignature: '4/4', language: 'en', keyScale: 'C', seed: 7, generateAudioCodes: false, filenamePrefix: 't' }, aceSelection))
+
+  // --- THE EMPTY REGISTRY (engine offline / serves nothing): inference
+  //     yields no names at all — the population surface emits EMPTY model
+  //     inputs and readiness gates own the refusal. No name ever invents
+  //     itself.
+  const emptyRegistry = []
+  const emptySelection = inferSelections(emptyRegistry, 'off')
+  assert.equal([emptySelection.fl2va, emptySelection.ref2va, emptySelection.textEncoder, emptySelection.videoVae, emptySelection.audioVae, emptySelection.fl2vLora, emptySelection.ref2vLora].every((value) => value === ''), true, 'an empty registry yields an all-empty selection')
+  const emptyGraph = buildMiniMaxWorkflow({ mode: 'text', width: 352, height: 608, prompt: 'invariant', duration: 5, seed: 7, steps: 20, turbo: 'off', sampler: 'res_multistep', scheduler: 'simple', filenamePrefix: 't', refImageSize: 'match' }, emptySelection, { images: [], videos: [], audios: [] })
+  for (const node of Object.values(emptyGraph)) {
+    for (const [field, value] of Object.entries(node.inputs ?? {})) {
+      if (MODEL_INPUT_KINDS[field]) assert.equal(value, '', `an empty registry leaves ${field} empty — never a fabricated name (got '${value}')`)
+    }
+  }
 })
 
 // (The LTX-2.3 utility inference test was removed with LTX — Phase 0,
@@ -1371,30 +1532,32 @@ test('Wave 1 R-06: refusal layer attribution + D3 auto-clear of migrated legacy 
   assert.equal(globalWedge.refusals[0].layer, 'global', 'the refusal names the global Settings layer')
 
   // D3 — the MIGRATED legacy pick that refuses: auto-clears, warns, renders.
-  // A legacy 'checkpoint' pick of a file with NO H3 form migrates onto both
-  // lanes and would refuse the form gate — pre-D3 that wedged every render
-  // in the family with the user never having made a lane pick at all.
-  const noFormFile = { kind: 'diffusion_models', name: 'community_noform_legacy.safetensors' }
-  const scanWithNoForm = vaeSplitScan.concat([noFormFile])
-  const legacyWedge = resolveModelOverrides('minimax', scanWithNoForm,
-    mergeModelOverrides(undefined, { checkpoint: 'community_noform_legacy.safetensors' }),
-    { chain: undefined, global: { checkpoint: 'community_noform_legacy.safetensors' } })
+  // (Wave 2 R-12 rewrite: the form-gate trigger died with the local scan —
+  // the wrong-KIND class is now the refusing migrated pick's stand-in. A
+  // legacy 'checkpoint' pick of a TEXT-ENCODER file migrates onto both lanes
+  // and refuses the kind gate — pre-D3 that wedged every render in the
+  // family with the user never having made a lane pick at all.)
+  const wrongKindLegacy = { kind: 'text_encoders', name: 'qwen3vl_wrongkind_legacy.safetensors' }
+  const scanWithWrongKind = vaeSplitScan.concat([wrongKindLegacy])
+  const legacyWedge = resolveModelOverrides('minimax', scanWithWrongKind,
+    mergeModelOverrides(undefined, { checkpoint: 'qwen3vl_wrongkind_legacy.safetensors' }),
+    { chain: undefined, global: { checkpoint: 'qwen3vl_wrongkind_legacy.safetensors' } })
   assert.equal(legacyWedge.refusals.length, 0, 'D3: the migrated refusing pick does NOT wedge the submission')
   assert.equal(legacyWedge.slots.fl2va.state, 'cleared', 'the outcome is the D3 cleared state')
   assert.ok(legacyWedge.warnings.some((warning) => warning.includes('legacy model pick')), 'the auto-clear surfaces a visible warning')
   assert.equal(legacyWedge.applied.fl2va, undefined, 'the cleared slot falls back to auto')
 
   // A conscious pick in the SAME slot never auto-clears (D3's other edge).
-  const consciousFormRefusal = resolveModelOverrides('minimax', scanWithNoForm,
-    mergeModelOverrides({ fl2va: 'community_noform_legacy.safetensors' }, {}),
-    { chain: { fl2va: 'community_noform_legacy.safetensors' }, global: {} })
-  assert.equal(consciousFormRefusal.refusals.length, 1, 'a conscious chain pick still refuses (never silently cleared)')
-  assert.equal(consciousFormRefusal.slots.fl2va.state, 'refused')
+  const consciousKindRefusal = resolveModelOverrides('minimax', scanWithWrongKind,
+    mergeModelOverrides({ fl2va: 'qwen3vl_wrongkind_legacy.safetensors' }, {}),
+    { chain: { fl2va: 'qwen3vl_wrongkind_legacy.safetensors' }, global: {} })
+  assert.equal(consciousKindRefusal.refusals.length, 1, 'a conscious chain pick still refuses (never silently cleared)')
+  assert.equal(consciousKindRefusal.slots.fl2va.state, 'refused')
 
   // Without the layers param (older callers), the D3 auto-clear still fires
   // — migration provenance is computable from the merged set alone (the
   // param only adds chain/global naming to refusals).
-  const noLayers = resolveModelOverrides('minimax', scanWithNoForm, { checkpoint: 'community_noform_legacy.safetensors' })
+  const noLayers = resolveModelOverrides('minimax', scanWithWrongKind, { checkpoint: 'qwen3vl_wrongkind_legacy.safetensors' })
   assert.equal(noLayers.refusals.length, 0, 'no layers param → provenance still known → auto-clear still fires')
   assert.equal(noLayers.slots.fl2va.state, 'cleared')
 })

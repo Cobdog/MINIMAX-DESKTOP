@@ -619,8 +619,11 @@ export class FetchManager {
         : 'The external custom nodes folder (an absolute, existing directory) must be configured in the engine settings first.' }
     }
     if (entry.destination.kind === 'model-root') {
+      // R-13 (Wave 2, Audit C's F5): an empty root resolves to '' — NEVER
+      // through resolve('') to the server CWD, where a GB-scale fetch would
+      // land in the launch directory. The refusal names the fix.
       const root = fetchModelRootPath(entry.destination.root, settings)
-      if (!isAbsolute(root)) return { started: false, id: entry.id, reason: `The ${entry.destination.root} model root does not resolve to an absolute path.` }
+      if (!root || !isAbsolute(root)) return { started: false, id: entry.id, reason: `No destination is configured for ${entry.destination.root} — set the models root (the folder consented fetches land in, mirrored to a managed engine) in settings first. Nothing was fetched.` }
     }
     if (entry.destination.kind === 'engine-checkout') {
       const destination = resolve(startOptions.destinationDir?.trim() || this.defaultEngineCheckoutDir(entry))

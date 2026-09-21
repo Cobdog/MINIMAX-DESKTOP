@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
-import { stockObjectInfo } from './fakeEngineInfo'
+import { H3_REGISTRY_LISTINGS, serveModelRegistry, serveObjectInfo, stockObjectInfo } from './fakeEngineInfo'
 
 // H3 Image Workbench (k9vu6t0, docs/specs/image-workbench-v1.md §2/§11): the
 // dedicated surface end to end at ?images=1 — engine-independent (the packet
@@ -262,21 +262,15 @@ test('the canvas tile names the workbench packet and links to the pick surface',
 // N frames). This is AC1's landing mechanics proven engine-free end to end.
 test('a generation lands as ONE take whose artifacts are the packet frames (fake engine, full path)', async ({ page, request }) => {
   const problems = await trackErrors(page)
-  const { mkdirSync, writeFileSync } = await import('node:fs')
-  const { join } = await import('node:path')
   const http = await import('node:http')
 
-  // Dummy model files so the workbench's availability resolves (the scanner
-  // tags forms from headers and degrades to "no tag" on dummy bytes).
-  const modelRoot = join(process.cwd(), 'test-home', 'iw-models')
-  for (const [kind, files] of Object.entries({
-    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
-    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
-    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors', 'minimax_h3_t1_image_vae_step1597.safetensors'],
-    loras: ['minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', 'MaxiMin-HHH-R2V-ThisIsFine.safetensors'],
-  })) {
-    mkdirSync(join(modelRoot, kind), { recursive: true })
-    for (const file of files as string[]) writeFileSync(join(modelRoot, kind, file), 'x')
+  // (Wave 2 R-12) The engine's /models listing resolves the workbench's
+  // availability — no local files (the T=1 decoder + the MaxiMin adapter
+  // ride the listing).
+  const workbenchListings = {
+    ...H3_REGISTRY_LISTINGS,
+    vae: [...H3_REGISTRY_LISTINGS.vae, 'minimax_h3_t1_image_vae_step1597.safetensors'],
+    loras: [...H3_REGISTRY_LISTINGS.loras, 'MaxiMin-HHH-R2V-ThisIsFine.safetensors'],
   }
 
   const frameBytes = FRAME_PNGS.map((base64) => Buffer.from(base64, 'base64'))
@@ -288,11 +282,8 @@ test('a generation lands as ONE take whose artifacts are the packet frames (fake
       res.end(JSON.stringify({ system: {}, devices: [] }))
       return
     }
-    if (url.pathname === '/object_info') {
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify(stockObjectInfo({ MiniMaxH3HybridLoader: {} })))
-      return
-    }
+    if (serveObjectInfo(url, stockObjectInfo({ MiniMaxH3HybridLoader: {} }), res)) return
+    if (serveModelRegistry(url, workbenchListings, res)) return
     if (url.pathname === '/upload/image') {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ name: 'uploaded.png', subfolder: '', type: 'input' }))
@@ -337,7 +328,6 @@ test('a generation lands as ONE take whose artifacts are the packet frames (fake
     await request.post('/api/lan/settings', { data: { settings: {
       ...originalSettings,
       comfyUrl: `http://127.0.0.1:${enginePort}`,
-      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: join(modelRoot, 'diffusion_models'), text_encoders: join(modelRoot, 'text_encoders'), vae: join(modelRoot, 'vae'), loras: join(modelRoot, 'loras') },
     } } })
     await request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
     await page.goto('/?images=1')
@@ -360,7 +350,6 @@ test('a generation lands as ONE take whose artifacts are the packet frames (fake
     // EMPTY-model-roots state — the first-run-guidance e2e keys on it (the
     // QOL wave's precondition). Scratch this test created, in a gitignored
     // tree, removed by the same test.
-    await import('node:fs').then((fs) => { fs.rmSync(modelRoot, { recursive: true, force: true }) })
     await new Promise<void>((resolve) => engine.close(() => resolve()))
   }
 })

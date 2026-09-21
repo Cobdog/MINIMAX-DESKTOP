@@ -74,16 +74,22 @@ const SCANNER_KINDS = new Set<string>(['diffusion_models', 'text_encoders', 'vae
 
 /** Resolves a fetch model root to an absolute directory against the current
  *  settings. Scanner kinds use the user's configured root; extra roots
- *  (model_patches, vdn, geometry_estimation, …) sit under settings.modelRoot. */
+ *  (model_patches, vdn, geometry_estimation, …) sit under settings.modelRoot.
+ *
+ *  (R-13, Wave 2 — Audit C's F5 probe) An empty/whitespace root means ABSENT
+ *  at EVERY layer: an unset scanner path, an unset per-kind override, and an
+ *  unset modelRoot all resolve to '' — never through `resolve('')` to the
+ *  server CWD (where GB-scale fetches could land in the launch directory).
+ *  Callers refuse honestly on '' (the fetcher's start guard); the consent
+ *  dialog states it as "not configured". */
 export function fetchModelRootPath(root: FetchModelRoot, settings: AppSettings): string {
-  // An EMPTY scanner path (the registry-only default) means unset — the
-  // fetch destination falls back to the shared modelRoot (Phase 0,
-  // 2026-09-20), never resolves against the CWD.
+  const sharedRoot = typeof settings.modelRoot === 'string' ? settings.modelRoot.trim() : ''
   if (SCANNER_KINDS.has(root)) {
-    const configured = (settings.paths as Record<string, string>)[root]
-    return resolve(configured || join(settings.modelRoot, root))
+    const configured = ((settings.paths as Record<string, string>)[root] ?? '').trim()
+    if (configured) return resolve(configured)
+    return sharedRoot ? resolve(join(sharedRoot, root)) : ''
   }
-  return resolve(join(settings.modelRoot, root as Exclude<FetchModelRoot, ModelKind>))
+  return sharedRoot ? resolve(join(sharedRoot, root as Exclude<FetchModelRoot, ModelKind>)) : ''
 }
 
 /** Node-pack entries are assembled from ENGINE_NODE_PACKS so the license
@@ -832,6 +838,7 @@ export function describeFetchDestination(entry: FetchCatalogEntry, settings: App
   switch (entry.destination.kind) {
     case 'model-root': {
       const root = fetchModelRootPath(entry.destination.root, settings)
+      if (!root) return `${entry.destination.root} → not configured (no models root is set — fetching is refused until one is)`
       return `${entry.destination.root} → ${root}${entry.destination.subpath ? `/${entry.destination.subpath}` : ''}`
     }
     case 'pack-ckpt':

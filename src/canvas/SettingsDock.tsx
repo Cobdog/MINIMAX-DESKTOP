@@ -51,17 +51,17 @@ export function SettingsDock() {
 
   const save = async () => {
     try {
-      // The old shell's exact save sequence: persist FIRST, then rescan +
-      // recheck + refresh the LLM providers. M4 (review 2026-09-19): the
-      // wrapper now surfaces the server's save-warnings (well-formed but
-      // nonexistent paths) instead of dropping them for a flat success —
-      // the save still succeeds; the toast names every miss.
+      // The old shell's exact save sequence: persist FIRST, then re-pull the
+      // inventory + recheck + refresh the LLM providers. M4 (review
+      // 2026-09-19): the wrapper now surfaces the server's save-warnings
+      // (well-formed but nonexistent paths) instead of dropping them for a
+      // flat success — the save still succeeds; the toast names every miss.
       const saved = await window.minimax.saveSettings(settings)
-      await Promise.all([scanModels(saved.settings), checkConnection(saved.settings.comfyUrl)])
+      await Promise.all([scanModels(saved.settings, { refresh: true }), checkConnection(saved.settings.comfyUrl)])
       await refreshOllama(saved.settings)
       toast('success', saved.warnings?.length
-        ? `Settings saved and model folders rescanned. Warnings: ${saved.warnings.join(' · ')}`
-        : 'Settings saved and model folders rescanned.')
+        ? `Settings saved and the engine registry refreshed. Warnings: ${saved.warnings.join(' · ')}`
+        : 'Settings saved and the engine registry refreshed.')
     } catch (error) {
       toast('error', `Settings could not be saved: ${error instanceof Error ? error.message : String(error)}`)
     }
@@ -111,7 +111,7 @@ export function SettingsDock() {
           diagnosticRunning={diagnosticRunning}
           ollamaModels={ollamaModels}
           onRefreshOllama={() => void refreshOllama(settings)}
-          onScan={() => void scanModels(settings)}
+          onScan={() => void scanModels(settings, { refresh: true })}
           onCheck={() => void checkConnection(settings.comfyUrl)}
           onSave={save}
           onRunDiagnostics={() => void runDiagnosticsNow()}

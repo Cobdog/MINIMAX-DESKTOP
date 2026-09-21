@@ -506,6 +506,40 @@ maybe('(f) placement policy: weights LINK into model roots (never copied); forei
   }
 })
 
+maybe('(f3) R-13 fetch-destination guard: empty roots mean ABSENT — never resolve(\'\') to the server CWD (Audit C\'s F5 probe)', async () => {
+  console.log('fetcher: the empty-root destination guard')
+  {
+    const cwd = process.cwd()
+    // Audit C's EXACT probe: paths.loras = '' with a modelRoot set — the
+    // destination must fall back to the shared root, never the CWD.
+    const probe = fetchModelRootPath('loras', { paths: { loras: '' }, modelRoot: '/any/thing' })
+    ok(probe === path.resolve('/any/thing', 'loras'), `an empty scanner path falls back to modelRoot (got ${probe})`)
+    ok(probe !== cwd && !probe.startsWith(cwd + path.sep), 'the empty path never resolves through the CWD')
+    // The deeper hole: an empty/whitespace modelRoot itself — '' (absent),
+    // never `<cwd>/<kind>` (the GB-scale-fetches-in-the-launch-directory
+    // class the audit flagged).
+    const noRoot = fetchModelRootPath('loras', { paths: { loras: '  ' }, modelRoot: '' })
+    ok(noRoot === '', `an empty modelRoot means absent — '' , never a CWD-relative path (got ${JSON.stringify(noRoot)})`)
+    const noRootExtra = fetchModelRootPath('model_patches', { paths: {}, modelRoot: '  ' })
+    ok(noRootExtra === '', `extra roots are absent too when modelRoot is empty (got ${JSON.stringify(noRootExtra)})`)
+    // The good paths still resolve.
+    const home = makeHome()
+    const settings = makeSettings(home)
+    ok(fetchModelRootPath('loras', settings) === path.join(settings.modelRoot, 'loras'), 'a configured root resolves exactly')
+    ok(fetchModelRootPath('model_patches', settings) === path.join(settings.modelRoot, 'model_patches'), 'an extra root resolves under the shared root')
+    // The consent-facing statement is honest about the unresolvable case.
+    const { describeFetchDestination } = hasServerBuild ? require(path.join(REPO, 'dist-server', 'server', 'fetchCatalog.js')) : {}
+    ok(/not configured/i.test(describeFetchDestination(findFetchEntry('da3-base'), { paths: {}, modelRoot: '' })), 'the destination summary states NOT CONFIGURED when unresolvable')
+    // start() REFUSES honestly: a model-root fetch with no resolvable
+    // destination never begins (no bytes, no placement, a named reason).
+    const bare = { comfyUrl: 'http://127.0.0.1:8188', ollamaUrl: '', ollamaModel: '', modelRoot: '', paths: {}, outputDirectory: home, inputDirectory: home, ffmpegPath: 'ffmpeg', engine: { mode: 'external', checkoutPath: '', pythonPath: '', portPreference: 0, autoStart: false, profile: 'default', profiles: {}, patches: {} }, fetch: { consents: { 'da3-base': { consented: true, licenseSpdx: 'Apache-2.0' } } } }
+    const { manager: guardManager, events } = makeManager(home, bare, makeClaimingTransport())
+    const refusedStart = await guardManager.start('da3-base')
+    ok(refusedStart.started === false && /No destination is configured/.test(refusedStart.reason ?? ''), `a fetch with no configured destination refuses at the gate (got ${JSON.stringify(refusedStart)})`)
+    ok(events.length === 0, 'the refused fetch began no work (no progress events)')
+  }
+})
+
 maybe('(f2) dataset-repo sources (gg7mu3s): /datasets/<repo>/resolve/... download URLs, verbatim sha pin, vae-root link', async () => {
   console.log('fetcher: dataset-repo download URLs')
   {

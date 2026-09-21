@@ -468,18 +468,13 @@ export type ModelFile = {
   path?: string
   kind: ModelKind
   bytes: number
-  /** MiniMax-H3 adaln form, detected at scan time from the safetensors
-   *  header (tensor shapes, never the filename): diffusion models carry
-   *  'curve' | 'full'; LoRAs carry 'adaln-free' | 'curve-adaln' |
-   *  'full-width-adaln'. Undefined = not H3-shaped / not readable. See
-   *  server/modelForms.ts. */
-  h3Form?: string
-  /** Inventory provenance (task 9om4bi9): 'instance' = listed by the
-   *  connected engine's own model endpoints (object_info enums or /models),
-   *  'local' = found on a configured local root, 'both' = the same file is
-   *  visible from both sides. Instance rows carry the engine-relative name
-   *  (subpaths included) — exactly what the graph loaders accept. */
-  source?: 'instance' | 'local' | 'both'
+  /** Registry-only inventory (Wave 2 R-12 — directive 2987ef3e): every row
+   *  IS the connected instance's own listing (object_info enums or /models),
+   *  carrying the engine-relative name verbatim — subpaths included, exactly
+   *  what the graph loaders accept — and bytes: 0 (the /models contract
+   *  reports no sizes). There are no local rows, no source tags, and no
+   *  header-derived form tags: the registry lists filenames only, and the
+   *  engine is the final arbiter of what a file contains. */
 }
 
 export type MediaFile = {
@@ -769,7 +764,7 @@ export type DesktopApi = {
   saveSettings(settings: AppSettings): Promise<{ settings: AppSettings; warnings?: string[] }>
   chooseDirectory(initialPath?: string): Promise<string | null>
   chooseMedia(type: MediaKind): Promise<{ path: string; name: string } | null>
-  scanModels(settings: AppSettings): Promise<ModelFile[]>
+  scanModels(settings: AppSettings, options?: { refresh?: boolean }): Promise<ModelFile[]>
   getComfyStatus(url: string): Promise<ComfyStatus>
   /** clientId is accepted for interface compatibility but ignored by the
    *  server: submissions carry the server's own stable engine-session id
@@ -800,7 +795,7 @@ export type DesktopApi = {
   getEngineStatus(): Promise<ManagedEngineStatus>
   startManagedEngine(): Promise<ManagedEngineStatus & { already?: boolean }>
   stopManagedEngine(): Promise<ManagedEngineStatus>
-  listEngineNodePacks(): Promise<{ packs: NodePackStatus[] }>
+  listEngineNodePacks(options?: { refresh?: boolean }): Promise<{ packs: NodePackStatus[] }>
   installEngineNodePack(id: string, sourceDirectory?: string): Promise<NodePackStatus>
   uninstallEngineNodePack(id: string): Promise<NodePackStatus>
   revertEnginePatch(id: string): Promise<{ reverted: boolean; patch: string }>

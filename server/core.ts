@@ -1,6 +1,7 @@
 /**
  * The MiniMax Studio server core — every capability that is not Electron:
- * settings persistence, model scanning, the ComfyUI/Ollama proxy, ffmpeg
+ * settings persistence, the registry-only model inventory (R-12), the
+ * ComfyUI/Ollama proxy, ffmpeg
  * operations, GPU telemetry, and the HTTP API + static hosting that the web
  * renderer consumes. Both entry points share this module:
  *
@@ -10,7 +11,7 @@
  * Nothing in this file may import from 'electron'.
  */
 import { createReadStream, existsSync } from 'node:fs'
-import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
@@ -32,9 +33,9 @@ import { EngineProcess } from './engineProcess'
 import { RuntimeManager, RuntimeConfigError } from './runtime'
 import { ENGINE_PATCH_IDS, revertEnginePatch, ENGINE_PATCHES } from './enginePatch'
 import { mergeEngineProfiles } from './engineProfiles'
-import { checkAllNodePacks, ENGINE_NODE_PACKS, findNodePack, installNodePack, isUsableCheckout, nodePackInstanceState, resolveNodePackTarget, resolveVendorRoot, uninstallNodePack } from './engineNodes'
-import { INVENTORY_MODEL_KINDS, instanceNamesForKind, inventoryFromObjectInfo, mergeModelInventories, parseModelsEndpointList } from './instanceInventory'
-import { h3FormForScannedFile } from './modelForms'
+import { checkAllNodePacks, ENGINE_NODE_PACKS, findNodePack, installNodePack, isUsableCheckout, resolveNodePackTarget, resolveVendorRoot, uninstallNodePack } from './engineNodes'
+import { INVENTORY_MODEL_KINDS, instanceNamesForKind, inventoryFromObjectInfo, parseModelsEndpointList, registryInventoryFiles } from './instanceInventory'
+import { createObjectInfoProbe, probeClassPresence } from './objectInfoProbe'
 import { FETCH_ENTRY_IDS, findFetchEntry, networkFetchPackIds } from './fetchCatalog'
 import { FetchManager, transportForEnvironment } from './fetcher'
 import { createLlmService, type LlmService } from './llm'
@@ -55,7 +56,6 @@ export type StudioServerPaths = {
 export type StudioServer = ReturnType<typeof createStudioServer>
 
 const modelKinds: ModelKind[] = ['diffusion_models', 'text_encoders', 'vae', 'loras', 'vae_approx', 'clip_vision']
-const modelExtensions = new Set(['.safetensors', '.pt', '.pth', '.gguf', '.onnx'])
 const mediaExtensions = new Set(['.mp4', '.webm', '.mov', '.mkv'])
 
 const mediaMimeTypes: Record<string, string> = {
@@ -188,6 +188,11 @@ async function comfyFetch(url: string, path: string, init?: RequestInit) {
 /** (Wave 1 R-03) The ComfyUI /prompt rejection reducer lives in
  *  src/lib/promptError.ts — extracted pure so the unit suite drives it with
  *  the engine's real error shapes. See that module for the shape contract. */
+
+/** (Wave 2 A-8) The targeted object_info presence probe — per-class
+ *  /object_info/{node} asks with a TTL cache, riding the comfyFetch funnel
+ *  so the SSRF guard and timeouts apply to every ask. */
+const objectInfoProbe = createObjectInfoProbe((url, path) => comfyFetch(url, path))
 
 function comfyChoices(info: Record<string, unknown>, node: string, field: string) {
   const definition = info[node] as { input?: { required?: Record<string, unknown[]> } } | undefined
@@ -939,64 +944,15 @@ export function createStudioServer(paths: StudioServerPaths) {
     return created
   }
 
-  async function scanDirectory(root: string, kind: ModelKind) {
-    const results: Array<{ name: string; path: string; kind: ModelKind; bytes: number; h3Form?: string }> = []
-    if (!root || !existsSync(root)) return results
-    const pending = [normalize(root)]
-    while (pending.length) {
-      const current = pending.pop()!
-      let entries
-      try {
-        entries = await readdir(current, { withFileTypes: true })
-      } catch {
-        continue
-      }
-      for (const entry of entries) {
-        const fullPath = join(current, entry.name)
-        // Symlinks resolve through stat (the central-registry layout is
-        // link-never-copy: most models on a shared install are symlinks, and
-        // a Dirent type test alone hides them). Dangling links throw in the
-        // stat below and are skipped like any unreadable entry.
-        let linked: 'file' | 'dir' | null = null
-        if (entry.isSymbolicLink()) {
-          try {
-            const resolved = await stat(fullPath)
-            linked = resolved.isDirectory() ? 'dir' : resolved.isFile() ? 'file' : null
-          } catch {
-            linked = null
-          }
-        }
-        if (entry.isDirectory() || linked === 'dir') {
-          if (!entry.name.startsWith('.')) pending.push(fullPath)
-        } else if ((entry.isFile() || linked === 'file') && modelExtensions.has(extname(entry.name).toLowerCase())) {
-          // Skip unreadable files instead of rejecting the whole scan — one
-          // EACCES entry must not blank the model list.
-          try {
-            const info = await stat(fullPath)
-            // H3 adaln form tag (task k271ykk): header-only read, one call
-            // per scanned file; an unreadable/exotic header degrades to "no
-            // tag", never to a failed scan. Diffusion models tag curve/full;
-            // LoRAs tag adaln-free/curve-adaln/full-width-adaln.
-            const h3Form = await h3FormForScannedFile(fullPath, kind)
-            results.push({ name: entry.name, path: fullPath, kind, bytes: info.size, ...(h3Form ? { h3Form } : {}) })
-          } catch { /* Unreadable entry; leave it out. */ }
-        }
-      }
-    }
-    return results
-  }
-
-  async function scanModels(settings: AppSettings) {
-    const groups = await Promise.all(modelKinds.map((kind) => scanDirectory(settings.paths[kind], kind)))
-    return groups.flat().sort((a, b) => a.name.localeCompare(b.name))
-  }
-
-  /** Instance-sourced inventory (task 9om4bi9): asks the CONNECTED engine
-   *  what it serves. Preference order per kind: the /models/{kind} route
-   *  (folder truth — files with no loader node included), then the loader
-   *  enums inside a fetched object_info payload. Any failure degrades to an
-   *  empty listing for that kind — the local scan is never blocked by an
-   *  engine hiccup, and object_info is fetched at most once per call. */
+  /** Registry-only inventory (remediation Wave 2, R-12 — directive
+   *  2987ef3e): asks the CONNECTED engine what it serves, and that is the
+   *  whole inventory — instance-invisible = nonexistent. Preference order
+   *  per kind: the /models/{kind} route (folder truth — files with no
+   *  loader node included), then the loader enums inside a fetched
+   *  object_info payload. Any failure degrades to an empty listing for that
+   *  kind; with the engine down there is no inventory at all. The local
+   *  scan that once ran here is gone (Wave 2): no app-side folder walking,
+   *  no local/instance merge, no source tags. */
   async function instanceInventoryFor(settings: AppSettings, preloadedObjectInfo?: unknown): Promise<Record<ModelKind, string[]>> {
     const fromObjectInfo = inventoryFromObjectInfo(preloadedObjectInfo ?? await comfyFetch(settings.comfyUrl, '/object_info').catch((error: unknown) => {
       logFailure('inventory/object-info', error, undefined, 'debug')
@@ -1012,18 +968,27 @@ export function createStudioServer(paths: StudioServerPaths) {
     return inventory
   }
 
-  /** Live instance verdict for every registry pack (task 9om4bi9): one
-   *  object_info read, any-match on the pack's distinctive node classes. An
-   *  unreachable engine answers 'unknown' for all — never an error that
-   *  blocks the pack listing. */
-  async function liveNodePackInstanceStates(settings: AppSettings): Promise<Record<string, 'active' | 'absent' | 'unknown'>> {
-    const info = await comfyFetch(settings.comfyUrl, '/object_info').catch((error: unknown) => {
-      logFailure('engine/nodes-object-info', error, undefined, 'debug')
-      return null
-    })
-    const keys = info && typeof info === 'object' ? Object.keys(info) : null
+  /** Live instance verdict for every registry pack: TARGETED per-class
+   *  object_info asks through the TTL-cached probe (Wave 2, A-8 — a full
+   *  /object_info pull per board refresh was megabytes). Any-match on the
+   *  pack's distinctive classes; a pack whose every ask failed (engine
+   *  unreachable) answers 'unknown' — never an error that blocks the pack
+   *  listing. */
+  async function liveNodePackInstanceStates(settings: AppSettings, options: { refresh?: boolean } = {}): Promise<Record<string, 'active' | 'absent' | 'unknown'>> {
+    if (options.refresh) objectInfoProbe.refresh(settings.comfyUrl)
+    const classNames = [...new Set(ENGINE_NODE_PACKS.flatMap((pack) => pack.instanceNodeClasses))]
+    const verdicts = await probeClassPresence(objectInfoProbe, classNames.map((className) => ({ engineUrl: settings.comfyUrl, className })))
+    const byClass = new Map<string, 'present' | 'absent' | 'unknown'>()
+    classNames.forEach((className, index) => byClass.set(className, verdicts[index] ?? 'unknown'))
     const states: Record<string, 'active' | 'absent' | 'unknown'> = {}
-    for (const pack of ENGINE_NODE_PACKS) states[pack.id] = nodePackInstanceState(pack, keys)
+    for (const pack of ENGINE_NODE_PACKS) {
+      const answers = pack.instanceNodeClasses.map((className) => byClass.get(className) ?? 'unknown')
+      states[pack.id] = answers.some((answer) => answer === 'present')
+        ? 'active'
+        : answers.every((answer) => answer === 'unknown')
+          ? 'unknown'
+          : 'absent'
+    }
     return states
   }
 
@@ -1551,27 +1516,36 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
         }
         const settings = await loadSettings()
         if (url.pathname === '/api/lan/bootstrap' && request.method === 'GET') {
-          const groups = await Promise.all(modelKinds.map((kind) => scanDirectory(settings.paths[kind], kind)))
+          // Registry-only (Wave 2, R-12 — directive 2987ef3e): the connected
+          // instance's own listing IS the inventory; an engine that cannot be
+          // reached serves no models at all (instance-invisible = nonexistent
+          // — no local fallback ever feeds a graph a file the engine cannot
+          // load). ?refresh=1 is the USER-requested refresh affordance
+          // (directive arm 2): a best-effort engine-side POST /refresh first
+          // — ComfyUI's own folder re-scan, served by revisions that carry
+          // the route (the pinned v0.34.0 does NOT; see
+          // docs/devdocs/comfyui-api/index.md) — then the targeted-probe
+          // cache drops so pack chips re-resolve against fresh data, then
+          // the listing re-pulls.
+          const userRefresh = url.searchParams.get('refresh') === '1'
           const started = Date.now()
           try {
             await comfyFetch(settings.comfyUrl, '/system_stats')
+            if (userRefresh) {
+              await comfyFetch(settings.comfyUrl, '/refresh', { method: 'POST' }).catch((error: unknown) => { logFailure('inventory/engine-refresh', error, undefined, 'debug'); return null })
+              objectInfoProbe.refresh(settings.comfyUrl)
+            }
             const info = await comfyFetch(settings.comfyUrl, '/object_info').catch((error: unknown) => { logFailure('bootstrap/object-info', error, undefined, 'debug'); return {} }) as Record<string, unknown>
             const upscalers = comfyChoices(info, 'UpscaleModelLoader', 'model_name')
-            // Instance-sourced inventory (task 9om4bi9): the engine's own
-            // listing merges with the local-root scan — union by (kind,
-            // name), each row tagged with its source. With zero local roots
-            // configured, an external instance's models still arrive.
-            const instance = await instanceInventoryFor(settings, info)
-            const merged = mergeModelInventories(groups.flat(), instance)
+            const inventory = await instanceInventoryFor(settings, info)
+            const models = registryInventoryFiles(inventory)
+            logEvent({ kind: 'inventory.registry', connected: true, refresh: userRefresh, files: models.length })
             const ollama = await comfyFetch(settings.ollamaUrl, '/api/tags').catch((error: unknown) => { logFailure('bootstrap/ollama', error, undefined, 'debug'); return { models: [] } }) as { models?: Array<{ name?: string; size?: number; remote_model?: string }> }
             const ollamaModels = (ollama.models ?? []).filter((item) => item.name && !item.remote_model && item.size !== 342).map((item) => item.name as string)
-            // Model paths are stripped: the renderer matches by name and kind, and
-            // full filesystem paths are a recon leak to anyone who can reach the API.
-            // The h3Form tag (when detected) rides along for LoRA×base guidance.
-            const models = merged.map((model) => ({ name: model.name, kind: model.kind, bytes: model.bytes, ...(model.h3Form ? { h3Form: model.h3Form } : {}), ...(model.source ? { source: model.source } : {}) }))
             return sendJson(response, 200, { connected: true, latencyMs: Date.now() - started, models, upscalers, ollamaModels, ollamaModel: settings.ollamaModel })
           } catch (error) {
-            return sendJson(response, 200, { connected: false, latencyMs: Date.now() - started, models: groups.flat().map((model) => ({ name: model.name, kind: model.kind, bytes: model.bytes, ...(model.h3Form ? { h3Form: model.h3Form } : {}) })), error: error instanceof Error ? error.message : String(error) })
+            logEvent({ kind: 'inventory.registry', connected: false, refresh: userRefresh })
+            return sendJson(response, 200, { connected: false, latencyMs: Date.now() - started, models: [], error: error instanceof Error ? error.message : String(error) })
           }
         }
         // ---- Studio storage (wave 1): jobs / projects / workspace / FTS ---
@@ -3015,7 +2989,10 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
           ? 'Set a valid ComfyUI checkout (with main.py) in the managed engine settings first.'
           : 'Set the external custom nodes folder (an absolute, existing directory) in the engine settings first, or switch to managed mode with a checkout.'
         if (url.pathname === '/api/lan/engine/nodes' && request.method === 'GET') {
-          const instanceStates = await liveNodePackInstanceStates(settings)
+          // ?refresh=1 (Wave 2): the board's manual Refresh drops the
+          // targeted-probe cache so every chip re-resolves against a fresh
+          // ask, not the TTL window.
+          const instanceStates = await liveNodePackInstanceStates(settings, { refresh: url.searchParams.get('refresh') === '1' })
           // hasNetworkSource (task mjhlt3k, AC-1): a pack with a consented
           // network fetch entry never needs the local-source input — Fetch…
           // is the install affordance when the folder is missing.
@@ -3567,7 +3544,6 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
     saveSettings,
     normalizeSettings,
     defaultSettings,
-    scanModels,
     readGpuTelemetry,
     comfyFetch,
     historyOutput,

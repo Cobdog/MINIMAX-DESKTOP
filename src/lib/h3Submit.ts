@@ -180,7 +180,7 @@ export async function submitH3Render(
     return { ok: false, message: refusal }
   }
   const { settings } = facts
-  // Degraded overrides (the picked file vanished from the scan) proceed on
+  // Degraded overrides (the picked file vanished from the registry) proceed on
   // auto — visibly: the warning rides the notice tier right where the render
   // starts, never a silent swap.
   for (const warning of facts.modelOverrides?.warnings ?? []) io.notify('neutral', warning)

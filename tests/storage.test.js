@@ -308,27 +308,11 @@ test('(d2) migration logic as a unit: fixture localStorage stores against a reco
   assert.ok(warned.some((line) => line.includes('migration deferred')), 'failure must log structurally')
 })
 
-test('(f) model scan follows SYMLINKS (audit D1, task junllxf): the link-never-copy layout must reach engine-ready', async () => {
-  const modelRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-scan-'))
-  const realBytes = Buffer.from('not-a-real-model-but-scannable')
-  fs.writeFileSync(path.join(modelRoot, 'real_diffusion_v1.safetensors'), realBytes)
-  fs.symlinkSync(path.join(modelRoot, 'real_diffusion_v1.safetensors'), path.join(modelRoot, 'linked_alias_v2.safetensors'))
-  fs.symlinkSync(path.join(modelRoot, 'nowhere.safetensors'), path.join(modelRoot, 'dangling_alias.safetensors')) // dangling: skipped, never fatal
-  fs.mkdirSync(path.join(modelRoot, 'nested'))
-  fs.symlinkSync(path.join(modelRoot, 'nested'), path.join(modelRoot, 'linked_dir'))
-  fs.writeFileSync(path.join(modelRoot, 'nested', 'deep_model_v3.safetensors'), realBytes)
-  const current = (await get('/api/lan/settings')).body.settings
-  const patched = { ...current, paths: { ...current.paths, diffusion_models: modelRoot } }
-  const savedScan = await post('/api/lan/settings', { settings: patched })
-  assert.equal(savedScan.status, 200, `settings PATCH for scan test failed: ${JSON.stringify(savedScan.body).slice(0, 200)}`)
-  const bootstrapped = await get('/api/lan/bootstrap')
-  assert.equal(bootstrapped.status, 200, 'bootstrap must answer with the engine down (degraded but scanned)')
-  const names = (bootstrapped.body.models || []).filter((model) => model.kind === 'diffusion_models').map((model) => model.name)
-  assert.ok(names.includes('real_diffusion_v1.safetensors'), `real file must scan (got ${names.join(',')})`)
-  assert.ok(names.includes('linked_alias_v2.safetensors'), `SYMLINKED model must scan — the link-never-copy layout depends on it (got ${names.join(',')})`)
-  assert.ok(names.includes('deep_model_v3.safetensors'), `file inside a SYMLINKED directory must scan (got ${names.join(',')})`)
-  assert.ok(!names.includes('dangling_alias.safetensors'), 'a dangling symlink must be skipped, never listed nor fatal')
-})
+// (The (f) symlink-scan test was removed with the local model scan — Wave 2
+// R-12, 2026-09-20: there is no app-side scan left to follow symlinks; the
+// ENGINE's own registry (which resolves links itself) is the only model
+// source. The registry-only bootstrap + engine-down-empty inventory live in
+// tests/instance.test.js (e). Git history is the archive.)
 
 test('(g) output resolve contract (audit D4): the route must answer BOTH a local file path and the media URL', async () => {
   const outDir = path.join(home, 'resolve-output')

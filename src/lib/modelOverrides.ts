@@ -2,56 +2,51 @@
  *  ladder (task euxwdva).
  *
  * Every engine family resolves its models by inferring them from the
- * directory scan (src/lib/modelSelection.ts's pattern ladder, h3image's
+ * instance registry (src/lib/modelSelection.ts's shared ladder, h3image's
  * inferH3ImgSelection, music3/ace's own). That ladder can only find files
  * whose names match a known pattern — a community merge (TenStrip
  * 10Eros-Max beta5 int8, say) matches nothing and is therefore invisible
- * to generation, no matter that it sits in the scanned folder. This module
- * is the ONE seam where an explicit user pick beats inference:
+ * to generation, no matter that the engine serves it. This module is the
+ * ONE seam where an explicit user pick beats inference:
  *
- *   resolveModels(family, inferredSelection, scan, overrides)
+ *   resolveModels(family, inferredSelection, registry, overrides)
  *
  * RESOLUTION ORDER (the contract every surface documents): chain-level
  * override > global (Settings) override > auto (inference). An absent or
  * empty slot is auto — nothing changes for existing users.
  *
- * Picks are scan-anchored: a slot's value must be the EXACT filename of a
- * scanned file (matched case-insensitively, then canonicalized to the
- * scanned file's real name so a case-drifted pick never loads a filename
- * the engine would reject). Three outcomes per slot:
+ * Picks are REGISTRY-ANCHORED (Wave 2 R-12 — directive 2987ef3e): a slot's
+ * value must be the EXACT registry-listed name of a file the CONNECTED
+ * instance serves (matched case-insensitively, then canonicalized to the
+ * registry row's real name so a case-drifted pick never loads a name the
+ * engine would reject). Instance-invisible = nonexistent — a pick the
+ * registry does not list never reaches a graph. Three outcomes per slot:
  *
- *   applied  — the scanned file becomes the slot's selection
- *   degraded — the file vanished from the scan since it was set: fall back
+ *   applied  — the registry row becomes the slot's selection
+ *   degraded — the file vanished from the registry since the pick was set
+ *              (the engine restarted without it, a folder moved): fall back
  *              to auto WITH a visible warning (environmental drift, not a
  *              user error — the render may proceed)
- *   refused  — the file is present but the family cannot use it (wrong
- *              kind, no detected H3 form on an H3 checkpoint slot, the T=1
- *              image VAE pushed into the video family, or a slot the family
- *              does not expose): the submission REFUSES with the reason —
- *              never a doomed graph
+ *   refused  — the instance serves the file but the family cannot use it
+ *              (wrong kind, the T=1 image VAE pushed into the video
+ *              family, or a slot the family does not expose): the
+ *              submission REFUSES with the reason — never a doomed graph
  *
  * Quant variants (int8 / nvfp4 / fp8 / fp16) are filename-level cuts of the
- * same architecture; the machine-checkable expectation in scan data is the
- * KIND plus — for the H3 checkpoint slots — the safetensors adaln form
- * (ModelFile.h3Form, detected at scan time from tensor shapes, never the
- * filename; see server/modelForms.ts). A wrong-quant pick is therefore not
- * refusable here and is deliberately not guessed at.
- *
- * The H3 form gate is SOURCE-AWARE (task rq0lsax, 2026-09-20): the form tag
- * exists only where the studio could open the file — local-root rows. An
- * instance-sourced row ('source: instance' or 'both', the engine-relative
- * names the connected engine lists) carries no header read (see
- * server/instanceInventory.ts — the instance API lists filenames only), so a
- * missing form there is MISSING EVIDENCE, not evidence of a wrong file: the
- * pick applies with a warning and the engine stays the final arbiter (it
- * loads the file or fails loudly). Local rows keep the hard refusal — there
- * the header read genuinely ran and found no H3 shape.
+ * same architecture; the machine-checkable expectation in registry data is
+ * the KIND alone. The registry lists filenames only — no header reads, so
+ * no form/quant verification happens app-side (the scan-time h3Form gate
+ * died with the local scan, Wave 2): the ENGINE is the final arbiter — it
+ * loads the file or fails loudly, and the failure taxonomy surfaces that
+ * readably. A wrong-quant pick is not refusable here and is deliberately
+ * not guessed at.
  *
  * The H3 families expose THREE checkpoint-class slots (rq0lsax): fl2va (the
  * first-frame/I2V lane), ref2va (the reference lane), and merged (ONE
  * pre-merged checkpoint standing in for both — the runtime-merge machinery
- * exists precisely so nobody HAS to pre-merge, but a community merge on disk
- * is the merge slot's reason to exist). When the merged pick applies it is
+ * exists precisely so nobody HAS to pre-merge, but a community merge the
+ * engine serves is the merge slot's reason to exist). When the merged pick
+ * applies it is
  * THE checkpoint — it fills both lanes, and simultaneously-set lane picks
  * get an explicit superseded warning (never a silent drop). The pre-split
  * single 'checkpoint' pick migrates onto fl2va AND ref2va (see
@@ -71,6 +66,7 @@
  * marker heuristics at VIDEO_VAE_MARKER document their own limits).
  */
 import type { ModelFile, ModelOverrideSlots } from '../types'
+import { dbg } from './dbg'
 import { inferH3ImgSelection, T1_IMAGE_VAE_PATTERN } from './graph/h3image'
 import { inferAceStepSelections } from './aceStepWorkflow'
 import { inferSelections } from './modelSelection'
@@ -86,9 +82,6 @@ export type ModelOverrideSlotName = 'checkpoint' | 'fl2va' | 'ref2va' | 'merged'
  *  (the same trick that keeps a legacy 'checkpoint' alive for the H3 lanes). */
 export const OVERRIDE_SLOTS: readonly ModelOverrideSlotName[] = ['checkpoint', 'fl2va', 'ref2va', 'merged', 'textEncoder', 'vae', 'videoVae', 'audioVae', 'imageVae']
 
-/** The diffusion-model slots the H3 form gate governs. */
-const CHECKPOINT_CLASS_SLOTS: ReadonlySet<ModelOverrideSlotName> = new Set(['checkpoint', 'fl2va', 'ref2va', 'merged'])
-
 export type ModelFamilyId = 'minimax' | 'h3image' | 'music3' | 'acestep'
 
 export type ModelFamilyInfo = {
@@ -99,10 +92,8 @@ export type ModelFamilyInfo = {
    *  genuinely plural (acestep's two DISTINCT text encoders — one pick for
    *  both would be dishonest). */
   slots: readonly ModelOverrideSlotName[]
-  /** The scan kind each exposed slot picks from. */
+  /** The registry kind each exposed slot picks from. */
   slotKinds: Partial<Record<ModelOverrideSlotName, ModelFile['kind']>>
-  /** H3 families refuse checkpoint picks with no detected adaln form. */
-  requireH3Form: boolean
 }
 
 /** The T=1 legality map (task epdvxd4, AC-4): the imageVae slot exists ONLY
@@ -122,32 +113,28 @@ export const MODEL_FAMILIES: readonly ModelFamilyInfo[] = [
     label: 'MiniMax H3 video',
     note: 'The FL2VA and Ref2VA picks pin each render lane separately — only the mode\'s slot loads. The merged pick is ONE pre-merged checkpoint standing in for both lanes when set (unused unless needed). Text encoder is the Qwen3-VL companion; the video and audio VAE picks load the graph\'s two decoders (nodes 3/4). No image-VAE slot exists here — the video graph is always multi-frame and the Mamad8 T=1 decoder is factory-banned from it.',
     slots: ['fl2va', 'ref2va', 'merged', 'textEncoder', 'videoVae', 'audioVae'],
-    slotKinds: { fl2va: 'diffusion_models', ref2va: 'diffusion_models', merged: 'diffusion_models', textEncoder: 'text_encoders', videoVae: 'vae', audioVae: 'vae' },
-    requireH3Form: true,
+    slotKinds: { fl2va: 'diffusion_models', ref2va: 'diffusion_models', merged: 'diffusion_models', textEncoder: 'text_encoders', videoVae: 'vae', audioVae: 'vae' }
   },
   {
     id: 'h3image',
     label: 'MiniMax H3 image workbench',
     note: 'The still-image families share the H3 stack. FL2VA and Ref2VA pin the stock lanes (and the runtime-merge loader\'s base/overlay inputs); the merged pick feeds the hybrid line as one plain-loaded file — a pre-merged checkpoint needs no runtime merge. The video/audio VAE picks load nodes 3/4; the image VAE pick is the Mamad8 T=1 decoder the T=1 Fast profile decodes through (the only family where it is legal).',
     slots: ['fl2va', 'ref2va', 'merged', 'textEncoder', 'videoVae', 'audioVae', 'imageVae'],
-    slotKinds: { fl2va: 'diffusion_models', ref2va: 'diffusion_models', merged: 'diffusion_models', textEncoder: 'text_encoders', videoVae: 'vae', audioVae: 'vae', imageVae: 'vae' },
-    requireH3Form: true,
+    slotKinds: { fl2va: 'diffusion_models', ref2va: 'diffusion_models', merged: 'diffusion_models', textEncoder: 'text_encoders', videoVae: 'vae', audioVae: 'vae', imageVae: 'vae' }
   },
   {
     id: 'music3',
     label: 'MiniMax Music 3',
     note: 'The Music 3 song engine: diffusion model, text encoder, and the DAV audio VAE — the family\'s one decoder is audio-class.',
     slots: ['checkpoint', 'textEncoder', 'audioVae'],
-    slotKinds: { checkpoint: 'diffusion_models', textEncoder: 'text_encoders', audioVae: 'vae' },
-    requireH3Form: false,
+    slotKinds: { checkpoint: 'diffusion_models', textEncoder: 'text_encoders', audioVae: 'vae' }
   },
   {
     id: 'acestep',
     label: 'ACE-Step XL 1.5',
     note: 'The checkpoint pick drives both the base and SFT cuts (the model choice decides which loads). The audio VAE is the family\'s one decoder (audio-class). The dual Qwen text encoders stay inferred — they are two distinct files.',
     slots: ['checkpoint', 'audioVae'],
-    slotKinds: { checkpoint: 'diffusion_models', audioVae: 'vae' },
-    requireH3Form: false,
+    slotKinds: { checkpoint: 'diffusion_models', audioVae: 'vae' }
   },
 ]
 
@@ -329,22 +316,20 @@ export type OverrideResolution = {
   applied: ModelOverrideSlots
 }
 
-/** Which contract check produced a refusal — the form gate is the one the
- *  resolution may convert to a warning for instance-sourced rows. */
-type SlotRefusal = { check: 'slot' | 'kind' | 'form' | 'vae'; reason: string }
+/** Which contract check produced a refusal. */
+type SlotRefusal = { check: 'slot' | 'kind' | 'vae'; reason: string }
 
 /** Filename markers for the VAE decoder classes (epdvxd4, AC-2). HEURISTICS
  *  WITH KNOWN LIMITS, documented here because no better evidence exists: the
- *  scan carries no VAE header-shape detection (h3Form reads diffusion-model
- *  adaln tensors only), so class follows the NAME — /video/i marks the video
- *  decoders (minimax_h3_video_vae*, ltx-2.5-video-vae*, LTX23_video_vae*),
- *  /audio|dav/i marks the audio decoders (…audio_vae*, music3's DAV), and
- *  T1_IMAGE_VAE_PATTERN is the Mamad8 image class. A file matching NO marker
- *  (ACE-Step's ace_1.5_vae, a community rename) cannot be classified by
- *  name: it applies — the engine stays the final arbiter, exactly like the
- *  instance-sourced form arm below. No known audio decoder name contains
- *  'video' and no known video decoder name contains 'audio'/'dav'; the
- *  markers refuse the cross-class picks that would ship a doomed graph. */
+ *  registry lists filenames only (no header shape detection), so class
+ *  follows the NAME — /video/i marks the video decoders
+ *  (minimax_h3_video_vae*), /audio|dav/i marks the audio decoders
+ *  (…audio_vae*, music3's DAV), and T1_IMAGE_VAE_PATTERN is the Mamad8
+ *  image class. A file matching NO marker (ACE-Step's ace_1.5_vae, a
+ *  community rename) cannot be classified by name: it applies — the engine
+ *  stays the final arbiter. No known audio decoder name contains 'video'
+ *  and no known video decoder name contains 'audio'/'dav'; the markers
+ *  refuse the cross-class picks that would ship a doomed graph. */
 const VIDEO_VAE_MARKER = /video/i
 const AUDIO_VAE_MARKER = /audio|dav/i
 
@@ -355,9 +340,6 @@ function slotRefusal(family: ModelFamilyInfo, slot: ModelOverrideSlotName, file:
   const expectedKind = family.slotKinds[slot]
   if (expectedKind && file.kind !== expectedKind) {
     return { check: 'kind', reason: `'${file.name}' is a ${file.kind.replace(/_/g, ' ')} file — the ${SLOT_LABELS[slot].toLowerCase()} slot picks from ${expectedKind.replace(/_/g, ' ')}.` }
-  }
-  if (family.requireH3Form && CHECKPOINT_CLASS_SLOTS.has(slot) && !file.h3Form) {
-    return { check: 'form', reason: `'${file.name}' carries no detectable MiniMax-H3 form (no adaln tensors in its safetensors header) — the H3 graphs would fail to load it.` }
   }
   // The decoder-class gate (epdvxd4): each VAE slot refuses picks whose
   // filename marks them as ANOTHER decoder class — the pick layer's
@@ -424,8 +406,10 @@ export function resolveModelOverrides(familyId: string, files: ModelFile[], over
       : typeof layers?.global?.[slot] === 'string' && layers.global[slot]!.trim()
         ? 'global'
         : null
-    // Exact filename against the scan, case-insensitive; the SCANNED file's
-    // real name wins so a case-drifted pick never outlives its file.
+    // Exact name against the registry listing, case-insensitive; the
+    // REGISTRY row's real name wins so a case-drifted pick never outlives
+    // its file. Subpaths match whole-string only — a pick of "x.safetensors"
+    // never resolves to "sub/x.safetensors" implicitly.
     let scanned: ModelFile | null = null
     for (const file of files) {
       if (file.name.toLowerCase() === name.toLowerCase()) {
@@ -434,25 +418,17 @@ export function resolveModelOverrides(familyId: string, files: ModelFile[], over
       }
     }
     if (!scanned) {
-      const warning = `Model override '${name}' is no longer in the scan — rendering with the auto (inferred) ${SLOT_LABELS[slot].toLowerCase()} instead.`
+      // Registry-anchored (R-12): the connected instance does not list this
+      // file, so as far as the app is concerned it does not exist — degrade
+      // to auto with the reason, never feed the name to a graph.
+      dbg('override', { slot, verdict: 'degraded-not-in-registry', pick: name, family: familyId })
+      const warning = `Model override '${name}' is not in the engine's model registry — the engine cannot see this file (it may have been removed, or the engine restarted without its folder). Rendering with the auto (inferred) ${SLOT_LABELS[slot].toLowerCase()} instead.`
       resolution.slots[slot] = { slot, state: 'degraded', file: name, warning }
       resolution.warnings.push(warning)
       continue
     }
     const refusal = slotRefusal(family, slot, scanned)
     if (refusal) {
-      // The source-aware form gate (rq0lsax): an instance-listed row has no
-      // header to read, so a missing form is missing EVIDENCE, not a wrong
-      // file — the pick applies with a warning and the engine stays the
-      // final arbiter. Local rows (the header read genuinely ran and found
-      // no H3 shape) keep the hard refusal above.
-      if (refusal.check === 'form' && (scanned.source === 'instance' || scanned.source === 'both')) {
-        const warning = `'${scanned.name}' is instance-listed — its MiniMax-H3 form cannot be verified from the instance inventory (the listing carries no safetensors header). Applying the pick as chosen; the engine loads it or fails loudly.`
-        resolution.slots[slot] = { slot, state: 'applied', file: scanned.name, warning }
-        resolution.applied[slot] = scanned.name
-        resolution.warnings.push(warning)
-        continue
-      }
       // D3 (Wave 1 R-06): a refusing pick the migration wrote — the user
       // never chose it at this slot (migration is fill-if-unset, so a
       // conscious pick is never migration-filled) — auto-clears to auto WITH
@@ -465,10 +441,12 @@ export function resolveModelOverrides(familyId: string, files: ModelFile[], over
       }
       resolution.slots[slot] = { slot, state: 'refused', file: scanned.name, reason: refusal.reason, ...(layer ? { layer } : {}) }
       resolution.refusals.push({ slot, file: scanned.name, reason: refusal.reason, layer: layer ?? 'global' })
+      dbg('override', { slot, verdict: 'refused', family: familyId, file: scanned.name, check: refusal.check, layer: layer ?? 'migration/global' })
       continue
     }
     resolution.slots[slot] = { slot, state: 'applied', file: scanned.name }
     resolution.applied[slot] = scanned.name
+    dbg('override', { slot, verdict: 'applied', family: familyId, file: scanned.name, layer: layer ?? 'unknown-layer' })
   }
   // The merged pick is THE checkpoint when it applies — simultaneously-set
   // lane picks are superseded, and the resolution SAYS so (never a silent

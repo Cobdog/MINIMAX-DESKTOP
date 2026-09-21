@@ -450,7 +450,7 @@ export function PropertiesPanel() {
   const patch = (part: Partial<CanvasChainSettings>) => setDraft((current) => current ? { ...current, ...part } : current)
   const mode = effectiveMode(draft)
   // ---- Chain-level model overrides (task euxwdva) ----
-  // The chain's engine decides the family; picks are scan-anchored and ride
+  // The chain's engine decides the family; picks are registry-anchored and ride
   // chain.settings (settings-vs-results separation: the RESOLVED files ride
   // the take's manifest). Resolution order: this pick > the global Settings
   // pick > auto (inference).

@@ -1,4 +1,4 @@
-import type { AppSettings, DesktopApi, FetchEntryStatus, LlmModelsResult, ManagedEngineStatus, MediaKind, NodePackStatus, PromptLibraryItem } from '../types'
+import type { AppSettings, DesktopApi, FetchEntryStatus, LlmModelsResult, ManagedEngineStatus, MediaKind, ModelFile, NodePackStatus, PromptLibraryItem } from '../types'
 
 /**
  * HTTP implementation of the DesktopApi bridge, used when the renderer runs in
@@ -132,8 +132,14 @@ export function createWebApiClient(): DesktopApi {
       const uploaded = await postJson<{ name: string; subfolder?: string }>('/api/lan/upload-media', { data, name: picked.name })
       return { path: comfyInputReference({ name: uploaded.name, subfolder: uploaded.subfolder, type: 'input' }), name: uploaded.name }
     },
-    async scanModels() {
-      return (await bootstrap()).models as never
+    async scanModels(_settings: AppSettings, options?: { refresh?: boolean }) {
+      // (R-12) The inventory read is ALWAYS a fresh bootstrap GET — the 10 s
+      // bootstrap cache would serve a stale (engine-down) listing to the
+      // recovery re-pull and to every scan after a settings change; the
+      // registry is the only model source, so its reads never cache. The
+      // USER refresh additionally asks the engine to re-scan its own folders
+      // (best-effort POST /refresh) and drops the server's probe cache.
+      return (await apiFetch<{ models: ModelFile[] }>(options?.refresh ? '/api/lan/bootstrap?refresh=1' : '/api/lan/bootstrap')).models as never
     },
     async getComfyStatus(url: string) {
       const query = url ? `?url=${encodeURIComponent(url)}` : ''
@@ -264,8 +270,8 @@ export function createWebApiClient(): DesktopApi {
     async stopManagedEngine() {
       return postJson<ManagedEngineStatus>('/api/lan/engine/stop', {})
     },
-    async listEngineNodePacks() {
-      return apiFetch<{ packs: NodePackStatus[] }>('/api/lan/engine/nodes')
+    async listEngineNodePacks(options?: { refresh?: boolean }) {
+      return apiFetch<{ packs: NodePackStatus[] }>(options?.refresh ? '/api/lan/engine/nodes?refresh=1' : '/api/lan/engine/nodes')
     },
     async installEngineNodePack(id: string, sourceDirectory?: string) {
       const body = await postJson<{ pack: NodePackStatus; notes?: string[] }>('/api/lan/engine/nodes/install', { id, sourceDirectory })

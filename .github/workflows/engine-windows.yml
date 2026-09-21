@@ -15,7 +15,7 @@
 # full + contracts, all Linux.
 #
 # The scheduled run is the FULL set — engine-process, runtime, fetcher,
-# instance, lora-form, benchmarks — engine-dependence unchanged (transport
+# instance, benchmarks — engine-dependence unchanged (transport
 # mocked, no ComfyUI needed).
 name: Engine CI (Windows)
 
@@ -55,8 +55,8 @@ jobs:
       #   fetcher        — local-first fetcher: symlink placement + tar;
       #   instance       — external-instance integration (9om4bi9): the
       #                    symlink/path-sensitive install surface;
-      #   lora-form      — form adapter: math + golden (numpy) + first-party
-      #                    pack install on Windows symlinks/junctions;
       #   benchmarks     — harness offline suite (BENCH_PYTHON=python above).
+      #   (lora-form was removed with the suite — Wave 2 R-12, 2026-09-21:
+      #    modelForms.ts and its tests died with the local model scan.)
       - name: OS-sensitive suites (full weekly set)
-        run: pnpm exec vitest run engine-process runtime fetcher instance lora-form benchmarks
+        run: pnpm exec vitest run engine-process runtime fetcher instance benchmarks

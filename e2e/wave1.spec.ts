@@ -3,7 +3,7 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { stockObjectInfo } from './fakeEngineInfo'
+import { H3_REGISTRY_LISTINGS, serveModelRegistry, serveObjectInfo, stockObjectInfo } from './fakeEngineInfo'
 
 /**
  * THE WAVE-1 ACCEPTANCE BAR (task jpc96dp, plan §3): the maintainer's exact
@@ -27,18 +27,10 @@ test('Wave 1 acceptance walk — the maintainer\'s first session, end to end on 
   const SHOT_DIR = path.join(process.cwd(), 'test-results', 'wave1-walk')
   fs.mkdirSync(SHOT_DIR, { recursive: true })
 
-  // Dummy model files (scanner-safe dummy bytes) — the shared H3 set the
-  // quality t2v ladder resolves (the canvas suite's sp-models precedent).
-  const modelRoot = path.join(process.cwd(), 'test-home', 'wave1-models')
-  for (const [kind, files] of Object.entries({
-    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
-    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
-    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
-    loras: ['minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors'],
-  })) {
-    fs.mkdirSync(path.join(modelRoot, kind), { recursive: true })
-    for (const file of files as string[]) fs.writeFileSync(path.join(modelRoot, kind, file), 'x')
-  }
+  // (Wave 2 R-12) No local model files, no configured local roots: the fake
+  // engine's OWN /models listing is the app's whole model inventory — the
+  // registry-only walk (instance-invisible = nonexistent). The diffusion
+  // rows are subpathed exactly as a real instance lists them.
 
   // The fake engine: MUTABLE registry + history so one server walks every
   // phase of the journey (up/incomplete, preflight-missing, 400-shaped,
@@ -68,16 +60,8 @@ test('Wave 1 acceptance walk — the maintainer\'s first session, end to end on 
       res.end(JSON.stringify({ system: { comfyui_version: 'v0.34.0' }, devices: [] }))
       return
     }
-    if (url.pathname === '/object_info') {
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify(engineState.registry))
-      return
-    }
-    if (url.pathname === '/models' || url.pathname.startsWith('/models/')) {
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify([]))
-      return
-    }
+    if (serveObjectInfo(url, engineState.registry, res)) return
+    if (serveModelRegistry(url, H3_REGISTRY_LISTINGS, res)) return
     if (url.pathname === '/prompt' && req.method === 'POST') {
       let body = ''
       req.on('data', (chunk: Buffer) => { body += chunk })
@@ -155,7 +139,6 @@ test('Wave 1 acceptance walk — the maintainer\'s first session, end to end on 
       ...originalSettings,
       comfyUrl: `http://127.0.0.1:${enginePort}`,
       engine: { ...(originalSettings.engine as Record<string, unknown>), mode: 'external' },
-      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: path.join(modelRoot, 'diffusion_models'), text_encoders: path.join(modelRoot, 'text_encoders'), vae: path.join(modelRoot, 'vae'), loras: path.join(modelRoot, 'loras') },
     } } })
     await resetSession(page)
 
@@ -319,8 +302,6 @@ test('Wave 1 acceptance walk — the maintainer\'s first session, end to end on 
   } finally {
     await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
     await resetSession(page).catch(() => undefined)
-    // The shared test-home returns to its empty-model-roots state.
-    fs.rmSync(modelRoot, { recursive: true, force: true })
     if (engine) await new Promise<void>((resolve) => engine!.close(() => resolve()))
   }
 })

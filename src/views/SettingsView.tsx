@@ -181,19 +181,19 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
    *  FetchBrowser's catalog entry — the same mechanism the canvas menu rows
    *  use. Consumed by FetchBrowser, then cleared here. */
   const [packFetchFocus, setPackFetchFocus] = useState<string[] | null>(null)
-  const refreshNodePacks = async () => {
-    try { setNodePacks((await window.minimax.listEngineNodePacks()).packs) } catch { /* listed on next action; errors surface there */ }
+  const refreshNodePacks = async (options?: { refresh?: boolean }) => {
+    try { setNodePacks((await window.minimax.listEngineNodePacks(options)).packs) } catch { /* listed on next action; errors surface there */ }
   }
   /** The board's manual Refresh (task mjhlt3k, AC-2): the pack rows re-GET
-   *  (fresh folder scan + live object_info verdicts — the route reads are
-   *  per-request, never cached) and the model inventory re-pulls through the
-   *  bootstrap scan (instance /models + object_info merged with the local
-   *  roots). The auto-refresh effects only fire on settings changes; this is
-   *  the "I changed something behind the studio's back" trigger. */
+   *  with the probe cache dropped (fresh targeted object_info asks — Wave 2
+   *  A-8) and the model inventory re-pulls with the USER refresh semantics
+   *  (engine-side /refresh best-effort + a fresh listing read — R-12). The
+   *  auto-refresh effects only fire on settings changes; this is the "I
+   *  changed something behind the studio's back" trigger. */
   const refreshPackBoard = async () => {
     setNodePackRefreshing(true)
     try {
-      await Promise.all([refreshNodePacks(), Promise.resolve(onScan())])
+      await Promise.all([refreshNodePacks({ refresh: true }), Promise.resolve(onScan())])
     } finally {
       setNodePackRefreshing(false)
     }
@@ -370,11 +370,11 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
               const autoFile = inferredOverrideSlotFile(family.id, slot, models)
               const outcome = value ? overridePickOutcome(family.id, slot, value, models) : null
               return <div className={`model-override-row${outcome?.state === 'refused' ? ' refused' : outcome?.state === 'degraded' ? ' degraded' : ''}`} key={slot} data-model-override-slot={slot}>
-                <div className="model-override-slot"><strong>{SLOT_LABELS[slot]}</strong><small>{candidates.length} {kind.replace(/_/g, ' ')} file{candidates.length === 1 ? '' : 's'}{candidates.some((model) => model.source === 'instance') ? ' · includes instance-listed' : ''}</small></div>
+                <div className="model-override-slot"><strong>{SLOT_LABELS[slot]}</strong><small>{candidates.length} {kind.replace(/_/g, ' ')} file{candidates.length === 1 ? '' : 's'} on the connected engine</small></div>
                 <div className="select-wrap">
                   <select aria-label={`${family.label} — ${SLOT_LABELS[slot]}`} value={value} onChange={(event) => setModelOverride(family.id, slot, event.target.value)}>
                     <option value="">auto (inferred){autoFile ? ` — ${autoFile}` : ' — nothing detected'}</option>
-                    {candidates.map((model) => <option key={model.name} value={model.name}>{model.name}{model.source === 'instance' || model.source === 'both' ? ' (instance)' : ''}</option>)}
+                    {candidates.map((model) => <option key={model.name} value={model.name}>{model.name}</option>)}
                   </select>
                   <ChevronDown size={15} />
                 </div>
@@ -386,7 +386,7 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
           </div>
         })}
       </div>
-      <p className="settings-note">Picks are exact scanned filenames. A pick whose file later disappears falls back to auto with a warning at render time; a pick the family cannot load (wrong folder, no detected H3 form on a locally-scanned file) refuses the render with the reason — never a doomed graph. Instance-listed files carry no readable header, so their form is unverifiable: the pick applies with a warning and the engine decides at load. The H3 families pin FL2VA and Ref2VA per render lane; the merged pick is ONE pre-merged checkpoint for both lanes and wins when set. VAE slots are decoder-specific (video / audio / image): a pick whose filename marks another decoder class refuses — the T=1 image decoder is legal only on the workbench's image-VAE slot, never in a video graph.</p>
+      <p className="settings-note">Picks are exact names from the connected engine's model registry — the engine-relative subpath the graph loader accepts. A pick the registry later stops listing falls back to auto with a warning at render time; a pick the family cannot load (wrong folder, a cross-class VAE) refuses the render with the reason — never a doomed graph. The registry lists filenames only, so nothing about a file's internals is verified app-side: the engine loads the pick or fails loudly with a readable error. The H3 families pin FL2VA and Ref2VA per render lane; the merged pick is ONE pre-merged checkpoint for both lanes and wins when set. VAE slots are decoder-specific (video / audio / image): a pick whose filename marks another decoder class refuses — the T=1 image decoder is legal only on the workbench's image-VAE slot, never in a video graph.</p>
     </section>
     <section className="settings-section setup-doctor-section">
       <div className="settings-heading"><div><Stethoscope size={19} /><span><strong>Setup doctor</strong><small>Verifies FFmpeg, HTTPS tooling, the engine device, and attention backends — with exact fixes.</small></span></div><button className="secondary-button" onClick={() => void runDoctor()} disabled={doctorRunning}>{doctorRunning ? <LoaderCircle size={16} className="spin" /> : <Stethoscope size={16} />}{doctorRunning ? 'Checking…' : 'Run checks'}</button></div>
@@ -516,7 +516,7 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
       </div>
       <p className="settings-note">Prompts go directly to the local Ollama server. Embedding and cloud-backed models are excluded.</p>
     </section>
-    <section className="settings-section"><div className="settings-heading"><div><HardDrive size={19} /><span><strong>Model inventory</strong><small>The connected engine's own registry is the model source of truth (instance-invisible = nonexistent). Local roots are gone from the user surface — refresh reads the engine's listing again.</small></span></div><button className="secondary-button" onClick={onScan} disabled={scanning}>{scanning ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}{scanning ? 'Refreshing…' : 'Refresh from engine'}</button></div><div className="path-table">{pathRows.map((row) => { const kindModels = models.filter((model) => model.kind === row.kind); const instanceCount = kindModels.filter((model) => model.source === 'instance' || model.source === 'both').length; const localCount = kindModels.length - kindModels.filter((model) => model.source === 'instance').length; return <div className="path-row" key={row.kind}><div className="path-kind"><Folder size={17} /><span><strong>{row.label}</strong><small>{row.note}</small></span></div><span className="file-count" data-model-kind-count={row.kind}>{kindModels.length} files{instanceCount > 0 ? ` · ${instanceCount} instance` : ''}{localCount > 0 && instanceCount > 0 ? ` · ${localCount} local` : ''}</span></div>})}</div></section>
+    <section className="settings-section"><div className="settings-heading"><div><HardDrive size={19} /><span><strong>Model inventory</strong><small>The connected engine's own registry is the model source of truth (instance-invisible = nonexistent) — there is no local folder list and no manual pointing. Refresh asks the engine to re-scan its folders and reads the listing again.</small></span></div><button className="secondary-button" onClick={onScan} disabled={scanning}>{scanning ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}{scanning ? 'Refreshing…' : 'Refresh from engine'}</button></div><div className="path-table">{pathRows.map((row) => { const kindModels = models.filter((model) => model.kind === row.kind); return <div className="path-row" key={row.kind}><div className="path-kind"><Folder size={17} /><span><strong>{row.label}</strong><small>{row.note}</small></span></div><span className="file-count" data-model-kind-count={row.kind}>{kindModels.length} file{kindModels.length === 1 ? '' : 's'} on the engine</span></div> })}{models.length === 0 && <div className="path-row"><div className="path-kind"><Folder size={17} /><span><strong>No models listed</strong><small>{status.connected ? 'The engine serves none of these folders yet — add weights where the engine reads them, then Refresh.' : 'The engine is offline — the registry is the only model source, so nothing can be listed until it connects.'}</small></span></div><span className="file-count">0 files</span></div>}</div></section>
     <section className="settings-section"><div className="settings-heading"><div><FolderOpen size={19} /><span><strong>Input &amp; output</strong><small>Renders and prepared media stay local, under the app folder by default.</small></span></div></div><div className="connection-row"><div className="field-group grow"><label htmlFor="input-path">Input directory</label><input id="input-path" data-input-path value={settings.inputDirectory} onChange={(event) => setSettings({ ...settings, inputDirectory: event.target.value })} /><PathCheckNote path={settings.inputDirectory} /></div></div><div className="connection-row"><div className="field-group grow"><label htmlFor="output-path">Output directory</label><input id="output-path" value={settings.outputDirectory} onChange={(event) => setSettings({ ...settings, outputDirectory: event.target.value })} /><PathCheckNote path={settings.outputDirectory} /></div></div><div className="connection-row clip-tool-path"><div className="field-group grow"><label htmlFor="ffmpeg-path">FFmpeg executable</label><input id="ffmpeg-path" value={settings.ffmpegPath} onChange={(event) => setSettings({ ...settings, ffmpegPath: event.target.value })} /></div></div><p className="settings-note">Unset, both default under the app's own data folder (<code>&lt;app&gt;/data/input</code>, <code>&lt;app&gt;/data/output</code>) — nothing lands in Documents. An absolute path you set is kept as-is. The clip editor uses FFmpeg for frame extraction, trim points, joining, and full-project export.</p></section>
     <section className="settings-section license-source-section" aria-label="License and source">
       <div className="settings-heading"><div><Scale size={19} /><span><strong>License &amp; source</strong><small>This app is free software — its source belongs to everyone who uses it.</small></span></div></div>

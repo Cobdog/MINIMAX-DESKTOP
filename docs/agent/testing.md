@@ -14,8 +14,7 @@
 
 ## TMPDIR first
 
-Any suite that writes real scratch (notably `test:llm`, `test:lora-form`
-with its ~1 GB safetensors) can flake with `EDQUOT` when the box's /tmp
+Any suite that writes real scratch (notably `test:llm`) can flake with `EDQUOT` when the box's /tmp
 tmpfs is full — this is the machine's recurring failure mode. Run with
 `TMPDIR=/home/agent/tmp-gpu` (any /home path) unless you have a reason not
 to. CI runners have fresh /tmp; the flake is local-only and never caused by
@@ -61,7 +60,7 @@ Runs the entire verification chain in canonical order — `typecheck` →
 `lint` → `license:audit` → `build` → `unit` (ONE `vitest run` covering every
 `tests/*.test.js` suite: workflows, registry, h3img, storage, documents,
 realtime, filmstrip, llm, engine-process, runtime, fetcher, instance,
-lora-form, poserig, camera, canvas, benchmarks, launcher, datasets) →
+poserig, camera, canvas, benchmarks, launcher, datasets) →
 `smoke:server` → e2e → vision-capture — each gate step in its own process,
 wall-clock timed, known-benign output filtered (the filter tally prints so
 nothing disappears silently), one summary table, non-zero exit on any
@@ -79,8 +78,10 @@ failure. A failed `build` skips only its dependents (unit/smoke/e2e/vision).
   fixture IS the contract. Same pattern for `pnpm test:h3img:update`.
   (Vitest swallows forwarded CLI flags, so the env VAR is the mechanism —
   the `--` passthrough does not reach process.argv.)
-- `test:lora-form` needs `python3` + `numpy` (skips loudly without python,
-  fails loudly with python but no numpy).
+- (The `test:lora-form` suite was removed with the local model scan —
+  Wave 2 R-12, 2026-09-20: modelForms.ts and its tests died together; git
+  history is the archive. The python3+numpy requirement lives on for the
+  benchmarks suite only.)
 - `test:datasets` (sv14rt0) boots the built server on a scratch home and
   drives the dataset manager with SYNTHETIC ffmpeg testsrc clips (never
   committed media); it needs ffmpeg on PATH.
@@ -189,7 +190,7 @@ stays the full-depth chain; CI runs the FULL suite only on merge-to-main.
   the back seat too, I am in a linux environment, I think windows testing
   can get pushed to very low priority"): weekly cron + workflow_dispatch,
   NOT on PRs or merge-to-main. It runs the leg's full OS-sensitive set
-  (`engine-process`, `runtime`, `fetcher`, `instance`, `lora-form`,
+  (`engine-process`, `runtime`, `fetcher`, `instance`,
   `benchmarks` with BENCH_PYTHON=python — link placement and tar
   extraction; transport mocked) so OS-difference coverage survives at
   near-zero standing cost. The manifest's windows flags stay as data for
