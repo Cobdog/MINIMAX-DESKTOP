@@ -117,7 +117,7 @@ export default defineConfig({
     // datasets.spec.ts joined with sv14rt0 (the dataset-manager workbench);
     // nodepacks.spec.ts joined with mjhlt3k (the status board — boots its
     // own local fake engine, unlike the engine-independent settings spec).
-    { name: 'e2e', testMatch: /(app|poserig|canvas|datasets|images|settings|nodepacks)\.spec\.ts/ },
+    { name: 'e2e', testMatch: /(app|poserig|canvas|datasets|images|settings|nodepacks|wave1)\.spec\.ts/ },
     { name: 'vision', testMatch: /vision-capture\.spec\.ts/ },
   ],
   webServer: {
