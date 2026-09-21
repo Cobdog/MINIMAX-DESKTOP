@@ -3222,4 +3222,36 @@ test('the floating docks keep their grid containment against react-rnd inline di
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
+// R-28 (Wave 4, audit B P2-4): a createChain answer that returns 200 with NO
+// chain id (falsy without throwing) used to mint a `pending:<n>` chainId — a
+// layout entry + selection for a chain that does not exist, then submitChain
+// refused "The chain is not on an open canvas." The creation boundary now
+// fails honestly: an error toast names the failure and NO tile appears.
+test('a chainless createChain answer fails honestly — no pending: ghost tile (R-28)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  // The exact falsy-without-throwing shape: 200, well-formed JSON, no chain.
+  await page.route('**/api/lan/documents/chains', async (route) => {
+    if (route.request().method() === 'POST') await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
+    else await route.continue()
+  })
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(0)
+  // The launcher prompt is the fresh-canvas entry (the bar prompt only
+  // exists once a canvas holds content) — the maintainer-sequence form:
+  // prompt → video chip → Enter.
+  await page.locator('[data-canvas-prompt]').fill('a prompt whose object is never created')
+  await page.locator('[data-canvas-chip="video"]').click()
+  await page.locator('[data-canvas-prompt]').press('Enter')
+  // The honest failure: the error toast names the creation failure…
+  await expect(page.locator('[data-canvas-toast="error"]').first()).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('[data-canvas-toast="error"]').first()).toContainText(/created no object|Could not create/i)
+  // …no ghost tile was placed, and none appears later (the old pending: tile
+  // would sit selected with a queued ring that can never resolve).
+  await page.waitForTimeout(800)
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(0)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
 

@@ -244,6 +244,56 @@ function titleFor(document: CanvasDocument, chain: DocumentChain, index: number)
   return `${chain.kind} ${index + 1}`
 }
 
+// ---- chain→job links (R-25, audit B P2-1) -------------------------------------
+
+/** The job facts the link rebuild needs — GenerationJob is structural here so
+ *  the projection stays free of the full surface type. */
+export type LinkJobFact = { id: string; status: string; manifest?: unknown }
+
+const TERMINAL_JOB_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'cancelled'])
+
+/** Rebuilds the chain→job link map from persisted manifests. Jobs arrive
+ *  NEWEST-FIRST; walking them oldest→newest lets the NEWEST manifest for a
+ *  chain win (a rerun or post-failure retry then lands its take — audit D7).
+ *
+ *  (R-25) A manifest link never displaces a NEWER NON-TERMINAL job's link:
+ *  a just-submitted job is pinned by onJobCreated but carries no manifest
+ *  until the running transition (the upload window — seconds with reference
+ *  images), during which an older manifest-carrying run for the same chain
+ *  would otherwise steal the link and detach the queued ring. A newer
+ *  TERMINAL holder (failed before the running transition) does not pin the
+ *  link — its failure already surfaced, so the older manifest legitimately
+ *  takes over. */
+export function rebuildChainJobLinks(
+  current: Readonly<Record<string, string>>,
+  jobs: ReadonlyArray<LinkJobFact>,
+  chainIds: ReadonlySet<string>,
+): Record<string, string> {
+  const links: Record<string, string> = { ...current }
+  // Newest-first order → a LOWER index is a newer job.
+  const order = new Map<string, number>()
+  for (let index = 0; index < jobs.length; index += 1) order.set(jobs[index].id, index)
+  for (let index = jobs.length - 1; index >= 0; index -= 1) {
+    const job = jobs[index]
+    const manifest = job.manifest && typeof job.manifest === 'object' ? (job.manifest as Record<string, unknown>) : null
+    const canvasLink = manifest ? manifest.canvas : null
+    const chainId = canvasLink && typeof canvasLink === 'object' && typeof (canvasLink as Record<string, unknown>).chainId === 'string'
+      ? (canvasLink as Record<string, unknown>).chainId as string
+      : null
+    if (!chainId || !chainIds.has(chainId)) continue
+    const incumbentId = links[chainId]
+    if (incumbentId && incumbentId !== job.id) {
+      const incumbentIndex = order.get(incumbentId)
+      if (incumbentIndex !== undefined && incumbentIndex < index) {
+        const incumbent = jobs[incumbentIndex]
+        if (!TERMINAL_JOB_STATUSES.has(incumbent.status)) continue // (R-25) the newer live job keeps the link
+      }
+    }
+    links[chainId] = job.id
+  }
+  return links
+}
+
 /**
  * The Phase-1 projection: one tile per live chain. Placement order (L25
  * decided: adjacency-near-parent default + cluster grid for roots):

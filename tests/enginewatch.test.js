@@ -201,6 +201,41 @@ test('(d) preflight — the graph-vs-object_info diff and the pack-row refusal (
     }
   }
 
+  // (d3) R-29 (Wave 4, audit C F7) — the CORE render-class check that feeds
+  // the doctor and the H3 stack report: an instance a version behind passes
+  // every file-based check and fails only at render. The check names the
+  // missing core classes, stays silent without object_info, and scopes by
+  // family (the H3 stack report must not inherit music3's verdict).
+  eq(preflight.missingCoreNodeClasses(undefined), [], 'no info → the core check stays silent (connection rung owns that refusal)')
+  eq(preflight.missingCoreNodeClasses({}), [], 'empty info → silent too')
+  const oldInstance = { KSamplerSelect: {}, SamplerCustomAdvanced: {}, EmptyMiniMaxMusic3LatentAudio: {}, MiniMaxMusic3TextEncode: {} } // no H3 natives
+  const coreMissing = preflight.missingCoreNodeClasses(oldInstance)
+  eq(coreMissing.map((item) => item.className), ['MiniMaxH3ImageToVideo', 'MiniMaxH3ReferenceToVideo'], 'the H3 natives are the missing core (an instance older than H3 support)')
+  ok(coreMissing.every((item) => item.stock), 'the core classes are stock — the refusal advice says update ComfyUI')
+  ok(preflight.preflightRefusal(coreMissing).includes('Update ComfyUI'), 'the core refusal maps to the update advice')
+  eq(preflight.missingCoreNodeClasses(oldInstance, 'h3-video').map((item) => item.className), ['MiniMaxH3ImageToVideo', 'MiniMaxH3ReferenceToVideo'], 'family-scoped: h3-video')
+  eq(preflight.missingCoreNodeClasses(oldInstance, 'audio'), [], 'family-scoped: audio is served here')
+  eq(preflight.missingCoreNodeClasses(oldInstance).length, 2, 'unscoped asks for every core family')
+
+  // The H3 stack report folds the engine side (R-29): with a full-serving
+  // snapshot nothing changes; with the H3 natives absent `ready` is false
+  // and the missing classes are named — weights cannot fix a node class.
+  const stack = loadTs('src/lib/h3Stack.ts')
+  const h3Models = [
+    { name: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', kind: 'diffusion_models', bytes: 1 },
+    { name: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', kind: 'text_encoders', bytes: 1 },
+    { name: 'minimax_h3_video_vae_fp16.safetensors', kind: 'vae', bytes: 1 },
+    { name: 'minimax_h3_audio_vae_fp32.safetensors', kind: 'vae', bytes: 1 },
+    { name: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', kind: 'loras', bytes: 1 },
+  ]
+  const servingInfo = { MiniMaxH3ImageToVideo: {}, MiniMaxH3ReferenceToVideo: {}, KSamplerSelect: {}, SamplerCustomAdvanced: {} }
+  eq(stack.h3StackReport(h3Models, undefined, servingInfo).ready, true, 'a serving engine keeps the file-only verdict (ready)')
+  eq(stack.h3StackReport(h3Models).nodes.missing, [], 'no info → no node verdict (back-compatible)')
+  const oldReport = stack.h3StackReport(h3Models, undefined, oldInstance)
+  eq(oldReport.ready, false, 'an instance missing the H3 natives is NOT ready even with every file present')
+  eq(oldReport.nodes.missing.length, 2, 'the report names the missing core classes')
+  eq(oldReport.validated, true, 'the validated (file-exactness) verdict stays untouched by the node check')
+
   // The fake-engine helper contract the e2e suites reuse: every stock class
   // the factories can emit, served as a bare object (the rq0lsax lean-shape
   // precedent — detection is key-presence only).

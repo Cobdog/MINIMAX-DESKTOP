@@ -1,4 +1,4 @@
-import type { AppSettings, DesktopApi, FetchEntryStatus, LlmModelsResult, ManagedEngineStatus, MediaKind, ModelFile, NodePackStatus, PromptLibraryItem } from '../types'
+import type { AppSettings, DesktopApi, ExternalEngineStatus, FetchEntryStatus, LlmModelsResult, ManagedEngineStatus, MediaKind, ModelFile, NodePackStatus, PromptLibraryItem } from '../types'
 
 /**
  * HTTP implementation of the DesktopApi bridge, used when the renderer runs in
@@ -262,7 +262,9 @@ export function createWebApiClient(): DesktopApi {
       return postJson<{ freed: boolean }>('/api/lan/free', {})
     },
     async getEngineStatus() {
-      return apiFetch<ManagedEngineStatus>('/api/lan/engine/status')
+      // (R-30) Per-mode shapes: managed → the runtime snapshot; external →
+      // the honest external readout (latency/version/queue depth).
+      return apiFetch<ManagedEngineStatus | ExternalEngineStatus>('/api/lan/engine/status')
     },
     async startManagedEngine() {
       return postJson<ManagedEngineStatus & { already?: boolean }>('/api/lan/engine/start', {})

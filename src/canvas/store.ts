@@ -41,6 +41,7 @@ import {
   collectOutputRefs,
   deriveEdges,
   deriveTiles,
+  rebuildChainJobLinks,
   seedSpawnPoint,
   TILE_W,
   type Tile,
@@ -442,16 +443,11 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     }
     const jobs = useJobsStore.getState().jobs
     // Rebuild chain→job links from persisted manifests (a reload restores the
-    // link for jobs whose manifest carries the canvas facts).
-    const links: Record<string, string> = { ...state.chainJobs }
-    // Jobs are newest-first; walking them forward lets an OLDER job for the
-    // same chain clobber the link (a rerun or post-failure retry then never
-    // lands its take — audit D7). Reverse so the NEWEST job for a chain wins.
-    for (const job of [...jobs].reverse()) {
-      const canvasLink = job.manifest && typeof job.manifest === 'object' ? (job.manifest as Record<string, unknown>).canvas : null
-      const chainId = canvasLink && typeof canvasLink === 'object' ? (canvasLink as Record<string, unknown>).chainId : null
-      if (typeof chainId === 'string' && activeDoc.chains.some((chain) => chain.id === chainId)) links[chainId] = job.id
-    }
+    // link for jobs whose manifest carries the canvas facts). The pure seam
+    // (R-25): the newest manifest for a chain wins, and a manifest link never
+    // displaces a newer NON-TERMINAL job's link — the upload window's pinned
+    // submit stays attached (audit B P2-1).
+    const links = rebuildChainJobLinks(state.chainJobs, jobs, new Set(activeDoc.chains.map((chain) => chain.id)))
     const tiles = deriveTiles(activeDoc, jobs, links, state.layout, new Set(state.dismissedFailures))
     const edges = deriveEdges(activeDoc, tiles)
     // Identity-stability guard: background reloads and jobsStore ticks must
@@ -1464,7 +1460,13 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         })
         // Spatial-queue contract c: the seed tile spawns at the prompt bar.
         // Pin the placement so later re-derivations keep it there.
-        const chainId = chain?.id ?? `pending:${toastSeq++}`
+        // (R-28, audit B P2-4) A createChain answer without an id is a hard
+        // failure — the old `pending:<n>` fallback minted a layout entry +
+        // selection for a chain that does not exist (a ghost tile until
+        // submitChain refused "not on an open canvas"). Fail honestly at the
+        // creation boundary instead; the catch below toasts the reason.
+        if (!chain?.id) throw new Error('The canvas server created no object for this prompt — nothing was placed.')
+        const chainId = chain.id
         set((current) => ({
           layout: { ...(current.layout ?? {}), [chainId]: { x: spawn.x, y: spawn.y, w: TILE_W } },
           viewDirty: true,
@@ -1733,7 +1735,11 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
           inputSpec: { fresh: { media: { name: file.name, kind: file.kind, path: ingested.path, blobPath: ingested.blob.relPath } } },
           settings: { name: file.name, mediaType: file.kind },
         })
-        const chainId = chain?.id ?? `pending:${toastSeq++}`
+        // (R-28, audit B P2-4) Same honest-creation boundary as submitPrompt:
+        // a missing id must not mint a `pending:` ghost — the very next call
+        // would create an output row for a chain that does not exist.
+        if (!chain?.id) throw new Error('The canvas server created no object for this file — nothing was placed.')
+        const chainId = chain.id
         const output = await documentsApi.createOutput({ chainId, substrates: ['decoded'] })
         await documentsApi.appendTake({
           outputId: output.id,

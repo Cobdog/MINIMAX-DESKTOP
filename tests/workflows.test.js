@@ -968,6 +968,54 @@ test('job poll reduction (P1 family): completion, stale polls, tolerance, struct
   }
 })
 
+// R-26 (Wave 4, audit B P2-2): dead-engine jobs must fail honestly in
+// seconds-to-minutes, not at the 60-minute deadline. A CONSECUTIVE
+// poll-failure streak accumulates on the job; at the limit the job fails
+// with engine-unreachable wording (classifyFailure lands its taxonomy
+// bucket); any successful observation resets the streak. The deadline sweep
+// stays as the independent backstop.
+test('job poll reduction (R-26): the consecutive-failure streak fails honestly long before the deadline', () => {
+  const { reduceJobPoll, POLL_FAILURE_STREAK_LIMIT, RUNNING_DEADLINE_MS } = load('src/lib/jobReducer.ts')
+  const { classifyFailure } = load('src/lib/failureTaxonomy.ts')
+  assert.ok(POLL_FAILURE_STREAK_LIMIT >= 5 && POLL_FAILURE_STREAK_LIMIT * 1000 < 120_000, `the streak limit sits in the seconds-to-minutes band (got ${POLL_FAILURE_STREAK_LIMIT})`)
+  assert.ok(POLL_FAILURE_STREAK_LIMIT * 1000 < RUNNING_DEADLINE_MS, 'the streak fires long before the 60-min deadline')
+  const baseJob = { id: 'j1', promptId: 'p1', mode: 'text', prompt: 'test', createdAt: Date.now() - 1000, status: 'running', progress: 40, width: 608, height: 352, duration: 5 }
+
+  // Below the limit: each failure only counts — the job stays running.
+  let job = baseJob
+  for (let i = 1; i < POLL_FAILURE_STREAK_LIMIT; i++) {
+    const step = reduceJobPoll(job, { kind: 'pollFailed' }, Date.now())
+    assert.equal(step.transitionedTo, undefined, `failure ${i} does not fail the job`)
+    assert.equal(step.job.status, 'running')
+    assert.equal(step.job.pollFailureStreak, i)
+    job = step.job
+  }
+
+  // At the limit: honest engine-unreachable failure (taxonomy-classified).
+  const failed = reduceJobPoll(job, { kind: 'pollFailed' }, Date.now())
+  assert.equal(failed.transitionedTo, 'failed')
+  assert.equal(failed.job.status, 'failed')
+  assert.equal(classifyFailure(failed.job.error ?? '').id, 'engine-unreachable', `the streak failure classifies engine-unreachable (got: ${failed.job.error})`)
+
+  // A single successful observation resets the streak: fail (limit-1) times,
+  // succeed once, then (limit-1) more failures must still be tolerated.
+  let mixed = baseJob
+  for (let i = 1; i < POLL_FAILURE_STREAK_LIMIT; i++) mixed = reduceJobPoll(mixed, { kind: 'pollFailed' }, Date.now()).job
+  const recovered = reduceJobPoll(mixed, { kind: 'incomplete' }, Date.now())
+  assert.equal(recovered.job.pollFailureStreak ?? 0, 0, 'a successful poll resets the streak')
+  let after = recovered.job
+  for (let i = 1; i < POLL_FAILURE_STREAK_LIMIT; i++) {
+    after = reduceJobPoll(after, { kind: 'pollFailed' }, Date.now()).job
+    assert.equal(after.status, 'running', `post-reset failure ${i} stays running`)
+  }
+
+  // The identity-stability contract survives: an idle tick on a clean running
+  // job (no streak) still returns the SAME object reference.
+  const clean = { ...baseJob, status: 'running' }
+  const idle = reduceJobPoll(clean, { kind: 'incomplete' }, Date.now())
+  assert.equal(idle.job, clean, 'idle tick keeps the identity guard when no streak is in play')
+})
+
 test('library persistence survives localStorage quota exhaustion (P0-2)', () => {
   const events = []
   let quotaFailures = 0

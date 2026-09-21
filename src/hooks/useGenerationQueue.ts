@@ -16,7 +16,7 @@
  *  component re-rendered in between. */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppSettings, GenerationJob } from '../types'
-import { extractExecutionError, isPastRunningDeadline, isTerminalStatus, reduceJobPoll, type PollObservation, type PollReduction } from '../lib/jobReducer'
+import { extractExecutionError, isPastRunningDeadline, isTerminalStatus, POLL_FAILURE_STREAK_LIMIT, reduceJobPoll, type PollObservation, type PollReduction } from '../lib/jobReducer'
 import { extractOutputFile, extractOutputUrl, withTiledVideoDecode } from '../lib/workflow'
 import { extractAutomatedReferenceSet, hydrateLoadedJobs, playableOutputUrl, recordCharacterSheetImages, recordCharacterTurntable, recordLocationWalkthrough, recordMovieOutput } from '../lib/jobRecords'
 import { fetchServerJobs, saveServerJobs, serverStorageMigrationDone } from '../lib/serverStorage'
@@ -217,7 +217,18 @@ export function useGenerationQueue(options: {
           }
           applyReduction(job.id, reduction)
           if (reduction.transitionedTo === 'failed') dbg('queue', { jobId: job.id, promptId, verdict: 'failed', reason: (reduction.job.error ?? '').slice(0, 160) })
-        }).catch(() => undefined)
+        }).catch(() => {
+          // (R-26, audit B P2-2) A poll that cannot even reach the engine is
+          // an observation too — feed it through the reducer so the
+          // consecutive-failure streak fails the job honestly in
+          // seconds-to-minutes instead of spinning "running" to the 60-min
+          // deadline sweep (which stays as the independent backstop).
+          const reduction = reduceJobPoll(job, { kind: 'pollFailed' }, Date.now())
+          if (reduction.transitionedTo === 'failed') {
+            dbg('queue', { jobId: job.id, promptId, verdict: 'failed', reason: 'poll-failure streak', streak: POLL_FAILURE_STREAK_LIMIT })
+          }
+          applyReduction(job.id, reduction)
+        })
       }
     }
     sweepRef.current = sweep

@@ -138,6 +138,7 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
   // managed mode is active); start/stop act through the bridge and persist
   // the current form first — the launch uses exactly what is on screen.
   const engineRuntime = useSessionStore((state) => state.engineRuntime)
+  const externalEngine = useSessionStore((state) => state.externalEngine)
   const [engineBusy, setEngineBusy] = useState(false)
   const [engineActionError, setEngineActionError] = useState<string | null>(null)
   const updateEngine = (patch: Partial<AppSettings['engine']>) => setSettings({ ...settings, engine: { ...settings.engine, ...patch } })
@@ -274,6 +275,17 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
             and foreign-refusal discipline as the managed checkout). */}
         <div className="connection-row"><div className="field-group grow"><label htmlFor="external-custom-nodes">External custom nodes folder</label><input id="external-custom-nodes" data-external-custom-nodes value={settings.engine.externalCustomNodesDir} placeholder="/path/to/ComfyUI/custom_nodes — pack installs land here" onChange={(event) => updateEngine({ externalCustomNodesDir: event.target.value })} /><PathCheckNote path={settings.engine.externalCustomNodesDir} /></div></div>
         <p className="settings-note managed-engine-note" data-external-custom-nodes-note>External mode keeps the connection above as the engine. With a custom nodes folder set, the node packs below install into it — from a local copy here, or one consented fetch of the pinned revision (Fetchable items). Model inventory is pulled from the instance itself, so no local model roots are required.</p>
+        {/* (R-31, audit C F9) The honest external health card: there is no
+            stdout to tail for an instance the studio did not launch — but
+            the engine itself answers latency, version, and queue depth
+            (R-30's per-mode status route; refreshed every few seconds). */}
+        {externalEngine && (
+          <p className="settings-note managed-engine-note" role="status" data-external-engine={externalEngine.connected ? 'connected' : 'offline'}>
+            {externalEngine.connected
+              ? <>Live · {externalEngine.latencyMs} ms · ComfyUI {externalEngine.version ?? 'version unknown'}{externalEngine.queueDepth !== undefined ? <> · queue {externalEngine.queueDepth === 0 ? 'empty' : `${externalEngine.queueDepth} job${externalEngine.queueDepth === 1 ? '' : 's'}`}</> : null}{externalEngine.device ? <> · {externalEngine.device}</> : null}</>
+              : <>Not answering ({externalEngine.error ?? 'unreachable'}) — the studio cannot start an instance it does not own; start it yourself and this card refreshes.</>}
+          </p>
+        )}
       </>}
       {settings.engine.mode === 'managed' && <>
         <div className="connection-row"><div className="field-group grow"><label htmlFor="managed-checkout">ComfyUI checkout (existing)</label><input id="managed-checkout" value={settings.engine.checkoutPath} placeholder="/path/to/ComfyUI — must contain main.py" onChange={(event) => updateEngine({ checkoutPath: event.target.value })} /><PathCheckNote path={settings.engine.checkoutPath} /></div></div>
@@ -325,11 +337,14 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
     </section>
     <section className="settings-section node-packs-section" aria-label="Node packs">
       <div className="settings-heading">
-        <div><GitBranch size={19} /><span><strong>Node packs</strong><small>Custom nodes the studio can place into the engine's custom-node folder — the managed checkout's custom_nodes/, or the external custom nodes folder above (the target is detected from the mode; nothing asks you to point at one). Vendored at a pinned revision (license-verified), fetched with your consent, or installed from the studio's own payload. Weights are linked, never copied. The status badge is version-aware and LIVE: it reads the folder's own markers (studio marker, git checkout, Comfy-Registry pyproject) plus the connected instance's node list.</small></span></div>
+        <div><GitBranch size={19} /><span><strong>Node packs</strong><small>Custom nodes the studio can place on this engine — grouped by the feature they serve, with each row's install state and version verdict beside it. How installs work is one click below.</small></span></div>
         <button type="button" className="secondary-button" data-node-pack-refresh onClick={() => void refreshPackBoard()} disabled={nodePackRefreshing || scanning} title="Re-pull the instance's model inventory and node list, re-scan the custom-nodes folder, and re-resolve every row">{nodePackRefreshing || scanning ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}Refresh</button>
       </div>
       <div className="node-pack-list">
-        {(nodePacks ?? []).map((pack) => {
+        {groupNodePacks(nodePacks ?? []).map((group) => (
+          <div className="node-pack-group" key={group.label} data-node-pack-group={group.label}>
+            <p className="node-pack-group-heading">{group.label}</p>
+            {group.packs.map((pack) => {
           const chip = nodePackChip(pack)
           // AC-1 path-prompt gate: the local-source input exists ONLY for a
           // pack with no network/payload source (no fetch-catalog entry —
@@ -355,11 +370,21 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
             </div>
           </div>
           )
-        })}
+            })}
+          </div>
+        ))}
         {nodePacks === null && <p className="settings-note">Loading node-pack registry…</p>}
       </div>
       {nodePackError && <div className="llm-test-result fail" role="status"><AlertCircle size={14} /><span>{nodePackError}</span></div>}
-      <p className="settings-note">Uninstall deletes only folders the studio placed (a marker install) — never a pack that was already there: pre-existing folders in the target are reported as "present — not studio-managed" (or "managed by ComfyUI" when the folder carries a git checkout or a Comfy-Registry pyproject), refused for install-over, and never deleted. A revision bump refetches at the pin. "Restart to activate" means the files are in place but the running instance has not loaded them yet. Packs without a license are never vendored — they install only through the consent-gated fetcher below.</p>
+      {/* (R-33, audit A-m1) The install policy lives behind one collapsed
+          summary instead of two walls of small print in the scroll — the
+          plan's "how installs work" popover, on the section's own
+          details-subsection idiom. */}
+      <details className="settings-subsection" data-node-pack-policy>
+        <summary><strong>How node-pack installs work</strong><small>targets, pins, licenses, what uninstall touches</small></summary>
+        <p className="settings-note">Installs land in the engine's custom-node folder — the managed checkout's custom_nodes/, or the external custom nodes folder above (the target is detected from the mode; nothing asks you to point at one). Packs arrive vendored at a pinned revision (license-verified), fetched with your consent, or installed from the studio's own payload. Weights are linked, never copied. The status badge is version-aware and LIVE: it reads the folder's own markers (studio marker, git checkout, Comfy-Registry pyproject) plus the connected instance's node list.</p>
+        <p className="settings-note">Uninstall deletes only folders the studio placed (a marker install) — never a pack that was already there: pre-existing folders in the target are reported as "present — not studio-managed" (or "managed by ComfyUI" when the folder carries a git checkout or a Comfy-Registry pyproject), refused for install-over, and never deleted. A revision bump refetches at the pin. "Restart to activate" means the files are in place but the running instance has not loaded them yet. Packs without a license are never vendored — they install only through the consent-gated fetcher in the library.</p>
+      </details>
     </section>
     {/* R-15 (M2's fix): the fetchable-items STORE has its own surface now —
         the Library / Get-models overlay. Settings keeps a one-line entry
@@ -573,6 +598,23 @@ const DEFAULT_FIELD_LABELS: Record<keyof AppSettings['generationDefaults'], stri
   sigmaShiftMode: 'sigma-shift mode', shiftVideo: 'video shift', shiftAudio: 'audio shift',
   loraStrength: 'LoRA strength', upscaleMode: 'upscale', refImageSize: 'reference image size',
   livePreview: 'live preview',
+}
+
+/** (R-32, audit C F11) Board grouping: rows group by the FEATURE they serve
+ *  (the registry's featureGroup) before any install/version state — a
+ *  reader scans "what does this do for me" first and the dense version
+ *  vocabulary second. Groups appear in first-member registry order (a new
+ *  pack's group shows where its first member sits — no hardcoded order list
+ *  to maintain). */
+function groupNodePacks(packs: NodePackStatus[]): Array<{ label: string; packs: NodePackStatus[] }> {
+  const groups: Array<{ label: string; packs: NodePackStatus[] }> = []
+  for (const pack of packs) {
+    const label = pack.featureGroup || 'Other packs'
+    const existing = groups.find((group) => group.label === label)
+    if (existing) existing.packs.push(pack)
+    else groups.push({ label, packs: [pack] })
+  }
+  return groups
 }
 
 /** The status badge for one node-pack row (task mjhlt3k — the version-aware

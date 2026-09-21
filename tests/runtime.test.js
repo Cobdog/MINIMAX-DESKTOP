@@ -62,6 +62,10 @@ const net = require('node:net')
 const path = require('node:path')
 const assert = require('node:assert/strict')
 const { makePortAllocator } = require('./lib/ports.cjs')
+// Scratch-home ledger (Wave 4 test hygiene): every mkdtemp registers;
+// afterAll tears them all down — per-run homes never leak again.
+const { makeScratchDir, removeAllScratchDirs } = require('./lib/scratch.cjs')
+afterAll(() => { void removeAllScratchDirs() })
 
 const freePort = makePortAllocator('runtime')
 
@@ -137,14 +141,14 @@ function holdHttp(port) {
 }
 
 function makeHome() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-runtime-home-'))
+  return makeScratchDir(path.join(os.tmpdir(), 'minimax-runtime-home-'))
 }
 
 /** A stub "ComfyUI checkout": temp dir containing main.py (node-JS stub
  *  content — node runs it regardless of extension, so the PRODUCTION argv
  *  `pythonPath main.py --port N` is exercised exactly). */
 function makeCheckout(fixture = 'runtime-stub.cjs') {
-  const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-runtime-checkout-'))
+  const checkout = makeScratchDir(path.join(os.tmpdir(), 'minimax-runtime-checkout-'))
   fs.copyFileSync(path.join(FIXTURES, fixture), path.join(checkout, 'main.py'))
   return checkout
 }
@@ -161,7 +165,7 @@ async function suiteStartPort() {
  * comfyUrl); the suite never persists through normalizeSettings. */
 function makeSettings(checkout, extra = {}) {
   const { engine: engineExtra = {}, paths: pathsExtra = {}, ...rest } = extra
-  const modelRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-runtime-models-'))
+  const modelRoot = makeScratchDir(path.join(os.tmpdir(), 'minimax-runtime-models-'))
   const kindDirs = {
     diffusion_models: path.join(modelRoot, 'diffusion_models'),
     text_encoders: path.join(modelRoot, 'text_encoders'),
@@ -243,7 +247,7 @@ class MiniMaxH3Model:
  *  main.py (the runnable node stub — a launch must actually boot), the
  *  comfy/ldm/minimax/model.py layout under test, and a stated version. */
 function makePatchCheckout(layoutText, comfyVersion) {
-  const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-runtime-patch-'))
+  const checkout = makeScratchDir(path.join(os.tmpdir(), 'minimax-runtime-patch-'))
   fs.copyFileSync(path.join(FIXTURES, 'runtime-stub.cjs'), path.join(checkout, 'main.py'))
   const targetDir = path.join(checkout, 'comfy', 'ldm', 'minimax')
   fs.mkdirSync(targetDir, { recursive: true })
@@ -260,7 +264,7 @@ function patchTargetOf(checkout) {
 
 /** A tiny local fixture "pack" with code, a weight, and junk to skip. */
 function makeFixtureVendorRoot() {
-  const vendorRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-runtime-vendor-'))
+  const vendorRoot = makeScratchDir(path.join(os.tmpdir(), 'minimax-runtime-vendor-'))
   const pack = path.join(vendorRoot, 'fixture-pack')
   fs.mkdirSync(path.join(pack, 'weights'), { recursive: true })
   fs.mkdirSync(path.join(pack, '__pycache__'), { recursive: true })
@@ -333,7 +337,7 @@ afterAll(async () => {
 maybe('(a) extra_model_paths.yaml generation', async () => {
   console.log('runtime: extra_model_paths.yaml generation')
   {
-    const realDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-runtime-root-'))
+    const realDir = makeScratchDir(path.join(os.tmpdir(), 'minimax-runtime-root-'))
     ok(validateModelRoot(realDir) === path.resolve(realDir), 'an existing absolute root validates and resolves')
     ok(validateModelRoot('relative/path') === null, 'relative root rejected')
     ok(validateModelRoot('/definitely/not/here') === null, 'nonexistent root rejected')
@@ -441,7 +445,7 @@ maybe('(d) failure taxonomy: exit-before-ready + unexpected crash', async () => 
     ok(failed.lastError && failed.lastError.includes('exited with code 3'), `unexpected death lands failed with the exit code (got "${failed.lastError}")`)
     ok(!isAlive(started.status.pid), 'crashed process reaped')
 
-    const failCheckout = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-runtime-checkout-'))
+    const failCheckout = makeScratchDir(path.join(os.tmpdir(), 'minimax-runtime-checkout-'))
     fs.writeFileSync(path.join(failCheckout, 'main.py'), "process.stderr.write('stub: failing before ready\\n'); process.exit(7)\n")
     const failRuntime = makeManager(makeHome(), makeSettings(failCheckout), { startPort: await suiteStartPort() })
     await assert.rejects(failRuntime.start(), /did not become ready/, 'exit-before-ready rejects the start')
@@ -582,8 +586,22 @@ routesMaybe('(g) routes against the real built server: status/start/stop, profil
     try { return (await fetch(`${base}/api/lan/settings`)).ok } catch { return false }
   }, 15_000, 'server boot')
 
+  // (R-30, Wave 4) External mode answers the honest EXTERNAL shape, not the
+  // managed runtime's vocabulary: no `state`, no log tail — the engine's own
+  // reachability facts instead. The comfyUrl is pinned to a dead suite port
+  // FIRST (never the 8188 default — the engine-port discipline), so the
+  // probe answers connected:false honestly.
+  const deadEnginePort = await freePort()
+  const defaultSettings = (await api('/api/lan/settings')).body.settings
+  const pinnedAway = await api('/api/lan/settings', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { ...defaultSettings, comfyUrl: `http://127.0.0.1:${deadEnginePort}` } }),
+  })
+  ok(pinnedAway.status === 200, 'the engine URL is pinned to a dead port before the status read (never 8188)')
   const initial = await api('/api/lan/engine/status')
-  ok(initial.status === 200 && initial.body.mode === 'external' && initial.body.state === 'stopped' && Array.isArray(initial.body.logTail), 'default posture: external mode, stopped, empty tail')
+  ok(initial.status === 200 && initial.body.mode === 'external' && !('state' in initial.body) && !('logTail' in initial.body), `external mode answers the external shape — no managed state/tail (got ${JSON.stringify(Object.keys(initial.body))})`)
+  ok(initial.body.external?.connected === false && typeof initial.body.external?.latencyMs === 'number' && typeof initial.body.external?.error === 'string', 'an unreachable external engine answers connected:false with the measured latency and the reason')
 
   const rejected = await api('/api/lan/engine/start', { method: 'POST' })
   ok(rejected.status === 400 && typeof rejected.body.error === 'string', 'start is refused in external mode with a clear error')
@@ -923,7 +941,7 @@ maybe('(k) consent patch manager (increment 2): layout detect, apply/backup/atom
 maybe('(l) weight symlink policy (increment 2): linkNeverCopy chain + linkWeightIntoModelRoot + the suite PASS summary', async () => {
   console.log('runtime: weight symlink policy')
   {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-runtime-links-'))
+    const home = makeScratchDir(path.join(os.tmpdir(), 'minimax-runtime-links-'))
     const weightSource = path.join(home, 'vdn-branch.safetensors')
     fs.writeFileSync(weightSource, 'WEIGHT-BYTES')
     const settings = makeSettings(makeCheckout())

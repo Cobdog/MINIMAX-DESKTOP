@@ -259,6 +259,40 @@ test('(i) derived edges + paths', () => {
   eq(noEdges.length, 0, 'edges: no edge when the consumer tile is absent')
 })
 
+// (i2) R-25 (Wave 4, audit B P2-1): the chain→job link rebuild is pure data
+// in derive.ts — a manifest link must never displace a NEWER NON-TERMINAL
+// job's link (a just-submitted job carries no manifest until the running
+// transition, so during the upload window an older manifest-carrying run for
+// the same chain would otherwise steal the link and the queued ring detaches).
+test('(i2) rebuildChainJobLinks — manifest links never clobber a newer live job (R-25)', () => {
+  const chainIds = new Set(['chain-1'])
+  const job = (id, status, manifest) => ({ id, status, progress: 0, manifest })
+  const canvasLink = (chainId) => ({ canvas: { chainId } })
+
+  // The D7 regression first (still true): among manifest-carrying jobs the
+  // NEWEST wins regardless of iteration order.
+  const older = job('job-old', 'completed', canvasLink('chain-1'))
+  const newer = job('job-new', 'completed', canvasLink('chain-1'))
+  eq(derive.rebuildChainJobLinks({}, [newer, older], chainIds), { 'chain-1': 'job-new' }, 'links: the newest manifest job wins')
+
+  // R-25 proper: a newer NON-TERMINAL job holds the link (pinned at submit
+  // via onJobCreated — no manifest yet); an older manifest must not displace it.
+  const live = job('job-live', 'queued')
+  eq(derive.rebuildChainJobLinks({ 'chain-1': 'job-live' }, [live, older], chainIds), { 'chain-1': 'job-live' }, 'links: a manifest link never displaces a newer non-terminal job (the upload window)')
+  const runningLive = job('job-live2', 'running')
+  eq(derive.rebuildChainJobLinks({ 'chain-1': 'job-live2' }, [runningLive, older], chainIds), { 'chain-1': 'job-live2' }, 'links: a running job keeps its link the same way')
+
+  // The boundary is non-terminal: a newer TERMINAL job without a manifest
+  // (failed before the running transition) does NOT hold the link — its
+  // failure already surfaced; the older manifest legitimately takes over.
+  const dead = job('job-dead', 'failed')
+  eq(derive.rebuildChainJobLinks({ 'chain-1': 'job-dead' }, [dead, older], chainIds), { 'chain-1': 'job-old' }, 'links: a newer terminal job does not pin the link')
+
+  // Unknown chains never enter the map; unknown incumbents are replaceable.
+  const foreign = job('job-foreign', 'completed', canvasLink('chain-other'))
+  eq(derive.rebuildChainJobLinks({ 'chain-1': 'job-ghost' }, [foreign, older], chainIds), { 'chain-1': 'job-old' }, 'links: manifests for other chains are ignored; a ghost incumbent loses to a real manifest')
+})
+
 test('(j) attention (radar)', () => {
   const document = fixture()
   const tiles = derive.deriveTiles(document, [], {}, undefined)

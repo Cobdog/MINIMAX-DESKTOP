@@ -99,7 +99,7 @@ export function useStudioSession() {
   const info = useSessionStore((state) => state.info)
   const ollamaModels = useSessionStore((state) => state.ollamaModels)
   const engineMode = useSessionStore((state) => state.settings?.engine.mode)
-  const { setSettings, setModels, setScanning, setChecking, setGpu, setOllamaModels, setLlm, setEngineRuntime } = useSessionStore.getState()
+  const { setSettings, setModels, setScanning, setChecking, setGpu, setOllamaModels, setLlm, setEngineRuntime, setExternalEngine } = useSessionStore.getState()
 
   const scanModels = useCallback(async (nextSettings: AppSettings, options?: { refresh?: boolean }) => {
     setScanning(true)
@@ -195,19 +195,39 @@ export function useStudioSession() {
   // active — this poll reads the studio's OWN managed process (state,
   // log-tail, phases); external mode has no such process to ask. The
   // engine-connection loop above (R-01) now covers BOTH modes equally.
+  // (R-31, audit C F9) External mode polls the honest external readout
+  // instead — R-30's per-mode status route answers latency, version, and
+  // queue depth from the engine itself (server-side TTL-cached, so this
+  // cadence never hammers the instance).
   useEffect(() => {
     if (engineMode !== 'managed') {
       setEngineRuntime(null)
-      return
+      if (engineMode !== 'external') {
+        setExternalEngine(null)
+        return
+      }
+      let disposed = false
+      const refresh = () => {
+        void window.minimax.getEngineStatus().then((value) => {
+          if (disposed) return
+          // Shape-discriminated (ManagedEngineStatus.mode carries the
+          // SETTINGS mode, so `mode` alone cannot narrow the union).
+          if ('external' in value) setExternalEngine(value.external)
+        }).catch(() => { if (!disposed) setExternalEngine(null) })
+      }
+      refresh()
+      const timer = window.setInterval(refresh, 5000)
+      return () => { disposed = true; window.clearInterval(timer) }
     }
+    setExternalEngine(null)
     let disposed = false
     const refresh = () => {
-      void window.minimax.getEngineStatus().then((value) => { if (!disposed) setEngineRuntime(value) }).catch(() => { if (!disposed) setEngineRuntime(null) })
+      void window.minimax.getEngineStatus().then((value) => { if (!disposed && !('external' in value)) setEngineRuntime(value) }).catch(() => { if (!disposed) setEngineRuntime(null) })
     }
     refresh()
     const timer = window.setInterval(refresh, 2500)
     return () => { disposed = true; window.clearInterval(timer) }
-  }, [engineMode, setEngineRuntime])
+  }, [engineMode, setEngineRuntime, setExternalEngine])
 
   return {
     settings, setSettings,

@@ -1,7 +1,12 @@
-import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import http from 'node:http'
 import { expect, test, type Page } from '@playwright/test'
+// Scratch-dir ledger (Wave 4 test hygiene): every per-run dir registers and
+// the file-level afterAll tears them down — per-run scratch never accumulates.
+import { makeScratchDir, removeAllScratchDirs } from '../tests/lib/scratch.cjs'
+
+test.afterAll(() => { void removeAllScratchDirs() })
 
 // Settings UX fix wave (g5x37k8, review i7u40j6): the settings surface's
 // blockers and majors, end to end against the built app. Engine-independent
@@ -62,7 +67,7 @@ test.beforeEach(async ({ page }) => {
 test('B1: node-pack chips re-resolve after Save — no field re-edit needed', async ({ page }) => {
   const problems = await trackErrors(page)
   const original = await originalSettings(page)
-  const externalDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-settings-b1-'))
+  const externalDir = makeScratchDir(path.join(os.tmpdir(), 'mm-settings-b1-'))
   try {
     // Boot with external mode and NO install target.
     const applied = await page.request.post('/api/lan/settings', { data: { settings: {
@@ -172,6 +177,55 @@ test('M3: a failed connection test renders its error with the tried address', as
   await expect(errorLine.textContent()).toBeTruthy()
   // No Save ran: nothing persisted, nothing to restore.
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+// R-31 (Wave 4, audit C F9): the honest external health card — there is no
+// stdout to tail for an instance the studio did not launch, but the engine
+// itself answers latency, version, and queue depth (R-30's per-mode status
+// route). Against a fake engine serving /system_stats + /queue the card
+// reads LIVE with those facts; no managed-runtime vocabulary anywhere.
+test('R-31: the external health card reads latency, version, and queue depth from the engine', async ({ page }) => {
+  const problems = await trackErrors(page)
+  const original = await originalSettings(page)
+  // The fake engine: the two read-only endpoints the external status reads.
+  const engine = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://engine.local')
+    if (url.pathname === '/system_stats') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ system: { comfyui_version: 'v0.3.45-e2e', python_version: '3.12' }, devices: [{ name: 'E2E FakeGPU' }] }))
+      return
+    }
+    if (url.pathname === '/queue') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ queue_running: [{ prompt: 'a' }], queue_pending: [] }))
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  const enginePort = await new Promise<number>((resolve) => engine.listen(0, '127.0.0.1', () => resolve((engine.address() as { port: number }).port)))
+  try {
+    await page.request.post('/api/lan/settings', { data: { settings: {
+      ...original,
+      comfyUrl: `http://127.0.0.1:${enginePort}`,
+      engine: { ...(original.engine as Record<string, unknown>), mode: 'external' },
+    } } })
+    await resetSession(page)
+    await page.goto('/')
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    await openSettings(page)
+    const card = page.locator('[data-external-engine]')
+    await expect(card).toBeVisible({ timeout: 15_000 })
+    await expect(card).toHaveAttribute('data-external-engine', 'connected')
+    await expect(card).toContainText('v0.3.45-e2e')
+    await expect(card).toContainText(/queue 1 job/)
+    await expect(card).toContainText(/ms/)
+    await expect(card).toContainText('E2E FakeGPU')
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    await restoreSettings(page, original)
+    engine.close()
+  }
 })
 
 // M4 — the server computes save-warnings ("…does not exist yet") and the

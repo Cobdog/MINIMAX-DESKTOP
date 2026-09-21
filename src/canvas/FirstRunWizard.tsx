@@ -66,6 +66,7 @@ export function FirstRunWizard() {
   const status = useSessionStore((state) => state.status)
   const settings = useSessionStore((state) => state.settings)
   const setSettings = useSessionStore((state) => state.setSettings)
+  const engineInfo = useSessionStore((state) => state.info)
   const submitPrompt = useCanvasStore((state) => state.submitPrompt)
   const setSettingsDock = useCanvasStore((state) => state.setSettingsDock)
   const setLibraryDock = useCanvasStore((state) => state.setLibraryDock)
@@ -107,7 +108,9 @@ export function FirstRunWizard() {
     return () => window.removeEventListener(WIZARD_REOPEN_EVENT, reopen)
   }, [])
 
-  const stack = useMemo(() => (settings ? h3StackReport(models, settings.modelOverrides?.minimax) : null), [models, settings])
+  // (R-29) The stack verdict folds the ENGINE side too: object_info says
+  // whether the instance actually serves the H3 core node classes.
+  const stack = useMemo(() => (settings ? h3StackReport(models, settings.modelOverrides?.minimax, engineInfo) : null), [models, settings, engineInfo])
 
   // Show when the registry is empty (the notice's own facts) and the wizard
   // was neither completed nor skipped. The scan-settled latch never flashes
@@ -240,7 +243,13 @@ function RegistryStep(props: { models: ReturnType<typeof useSessionStore.getStat
         {counts.map(([kind, count]) => <li key={kind} data-wizard-model-kind={kind}><strong>{kind.replace(/_/g, ' ')}</strong><span>{count}</span></li>)}
       </ul>}
     {stack && <p className={`canvas-wizard-${stack.validated ? 'ok' : stack.ready ? 'warn' : 'warn'}`} data-wizard-stack={stack.validated ? 'validated' : stack.ready ? 'custom' : 'incomplete'}>
-      {stack.validated ? <><Check size={13} /> The validated official H3 stack is complete.</> : stack.ready ? 'Custom stack detected — generation works; output may differ from the validated set.' : 'The H3 stack is incomplete — video renders will refuse with the missing list until the weights land where the engine reads them.'}
+      {stack.validated
+        ? <><Check size={13} /> The validated official H3 stack is complete.</>
+        : stack.nodes.missing.length > 0
+          ? `The engine does not serve the studio's core render nodes (${stack.nodes.missing.map((item) => item.className).join(', ')}) — weights cannot fix this. Update ComfyUI (or install the missing node packs), restart the engine, then refresh.`
+          : stack.ready
+            ? 'Custom stack detected — generation works; output may differ from the validated set.'
+            : 'The H3 stack is incomplete — video renders will refuse with the missing list until the weights land where the engine reads them.'}
     </p>}
     <div className="canvas-wizard-row">
       <button type="button" className="canvas-chip" data-wizard-refresh onClick={onRefresh} disabled={scanning}>
