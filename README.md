@@ -321,6 +321,8 @@ Reference downloads and node documentation are maintained by [Comfy-Org's ACE-St
 | [docs/research/per-model-prompt-doctrines.md](docs/research/per-model-prompt-doctrines.md) | Per-model inference-prompt + captioning doctrines (Anima, Klein, Krea 2, H3) |
 | [docs/PROVENANCE.md](docs/PROVENANCE.md) | Fork lineage, AGPLv3 rationale, vendored-ports provenance |
 | [docs/LICENSES.md](docs/LICENSES.md) | Third-party license inventory (deps, vendored, user-fetch, weights), AGPL mechanics, headers policy |
+| [docs/licenses/registry.md](docs/licenses/registry.md) | The license registry — per-component verdicts, obligations, C&D blast radius (lockstep-checked by `pnpm license:audit`) |
+| [docs/licenses/policy.md](docs/licenses/policy.md) | License decision rules, AGPLv3 compliance map per distribution shape, the user-fetch workaround doctrine, maintenance charter |
 | [docs/migration.md](docs/migration.md) | The Electron → web migration record (complete) |
 | [docs/audit/code-quality-audit.md](docs/audit/code-quality-audit.md) | Adversarial review: P0–P3 findings + resolution status |
 | [docs/audit/security-audit.md](docs/audit/security-audit.md) | Threat model, findings + resolution status |
