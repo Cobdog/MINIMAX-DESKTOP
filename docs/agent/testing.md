@@ -14,8 +14,7 @@
 
 ## TMPDIR first
 
-Any suite that writes real scratch (notably `test:llm`, `test:lora-form`
-with its ~1 GB safetensors) can flake with `EDQUOT` when the box's /tmp
+Any suite that writes real scratch (notably `test:llm`) can flake with `EDQUOT` when the box's /tmp
 tmpfs is full — this is the machine's recurring failure mode. Run with
 `TMPDIR=/home/agent/tmp-gpu` (any /home path) unless you have a reason not
 to. CI runners have fresh /tmp; the flake is local-only and never caused by
@@ -79,8 +78,10 @@ failure. A failed `build` skips only its dependents (unit/smoke/e2e/vision).
   fixture IS the contract. Same pattern for `pnpm test:h3img:update`.
   (Vitest swallows forwarded CLI flags, so the env VAR is the mechanism —
   the `--` passthrough does not reach process.argv.)
-- `test:lora-form` needs `python3` + `numpy` (skips loudly without python,
-  fails loudly with python but no numpy).
+- (The `test:lora-form` suite was removed with the local model scan —
+  Wave 2 R-12, 2026-09-20: modelForms.ts and its tests died together; git
+  history is the archive. The python3+numpy requirement lives on for the
+  benchmarks suite only.)
 - `test:datasets` (sv14rt0) boots the built server on a scratch home and
   drives the dataset manager with SYNTHETIC ffmpeg testsrc clips (never
   committed media); it needs ffmpeg on PATH.
@@ -160,7 +161,7 @@ fallback).
   smoke, e2e, vision-capture on every push/PR.
 - **Windows Engine** (`.github/workflows/engine-windows.yml`): server build
   + the OS-sensitive suites as vitest filters (`pnpm test:engine`,
-  `test:runtime`, `test:fetcher`, `test:instance`, `test:lora-form`,
+  `test:runtime`, `test:fetcher`, `test:instance`,
   `test:benchmarks` with BENCH_PYTHON=python — link placement and tar
   extraction; transport mocked).
 - Verify BOTH legs before calling landed work done (run links go into the
