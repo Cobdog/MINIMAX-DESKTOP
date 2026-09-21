@@ -3,7 +3,7 @@
  *  Ollama fallback), model locations, and output/clip paths. */
 import { useEffect, useState } from 'react'
 import { GitBranch, Wand2 } from 'lucide-react'
-import { Activity, AlertCircle, Check, ChevronDown, Cpu, Eye, Folder, FolderOpen, Gauge, HardDrive, Info, Layers, LoaderCircle, Power, RefreshCw, Save, Scale, ServerCog, SlidersHorizontal, Sparkles, Stethoscope, Unplug } from 'lucide-react'
+import { Activity, AlertCircle, Check, ChevronDown, Cpu, Eye, Folder, FolderOpen, Gauge, HardDrive, Info, Layers, LoaderCircle, Power, RefreshCw, Scale, ServerCog, SlidersHorizontal, Sparkles, Stethoscope, Unplug } from 'lucide-react'
 import type { AppSettings, ComfyStatus, LlmModelsResult, ModelFile, ModelKind, NodePackStatus, OllamaModel, UpscaleMode } from '../types'
 import { choices, type ObjectInfo } from '../lib/comfyInfo'
 import { inferredOverrideSlotFile, MODEL_FAMILIES, overridePickOutcome, SLOT_LABELS, type ModelOverrideSlotName } from '../lib/modelOverrides'
@@ -12,7 +12,7 @@ import type { h3StackReport } from '../lib/h3Stack'
 import { SelectField, NumberField } from '../components/form'
 import { formatBytes } from '../lib/format'
 import type { DoctorReport } from '../lib/doctor'
-import { FetchBrowser } from '../components/FetchBrowser'
+import { PACKS_CHANGED_EVENT } from '../components/LibraryDock'
 import { useSessionStore } from '../state/sessionStore'
 
 /** Inline directory-path feedback (maintainer flag 2026-09-19: "changing a
@@ -43,7 +43,7 @@ function PathCheckNote({ path }: { path: string }) {
     : <><AlertCircle size={13} /> {detail || 'Path check failed.'}</>}</p>
 }
 
-export function SettingsView({ settings, setSettings, info, infoEpoch = 0, models, h3Report, scanning, status, checking, diagnosticRunning, ollamaModels, onRefreshOllama, onScan, onCheck, onSave, onRunDiagnostics }: { settings: AppSettings; setSettings(value: AppSettings): void; info: ObjectInfo; infoEpoch?: number; models: ModelFile[]; h3Report: ReturnType<typeof h3StackReport>; scanning: boolean; status: ComfyStatus; checking: boolean; diagnosticRunning: boolean; ollamaModels: OllamaModel[]; onRefreshOllama(): void; onScan(): void; onCheck(): void; onSave(): void | Promise<void>; onRunDiagnostics(): void }) {
+export function SettingsView({ settings, setSettings, info, infoEpoch = 0, models, h3Report, scanning, status, checking, diagnosticRunning, ollamaModels, onRefreshOllama, onScan, onCheck, onRunDiagnostics, onOpenLibrary }: { settings: AppSettings; setSettings(value: AppSettings): void; info: ObjectInfo; infoEpoch?: number; models: ModelFile[]; h3Report: ReturnType<typeof h3StackReport>; scanning: boolean; status: ComfyStatus; checking: boolean; diagnosticRunning: boolean; ollamaModels: OllamaModel[]; onRefreshOllama(): void; onScan(): void; onCheck(): void; onRunDiagnostics(): void; onOpenLibrary(focusEntryIds?: string[]): void }) {
   const pathRows: Array<{ kind: ModelKind; label: string; note: string }> = [
     { kind: 'diffusion_models', label: 'Diffusion models', note: 'FL2VA and Ref2VA checkpoints' },
     { kind: 'text_encoders', label: 'Text encoders', note: 'Qwen3-VL MiniMax encoder' },
@@ -177,10 +177,6 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
   const [nodePackError, setNodePackError] = useState<string | null>(null)
   const [nodePackRefreshing, setNodePackRefreshing] = useState(false)
   const [nodePackSource, setNodePackSource] = useState<Record<string, string>>({})
-  /** One-click fetch deep-link from a pack row (task 9om4bi9): focuses the
-   *  FetchBrowser's catalog entry — the same mechanism the canvas menu rows
-   *  use. Consumed by FetchBrowser, then cleared here. */
-  const [packFetchFocus, setPackFetchFocus] = useState<string[] | null>(null)
   const refreshNodePacks = async (options?: { refresh?: boolean }) => {
     try { setNodePacks((await window.minimax.listEngineNodePacks(options)).packs) } catch { /* listed on next action; errors surface there */ }
   }
@@ -210,9 +206,15 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
   // check, engine recovery) re-resolves the live pack chips — an engine that
   // came back flips "absent" rows to "active" here without a manual Refresh.
   useEffect(() => { void refreshNodePacks() }, [settings.engine.checkoutPath, settings.engine.externalCustomNodesDir, settings.engine.mode, packSaveTick, infoEpoch])
-  const saveAndRefreshPacks = async () => {
-    try { await onSave() } finally { bumpPackSaveTick() }
-  }
+  // R-15: the pack board re-resolves when a fetch completes in the LIBRARY
+  // surface or a save lands in the dock (the PACKS_CHANGED_EVENT contract —
+  // one event, both sources; the old in-scroll scrollIntoView deep-link and
+  // the save-only tick are both superseded by it).
+  useEffect(() => {
+    const refresh = () => { void refreshNodePacks() }
+    window.addEventListener(PACKS_CHANGED_EVENT, refresh)
+    return () => window.removeEventListener(PACKS_CHANGED_EVENT, refresh)
+  }, [])
   const runNodePackAction = async (id: string, action: () => Promise<NodePackStatus>) => {
     setNodePackBusy(id)
     setNodePackError(null)
@@ -231,8 +233,25 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
     { id: '24', label: '24 GB', guidance: 'Q5 or pruned INT8 diffusion + INT8 text encoder · 1344×768 · up to 10 s · comfortable queueing. INT8 is the best-tested community tier.' },
     { id: 'blackwell', label: 'Blackwell', guidance: 'NVFP4 diffusion + NVFP4-AWQ text encoder · native resolution/duration headroom · SageAttention and Sol-Attn give the largest speedups here.' },
   ]
-  return <div className="standard-page settings-page"><div className="page-heading"><div><p className="eyebrow">APPLICATION</p><h1>Settings</h1><p>Point the studio at your existing local engine and model folders.</p></div><button className="primary-button" data-save-settings onClick={() => void saveAndRefreshPacks()}><Save size={17} />Save settings</button></div>
-    <section className="settings-section"><div className="settings-heading"><div><Activity size={19} /><span><strong>ComfyUI engine</strong><small>The desktop app communicates only with this local address.</small></span></div><span className={`health-pill ${status.connected ? 'online' : ''}`}>{status.connected ? 'Connected' : 'Offline'}</span></div><div className="connection-row"><div className="field-group grow"><label htmlFor="comfy-url">Server URL</label><input id="comfy-url" value={settings.comfyUrl} onChange={(event) => setSettings({ ...settings, comfyUrl: event.target.value })} /></div><button className="secondary-button test-button" onClick={onCheck} disabled={checking}>{checking ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}Test connection</button></div>
+  // R-15 (Wave 3): the three-group IA + the sticky rail. The measured
+  // baseline was the contract: 17 sections / 15,147 px / 144 controls in one
+  // flat scroll — the absorption surface of a year of increments. The groups
+  // are SETUP (once) / DEFAULTS (daily) / STATUS & DIAGNOSTICS; the store
+  // (FetchBrowser) lives in its own Library surface; run tools exited to the
+  // canvas typed-hole menus; the full IA belongs to the Control Center spec
+  // (A-4's minimum-survives scope — this is that minimum).
+  const scrollToGroup = (group: string) => {
+    document.querySelector(`[data-settings-group="${group}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }
+  return <div className="standard-page settings-page"><div className="page-heading"><div><p className="eyebrow">APPLICATION</p><h1>Settings</h1><p>Engine and connection, daily defaults, and diagnostics — the model library has its own surface.</p></div></div>
+    <nav className="settings-nav" aria-label="Settings groups" data-settings-nav>
+      <button type="button" onClick={() => scrollToGroup('setup')}>Setup</button>
+      <button type="button" onClick={() => scrollToGroup('defaults')}>Defaults</button>
+      <button type="button" onClick={() => scrollToGroup('status')}>Status &amp; diagnostics</button>
+    </nav>
+    <section className="settings-group" data-settings-group="setup" aria-label="Setup">
+<h2 className="settings-group-heading">Setup <small>once — engine, node packs, the model library, input &amp; output</small></h2>
+<section className="settings-section"><div className="settings-heading"><div><Activity size={19} /><span><strong>ComfyUI engine</strong><small>The desktop app communicates only with this local address.</small></span></div><span className={`health-pill ${status.connected ? 'online' : ''}`}>{status.connected ? 'Connected' : 'Offline'}</span></div><div className="connection-row"><div className="field-group grow"><label htmlFor="comfy-url">Server URL</label><input id="comfy-url" value={settings.comfyUrl} onChange={(event) => setSettings({ ...settings, comfyUrl: event.target.value })} /></div><button className="secondary-button test-button" onClick={onCheck} disabled={checking}>{checking ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}Test connection</button></div>
     {/* M3 (review 2026-09-19): the status route's `error` used to be dead
         weight — a failed test showed only the stale "Offline" pill with no
         acknowledgment the test ran or why it failed. Render the reason with
@@ -330,10 +349,7 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
             </div>
             <div className="node-pack-actions">
               {needsLocalSource && <input className="node-pack-source" placeholder="local repo directory (absolute)" value={nodePackSource[pack.id] ?? ''} onChange={(event) => setNodePackSource({ ...nodePackSource, [pack.id]: event.target.value })} aria-label={`Local source directory for ${pack.name}`} />}
-              {pack.installMode === 'user-fetch' && pack.hasNetworkSource && pack.targetKind !== 'none' && pack.folderState !== 'foreign' && <button type="button" className="secondary-button" title={pack.versionRelation === 'differs' ? `Refetch the pinned revision of ${pack.name} (consent-gated) — the installed copy differs from the pin` : `Fetch the pinned revision of ${pack.name} (consent-gated)`} onClick={() => {
-                setPackFetchFocus([`pack:${pack.id}`])
-                document.querySelector('.fetch-section')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-              }} data-node-pack-fetch={pack.id}>Fetch…</button>}
+              {pack.installMode === 'user-fetch' && pack.hasNetworkSource && pack.targetKind !== 'none' && pack.folderState !== 'foreign' && <button type="button" className="secondary-button" title={pack.versionRelation === 'differs' ? `Refetch the pinned revision of ${pack.name} (consent-gated) — the installed copy differs from the pin` : `Fetch the pinned revision of ${pack.name} (consent-gated)`} onClick={() => onOpenLibrary([`pack:${pack.id}`])} data-node-pack-fetch={pack.id}>Fetch…</button>}
               {(pack.installMode !== 'user-fetch' || needsLocalSource) && <button type="button" className="secondary-button" title={pack.folderState === 'foreign' ? 'Already present — placed outside the studio; the studio never replaces or deletes it' : undefined} disabled={nodePackBusy === pack.id || pack.availability === 'unavailable' || pack.folderState === 'foreign' || (needsLocalSource && !nodePackSource[pack.id]?.trim())} onClick={() => void runNodePackAction(pack.id, () => window.minimax.installEngineNodePack(pack.id, nodePackSource[pack.id]?.trim() || undefined))}>{nodePackBusy === pack.id ? <LoaderCircle size={14} className="spin" /> : null}Install</button>}
               <button type="button" className="secondary-button" disabled={!pack.installed || nodePackBusy === pack.id} onClick={() => void runNodePackAction(pack.id, () => window.minimax.uninstallEngineNodePack(pack.id))}>Uninstall</button>
             </div>
@@ -345,16 +361,36 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
       {nodePackError && <div className="llm-test-result fail" role="status"><AlertCircle size={14} /><span>{nodePackError}</span></div>}
       <p className="settings-note">Uninstall deletes only folders the studio placed (a marker install) — never a pack that was already there: pre-existing folders in the target are reported as "present — not studio-managed" (or "managed by ComfyUI" when the folder carries a git checkout or a Comfy-Registry pyproject), refused for install-over, and never deleted. A revision bump refetches at the pin. "Restart to activate" means the files are in place but the running instance has not loaded them yet. Packs without a license are never vendored — they install only through the consent-gated fetcher below.</p>
     </section>
-    {/* (R-10, audit C F4) Fetch completion refreshes the PACK board too — a
-        fetched pack auto-installs and its chip must flip without the board's
-        own Refresh click; onScan alone left the models scan stale-chip pair. */}
-    <FetchBrowser settings={settings} setSettings={setSettings} onAfterFetch={() => { onScan(); void refreshNodePacks() }} onAdoptCheckout={(path) => updateEngine({ checkoutPath: path })} focusEntryIds={packFetchFocus ?? undefined} onFocusConsumed={() => setPackFetchFocus(null)} />
-    <section className="settings-section h3-stack-section">
-      <div className="settings-heading"><div><Gauge size={19} /><span><strong>H3 engine stack</strong><small>Compares the selected files with the validated official ComfyUI stack.</small></span></div><span className={`health-pill ${h3Report.validated ? 'online' : ''}`}>{h3Report.validated ? 'Validated' : h3Report.ready ? 'Custom' : 'Incomplete'}</span></div>
-      <div className="h3-stack-list">{h3Report.rows.map((row) => <div key={row.label} className={row.validated ? 'validated' : 'custom'}><span>{row.validated ? <Check size={14} /> : <AlertCircle size={14} />}</span><div><strong>{row.label}</strong><small title={row.selected || row.expected}>{row.selected || `Missing · expected ${row.expected}`}</small></div><em>{row.override ? 'Override' : row.validated ? 'Recommended' : row.selected ? 'Non-standard' : 'Missing'}</em></div>)}</div>
-      <div className="h3-stack-list">{detectedTurboFamilies.length ? detectedTurboFamilies.map(({ entry, detection }) => <div key={entry.id} className="validated"><span><Check size={14} /></span><div><strong>{entry.label}</strong><small title={detection.model ?? entry.ui.installHint}>{detection.model ?? entry.ui.installHint}</small></div><em>{entry.pairing?.steps ?? '?'} steps{entry.pairing?.samplerNode ? ' · larryvrh-ready' : ''}</em></div>) : <div className="custom"><span><AlertCircle size={14} /></span><div><strong>No turbo families detected</strong><small>Install an official or community turbo LoRA into ComfyUI/models/loras, then rescan.</small></div><em>Missing</em></div>}</div>
-      {!h3Report.validated && <p className="settings-warning"><AlertCircle size={15} />Some components differ from the validated H3 stack. Generation remains available, but output quality may differ.</p>}
-      <div className="diagnostic-action"><span><strong>Fixed quality comparison</strong><small>Queues Native Quality and Turbo 8 at 1344 × 768, 5 seconds, seed 12345, with no upscale.</small></span><button className="secondary-button" disabled={!status.connected || diagnosticRunning || !h3Report.ready} onClick={onRunDiagnostics}>{diagnosticRunning ? <LoaderCircle className="spin" size={15} /> : <Activity size={15} />}{diagnosticRunning ? 'Queuing tests…' : 'Run H3 Quality Test'}</button></div>
+    {/* R-15 (M2's fix): the fetchable-items STORE has its own surface now —
+        the Library / Get-models overlay. Settings keeps a one-line entry
+        point (the audit's exit); the pack rows above keep their per-row
+        Fetch… deep-links, which focus the entry inside the Library dock. */}
+    <section className="settings-section library-entry-section" aria-label="Library and models">
+      <div className="settings-heading"><div><Folder size={19} /><span><strong>Library — get models</strong><small>The consent-gated catalog: engine checkouts, node packs, and model weights (license verdicts on every row; weights link, never copy). Its own surface — not part of this scroll.</small></span></div><button type="button" className="secondary-button" data-open-library onClick={() => onOpenLibrary()}><FolderOpen size={16} />Open the library</button></div>
+    </section>
+    <section className="settings-section"><div className="settings-heading"><div><FolderOpen size={19} /><span><strong>Input &amp; output</strong><small>Renders and prepared media stay local, under the app folder by default.</small></span></div></div><div className="connection-row"><div className="field-group grow"><label htmlFor="input-path">Input directory</label><input id="input-path" data-input-path value={settings.inputDirectory} onChange={(event) => setSettings({ ...settings, inputDirectory: event.target.value })} /><PathCheckNote path={settings.inputDirectory} /></div></div><div className="connection-row"><div className="field-group grow"><label htmlFor="output-path">Output directory</label><input id="output-path" value={settings.outputDirectory} onChange={(event) => setSettings({ ...settings, outputDirectory: event.target.value })} /><PathCheckNote path={settings.outputDirectory} /></div></div><div className="connection-row clip-tool-path"><div className="field-group grow"><label htmlFor="ffmpeg-path">FFmpeg executable</label><input id="ffmpeg-path" value={settings.ffmpegPath} onChange={(event) => setSettings({ ...settings, ffmpegPath: event.target.value })} /></div></div><p className="settings-note">Unset, both default under the app's own data folder (<code>&lt;app&gt;/data/input</code>, <code>&lt;app&gt;/data/output</code>) — nothing lands in Documents. An absolute path you set is kept as-is. The clip editor uses FFmpeg for frame extraction, trim points, joining, and full-project export.</p></section>
+    </section>
+<section className="settings-group" data-settings-group="defaults" aria-label="Defaults">
+<h2 className="settings-group-heading">Defaults <small>daily — generation, model picks, the LLM layer</small></h2>
+<section className="settings-section generation-defaults-section">
+      <div className="settings-heading"><div><SlidersHorizontal size={19} /><span><strong>Generation defaults</strong><small>Choose the starting values for the main Create workspace — every NEW chain starts from them.</small></span></div><button className="secondary-button" data-apply-defaults disabled={!recommendedDeltaNotes.length} title={recommendedDeltaNotes.length ? `Sets tuned defaults back to the recommended set — asks first, naming every change (currently: ${recommendedDeltaNotes.length})` : 'Already at the recommended set'} onClick={resetToRecommended}>Reset to recommended</button></div>
+      <div className="preset-row" aria-label="Generation presets">
+        <button type="button" onClick={() => applyPreset('quality')}><strong>Native Quality</strong><small>1344 × 768 · 30 steps · no upscale</small></button>
+        <button type="button" onClick={() => applyPreset('official-turbo')}><strong>Turbo 8</strong><small>Native canvas · official LoRA 1.0</small></button>
+        <button type="button" onClick={() => applyPreset('preview')}><strong>Preview</strong><small>864 × 480 · official Turbo 8</small></button>
+      </div>
+      <div className="generation-defaults-grid">
+        <SelectField label="Default resolution" value={defaults.resolution} onChange={(resolution) => updateDefaults({ resolution })} options={['608x352', '864x480', '1056x608', '1344x768', '768x1344', '768x768'].map((value) => [value, value.replace('x', ' × ')])} />
+        <NumberField label="Default duration (seconds)" value={defaults.duration} min={2} max={15} step={0.5} onChange={(duration) => updateDefaults({ duration })} />
+        <SelectField label="Default quality" value={defaults.turbo === '4' ? '8' : defaults.turbo} onChange={(turbo) => updateDefaults({ turbo: turbo as 'off' | '8', ...(turbo === 'off' ? { steps: 30 } : {}) })} options={[["off", 'Native quality · 30 steps'], ["8", 'Official Turbo 8']]} />
+        <NumberField label="Full-quality steps" value={defaults.steps} min={16} max={30} onChange={(steps) => updateDefaults({ steps })} />
+        <SelectField label="Reference image fidelity" value={defaults.refImageSize} onChange={(refImageSize) => updateDefaults({ refImageSize: refImageSize as 'match' | 'max' })} options={[["match", 'Match output · faster'], ["max", 'Maximum identity · slower']]} />
+        <SelectField label="Default post-render upscale" value={defaults.upscaleMode} onChange={(upscaleMode) => updateDefaults({ upscaleMode: upscaleMode as UpscaleMode })} options={[["off", 'Off · recommended for diagnosis'], ["rtx", 'RTX/CUDA frames · 2× · experimental']]} />
+        <label className="settings-check"><input type="checkbox" checked={defaults.livePreview} onChange={(event) => updateDefaults({ livePreview: event.target.checked })} /><span><strong>Live preview by default</strong><small>Uses ComfyUI progress and preview events.</small></span></label>
+      </div>
+      <details className="experimental-settings"><summary><AlertCircle size={15} /><span><strong>Experimental sampling</strong><small>Custom samplers, shifts, LoRA strength, and 4-step FL2V can make output less stable.</small></span><ChevronDown size={15} /></summary><div className="generation-defaults-grid"><label className="settings-check"><input type="checkbox" checked={defaults.experimentalSampling} onChange={(event) => updateDefaults({ experimentalSampling: event.target.checked })} /><span><strong>Enable custom sampler</strong><small>Otherwise res_multistep + simple is forced.</small></span></label><SelectField label="Experimental Turbo override" value={defaults.turbo} onChange={(turbo) => updateDefaults({ turbo: turbo as 'off' | '4' | '8' })} options={[["off", 'Off'], ["8", 'Official 8-step'], ["4", '4-step preview testing']]} /><NumberField label="Turbo LoRA strength" value={defaults.loraStrength} min={0} max={2} step={0.05} onChange={(loraStrength) => updateDefaults({ loraStrength })} /><SelectField label="Sampler" value={defaults.experimentalSampling ? defaults.sampler : 'res_multistep'} disabled={!defaults.experimentalSampling} onChange={(sampler) => updateDefaults({ sampler })} options={samplerOptions.map((value) => [value, value])} /><SelectField label="Scheduler" value={defaults.experimentalSampling ? defaults.scheduler : 'simple'} disabled={!defaults.experimentalSampling} onChange={(scheduler) => updateDefaults({ scheduler })} options={schedulerOptions.map((value) => [value, value])} /><SelectField label="Sigma shifts" value={defaults.sigmaShiftMode} onChange={(sigmaShiftMode) => updateDefaults({ sigmaShiftMode: sigmaShiftMode as 'model' | 'custom' })} options={[["model", 'Native model defaults · 12 / 3'], ["custom", 'Custom MiniMaxH3SigmaShift node']]} /><NumberField label="Video sigma shift" value={defaults.shiftVideo} min={0.01} max={100} step={0.01} disabled={defaults.sigmaShiftMode !== 'custom'} onChange={(shiftVideo) => updateDefaults({ shiftVideo })} /><NumberField label="Audio sigma shift" value={defaults.shiftAudio} min={0.01} max={100} step={0.01} disabled={defaults.sigmaShiftMode !== 'custom'} onChange={(shiftAudio) => updateDefaults({ shiftAudio })} /></div></details>
+      {warnedSampler && <p className="settings-warning"><AlertCircle size={15} />This sampler is on the compatibility-risk list you supplied. Test a short clip before committing to a final render.</p>}
+      <p className="settings-note">The production path is 1344 × 768, 30 steps, res_multistep + simple, CFG 1, denoise 1, 24 fps, native 12/3 shifts, and upscale off. Custom sampling is intentionally separated because it complicates quality diagnosis.</p>
     </section>
     <section className="settings-section model-overrides-section" aria-label="Model overrides">
       <div className="settings-heading"><div><Layers size={19} /><span><strong>Model overrides</strong><small>Pin the exact checkpoint, text encoder, or VAE per engine family — for files the name-pattern inference can never find (a community merge, a renamed quant). Auto keeps the inferred pick; a per-chain pick (the chain's properties panel) beats these, which beat auto. The H3 families expose FL2VA / Ref2VA / merged checkpoint lanes; the VAE picks split by decoder — video, audio, and (the workbench only) the T=1 image decoder.</small></span></div></div>
@@ -387,79 +423,6 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
         })}
       </div>
       <p className="settings-note">Picks are exact names from the connected engine's model registry — the engine-relative subpath the graph loader accepts. A pick the registry later stops listing falls back to auto with a warning at render time; a pick the family cannot load (wrong folder, a cross-class VAE) refuses the render with the reason — never a doomed graph. The registry lists filenames only, so nothing about a file's internals is verified app-side: the engine loads the pick or fails loudly with a readable error. The H3 families pin FL2VA and Ref2VA per render lane; the merged pick is ONE pre-merged checkpoint for both lanes and wins when set. VAE slots are decoder-specific (video / audio / image): a pick whose filename marks another decoder class refuses — the T=1 image decoder is legal only on the workbench's image-VAE slot, never in a video graph.</p>
-    </section>
-    <section className="settings-section setup-doctor-section">
-      <div className="settings-heading"><div><Stethoscope size={19} /><span><strong>Setup doctor</strong><small>Verifies FFmpeg, HTTPS tooling, the engine device, and attention backends — with exact fixes.</small></span></div><button className="secondary-button" onClick={() => void runDoctor()} disabled={doctorRunning}>{doctorRunning ? <LoaderCircle size={16} className="spin" /> : <Stethoscope size={16} />}{doctorRunning ? 'Checking…' : 'Run checks'}</button></div>
-      {doctor && <div className="doctor-report">{doctor.checks.map((check) => <div className={`doctor-check ${check.status}`} key={check.id}><span>{check.status === 'ok' ? <Check size={14} /> : <AlertCircle size={14} />}</span><div><strong>{check.label}</strong><small>{check.detail}</small>{check.recommendation && <p>{check.recommendation}</p>}</div></div>)}</div>}
-    </section>
-    <section className="settings-section graph-compat-section">
-      <div className="settings-heading"><div><GitBranch size={19} /><span><strong>Graph compatibility</strong><small>The ComfyUI version this studio's graph families were last verified against.</small></span></div></div>
-      {(() => {
-        const connected = status.stats?.system?.comfyui_version
-        const tested = settings.testedComfyVersion
-        const newer = Boolean(connected && tested && connected !== tested)
-        return <div className={`doctor-check ${newer ? 'warn' : 'ok'}`}><span>{newer ? <AlertCircle size={14} /> : <Check size={14} />}</span><div><strong>{newer ? 'ComfyUI updated since verification' : 'Graphs verified against this engine'}</strong><small>{connected ? `Connected engine: ${connected}. ` : 'Engine offline — version unknown. '}{tested ? `Graphs last verified against: ${tested}.` : 'No verification recorded yet; it is captured on the next successful connection.'}{newer ? ' Node changes in newer ComfyUI builds can break graphs — re-run the H3 Quality Test before trusting new renders, then the record updates on save.' : ''}</small></div></div>
-      })()}
-    </section>
-    <section className="settings-section krea2-edit-section" aria-label="Krea 2 edit modes">
-      <div className="settings-heading"><div><Wand2 size={19} /><span><strong>Krea 2 edit modes</strong><small>Per-workflow edit graphs over the resident Krea 2 checkpoint pair — availability-gated here; the canvas redesign owns the real editing UI.</small></span></div><span className={`health-pill ${editModesReady === krea2EditModes.length ? 'online' : ''}`}>{editModesReady} of {krea2EditModes.length} ready</span></div>
-      <div className="preset-row" aria-label="Edit mode picker">
-        {krea2EditModes.map(({ family, detection }) => <button type="button" className={selectedKrea2EditMode === family.id ? 'tier-selected' : ''} key={family.id} onClick={() => setSelectedKrea2EditMode(family.id)}><strong>{family.label}</strong><small>{detection.available ? `${family.checkpoint === 'raw' ? 'RAW' : 'Turbo'} · ${family.recipe.steps} steps · CFG ${family.recipe.cfg}` : 'Needs setup'}</small></button>)}
-      </div>
-      {(() => {
-        const selected = krea2EditModes.find(({ family }) => family.id === selectedKrea2EditMode) ?? krea2EditModes[0]
-        if (!selected) return null
-        const { family, detection } = selected
-        const dialCopy: Record<string, string> = {
-          groundingPx: `grounding_px ${KREA2_RECIPE_PINS.groundingPx.default} (dial ${KREA2_RECIPE_PINS.groundingPx.min}–${KREA2_RECIPE_PINS.groundingPx.max}: lower = stronger edits, higher = stronger identity)`,
-          refBoost: `ref_boost ${KREA2_RECIPE_PINS.refBoost.default} (likeness; UI cap ${KREA2_RECIPE_PINS.refBoost.uiCap} — above ${KREA2_RECIPE_PINS.refBoost.removalBreakAbove} breaks removals)`,
-          refBoostA: 'ref_boost_a — the same likeness dial for the scene reference',
-          fitMode: `fit geometry '${KREA2_RECIPE_PINS.fitMode.default}' ('${KREA2_RECIPE_PINS.fitMode.legacy}' only for older weights)`,
-          steps: `steps ${family.recipe.steps} (band ${KREA2_RECIPE_PINS.turboStepsBand.min}–${KREA2_RECIPE_PINS.turboStepsBand.max})`,
-          cfg: 'CFG — above 1 the negative is grounded automatically (empty prompt + same image)',
-          mask: 'mask: white generates, black is preserved (Mask Editor)',
-          padding: `padding per side on a ${KREA2_RECIPE_PINS.anypaint.paddingStep}px grid; mask + padding in one request = mixed`,
-        }
-        const missing = [...detection.missingNodes.map((nodeClass) => `node ${nodeClass} (node pack)`), ...detection.missingModels]
-        return <div className={`doctor-check ${detection.available ? 'ok' : 'warn'}`}>
-          <span>{detection.available ? <Check size={14} /> : <AlertCircle size={14} />}</span>
-          <div>
-            <strong>{family.label}{detection.available && detection.resolved ? ` — ${detection.resolved.diffusion} + ${detection.resolved.lora}` : ''}</strong>
-            <small>{family.ui.description}</small>
-            <p>{family.recipe.sampler}+{family.recipe.scheduler} · LoRA @{family.recipe.loraStrength} · {family.recipeTriple.carrier}</p>
-            {family.ui.promptGuidance && <p>Prompting: {family.ui.promptGuidance}</p>}
-            <p>Dials: {family.dials.map((dial) => dialCopy[dial]).filter(Boolean).join(' · ') || 'pinned recipe — no dials'}</p>
-            {family.ui.warning && <p>{family.ui.warning}</p>}
-            {missing.length > 0 && <p>Missing: {missing.join('; ')}. {family.ui.installHint}</p>}
-          </div>
-        </div>
-      })()}
-    </section>
-    <section className="settings-section gpu-tier-section">
-      <div className="settings-heading"><div><Gauge size={19} /><span><strong>GPU tier guidance</strong><small>Community quant and workload recommendations per VRAM tier. Stored with settings; guidance only.</small></span></div></div>
-      <div className="preset-row" aria-label="GPU tiers">
-        {gpuTiers.map((tier) => <button type="button" className={settings.gpuTier === tier.id ? 'tier-selected' : ''} key={tier.id} onClick={() => setSettings({ ...settings, gpuTier: tier.id })}><strong>{tier.label}</strong><small>{tier.guidance}</small></button>)}
-      </div>
-    </section>
-    <section className="settings-section generation-defaults-section">
-      <div className="settings-heading"><div><SlidersHorizontal size={19} /><span><strong>Generation defaults</strong><small>Choose the starting values for the main Create workspace — every NEW chain starts from them.</small></span></div><button className="secondary-button" data-apply-defaults disabled={!recommendedDeltaNotes.length} title={recommendedDeltaNotes.length ? `Sets tuned defaults back to the recommended set — asks first, naming every change (currently: ${recommendedDeltaNotes.length})` : 'Already at the recommended set'} onClick={resetToRecommended}>Reset to recommended</button></div>
-      <div className="preset-row" aria-label="Generation presets">
-        <button type="button" onClick={() => applyPreset('quality')}><strong>Native Quality</strong><small>1344 × 768 · 30 steps · no upscale</small></button>
-        <button type="button" onClick={() => applyPreset('official-turbo')}><strong>Turbo 8</strong><small>Native canvas · official LoRA 1.0</small></button>
-        <button type="button" onClick={() => applyPreset('preview')}><strong>Preview</strong><small>864 × 480 · official Turbo 8</small></button>
-      </div>
-      <div className="generation-defaults-grid">
-        <SelectField label="Default resolution" value={defaults.resolution} onChange={(resolution) => updateDefaults({ resolution })} options={['608x352', '864x480', '1056x608', '1344x768', '768x1344', '768x768'].map((value) => [value, value.replace('x', ' × ')])} />
-        <NumberField label="Default duration (seconds)" value={defaults.duration} min={2} max={15} step={0.5} onChange={(duration) => updateDefaults({ duration })} />
-        <SelectField label="Default quality" value={defaults.turbo === '4' ? '8' : defaults.turbo} onChange={(turbo) => updateDefaults({ turbo: turbo as 'off' | '8', ...(turbo === 'off' ? { steps: 30 } : {}) })} options={[["off", 'Native quality · 30 steps'], ["8", 'Official Turbo 8']]} />
-        <NumberField label="Full-quality steps" value={defaults.steps} min={16} max={30} onChange={(steps) => updateDefaults({ steps })} />
-        <SelectField label="Reference image fidelity" value={defaults.refImageSize} onChange={(refImageSize) => updateDefaults({ refImageSize: refImageSize as 'match' | 'max' })} options={[["match", 'Match output · faster'], ["max", 'Maximum identity · slower']]} />
-        <SelectField label="Default post-render upscale" value={defaults.upscaleMode} onChange={(upscaleMode) => updateDefaults({ upscaleMode: upscaleMode as UpscaleMode })} options={[["off", 'Off · recommended for diagnosis'], ["rtx", 'RTX/CUDA frames · 2× · experimental']]} />
-        <label className="settings-check"><input type="checkbox" checked={defaults.livePreview} onChange={(event) => updateDefaults({ livePreview: event.target.checked })} /><span><strong>Live preview by default</strong><small>Uses ComfyUI progress and preview events.</small></span></label>
-      </div>
-      <details className="experimental-settings"><summary><AlertCircle size={15} /><span><strong>Experimental sampling</strong><small>Custom samplers, shifts, LoRA strength, and 4-step FL2V can make output less stable.</small></span><ChevronDown size={15} /></summary><div className="generation-defaults-grid"><label className="settings-check"><input type="checkbox" checked={defaults.experimentalSampling} onChange={(event) => updateDefaults({ experimentalSampling: event.target.checked })} /><span><strong>Enable custom sampler</strong><small>Otherwise res_multistep + simple is forced.</small></span></label><SelectField label="Experimental Turbo override" value={defaults.turbo} onChange={(turbo) => updateDefaults({ turbo: turbo as 'off' | '4' | '8' })} options={[["off", 'Off'], ["8", 'Official 8-step'], ["4", '4-step preview testing']]} /><NumberField label="Turbo LoRA strength" value={defaults.loraStrength} min={0} max={2} step={0.05} onChange={(loraStrength) => updateDefaults({ loraStrength })} /><SelectField label="Sampler" value={defaults.experimentalSampling ? defaults.sampler : 'res_multistep'} disabled={!defaults.experimentalSampling} onChange={(sampler) => updateDefaults({ sampler })} options={samplerOptions.map((value) => [value, value])} /><SelectField label="Scheduler" value={defaults.experimentalSampling ? defaults.scheduler : 'simple'} disabled={!defaults.experimentalSampling} onChange={(scheduler) => updateDefaults({ scheduler })} options={schedulerOptions.map((value) => [value, value])} /><SelectField label="Sigma shifts" value={defaults.sigmaShiftMode} onChange={(sigmaShiftMode) => updateDefaults({ sigmaShiftMode: sigmaShiftMode as 'model' | 'custom' })} options={[["model", 'Native model defaults · 12 / 3'], ["custom", 'Custom MiniMaxH3SigmaShift node']]} /><NumberField label="Video sigma shift" value={defaults.shiftVideo} min={0.01} max={100} step={0.01} disabled={defaults.sigmaShiftMode !== 'custom'} onChange={(shiftVideo) => updateDefaults({ shiftVideo })} /><NumberField label="Audio sigma shift" value={defaults.shiftAudio} min={0.01} max={100} step={0.01} disabled={defaults.sigmaShiftMode !== 'custom'} onChange={(shiftAudio) => updateDefaults({ shiftAudio })} /></div></details>
-      {warnedSampler && <p className="settings-warning"><AlertCircle size={15} />This sampler is on the compatibility-risk list you supplied. Test a short clip before committing to a final render.</p>}
-      <p className="settings-note">The production path is 1344 × 768, 30 steps, res_multistep + simple, CFG 1, denoise 1, 24 fps, native 12/3 shifts, and upscale off. Custom sampling is intentionally separated because it complicates quality diagnosis.</p>
     </section>
     <section className="settings-section llm-section" aria-label="LLM router">
       <div className="settings-heading">
@@ -516,12 +479,78 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
       </div>
       <p className="settings-note">Prompts go directly to the local Ollama server. Embedding and cloud-backed models are excluded.</p>
     </section>
-    <section className="settings-section"><div className="settings-heading"><div><HardDrive size={19} /><span><strong>Model inventory</strong><small>The connected engine's own registry is the model source of truth (instance-invisible = nonexistent) — there is no local folder list and no manual pointing. Refresh asks the engine to re-scan its folders and reads the listing again.</small></span></div><button className="secondary-button" onClick={onScan} disabled={scanning}>{scanning ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}{scanning ? 'Refreshing…' : 'Refresh from engine'}</button></div><div className="path-table">{pathRows.map((row) => { const kindModels = models.filter((model) => model.kind === row.kind); return <div className="path-row" key={row.kind}><div className="path-kind"><Folder size={17} /><span><strong>{row.label}</strong><small>{row.note}</small></span></div><span className="file-count" data-model-kind-count={row.kind}>{kindModels.length} file{kindModels.length === 1 ? '' : 's'} on the engine</span></div> })}{models.length === 0 && <div className="path-row"><div className="path-kind"><Folder size={17} /><span><strong>No models listed</strong><small>{status.connected ? 'The engine serves none of these folders yet — add weights where the engine reads them, then Refresh.' : 'The engine is offline — the registry is the only model source, so nothing can be listed until it connects.'}</small></span></div><span className="file-count">0 files</span></div>}</div></section>
-    <section className="settings-section"><div className="settings-heading"><div><FolderOpen size={19} /><span><strong>Input &amp; output</strong><small>Renders and prepared media stay local, under the app folder by default.</small></span></div></div><div className="connection-row"><div className="field-group grow"><label htmlFor="input-path">Input directory</label><input id="input-path" data-input-path value={settings.inputDirectory} onChange={(event) => setSettings({ ...settings, inputDirectory: event.target.value })} /><PathCheckNote path={settings.inputDirectory} /></div></div><div className="connection-row"><div className="field-group grow"><label htmlFor="output-path">Output directory</label><input id="output-path" value={settings.outputDirectory} onChange={(event) => setSettings({ ...settings, outputDirectory: event.target.value })} /><PathCheckNote path={settings.outputDirectory} /></div></div><div className="connection-row clip-tool-path"><div className="field-group grow"><label htmlFor="ffmpeg-path">FFmpeg executable</label><input id="ffmpeg-path" value={settings.ffmpegPath} onChange={(event) => setSettings({ ...settings, ffmpegPath: event.target.value })} /></div></div><p className="settings-note">Unset, both default under the app's own data folder (<code>&lt;app&gt;/data/input</code>, <code>&lt;app&gt;/data/output</code>) — nothing lands in Documents. An absolute path you set is kept as-is. The clip editor uses FFmpeg for frame extraction, trim points, joining, and full-project export.</p></section>
-    <section className="settings-section license-source-section" aria-label="License and source">
-      <div className="settings-heading"><div><Scale size={19} /><span><strong>License &amp; source</strong><small>This app is free software — its source belongs to everyone who uses it.</small></span></div></div>
-      <p className="settings-note">MiniMax Studio is licensed under the <strong>GNU AGPLv3</strong> (<a href="https://github.com/Cobdog/MINIMAX-DESKTOP/blob/main/LICENSE" target="_blank" rel="noreferrer">full text</a>). The corresponding source lives at <a href="https://github.com/Cobdog/MINIMAX-DESKTOP" target="_blank" rel="noreferrer">github.com/Cobdog/MINIMAX-DESKTOP</a> — if you run a modified copy for others over a network, share your source with them. Third-party components and model-weight licenses are inventoried in <a href="https://github.com/Cobdog/MINIMAX-DESKTOP/blob/main/docs/LICENSES.md" target="_blank" rel="noreferrer">docs/LICENSES.md</a>.</p>
+    <section className="settings-section defaults-subsection-section" aria-label="GPU tier guidance">
+<div className="settings-heading"><div><Gauge size={19} /><span><strong>GPU tier guidance</strong><small>Community quant and workload recommendations per VRAM tier — reference help, not a setting you must touch.</small></span></div></div>
+<details className="settings-subsection" data-settings-gpu-details><summary><strong>Per-tier recommendations</strong><small>stored with settings; guidance only</small></summary><div className="settings-heading"><div><Gauge size={19} /><span><strong>GPU tier guidance</strong><small>Community quant and workload recommendations per VRAM tier. Stored with settings; guidance only.</small></span></div></div>
+      <div className="preset-row" aria-label="GPU tiers">
+        {gpuTiers.map((tier) => <button type="button" className={settings.gpuTier === tier.id ? 'tier-selected' : ''} key={tier.id} onClick={() => setSettings({ ...settings, gpuTier: tier.id })}><strong>{tier.label}</strong><small>{tier.guidance}</small></button>)}
+      </div></details>
+</section>
+</section>
+<section className="settings-group" data-settings-group="status" aria-label="Status and diagnostics">
+<h2 className="settings-group-heading">Status &amp; diagnostics <small>what the engine and this workstation actually have</small></h2>
+<section className="settings-section"><div className="settings-heading"><div><HardDrive size={19} /><span><strong>Model inventory</strong><small>The connected engine's own registry is the model source of truth (instance-invisible = nonexistent) — there is no local folder list and no manual pointing. Refresh asks the engine to re-scan its folders and reads the listing again.</small></span></div><button className="secondary-button" onClick={onScan} disabled={scanning}>{scanning ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}{scanning ? 'Refreshing…' : 'Refresh from engine'}</button></div><div className="path-table">{pathRows.map((row) => { const kindModels = models.filter((model) => model.kind === row.kind); return <div className="path-row" key={row.kind}><div className="path-kind"><Folder size={17} /><span><strong>{row.label}</strong><small>{row.note}</small></span></div><span className="file-count" data-model-kind-count={row.kind}>{kindModels.length} file{kindModels.length === 1 ? '' : 's'} on the engine</span></div> })}{models.length === 0 && <div className="path-row"><div className="path-kind"><Folder size={17} /><span><strong>No models listed</strong><small>{status.connected ? 'The engine serves none of these folders yet — add weights where the engine reads them, then Refresh.' : 'The engine is offline — the registry is the only model source, so nothing can be listed until it connects.'}</small></span></div><span className="file-count">0 files</span></div>}</div></section>
+    <section className="settings-section h3-stack-section">
+      <div className="settings-heading"><div><Gauge size={19} /><span><strong>H3 engine stack</strong><small>Compares the selected files with the validated official ComfyUI stack.</small></span></div><span className={`health-pill ${h3Report.validated ? 'online' : ''}`}>{h3Report.validated ? 'Validated' : h3Report.ready ? 'Custom' : 'Incomplete'}</span></div>
+      <div className="h3-stack-list">{h3Report.rows.map((row) => <div key={row.label} className={row.validated ? 'validated' : 'custom'}><span>{row.validated ? <Check size={14} /> : <AlertCircle size={14} />}</span><div><strong>{row.label}</strong><small title={row.selected || row.expected}>{row.selected || `Missing · expected ${row.expected}`}</small></div><em>{row.override ? 'Override' : row.validated ? 'Recommended' : row.selected ? 'Non-standard' : 'Missing'}</em></div>)}</div>
+      <div className="h3-stack-list">{detectedTurboFamilies.length ? detectedTurboFamilies.map(({ entry, detection }) => <div key={entry.id} className="validated"><span><Check size={14} /></span><div><strong>{entry.label}</strong><small title={detection.model ?? entry.ui.installHint}>{detection.model ?? entry.ui.installHint}</small></div><em>{entry.pairing?.steps ?? '?'} steps{entry.pairing?.samplerNode ? ' · larryvrh-ready' : ''}</em></div>) : <div className="custom"><span><AlertCircle size={14} /></span><div><strong>No turbo families detected</strong><small>Install an official or community turbo LoRA into ComfyUI/models/loras, then rescan.</small></div><em>Missing</em></div>}</div>
+      {!h3Report.validated && <p className="settings-warning"><AlertCircle size={15} />Some components differ from the validated H3 stack. Generation remains available, but output quality may differ.</p>}
+      <div className="diagnostic-action"><span><strong>Fixed quality comparison</strong><small>Queues Native Quality and Turbo 8 at 1344 × 768, 5 seconds, seed 12345, with no upscale.</small></span><button className="secondary-button" disabled={!status.connected || diagnosticRunning || !h3Report.ready} onClick={onRunDiagnostics}>{diagnosticRunning ? <LoaderCircle className="spin" size={15} /> : <Activity size={15} />}{diagnosticRunning ? 'Queuing tests…' : 'Run H3 Quality Test'}</button></div>
     </section>
+    <section className="settings-section setup-doctor-section">
+      <div className="settings-heading"><div><Stethoscope size={19} /><span><strong>Setup doctor</strong><small>Verifies FFmpeg, HTTPS tooling, the engine device, and attention backends — with exact fixes.</small></span></div><button className="secondary-button" onClick={() => void runDoctor()} disabled={doctorRunning}>{doctorRunning ? <LoaderCircle size={16} className="spin" /> : <Stethoscope size={16} />}{doctorRunning ? 'Checking…' : 'Run checks'}</button></div>
+      {doctor && <div className="doctor-report">{doctor.checks.map((check) => <div className={`doctor-check ${check.status}`} key={check.id}><span>{check.status === 'ok' ? <Check size={14} /> : <AlertCircle size={14} />}</span><div><strong>{check.label}</strong><small>{check.detail}</small>{check.recommendation && <p>{check.recommendation}</p>}</div></div>)}</div>}
+    </section>
+    <section className="settings-section graph-compat-section">
+      <div className="settings-heading"><div><GitBranch size={19} /><span><strong>Graph compatibility</strong><small>The ComfyUI version this studio's graph families were last verified against.</small></span></div></div>
+      {(() => {
+        const connected = status.stats?.system?.comfyui_version
+        const tested = settings.testedComfyVersion
+        const newer = Boolean(connected && tested && connected !== tested)
+        return <div className={`doctor-check ${newer ? 'warn' : 'ok'}`}><span>{newer ? <AlertCircle size={14} /> : <Check size={14} />}</span><div><strong>{newer ? 'ComfyUI updated since verification' : 'Graphs verified against this engine'}</strong><small>{connected ? `Connected engine: ${connected}. ` : 'Engine offline — version unknown. '}{tested ? `Graphs last verified against: ${tested}.` : 'No verification recorded yet; it is captured on the next successful connection.'}{newer ? ' Node changes in newer ComfyUI builds can break graphs — re-run the H3 Quality Test before trusting new renders, then the record updates on save.' : ''}</small></div></div>
+      })()}
+    </section>
+    <section className="settings-section status-subsection-section" aria-label="Krea 2 edit modes availability">
+<div className="settings-heading"><div><Wand2 size={19} /><span><strong>Krea 2 edit modes</strong><small>Availability + recipe readout — the real editing UI lives on the canvas/workbench surfaces (the settings exit, R-15).</small></span></div></div>
+<details className="settings-subsection" data-settings-krea2-details><summary><strong>Edit-mode availability &amp; recipes</strong><small>per-workflow graphs over the resident Krea 2 pair</small></summary><div className="settings-heading"><div><Wand2 size={19} /><span><strong>Krea 2 edit modes</strong><small>Per-workflow edit graphs over the resident Krea 2 checkpoint pair — availability-gated here; the canvas redesign owns the real editing UI.</small></span></div><span className={`health-pill ${editModesReady === krea2EditModes.length ? 'online' : ''}`}>{editModesReady} of {krea2EditModes.length} ready</span></div>
+      <div className="preset-row" aria-label="Edit mode picker">
+        {krea2EditModes.map(({ family, detection }) => <button type="button" className={selectedKrea2EditMode === family.id ? 'tier-selected' : ''} key={family.id} onClick={() => setSelectedKrea2EditMode(family.id)}><strong>{family.label}</strong><small>{detection.available ? `${family.checkpoint === 'raw' ? 'RAW' : 'Turbo'} · ${family.recipe.steps} steps · CFG ${family.recipe.cfg}` : 'Needs setup'}</small></button>)}
+      </div>
+      {(() => {
+        const selected = krea2EditModes.find(({ family }) => family.id === selectedKrea2EditMode) ?? krea2EditModes[0]
+        if (!selected) return null
+        const { family, detection } = selected
+        const dialCopy: Record<string, string> = {
+          groundingPx: `grounding_px ${KREA2_RECIPE_PINS.groundingPx.default} (dial ${KREA2_RECIPE_PINS.groundingPx.min}–${KREA2_RECIPE_PINS.groundingPx.max}: lower = stronger edits, higher = stronger identity)`,
+          refBoost: `ref_boost ${KREA2_RECIPE_PINS.refBoost.default} (likeness; UI cap ${KREA2_RECIPE_PINS.refBoost.uiCap} — above ${KREA2_RECIPE_PINS.refBoost.removalBreakAbove} breaks removals)`,
+          refBoostA: 'ref_boost_a — the same likeness dial for the scene reference',
+          fitMode: `fit geometry '${KREA2_RECIPE_PINS.fitMode.default}' ('${KREA2_RECIPE_PINS.fitMode.legacy}' only for older weights)`,
+          steps: `steps ${family.recipe.steps} (band ${KREA2_RECIPE_PINS.turboStepsBand.min}–${KREA2_RECIPE_PINS.turboStepsBand.max})`,
+          cfg: 'CFG — above 1 the negative is grounded automatically (empty prompt + same image)',
+          mask: 'mask: white generates, black is preserved (Mask Editor)',
+          padding: `padding per side on a ${KREA2_RECIPE_PINS.anypaint.paddingStep}px grid; mask + padding in one request = mixed`,
+        }
+        const missing = [...detection.missingNodes.map((nodeClass) => `node ${nodeClass} (node pack)`), ...detection.missingModels]
+        return <div className={`doctor-check ${detection.available ? 'ok' : 'warn'}`}>
+          <span>{detection.available ? <Check size={14} /> : <AlertCircle size={14} />}</span>
+          <div>
+            <strong>{family.label}{detection.available && detection.resolved ? ` — ${detection.resolved.diffusion} + ${detection.resolved.lora}` : ''}</strong>
+            <small>{family.ui.description}</small>
+            <p>{family.recipe.sampler}+{family.recipe.scheduler} · LoRA @{family.recipe.loraStrength} · {family.recipeTriple.carrier}</p>
+            {family.ui.promptGuidance && <p>Prompting: {family.ui.promptGuidance}</p>}
+            <p>Dials: {family.dials.map((dial) => dialCopy[dial]).filter(Boolean).join(' · ') || 'pinned recipe — no dials'}</p>
+            {family.ui.warning && <p>{family.ui.warning}</p>}
+            {missing.length > 0 && <p>Missing: {missing.join('; ')}. {family.ui.installHint}</p>}
+          </div>
+        </div>
+      })()}</details>
+</section>
+<section className="settings-section status-subsection-section" aria-label="About and license">
+<div className="settings-heading"><div><Scale size={19} /><span><strong>About &amp; license</strong><small>The app is free software — AGPLv3; the full third-party inventory lives in docs/LICENSES.md.</small></span></div></div>
+<details className="settings-subsection" data-settings-about-details><summary><strong>License &amp; source</strong><small>AGPLv3 + the third-party inventory</small></summary><div className="settings-heading"><div><Scale size={19} /><span><strong>License &amp; source</strong><small>This app is free software — its source belongs to everyone who uses it.</small></span></div></div>
+      <p className="settings-note">MiniMax Studio is licensed under the <strong>GNU AGPLv3</strong> (<a href="https://github.com/Cobdog/MINIMAX-DESKTOP/blob/main/LICENSE" target="_blank" rel="noreferrer">full text</a>). The corresponding source lives at <a href="https://github.com/Cobdog/MINIMAX-DESKTOP" target="_blank" rel="noreferrer">github.com/Cobdog/MINIMAX-DESKTOP</a> — if you run a modified copy for others over a network, share your source with them. Third-party components and model-weight licenses are inventoried in <a href="https://github.com/Cobdog/MINIMAX-DESKTOP/blob/main/docs/LICENSES.md" target="_blank" rel="noreferrer">docs/LICENSES.md</a>.</p></details>
+</section>
+</section>
   </div>
 }
 

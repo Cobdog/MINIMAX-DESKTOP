@@ -196,10 +196,11 @@ test('M4: saving settings surfaces the server\'s nonexistent-path warnings', asy
   }
 })
 
-// M2 — Settings reachability: the deep-link opens the dock on the canvas,
-// and the datasets + images surfaces carry the affordance (their hrefs
-// preserve the LAN token when one is present).
-test('M2: ?settings=1 opens the dock; datasets and images surfaces link to it', async ({ page }) => {
+// M2 — Settings reachability, R-21-shaped (Wave 3): the deep-link still
+// opens the dock on the canvas, and the datasets + images surfaces open the
+// dock ON THEIR OWN SURFACE — the view is never replaced (audit M7's fix;
+// the old full-page href navigation is gone).
+test('M2/R-21: ?settings=1 opens the dock; datasets and images dock it without leaving the surface', async ({ page }) => {
   const problems = await trackErrors(page)
   await resetSession(page)
   await page.goto('/?settings=1')
@@ -208,10 +209,16 @@ test('M2: ?settings=1 opens the dock; datasets and images surfaces link to it', 
   await page.locator('[data-canvas-settings-close]').click()
   await expect(page.locator('[data-canvas-settings-dock]')).toHaveCount(0)
 
+  // Datasets: the dock opens ON the datasets surface (R-21) — the surface
+  // stays mounted behind it (the datasets titlebar is still in the DOM).
   await page.goto('/?datasets=1')
-  const dsLink = page.locator('[data-ds-settings-link]')
-  await expect(dsLink).toBeVisible()
-  await expect(dsLink).toHaveAttribute('href', /\/\?settings=1/)
+  const dsButton = page.locator('[data-ds-settings-button]')
+  await expect(dsButton).toBeVisible()
+  await dsButton.click()
+  await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('[data-ds-settings-button]')).toBeVisible()
+  await page.locator('[data-canvas-settings-close]').click()
+  await expect(page.locator('[data-canvas-settings-dock]')).toHaveCount(0)
 
   // The images workbench needs a live session chain before its header
   // renders — seed one through the documents API (the surface's own e2e
@@ -222,9 +229,13 @@ test('M2: ?settings=1 opens the dock; datasets and images surfaces link to it', 
   await page.request.post('/api/lan/documents/session', { data: { openProjects: [project.project.id], activeProject: project.project.id } })
   try {
     await page.goto('/?images=1')
-    const iwLink = page.locator('[data-iw-settings-link]')
-    await expect(iwLink).toBeVisible({ timeout: 20_000 })
-    await expect(iwLink).toHaveAttribute('href', /\/\?settings=1/)
+    const iwButton = page.locator('[data-iw-settings-button]')
+    await expect(iwButton).toBeVisible({ timeout: 20_000 })
+    await iwButton.click()
+    await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('[data-iw-settings-button]')).toBeVisible()
+    await page.locator('[data-canvas-settings-close]').click()
+    await expect(page.locator('[data-canvas-settings-dock]')).toHaveCount(0)
   } finally {
     await resetSession(page)
   }
@@ -329,6 +340,53 @@ test('M9/M10/M11: dock geometry — actions reachable at 420px, close reachable 
   const settingsBox = await page.locator('[data-canvas-settings-dock]').boundingBox()
   await page.mouse.click(settingsBox!.x + 60, settingsBox!.y + 8)
   expect(await ownerAt(diagnosticsIcon!.x + 2, diagnosticsIcon!.y + 2), 'a grabbed settings dock now covers the diagnostics header band (raise-on-grab)').toBe('settings')
+})
+
+// R-15 (Wave 3) — the three-group IA against the audit's MEASURED baseline
+// (the contract): 17 sections / 15,147 px of scroll / 144 controls in one
+// flat column collapsed into the 3-group shape with a sticky rail, the
+// store (fetchables) promoted to its own Library surface, the sticky
+// dirty-aware save at the dock's foot, and the run-tool/prose exits folded
+// into collapsed subsections. The ceiling is generous on purpose — the
+// assertion is the COLLAPSE (an order of magnitude), not a pixel count.
+test('R-15: the three-group Settings IA — measured collapse from the 15k-px baseline', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?settings=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible()
+  await page.waitForTimeout(1_200)
+  // The shape: three named groups + the sticky rail + the sticky save.
+  await expect(page.locator('[data-settings-nav]')).toBeVisible()
+  for (const group of ['setup', 'defaults', 'status']) {
+    await expect(page.locator(`[data-settings-group="${group}"]`)).toBeVisible()
+  }
+  await expect(page.locator('[data-settings-save-footer]')).toBeVisible()
+  await expect(page.locator('[data-save-settings]')).toBeVisible()
+  // The store is NOT embedded here anymore (its own Library surface).
+  await expect(page.locator('[data-canvas-settings-body] .fetch-section')).toHaveCount(0)
+  await expect(page.locator('[data-open-library]')).toBeVisible()
+  const stats = await page.evaluate(() => {
+    const scroller = document.querySelector('[data-canvas-settings-body]')
+    if (!scroller) return null
+    return {
+      scrollHeight: scroller.scrollHeight,
+      controls: scroller.querySelectorAll('input, select, textarea, button').length,
+      sections: scroller.querySelectorAll('.settings-section').length,
+    }
+  })
+  expect(stats, 'the dock body exists').not.toBeNull()
+  console.log(`R15_MEASURED scrollHeight=${stats!.scrollHeight} controls=${stats!.controls} sections=${stats!.sections} (baseline: 15147px / 144 controls / 17 sections)`)
+  // The collapse: an order of magnitude under the baseline scroll, controls
+  // well under 144 (the Library's store controls left the page), sections
+  // fewer than the flat 16-17 (exits folded).
+  expect(stats!.scrollHeight, 'the scroll collapses from the 15,147px baseline').toBeLessThan(8_000)
+  expect(stats!.controls, 'the control count collapses from 144').toBeLessThan(110)
+  // The section COUNT is a wash by design (the store's one section left; the
+  // library entry + folded subsections arrived) — the collapse that matters
+  // is the scroll, the controls, and the IA shape asserted above.
+  expect(stats!.sections).toBeLessThan(17)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
 // M13 — the boot-time 400: the debounced persist used to fire an empty

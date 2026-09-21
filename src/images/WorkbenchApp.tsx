@@ -20,6 +20,10 @@ import { useStudioSession } from '../hooks/useStudioSession'
 import { useGenerationQueue } from '../hooks/useGenerationQueue'
 import { useLivePreview } from '../lib/useLivePreview'
 import { useSessionStore } from '../state/sessionStore'
+import { submitH3DiagnosticPair } from '../lib/h3Diagnostics'
+import { SettingsDock } from '../canvas/SettingsDock'
+import { LibraryDock } from '../components/LibraryDock'
+import { CanvasSessionContext } from '../canvas/sessionContext'
 import { useJobsStore } from '../state/jobsStore'
 import { useCanvasStore, engineBridge } from '../canvas/store'
 import { documentsApi } from '../canvas/api'
@@ -56,7 +60,9 @@ function experimentsEnabled(): boolean {
 
 /** The engine/session host for the workbench route (the CanvasEngineHost
  * pattern: the shared hooks keep one queue, one engine session — mounted
- * outside the canvas shell). */
+ * outside the canvas shell). (R-21, Wave 3) the host PROVIDES the session
+ * context so the docked Settings + Library surfaces mount HERE too —
+ * opening settings from the workbench no longer replaces the view. */
 function WorkbenchEngineHost({ children }: { children: ReactNode }) {
   const toast = useCanvasStore((state) => state.toast)
   const notify = useCallback((tone: 'error' | 'success' | 'neutral', text: string) => toast(tone, text), [toast])
@@ -66,7 +72,22 @@ function WorkbenchEngineHost({ children }: { children: ReactNode }) {
   engineBridge.clientId = live.clientId
   engineBridge.cancellationRequests = queue.cancellationRequests
   engineBridge.cancelJob = (job) => void queue.cancelJob(job)
-  return <>{children}</>
+  const runDiagnostics = async () => {
+    const state = useSessionStore.getState()
+    if (!state.settings) return 'Studio settings are still loading.'
+    return submitH3DiagnosticPair(
+      { settings: state.settings, connected: state.status.connected, models: state.models, info: state.info, clientId: engineBridge.clientId },
+      {
+        notify: (tone2, text) => useCanvasStore.getState().toast(tone2, text),
+        setJobs: (update) => useJobsStore.getState().setJobs(update),
+      },
+    )
+  }
+  return <CanvasSessionContext.Provider value={{ session, runDiagnostics }}>
+    {children}
+    <SettingsDock />
+    <LibraryDock />
+  </CanvasSessionContext.Provider>
 }
 
 const MODE_GROUPS: Array<{ mode: string; label: string; families: string[] }> = [
@@ -560,7 +581,7 @@ function WorkbenchSurface() {
             session host but no docked settings panel; one click opens the
             dock on the canvas). */}
         <SurfaceSwitcher />
-        <a className="iw-back" data-iw-settings-link href={`/?settings=1${token ? `&token=${encodeURIComponent(token)}` : ''}`} title="Settings — opens docked on the canvas surface"><Settings size={14} /> settings</a>
+        <button type="button" className="iw-back" data-iw-settings-button onClick={() => useCanvasStore.getState().setSettingsDock(true)} title="Settings — docked right here (R-21: opening it never leaves this surface)"><Settings size={14} /> settings</button>
         <strong>H3 Image Workbench</strong>
         <span className={`iw-engine ${sessionState.status.connected ? 'ok' : 'warn'}`} data-iw-engine={sessionState.status.connected ? 'on' : 'off'}>
           {sessionState.status.connected ? 'engine online' : 'engine offline'}

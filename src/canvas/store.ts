@@ -264,6 +264,14 @@ type CanvasState = {
   gapMenu: { planId: string; afterSegmentId: string } | null
   /** Phase 4 (§8): Settings docked as a floating panel (the thin surface). */
   settingsDock: boolean
+  /** R-15 (Wave 3): the Library / Get-models surface — FetchBrowser promoted
+   *  out of the settings scroll into its own overlay, reachable from every
+   *  surface (the typed-hole fetch affordances deep-link through focus ids). */
+  libraryDock: boolean
+  /** The fetch-entry focus ids an opener passed in (consumed once by the
+   *  FetchBrowser inside the Library dock — the openFetchBrowser deep-link
+   *  machinery, R-15/R-19). */
+  libraryFocus: string[] | null
   /** Dock stacking counter (review M11, 2026-09-19): a dock that opens or is
    *  grabbed takes the NEXT z — three open docks no longer stack at the same
    *  z with DOM order deciding the winner. Each dock keeps its own assigned
@@ -330,6 +338,8 @@ type CanvasActions = {
    *  plan id, or null with the refusal reasons toasted. */
   applyLoraTimeline(chainId: string): Promise<{ ok: boolean; planId?: string; reasons?: string[] }>
   setSettingsDock(open: boolean): void
+  /** R-15: open the Library / Get-models overlay (optionally focusing catalog entries). */
+  setLibraryDock(open: boolean, focusEntryIds?: string[]): void
   /** Dock stacking (review M11): take the next z for a dock opening or
    *  being grabbed; returns the value to apply. */
   raiseDock(): number
@@ -787,6 +797,8 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     timelinePlanId: null,
     gapMenu: null,
     settingsDock: false,
+    libraryDock: false,
+    libraryFocus: null,
     dockZ: 60,
     diagnosticsDock: false,
     audioDock: null,
@@ -1264,6 +1276,9 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
 
     setSettingsDock: (open) => {
       set({ settingsDock: open })
+    },
+    setLibraryDock: (open, focusEntryIds) => {
+      set({ libraryDock: open, ...(open && focusEntryIds ? { libraryFocus: focusEntryIds } : {}) })
     },
     raiseDock: () => {
       const next = get().dockZ + 1

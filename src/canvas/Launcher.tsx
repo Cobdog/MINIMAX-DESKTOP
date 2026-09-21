@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AudioLines, Clapperboard, FileVideo, ImagePlus, MessageSquareOff, Music2, Plus, Sparkles, Upload } from 'lucide-react'
 import { PromptLibraryBrowser } from '../components/PromptLibraryBrowser'
 import { FirstRunNotice } from './FirstRunNotice'
+import { FirstRunWizard } from './FirstRunWizard'
 import { useCanvasStore } from './store'
 
 export function Launcher({ onPickFile }: { onPickFile(): void }) {
@@ -57,6 +58,10 @@ export function Launcher({ onPickFile }: { onPickFile(): void }) {
 
   return <div className="canvas-launcher" data-canvas-launcher>
     <div className="canvas-launcher-inner">
+      {/* (R-16, Wave 3) The first-run wizard owns the fresh-home journey
+          (four thin steps, skippable/resumable); the notice below stays as
+          the fallback surface for every path that skips or outruns it. */}
+      <FirstRunWizard />
       {/* QOL wave (rrxlw2r): model-roots-empty onboarding — the app is never
           silently dead on a fresh install; dismissible once per browser. */}
       <FirstRunNotice />

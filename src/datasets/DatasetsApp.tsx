@@ -10,7 +10,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Camera, Database, Download, FolderOpen, Layers, LoaderCircle, Pin, Plus, RefreshCw, Search, Settings, Sparkles, Trash2, Upload, Video } from 'lucide-react'
 import { datasetsApi, mediaUrlFor, type AspectEntry, type DashboardPayload, type DatasetSettings, type ExportResultPayload, type LibraryLayer, type LibrarySource } from './api'
-import { authToken } from '../lib/apiClient'
+import { useStudioSession } from '../hooks/useStudioSession'
+import { submitH3DiagnosticPair } from '../lib/h3Diagnostics'
+import { useSessionStore } from '../state/sessionStore'
+import { useJobsStore } from '../state/jobsStore'
+import { SettingsDock } from '../canvas/SettingsDock'
+import { LibraryDock } from '../components/LibraryDock'
+import { CanvasSessionContext } from '../canvas/sessionContext'
+import { CanvasToasts } from '../canvas/CanvasToasts'
+import { useCanvasStore } from '../canvas/store'
 import { SurfaceSwitcher } from '../surfaces/SurfaceSwitcher'
 import { CropEditor } from './CropEditor'
 import { CaptionPanel } from './CaptionPanel'
@@ -27,7 +35,40 @@ function floorBadge(source: LibrarySource): string {
   return ''
 }
 
+/** (R-21, Wave 3) The datasets session host — the MINIMAL one: the session
+ * hook (settings/engine/model-registry) + the diagnostics runner, providing
+ * the session context the docked Settings + Library surfaces consume. No
+ * queue/live-preview here — this surface renders nothing; one poller per
+ * ACTIVE surface, the house discipline (surfaces are full mounts, so the
+ * cost is the same as the canvas's own host). */
+function DatasetsSessionHost({ children }: { children: React.ReactNode }) {
+  const session = useStudioSession()
+  const runDiagnostics = async () => {
+    const state = useSessionStore.getState()
+    if (!state.settings) return 'Studio settings are still loading.'
+    return submitH3DiagnosticPair(
+      { settings: state.settings, connected: state.status.connected, models: state.models, info: state.info, clientId: undefined },
+      {
+        notify: (tone, text) => useCanvasStore.getState().toast(tone, text),
+        setJobs: (update) => useJobsStore.getState().setJobs(update),
+      },
+    )
+  }
+  return <CanvasSessionContext.Provider value={{ session, runDiagnostics }}>
+    {children}
+    <SettingsDock />
+    <LibraryDock />
+    <CanvasToasts />
+  </CanvasSessionContext.Provider>
+}
+
 export function DatasetsApp() {
+  return <DatasetsSessionHost>
+    <DatasetsSurface />
+  </DatasetsSessionHost>
+}
+
+function DatasetsSurface() {
   const [tab, setTab] = useState<Tab>('library')
   const [library, setLibrary] = useState<{ sources: LibrarySource[]; trashed: { sources: Array<{ id: string; name: string; ingestPath: string; layers: number }> } } | null>(null)
   const [aspects, setAspects] = useState<AspectEntry[]>([])
@@ -295,11 +336,10 @@ export function DatasetsApp() {
         ))}
       </nav>
       <div className="ds-titlebar-right">
-        {/* Settings reachability (review M2, g5x37k8 2026-09-19): this
-            surface mounts no session host, so the docked panel lives on the
-            canvas — the deep-link opens it there in one click (token kept:
-            a tokened session must not lose its auth crossing surfaces). */}
-        <a className="ds-btn ghost" data-ds-settings-link href={`/?settings=1${authToken() ? `&token=${encodeURIComponent(authToken())}` : ''}`} title="Settings — opens docked on the canvas surface"><Settings size={13} /></a>
+        {/* (R-21, Wave 3) Settings reachability: this surface mounts its own
+            session host now, so the docked panel opens HERE — no navigation,
+            the dataset view is never replaced (audit M7's fix). */}
+        <button type="button" className="ds-btn ghost" data-ds-settings-button onClick={() => useCanvasStore.getState().setSettingsDock(true)} title="Settings — docked right here (R-21: opening it never leaves this surface)"><Settings size={13} /></button>
         {settings && <span className="ds-trigger" title="Dataset trigger token">trigger: <code>{settings.triggerToken || '(unset)'}</code></span>}
         <span className={`ds-rife ${rifeAvailable ? 'ok' : ''}`} title={rifeAvailable ? 'rife-ncnn-vulkan detected — preferred interpolator' : 'rife-ncnn-vulkan absent — minterpolate fallback (A1 final)'}>{rifeAvailable ? 'RIFE' : 'minterpolate'}</span>
         <button type="button" className="ds-btn ghost" title="Refresh — also clears the error banner (a user-initiated refresh)" onClick={() => void refresh({ clearError: true })}><RefreshCw size={13} /></button>

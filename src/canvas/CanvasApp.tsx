@@ -31,6 +31,8 @@ import { PropertiesPanel } from './PropertiesPanel'
 import { Launcher } from './Launcher'
 import { Radar } from './Radar'
 import { SettingsDock } from './SettingsDock'
+import { LibraryDock } from '../components/LibraryDock'
+import { CanvasToasts } from './CanvasToasts'
 import { Substrate } from './Substrate'
 import { useCanvasStore } from './store'
 import { useJobsStore } from '../state/jobsStore'
@@ -49,7 +51,6 @@ export function CanvasApp() {
   const activeProjectId = useCanvasStore((state) => state.activeProjectId)
   const documents = useCanvasStore((state) => state.documents)
   const tiles = useCanvasStore((state) => state.tiles)
-  const toasts = useCanvasStore((state) => state.toasts)
   const boot = useCanvasStore((state) => state.boot)
   const select = useCanvasStore((state) => state.select)
   const ingestFile = useCanvasStore((state) => state.ingestFile)
@@ -226,19 +227,13 @@ export function CanvasApp() {
       <PoseRigDock />
       <AudioDock />
       <SettingsDock />
+      <LibraryDock />
       <DiagnosticsDock />
       <IndexOverlay />
       <LibraryOverlay />
       <TimelineOverlay />
     </CanvasEngineHost>
-    <div className="canvas-toasts" aria-live="polite">
-      {toasts.map((toast) => (
-        <div key={toast.id} className={`canvas-toast ${toast.tone}`} data-canvas-toast={toast.tone}>
-          <span>{toast.text}</span>
-          <button type="button" aria-label="Dismiss" onClick={() => useCanvasStore.getState().dismissToast(toast.id)}>×</button>
-        </div>
-      ))}
-    </div>
+    <CanvasToasts />
     <input
       ref={fileInputRef}
       type="file"
