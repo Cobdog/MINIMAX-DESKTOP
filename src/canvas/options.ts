@@ -10,7 +10,6 @@
  * store computes the facts; the tests feed synthetic facts. Ranking per L19:
  * type-natural generation routes first, category visible on every row.
  */
-import { frameCount } from '../lib/workflow'
 import type { GenerationMode } from '../types'
 
 export type EndpointDirection = 'consume' | 'produce'
@@ -37,6 +36,9 @@ export type EndpointOption = {
   /** The store action this row performs when picked. */
   action:
     | { kind: 'generate'; mode: GenerationMode }
+    /** (R-20) The audio engines' canonical home is the produce menu — the
+     *  launcher chips retired (one home per engine). */
+    | { kind: 'audio-dock'; engine: 'music3' | 'acestep' }
     | { kind: 'set-first-frame' }
     | { kind: 'set-last-frame' }
     | { kind: 'add-reference' }
@@ -50,11 +52,15 @@ export type EndpointOption = {
   hint?: string
 }
 
-/** The parameter hints every generation row carries: the official H3 frame
- *  grid (frames = 17n+5 by construction), 32-pixel resolution multiples, and
- *  the 2–15 s duration clamp. */
+/** The parameter hints every generation row carries — HUMANIZED (R-22, Wave
+ *  3): the audit's finding was engine internals as user-facing copy
+ *  ("158 frames (17n+5 grid) · 1344x768 (32px multiples)"). The row speaks
+ *  outcome (a ~N s clip at a quality band); the frame grid stays in the
+ *  take's provenance where the power user reads it.
+ */
 export function parameterHint(duration = 6, resolution = '1344x768'): string {
-  return `${frameCount(duration)} frames (17n+5 grid) · ${resolution} (32px multiples) · 2–15 s`
+  const band = resolution.startsWith('864x') || resolution.startsWith('608x') ? 'SD' : resolution.startsWith('768x1344') ? 'HD portrait' : 'HD'
+  return `~${duration.toFixed(1)} s clip · ${band} (${resolution})`
 }
 
 
@@ -142,12 +148,30 @@ export function endpointOptions(direction: EndpointDirection, sourceKinds: Reado
   }
   // Phase 4: latent continuation RENDERS — the Motion-Context machinery
   // loads the saved sampler latent as never-denoised conditioning (no
-  // re-encode). The engine-side nodes gate honestly.
+  // re-encode). The engine-side nodes gate honestly. (R-22) the row is
+  // OUTCOME-named — the storage substrate is not the user's decision axis.
   rows.push({
-    id: 'produce:fork-latents', group: 'fork', label: 'Fork — latents on disk', description: 'Continue from the saved sampler latent — Motion-Context conditioning, no re-encode.',
+    id: 'produce:fork-latents', group: 'fork', label: 'Continue from this take (no re-encode)', description: 'The next chain picks up this take’s saved latent — Motion-Context conditioning, no re-encode.',
     action: { kind: 'fork', substrate: 'latents' }, available: availability.motionContextReady,
     reason: availability.motionContextReady ? undefined : 'Latent continuation needs the ComfyUI-H3-Motion-Context custom nodes — install the pack manually, then refresh the engine.',
     hint: 'the take’s saved clip pins the context rows · motion + audio continue',
+  })
+  // (R-20) The audio engines: one canonical home each — the produce menu
+  // (the launcher chips are retired). Availability-gated with their missing
+  // list as the reason, exactly like every other row.
+  // Availability note: the dock rows stay ENABLED offline — the DOCK is the
+  // honest gate (its submit carries the refusal with the missing list, the
+  // established offline pattern); disabling here would kill the authoring
+  // surface instead of gating the render. The needs ride the hint.
+  rows.push({
+    id: 'produce:music3', group: 'generate', label: 'Music 3 — a complete song', description: 'The audio dock opens on this chain — caption, lyrics, seconds; the track lands as its own object.',
+    action: { kind: 'audio-dock', engine: 'music3' }, available: true,
+    hint: availability.music3.available ? 'complete songs · own object' : `author now · render needs ${availability.music3.missing.join('; ')}`,
+  })
+  rows.push({
+    id: 'produce:acestep', group: 'generate', label: 'ACE-Step — a music track', description: 'The audio dock opens on this chain — tag prompt, instrumentation, BPM; the track lands as its own object.',
+    action: { kind: 'audio-dock', engine: 'acestep' }, available: true,
+    hint: availability.acestep.available ? 'tag-prompted tracks · own object' : `author now · render needs ${availability.acestep.missing.join('; ')}`,
   })
   return rows
 }

@@ -504,7 +504,7 @@ test('typed-hole menus open at the endpoints and fork creates chain + edge', asy
   const menu = page.locator('[data-canvas-endpoint-menu="produce"]')
   await expect(menu).toBeVisible()
   await expect(menu.locator('[data-canvas-menu-row="produce:ref2v"]')).toBeEnabled()
-  await expect(menu.locator('[data-canvas-menu-row="produce:ref2v"] .canvas-menu-row-hint')).toContainText('17n+5')
+  await expect(menu.locator('[data-canvas-menu-row="produce:ref2v"] .canvas-menu-row-hint')).toContainText('~6.0 s clip') // R-22: humanized outcome, not engine internals
   await expect(menu.locator('[data-canvas-menu-row="produce:fork-decoded"]')).toBeEnabled()
   await expect(menu.locator('[data-canvas-menu-row="produce:fork-decoded"] .canvas-menu-row-hint')).toContainText('never altered')
 
@@ -525,7 +525,7 @@ test('typed-hole menus open at the endpoints and fork creates chain + edge', asy
   await page.locator('[data-canvas-tile]').nth(1).locator('[data-canvas-endpoint="head"]').click()
   const consume = page.locator('[data-canvas-endpoint-menu="consume"]')
   await expect(consume).toBeVisible()
-  await expect(consume.locator('footer')).toContainText('Select the object to consume from')
+  await expect(consume.locator('footer')).toContainText('Pick the source object first')
   await expect(consume.locator('[data-canvas-menu-row="consume:first-frame"]')).toHaveCount(0)
   await page.keyboard.press('Escape')
   await expect(consume).toHaveCount(0)
@@ -1487,13 +1487,14 @@ test('engines-as-ops complete: the audio docks (probe seams + honest gating)', a
   expect(ace.graph.textEncode).toBe(true)
   expect(ace.graph.saveAudio).toBe(true)
 
-  // The audio dock: the bottom bar's nothing-selected context opens Music 3;
-  // offline the submit button carries the honest refusal. One press, one
-  // action (app-tour wave d6iy68r, review m1): the FIRST Escape deselects,
-  // returning the bar to its empty context.
+  // The audio dock: (R-20) the engine's ONE canonical home is the typed-hole
+  // produce menu — the bar's chips are retired. Open the first object's
+  // tail menu and pick the Music 3 row.
   await page.keyboard.press('Escape')
   await expect(page.locator('.canvas-tile.selected')).toHaveCount(0)
-  await page.locator('[data-canvas-bar-music3]').click()
+  const audioSourceTile = page.locator('[data-canvas-tile]').first()
+  await audioSourceTile.locator('[data-canvas-endpoint="tail"]').click()
+  await page.locator('[data-canvas-menu-row="produce:music3"]').click()
   const dock = page.locator('[data-canvas-audio-dock]')
   await expect(dock).toBeVisible()
   await expect(dock).toHaveAttribute('data-canvas-audio-engine', 'music3')
@@ -1936,8 +1937,9 @@ test('MoviePlanner retired (5b): no movie tab; the plan surface is the timeline;
 
   // (The Studios dock five-tab block was removed with the Studios — Phase
   // 0, 2026-09-20; the movie-tab absence checks died with the dock.)
-  // The launcher's movie-plan chip opens the TIMELINE (the Director Suite).
-  await page.locator('[data-canvas-chip="movie"]').click()
+  // (R-20) The timeline opens from its titlebar button (the launcher chip is
+  // retired — one home per thing).
+  await page.locator('[data-canvas-timeline-button]').click()
   await expect(page.locator('[data-canvas-timeline]')).toBeVisible()
   await page.keyboard.press('Escape')
 
@@ -3186,9 +3188,15 @@ test('the floating docks keep their grid containment against react-rnd inline di
   await page.goto('/?canvas=1')
   await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
 
-  // The audio dock via the launcher chip (the launcher unmounts once the
-  // canvas has objects — open it first, assert, close it).
-  await page.locator('[data-canvas-chip="music3"]').click()
+  // (R-20) The audio engines' one canonical home is the typed-hole produce
+  // menu — the launcher chip is retired. Spawn the seed first (it is the
+  // produce source), then its tail menu opens the dock.
+  await page.locator('[data-canvas-prompt]').fill('dock containment probe')
+  await page.locator('[data-canvas-submit]').click()
+  const seedTile = page.locator('[data-canvas-tile]').first()
+  await expect(seedTile).toBeVisible({ timeout: 10_000 })
+  await seedTile.locator('[data-canvas-endpoint="tail"]').click()
+  await page.locator('[data-canvas-menu-row="produce:music3"]').click()
   const audioDock = page.locator('[data-canvas-audio-dock]')
   await expect(audioDock).toBeVisible()
   await expect.poll(() => audioDock.evaluate((element) => getComputedStyle(element).display)).toBe('grid')
@@ -3196,9 +3204,7 @@ test('the floating docks keep their grid containment against react-rnd inline di
   await expect(audioDock).toHaveCount(0)
 
   // The properties panel (the node sidebar) opens on the spawned seed.
-  await page.locator('[data-canvas-prompt]').fill('dock containment probe')
-  await page.locator('[data-canvas-submit]').click()
-  await expect(page.locator('[data-canvas-tile]').first()).toBeVisible({ timeout: 10_000 })
+  await seedTile.click()
   const properties = page.locator('[data-canvas-properties]')
   await expect(properties).toBeVisible()
   await expect.poll(() => properties.evaluate((element) => getComputedStyle(element).display)).toBe('grid')

@@ -37,6 +37,7 @@ import { useCanvasStore } from './store'
 
 export function SettingsDock() {
   const open = useCanvasStore((state) => state.settingsDock)
+  const focusSection = useCanvasStore((state) => state.settingsDockSection)
   const setSettingsDock = useCanvasStore((state) => state.setSettingsDock)
   const setLibraryDock = useCanvasStore((state) => state.setLibraryDock)
   // (R-01) The pack board re-resolves its live chips on every object_info
@@ -141,11 +142,15 @@ export function SettingsDock() {
           onCheck={() => void checkConnection(settings.comfyUrl)}
           onRunDiagnostics={() => void runDiagnosticsNow()}
           onOpenLibrary={(focusEntryIds) => setLibraryDock(true, focusEntryIds)}
+          focusSection={focusSection ?? undefined}
         />
       </ErrorBoundary>
     </div>
     {/* R-15/M1: the sticky, dirty-aware save — always at the dock's foot,
         never a 15k-px scroll away. */}
+    {/* The section deep-link is consumed on open (R-19): scroll once the
+        view mounts, then clear it so reopen lands at the top. */}
+    {focusSection && <SettingsSectionFocus section={focusSection} onConsumed={() => useCanvasStore.setState({ settingsDockSection: null })} />}
     <footer className="canvas-settings-footer" data-settings-save-footer>
       <span className={`settings-dirty-state ${dirty ? 'dirty' : ''}`} data-settings-dirty={dirty ? 'unsaved' : 'saved'} role="status">
         {dirty ? 'Unsaved changes' : 'All changes saved'}
@@ -155,4 +160,17 @@ export function SettingsDock() {
       </button>
     </footer>
   </Rnd>
+}
+
+/** Scrolls the settings body to the deep-linked section once, then reports
+ *  consumption (the param is one-shot). */
+function SettingsSectionFocus(props: { section: string; onConsumed(): void }) {
+  useEffect(() => {
+    const target = document.querySelector(`[data-settings-section="${props.section}"]`)
+    if (target) target.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    const timer = window.setTimeout(props.onConsumed, 400)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  return null
 }

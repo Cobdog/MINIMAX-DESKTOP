@@ -703,10 +703,20 @@ function WorkbenchSurface() {
 
           {family?.ui.warning && <p className="iw-warning" data-iw-family-warning>{family.ui.warning}</p>}
           {!detectionOf(settings.family)?.available && (
-            <p className="iw-unavailable-note" data-iw-unavailable>
-              {detectionOf(settings.family)?.missingModels.join('; ') || detectionOf(settings.family)?.missingNodes.join('; ') || 'unavailable'}
-              {family?.ui.installHint ? ` — ${family.ui.installHint}` : ''}
-            </p>
+            <div className="iw-unavailable-note" data-iw-unavailable>
+              <p>
+                {detectionOf(settings.family)?.missingModels.join('; ') || detectionOf(settings.family)?.missingNodes.join('; ') || 'unavailable'}
+                {family?.ui.installHint ? ` — ${family.ui.installHint}` : ''}
+              </p>
+              {/* (R-19) The unavailable family is never a dead end at the
+                  choice point: the Library is one click away (weights and
+                  node packs, license verdicts on every row). */}
+              <button type="button" className="canvas-chip" data-iw-open-library
+                title="Open the library — the missing weights and packs are fetchable there with consent"
+                onClick={() => useCanvasStore.getState().setLibraryDock(true)}>
+                Get the missing pieces…
+              </button>
+            </div>
           )}
 
           {(family?.kind === 'edit' || family?.kind === 'generate-directed') && (

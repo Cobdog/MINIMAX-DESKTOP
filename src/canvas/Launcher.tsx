@@ -9,8 +9,7 @@
  * launcher comes alive, no mode switch; a refused engine surfaces honestly.
  */
 import { useEffect, useRef, useState } from 'react'
-import { AudioLines, Clapperboard, FileVideo, ImagePlus, MessageSquareOff, Music2, Plus, Sparkles, Upload } from 'lucide-react'
-import { PromptLibraryBrowser } from '../components/PromptLibraryBrowser'
+import { Clapperboard, FileVideo, ImagePlus, MessageSquareOff, Plus, Upload } from 'lucide-react'
 import { FirstRunNotice } from './FirstRunNotice'
 import { FirstRunWizard } from './FirstRunWizard'
 import { useCanvasStore } from './store'
@@ -26,7 +25,6 @@ export function Launcher({ onPickFile }: { onPickFile(): void }) {
   const [prompt, setPrompt] = useState('')
   const [mediaType, setMediaType] = useState<'video' | 'image'>('video')
   const [submitting, setSubmitting] = useState(false)
-  const [libraryOpen, setLibraryOpen] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
   // The launcher owns the global `/` focus (§7): typing starts here.
@@ -98,45 +96,32 @@ export function Launcher({ onPickFile }: { onPickFile(): void }) {
         </button>
       </div>
 
+      {/* (R-20, Wave 3 — audit M6/m5) The launcher is the ONE prompt
+          surface: the media-type toggle (each chip states its EFFECT, R-23),
+          the no-dialogue policy chip (user language — the developer-speak
+          "noDialogue handoff" is gone), and drop/pick. The audio engines
+          moved to their one canonical home — the typed-hole produce menu;
+          the prompt library lives on its titlebar button + V; the movie plan
+          on its timeline button. The datasets chip precedent applies: one
+          home per thing. */}
       <div className="canvas-launcher-chips" role="group" aria-label="Entry chips">
-        <button type="button" className={`canvas-chip ${mediaType === 'image' ? 'active' : ''}`} data-canvas-chip="image" onClick={() => setMediaType('image')}>
+        <button type="button" className={`canvas-chip ${mediaType === 'image' ? 'active' : ''}`} data-canvas-chip="image" title="New seeds spawn as IMAGE chains — a still per take (the workbench's families)" onClick={() => setMediaType('image')}>
           <ImagePlus size={13} /> image prompt
         </button>
-        <button type="button" className={`canvas-chip ${mediaType === 'video' ? 'active' : ''}`} data-canvas-chip="video" onClick={() => setMediaType('video')}>
+        <button type="button" className={`canvas-chip ${mediaType === 'video' ? 'active' : ''}`} data-canvas-chip="video" title="New seeds spawn as VIDEO chains — the derived mode follows what you later bind (R-23)" onClick={() => setMediaType('video')}>
           <FileVideo size={13} /> video prompt
         </button>
         <button
           type="button"
           className="canvas-chip"
           data-canvas-chip="noDialogue"
-          title="The chain's no-dialogue policy composes into the render prompt (silent score emission)"
+          title="Adds the no-dialogue policy to the prompt — the render scores the shot with no spoken lines"
           onClick={() => setPrompt((current) => current ? `${current} · no dialogue` : 'no dialogue')}
         >
-          <MessageSquareOff size={13} /> noDialogue handoff
+          <MessageSquareOff size={13} /> no dialogue
         </button>
         <button type="button" className="canvas-chip" data-canvas-chip="drop" onClick={onPickFile}>
           <Upload size={13} /> drop / pick media
-        </button>
-        {/* §5.4 (Phase 4): the audio engines arrive as typed-hole selections —
-            Music 3 and ACE-Step dock as panels, their tracks land as objects. */}
-        <button type="button" className="canvas-chip" data-canvas-chip="music3" title="MiniMax Music 3 — complete songs as audio objects" onClick={() => useCanvasStore.getState().setAudioDock({ engine: 'music3' })}>
-          <AudioLines size={13} /> Music 3
-        </button>
-        <button type="button" className="canvas-chip" data-canvas-chip="acestep" title="ACE-Step XL 1.5 — music tracks as audio objects" onClick={() => useCanvasStore.getState().setAudioDock({ engine: 'acestep' })}>
-          <Music2 size={13} /> ACE-Step
-        </button>
-        {/* §5.5 (L11): launcher-adjacent prompt library — the browser opens
-            beside the bar; a pick fills it. */}
-        <button type="button" className="canvas-chip" data-canvas-chip="prompt-library" title="Search public Civitai generation metadata for reusable prompts" onClick={() => setLibraryOpen(true)}>
-          <Sparkles size={13} /> prompt library
-        </button>
-        {/* The datasets chip was RETIRED 2026-09-18 (QOL wave rrxlw2r): the
-            surface switcher in the titlebar is the one entry point per
-            surface — the chip duplicated it. The canvas bridge stays two
-            explicit actions (canvas take → source; dataset layer →
-            canvas reference). */}
-        <button type="button" className="canvas-chip" data-canvas-chip="movie" title="The timeline projection — the plan chronology + measured transitions (the Director Suite)" onClick={() => useCanvasStore.getState().setTimelineOpen(true)}>
-          <Clapperboard size={13} /> movie plan
         </button>
       </div>
 
@@ -163,7 +148,6 @@ export function Launcher({ onPickFile }: { onPickFile(): void }) {
           <p className="canvas-launcher-norecent">No other canvases yet — the first prompt creates one.</p>
         )}
       </div>
-      {libraryOpen && <PromptLibraryBrowser onClose={() => setLibraryOpen(false)} onInsert={(entry) => { setPrompt(entry); window.setTimeout(() => inputRef.current?.focus(), 0) }} />}
     </div>
   </div>
 }

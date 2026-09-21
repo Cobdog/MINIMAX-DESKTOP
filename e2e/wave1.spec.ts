@@ -201,7 +201,7 @@ test('Wave 1 acceptance walk — the maintainer\'s first session, end to end on 
     await expect(chip).toHaveAttribute('data-engine-connected', 'true', { timeout: 20_000 })
     await page.waitForTimeout(1_000) // the recovery's object_info re-pull settles
     const submittedBefore = submittedGraphs.length
-    await page.keyboard.press('Escape') // deselect — the bottom bar's prompt lives on the empty-canvas context
+    await page.keyboard.press('Escape') // deselect — with objects present the contextual bar is the prompt surface (R-20)
     await page.locator('[data-canvas-bar-prompt]').fill('a second shot the registry cannot run')
     await page.locator('[data-canvas-bar-prompt]').press('Enter')
     await expect(page.locator('[data-canvas-tile]')).toHaveCount(2, { timeout: 10_000 })

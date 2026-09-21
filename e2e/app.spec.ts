@@ -165,7 +165,10 @@ test('launcher keeps the prompt bar and chips visible at 1080p', async ({ page }
   await expect(page.locator('[data-canvas-promptbar]')).toBeVisible()
   expect(await inViewport(page.locator('[data-canvas-prompt]'))).toBe(true)
   expect(await inViewport(page.locator('[data-canvas-submit]'))).toBe(true)
-  for (const chip of ['image', 'video', 'music3', 'acestep', 'movie', 'prompt-library']) {
+  // (R-20) The launcher is the four-chip surface: media-type toggle, the
+  // no-dialogue policy, and drop. The audio/library/movie chips retired to
+  // their one canonical home each.
+  for (const chip of ['image', 'video', 'noDialogue', 'drop']) {
     await expect(page.locator(`[data-canvas-chip="${chip}"]`)).toBeVisible()
     expect(await inViewport(page.locator(`[data-canvas-chip="${chip}"]`))).toBe(true)
   }
@@ -425,24 +428,22 @@ test('launcher core flow is keyboard-operable (focus rings + dialog discipline)'
   await page.keyboard.type('a lone drummer on a night train, windows streaked with rain')
   await expect(page.locator('[data-canvas-prompt]')).toHaveValue(/lone drummer/)
 
-  // The prompt-library dialog opens by keyboard (Tab forward to the chip —
-  // the chip row sits BELOW the prompt bar in the launcher's DOM order —
-  // then Enter) and keeps the Base UI discipline: focus inside, Escape
-  // restores the trigger.
-  for (let index = 0; index < 14; index += 1) {
-    if (await page.evaluate(() => document.activeElement?.getAttribute('data-canvas-chip') === 'prompt-library')) break
-    await page.keyboard.press('Tab')
-  }
-  expect(await page.evaluate(() => document.activeElement?.getAttribute('data-canvas-chip'))).toBe('prompt-library')
-  const chipFocus = await focusReport()
-  expect(chipFocus.focusVisible).toBe(true)
-  await page.keyboard.press('Enter')
+  // (R-20) The prompt-library chip is RETIRED — the library's launcher-side
+  // entry is the PROPERTIES PANEL's library button (the panel's prompt
+  // tools). Spawn the seed (Enter submits the launcher prompt), then the
+  // panel's library button keeps the Base UI discipline: click opens, focus
+  // moves inside, Escape restores the trigger.
+  await page.locator('[data-canvas-submit]').click()
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+  const panelLibraryButton = page.locator('[data-canvas-prompt-library]')
+  await expect(panelLibraryButton).toBeVisible({ timeout: 10_000 })
+  await panelLibraryButton.click()
   const dialog = page.locator('.prompt-library-modal')
   await expect(dialog).toBeVisible({ timeout: 10_000 })
   expect(await page.evaluate(() => Boolean(document.activeElement?.closest('.prompt-library-modal')))).toBe(true)
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
-  await expect(page.locator('[data-canvas-chip="prompt-library"]')).toBeFocused()
+  await expect(panelLibraryButton).toBeFocused()
 
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })

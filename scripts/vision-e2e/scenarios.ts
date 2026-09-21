@@ -194,7 +194,7 @@ export const SCENARIOS: VisionScenario[] = [
         rubric: [
           SHELL_CONTEXT,
           'Center of the canvas: a centered launcher block. Its TOP may carry the first-run onboarding notice (QOL wave 2026-09-18): a dashed-blue-bordered card titled "No models visible — one setup step before the first render." with two small buttons ("Open settings — engine connection", "Browse fetchable items") and an × dismiss — INTENDED guidance on the models-empty test home, never a defect. Below it a large heading "A blank canvas", a one-line subtitle mentioning describing a shot or dropping anything, and below it the PROMPT BAR — a wide dark rounded textarea (placeholder mentioning "/" to focus and Enter to spawn) with a submit button at its right reading "Spawn video seed" with a small video icon.',
-          'Below the prompt bar, a CHIP ROW of small rounded pill buttons, at minimum: "image prompt", "video prompt" (one of these highlighted as the active media type), "noDialogue handoff", "drop / pick media", "Music 3", "ACE-Step", "prompt library", and "movie plan" — each with a small icon. All chips must sit fully inside the viewport with readable labels.',
+          'Below the prompt bar, a CHIP ROW of small rounded pill buttons, exactly four: "image prompt", "video prompt" (one of these highlighted as the active media type), "no dialogue", and "drop / pick media" — each with a small icon. (R-20 amendment, Wave 3: the audio-engine chips, prompt library, and movie-plan chips are RETIRED — their one canonical home each is the typed-hole produce menu / the titlebar buttons; their absence is the intended design, never a defect.) All chips must sit fully inside the viewport with readable labels.',
           'A "Resume" section below the chips: a header row with the word "Resume" and a "new canvas" button, then either recent-canvas cards (name + date, any count) or the muted line "No other canvases yet — the first prompt creates one." — either state is correct.',
           'NO left sidebar, NO grouped navigation (Create / Queue / Library / Clip editor), NO "retired" pills anywhere — the old shell is deleted by design; any of those appearing is a REGRESSION, flag it.',
           'Defects to flag: overlapping titlebar controls, the prompt bar or chips clipped by the viewport, unreadable text mid-glyph, a pure-white or pure-black dead region covering the surface.',
@@ -734,15 +734,16 @@ export const SCENARIOS: VisionScenario[] = [
       await page.goto('/')
       await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
       await expect(page.locator('[data-canvas-prompt]')).toBeVisible()
-      // Keyboard-only walk backward to the prompt-library chip (the same
-      // route the keyboard-operability e2e takes) and open with Enter, so the
-      // capture shows the dialog PLUS a genuine :focus-visible ring.
-      const prompt = page.locator('[data-canvas-prompt]')
-      await prompt.focus()
-      for (let index = 0; index < 60; index += 1) {
-        if (await page.evaluate(() => document.activeElement?.getAttribute('data-canvas-chip') === 'prompt-library')) break
-        await page.keyboard.press('Shift+Tab')
-      }
+      // (R-20) The prompt-library chip is retired — the library's launcher-side
+      // entry is the PROPERTIES PANEL's library button. Spawn the seed, open
+      // the panel's library button by keyboard (focus + Enter, so the capture
+      // shows the dialog PLUS a genuine :focus-visible ring).
+      await page.locator('[data-canvas-prompt]').fill('a lone trumpeter on a night platform')
+      await page.locator('[data-canvas-submit]').click()
+      await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+      const panelButton = page.locator('[data-canvas-prompt-library]')
+      await expect(panelButton).toBeVisible({ timeout: 10_000 })
+      await panelButton.focus()
       await page.keyboard.press('Enter')
       await expect(page.locator('.prompt-library-modal')).toBeVisible()
       await page.waitForTimeout(400)
@@ -757,7 +758,7 @@ export const SCENARIOS: VisionScenario[] = [
         label: 'Launcher — prompt library dialog opened by keyboard, focus ring visible',
         rubric: [
           SHELL_CONTEXT,
-          'The canvas launcher behind a dimmed modal overlay — background controls stay recognizable (titlebar, prompt bar silhouettes), never fully black.',
+          'The canvas behind a dimmed modal overlay — background controls stay recognizable (titlebar, a spawned seed object, the properties panel silhouette), never fully black. (R-20 amendment: the dialog now opens from the properties panel library button, not a launcher chip.)',
           'A dialog panel floats roughly centered: kicker "PROMPT LIBRARY", bold title about community & saved prompts, a one-line explainer, and a tab strip with a "Community" tab (active) and a "Saved" tab (its count varies — any count is fine).',
           'Dialog furniture: a search input row (search field plus filter dropdown/checkboxes), a "Load more" button and an attribution/footer line at the bottom when content is present, and an X close button at the panel\'s TOP-RIGHT corner — all inside the panel bounds.',
           'A keyboard-focus indicator is clearly visible: a bright green/chartreuse rectangular ring around the close (X) button.',
@@ -919,12 +920,11 @@ export const SCENARIOS: VisionScenario[] = [
       await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
       await page.goto('/?canvas=1')
       await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
-      // The audio dock FIRST — the empty canvas shows the launcher, whose
-      // Music 3 chip opens the dock (§5.4). It stays floating while the
-      // object + panel arrive (selecting never closes an open dock).
-      await page.locator('[data-canvas-chip="music3"]').click()
-      await expect(page.locator('[data-canvas-audio-dock]')).toBeVisible()
-      await page.locator('[data-canvas-audio-caption]').fill('slow cinematic ambient piano, wide reverb, 60 seconds')
+      // (R-20) The audio dock opens from its ONE canonical home — the
+      // typed-hole produce menu on a source object. The PNG lands first
+      // (the scenario's own drop below), its tail menu opens the dock, and
+      // the dock stays floating while the panel arrives (selecting never
+      // closes an open dock).
       // A real, decodable PNG lands as a media object…
       await page.evaluate(() => {
         const canvas = document.createElement('canvas')
@@ -943,6 +943,11 @@ export const SCENARIOS: VisionScenario[] = [
         )
         document.querySelector('[data-canvas-root]')!.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true }))
       })
+      const visionSourceTile = page.locator('[data-canvas-tile]').first()
+      await visionSourceTile.locator('[data-canvas-endpoint="tail"]').click()
+      await page.locator('[data-canvas-menu-row="produce:music3"]').click()
+      await expect(page.locator('[data-canvas-audio-dock]')).toBeVisible()
+      await page.locator('[data-canvas-audio-caption]').fill('slow cinematic ambient piano, wide reverb, 60 seconds')
       await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
       await page.waitForTimeout(500)
       // …and selecting it (a direct dispatch — the tile may sit under the

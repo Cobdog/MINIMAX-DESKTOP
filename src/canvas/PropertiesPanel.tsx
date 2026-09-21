@@ -606,6 +606,15 @@ export function PropertiesPanel() {
       <span className="canvas-properties-mode" data-canvas-mode={mode}>{MODE_LABEL[mode]}</span>
       <button type="button" aria-label="Close properties" onClick={() => setInspectorOpen(false)}><X size={13} /></button>
     </header>
+    {/* (R-23) The mode RULE at choice time — the mode is derived from what
+        the chain binds; the audit's finding was that the rule was stated
+        nowhere. One line, mode-specific. */}
+    <p className="canvas-properties-mode-hint" data-canvas-mode-hint>
+      {mode === 'text' ? 'Text-only shot — bind a picture to switch to reference mode; set both end frames for first + last frame mode.'
+        : mode === 'image' ? 'First-frame anchored — the bound image starts the shot.'
+        : mode === 'frames' ? 'First + last frame anchored — the shot travels between your two frames.'
+        : 'Reference-anchored — every bound picture rides the ordered reference set (≤9).'}
+    </p>
     <div className="canvas-inspector-body canvas-properties-body">
       <section className="canvas-properties-section" data-canvas-section="prompt">
         <label>Prompt <span className="canvas-properties-hint">// presets</span></label>
@@ -658,6 +667,16 @@ export function PropertiesPanel() {
             replace the whole-prompt tools); the timeline tool is retired into
             the Flow box everywhere (2026-09-18, spec AC 4). */}
         <div className="canvas-properties-prompttools" data-canvas-prompt-tools>
+          {/* (R-19) A disabled tool is never a dead end: when no local text
+              model is reachable, the Connect action opens Settings docked AT
+              the LLM section — one click from the point of need. */}
+          {!llmAvailable && (
+            <button type="button" className="canvas-chip" data-canvas-llm-connect
+              title="Connect a local text model — the llama.cpp router or Ollama, docked at the LLM section (nothing leaves this workstation)"
+              onClick={() => useCanvasStore.getState().setSettingsDock(true, 'llm')}>
+              Connect a text model…
+            </button>
+          )}
           {draft.promptMode === 'freeform' && (
             <>
               <button type="button" data-canvas-prompt-tool="enhance" disabled={!llmAvailable || Boolean(promptingTool)} title={!llmAvailable ? 'Connect a local text model (llama.cpp router or Ollama) in Settings — nothing leaves this workstation' : 'Rewrite the prompt for stronger MiniMax video direction'} onClick={() => void runPromptTool('enhance')}>
@@ -735,6 +754,16 @@ export function PropertiesPanel() {
                 <option key={entry.id} value={entry.id}>{entry.label}{detection.available ? '' : ' (not installed)'}</option>
               ))}
             </select>
+            {/* (R-19) "not installed" is never a dead end at the choice
+                point: the fetch affordance opens the Library focused on the
+                turbo LoRA entries (the EndpointMenu precedent). */}
+            {turboFamilies.some(({ detection }) => !detection.available) && (
+              <button type="button" className="canvas-chip" data-canvas-turbo-fetch
+                title="Open the library at the model catalog — the missing turbo LoRAs are fetchable there with consent"
+                onClick={() => useCanvasStore.getState().setLibraryDock(true)}>
+                fetch missing ({turboFamilies.filter(({ detection }) => !detection.available).length})
+              </button>
+            )}
           </div>
         )}
         {/* Model overrides (euxwdva): collapsed by default — 'auto' (with

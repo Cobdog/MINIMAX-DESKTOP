@@ -372,6 +372,18 @@ details.canvas-properties-disclosure[open] > summary::after { content: '−'; }
 .structured-subject-head button:hover { color: var(--warning); }
 .structured-pin-badge { width: max-content; padding: 1px 7px; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: 999px; color: var(--accent); font-size: var(--text-2xs); }
 .structured-flow-row { display: grid; gap: 4px; padding: 6px 7px; border: 1px dashed var(--line-strong); border-radius: 8px; }
+
+/* (R-18/vision debt, Wave 3) THE LEFT-EDGE CLIP, fixed at its source: the
+   compose preview's <pre> carried one unbreakable line (the composed prompt
+   is a single enormous string) — white-space:pre forced the panel body's
+   min-content wider than the panel, and any scrollIntoView then scrolled
+   the panel ROOT horizontally (inline:'nearest' rides along with
+   block:'start'), cutting every row's first ~2 glyphs at the left border.
+   The preview wraps; the structured boxes can never force width; the body
+   grid item takes min-width:0 (the classic grid blowout guard). */
+[data-structured-preview] pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
+.canvas-properties-body > * { min-width: 0; max-width: 100%; }
+.structured-editor, .structured-box, .structured-box-body, .structured-flow-row { min-width: 0; }
 .structured-flow-times { display: flex; align-items: center; gap: 5px; color: var(--muted-2); font-size: var(--text-2xs); }
 .structured-flow-times input { width: 64px; text-align: right; font-family: ui-monospace, Consolas, monospace; }
 .structured-flow-row-tools { display: flex; gap: 4px; }

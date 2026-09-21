@@ -264,6 +264,9 @@ type CanvasState = {
   gapMenu: { planId: string; afterSegmentId: string } | null
   /** Phase 4 (§8): Settings docked as a floating panel (the thin surface). */
   settingsDock: boolean
+  /** (R-19) The section the dock should land at when it opens (e.g. 'llm' —
+   *  the Connect… affordances deep-link here); consumed once on open. */
+  settingsDockSection: string | null
   /** R-15 (Wave 3): the Library / Get-models surface — FetchBrowser promoted
    *  out of the settings scroll into its own overlay, reachable from every
    *  surface (the typed-hole fetch affordances deep-link through focus ids). */
@@ -337,7 +340,7 @@ type CanvasActions = {
    *  seeds its chain (created + selected, NEVER submitted). Returns the new
    *  plan id, or null with the refusal reasons toasted. */
   applyLoraTimeline(chainId: string): Promise<{ ok: boolean; planId?: string; reasons?: string[] }>
-  setSettingsDock(open: boolean): void
+  setSettingsDock(open: boolean, section?: string): void
   /** R-15: open the Library / Get-models overlay (optionally focusing catalog entries). */
   setLibraryDock(open: boolean, focusEntryIds?: string[]): void
   /** Dock stacking (review M11): take the next z for a dock opening or
@@ -797,6 +800,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     timelinePlanId: null,
     gapMenu: null,
     settingsDock: false,
+    settingsDockSection: null,
     libraryDock: false,
     libraryFocus: null,
     dockZ: 60,
@@ -1274,8 +1278,8 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       }
     },
 
-    setSettingsDock: (open) => {
-      set({ settingsDock: open })
+    setSettingsDock: (open, section) => {
+      set({ settingsDock: open, ...(open && section ? { settingsDockSection: section } : {}) })
     },
     setLibraryDock: (open, focusEntryIds) => {
       set({ libraryDock: open, ...(open && focusEntryIds ? { libraryFocus: focusEntryIds } : {}) })
@@ -1809,6 +1813,12 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       if (!doc) return
       set({ endpointMenu: null })
       const action = option.action
+      // (R-20) The audio engines' produce rows dock the engine panel — the
+      // chain context rides along when the dock supports it.
+      if (action.kind === 'audio-dock') {
+        get().setAudioDock({ engine: action.engine })
+        return
+      }
       if (action.kind === 'set-first-frame' || action.kind === 'set-last-frame' || action.kind === 'add-reference') {
         // Consume-from: the chain consumes the SELECTED source's canonical output.
         if (!sourceChainId || sourceChainId === chainId) {
