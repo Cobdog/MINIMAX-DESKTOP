@@ -101,6 +101,7 @@ network is touched); we never redistribute them.
 | `krea2edit` | lbouaraba @ `86f886da…` | Apache-2.0 `[API-2026-09-14]` | fetch-consent | clean; solo-maintained, v2 retrain in progress — re-verify at v2 | trivial |
 | `krea2-anypaint` | alexw5702-afk @ `675be5a9…` | MIT `[API-2026-09-14]` (NOTICE credits Rebels + ostris) | fetch-consent | clean | trivial |
 | `autocontext` | supElement @ `f1062d34…` | Apache-2.0 `[API-2026-09-16]` | fetch-consent (vendor candidate — 14 files, no weights) | clean | trivial |
+| `h3-image-studio` | astropuzzo @ `47dea30…` (v23.0.0) | Unlicense `[code-read 2026-09-21 — pack assessment]` | fetch-consent (vendor-eligible: public-domain-equivalent; user-fetch matches the current posture) | clean | trivial — the T=1-legality gate's pack (task d4er4ati) |
 
 Fetch-catalog packs not in `ENGINE_NODE_PACKS` (fetched into the user's
 instance; same fetch-consent discipline):

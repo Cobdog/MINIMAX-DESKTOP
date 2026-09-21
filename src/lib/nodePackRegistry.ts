@@ -35,7 +35,12 @@ import type { NodePackDefinition } from '../types'
  *    line only) — the segmented-inference pack (prompt-timeline slicing,
  *    per-segment reference filtering, 3-channel anchoring; deep-read:
  *    docs/research/autocontext-deepread.md). Permissive: vendor-eligible,
- *    user-fetch until a vendoring increment is wanted. */
+ *    user-fetch until a vendoring increment is wanted.
+ *  - ComfyUI-MiniMax-H3-Image-Studio (astropuzzo, task d4er4ti): Unlicense
+ *    (LICENSE file + SPDX header in nodes.py, read at 47dea30 during the
+ *    2026-09-21 pack assessment) — public-domain-equivalent; vendor-eligible
+ *    in principle, user-fetch until wanted (same posture as the other
+ *    permissive unfetched packs). */
 export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
   {
     id: 'vdn-h3',
@@ -153,6 +158,29 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     // Verified from the canonical shared install (2026-09-19); mirrored by
     // ANYPAINT_NODES in src/lib/graph/krea2edit.ts.
     instanceNodeClasses: ['Krea2AnyPaintPrepare', 'Krea2AnyPaintEncode', 'Krea2AnyPaintModelPatch'],
+  },
+  {
+    // The H3-image engine-truth gate (task d4er4ti, Wave 3 rung 0; deep-read
+    // docs/research/h3-image-studio-pack-assessment.md). astropuzzo's parallel
+    // H3 conditioning pack: legal T=1 latents (own latent construction — the
+    // stock conditioning node refuses length<5 at server-side validation,
+    // ComfyUI issue #15644) and the exact 9/13-frame ladder the stock
+    // 17n+5 grid snaps to 22. The T=1 Fast family is GATED on this pack's
+    // Prepare classes until the studio-side pack-conditioned graph lands.
+    id: 'h3-image-studio',
+    name: 'ComfyUI-MiniMax-H3-Image-Studio',
+    description: 'astropuzzo\'s H3 image studio pack: a parallel conditioning implementation (12 nodes, no core patching, no dependencies — works on ComfyUI ≥0.30) that constructs the packed H3 AV latent itself, making single-frame (T=1) latents legal end-to-end and hitting the 9/13-frame packet tiers exactly where stock nodes snap both to a 22-frame sample. The load-bearing classes are the Prepare set + the exact/slice frame decode; its sampling/resolution/selector nodes duplicate capability the app already owns.',
+    repoUrl: 'https://github.com/astropuzzo/ComfyUI-MiniMax-H3-Image-Studio',
+    pinnedRevision: '47dea30d0bf07e7340ef0cc97e8174a15edf55b9',
+    licenseSpdx: 'Unlicense',
+    licenseNote: 'The Unlicense (LICENSE file + SPDX header in nodes.py, read at v23.0.0 / 47dea30 during the 2026-09-21 pack assessment) — public-domain-equivalent, the permissiveness ceiling; compatible with our AGPLv3 in both directions and unconditionally vendor-eligible. User-fetch matches the current posture (the Larryvrh precedent): permissive, but nothing ships in-tree until a vendoring increment is deliberately wanted. The WEIGHTS the T=1 lane needs keep their own licenses (the smhfacct hybrid / Mamad8 VAE / ThisIsFine adapter) via the origin-gated catalog.',
+    installMode: 'user-fetch',
+    homepage: 'https://github.com/astropuzzo/ComfyUI-MiniMax-H3-Image-Studio',
+    // NODE_CLASS_MAPPINGS read from the assessment's full code read of nodes.py
+    // at 47dea30 (v23.0.0, 12 classes, category MiniMax H3/Image Studio). The
+    // five listed are the non-duplicating core (the Prepare set + decode);
+    // detection is any-match, exactly the pack board's rule.
+    instanceNodeClasses: ['H3ImagePrepare', 'H3TextToImagePrepare', 'H3ImageToImagePrepare', 'H3ReferenceEditPrepare', 'H3ImageDecode'],
   },
   // -- segmented inference for H3 (task lxmtgss deep-read → task p8oyfy1) --
   {

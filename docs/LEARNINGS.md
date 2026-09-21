@@ -64,6 +64,13 @@
 - **Record honestly what was NOT tested** (the bypass-mode retest, 20-vs-50
   step VDN visual quality, W4A8 VAE decode fidelity) — open caveats travel
   with the verdict, or they are lost.
+- **Graph-shape verification is not execution truth** (task d4er4ati,
+  2026-09-21): the T=1 Fast family shipped as "working" on the strength of
+  golden snapshots + fake-engine e2e while every STOCK engine refuses its
+  length:1 prompt at server-side validation (execution.py schema-min; issue
+  #15644). A capability claim about an engine needs the real engine (8189
+  testbed per the runbook) or an honest gate naming the blocker — synthetic
+  evidence can carry a false claim for months undetected.
 
 ## Harness / toolchain gotchas (proven on this repo)
 

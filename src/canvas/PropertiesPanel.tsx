@@ -25,7 +25,7 @@ import { Captions, Clock3, Dices, LoaderCircle, Play, Sparkles, Square, Star, Vo
 import { SmartPromptEditor, type SmartPromptEditorHandle } from '../components/SmartPromptEditor'
 import { StructuredPromptEditor } from '../components/StructuredPromptEditor'
 import { PromptLibraryBrowser } from '../components/PromptLibraryBrowser'
-import { detectOptimizations } from '../lib/graph'
+import { detectOptimizations, engineFamilyForChain } from '../lib/graph'
 import { inferredOverrideSlotFile, migrateLegacyModelOverrideSlots, modelFamilyInfo, overridePickOutcome, SLOT_LABELS, type ModelFamilyId, type ModelOverrideSlotName } from '../lib/modelOverrides'
 import { guideFrameWarning } from '../lib/workflow'
 import { buildPromptAssistantContext } from '../lib/promptComposer'
@@ -34,7 +34,7 @@ import { useLlmStream } from '../lib/useLlmStream'
 import type { ModelOverrideSlots } from '../types'
 import { useSessionStore } from '../state/sessionStore'
 import { STATUS_LABEL } from './derive'
-import { effectiveMode, IMAGE_ENGINES, MODE_LABEL, readChainSettings, type CanvasChainSettings } from './generation'
+import { effectiveMode, MODE_LABEL, readChainSettings, type CanvasChainSettings } from './generation'
 import {
   compileLoraTimeline, DEFAULT_TRANSITION_WINDOW, LORA_COMBINED_COLLAPSE_RISK, LORA_COMBINED_HEALTHY_MAX, LORA_SLOTS,
   newLoraRange, newLoraTimelineDoc, snapRangeBoundary,
@@ -449,14 +449,17 @@ export function PropertiesPanel() {
 
   const patch = (part: Partial<CanvasChainSettings>) => setDraft((current) => current ? { ...current, ...part } : current)
   const mode = effectiveMode(draft)
+  // ---- The engine-family registry (A-3, directive c250ab36) ----
+  // The chain's engine — label, model-override family, and which sections
+  // exist — is DATA on the registry entry; this panel renders from it instead
+  // of growing a ternary per engine. The fallback covers a malformed settings
+  // object (readChainSettings always sets mediaType; belt-and-braces).
+  const engineFamily = engineFamilyForChain(draft) ?? engineFamilyForChain({ mediaType: draft.mediaType })!
   // ---- Chain-level model overrides (task euxwdva) ----
-  // The chain's engine decides the family; picks are registry-anchored and ride
-  // chain.settings (settings-vs-results separation: the RESOLVED files ride
-  // the take's manifest). Resolution order: this pick > the global Settings
-  // pick > auto (inference).
-  const modelFamilyId: ModelFamilyId = draft.mediaType === 'audio'
-    ? (draft.audio.engine === 'acestep' ? 'acestep' : 'music3')
-    : 'minimax'
+  // Picks are registry-anchored and ride chain.settings (settings-vs-results
+  // separation: the RESOLVED files ride the take's manifest). Resolution
+  // order: this pick > the global Settings pick > auto (inference).
+  const modelFamilyId: ModelFamilyId = engineFamily.modelFamilyId
   const modelFamily = modelFamilyInfo(modelFamilyId)!
   // Legacy chains may still store a single 'checkpoint' pick — the migrated
   // view keeps it VISIBLE on its new lanes (the resolution seam applies the
@@ -690,52 +693,57 @@ export function PropertiesPanel() {
       </section>
 
       <section className="canvas-properties-section" data-canvas-section="engine">
-        <label>Engine — {draft.mediaType === 'audio' ? (draft.audio.engine === 'music3' ? 'MiniMax Music 3' : 'ACE-Step XL 1.5') : draft.mediaType === 'image' ? (IMAGE_ENGINES.find((engine) => engine.id === draft.imageEngine) ?? IMAGE_ENGINES[0]).label : 'MiniMax H3'}</label>
+        <label>Engine — {engineFamily.label}</label>
         {draft.mediaType === 'image' && (
           <p className="canvas-properties-note" data-canvas-image-engine-note>
-            {IMAGE_ENGINES.find((engine) => engine.id === draft.imageEngine)?.note ?? IMAGE_ENGINES[0].note} The image intent renders one H3-1F still per take; image-with-reference hands off to the workbench's Edit surface.
+            {engineFamily.note} The image intent renders one H3-1F still per take; image-with-reference hands off to the workbench's Edit surface.
           </p>
         )}
-        {draft.mediaType === 'audio' && (
+        {engineFamily.panel.audioDock && (
           <div className="canvas-properties-row">
             <button type="button" className="canvas-chip" data-canvas-open-audio-dock onClick={() => useCanvasStore.getState().setAudioDock({ engine: draft.audio.engine, chainId: chain.id })}>
               edit in the audio dock…
             </button>
           </div>
         )}
-        <div className="canvas-properties-row">
-          <span>tier</span>
-          <div className="canvas-properties-tiers" role="radiogroup" aria-label="Speed tier">
-            {TIERS.map((tier) => (
-              <button
-                type="button"
-                key={tier.value}
-                role="radio"
-                aria-checked={draft.turbo === tier.value}
-                className={`canvas-chip ${draft.turbo === tier.value ? 'active' : ''}`}
-                data-canvas-tier={tier.value}
-                onClick={() => patch({ turbo: tier.value })}
-              >
-                {tier.label} <small>{tier.note}</small>
-              </button>
-            ))}
+        {engineFamily.panel.tier && (
+          <div className="canvas-properties-row">
+            <span>tier</span>
+            <div className="canvas-properties-tiers" role="radiogroup" aria-label="Speed tier">
+              {TIERS.map((tier) => (
+                <button
+                  type="button"
+                  key={tier.value}
+                  role="radio"
+                  aria-checked={draft.turbo === tier.value}
+                  className={`canvas-chip ${draft.turbo === tier.value ? 'active' : ''}`}
+                  data-canvas-tier={tier.value}
+                  onClick={() => patch({ turbo: tier.value })}
+                >
+                  {tier.label} <small>{tier.note}</small>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-        <div className="canvas-properties-row">
-          <label htmlFor="canvas-turbo-family">turbo family</label>
-          <select id="canvas-turbo-family" data-canvas-family value={draft.turboFamily} onChange={(event) => patch({ turboFamily: event.target.value })}>
-            <option value="">auto — registry-ranked</option>
-            {turboFamilies.map(({ entry, detection }) => (
-              <option key={entry.id} value={entry.id}>{entry.label}{detection.available ? '' : ' (not installed)'}</option>
-            ))}
-          </select>
-        </div>
+        )}
+        {engineFamily.panel.turboFamily && (
+          <div className="canvas-properties-row">
+            <label htmlFor="canvas-turbo-family">turbo family</label>
+            <select id="canvas-turbo-family" data-canvas-family value={draft.turboFamily} onChange={(event) => patch({ turboFamily: event.target.value })}>
+              <option value="">auto — registry-ranked</option>
+              {turboFamilies.map(({ entry, detection }) => (
+                <option key={entry.id} value={entry.id}>{entry.label}{detection.available ? '' : ' (not installed)'}</option>
+              ))}
+            </select>
+          </div>
+        )}
         {/* Model overrides (euxwdva): collapsed by default — 'auto' (with
             what auto currently resolves to) is the honest default state.
-            Image chains are excluded: they render through the image
-            workbench, whose model selection is the h3image GLOBAL picks
-            (chain-level slots here would be dead controls on that path). */}
-        {draft.mediaType !== 'image' && <details className="canvas-properties-models" data-canvas-section="models">
+            The section's existence is ENGINE DATA (A-3): image chains render
+            through the image workbench, whose model selection is the h3image
+            GLOBAL picks (chain-level slots here would be dead controls on
+            that path). */}
+        {engineFamily.panel.models && <details className="canvas-properties-models" data-canvas-section="models">
           <summary>models <span className="canvas-properties-hint">{modelFamily.label} · auto (inferred)</span></summary>
           {modelFamily.slots.map((slot) => {
             const value = chainSlots[slot] ?? ''
@@ -763,25 +771,34 @@ export function PropertiesPanel() {
           })}
           <p className="canvas-properties-note">A pick here beats the global Settings pick, which beats auto inference. Picks are exact scanned filenames; the resolved files ride the take's manifest. The H3 lanes pin FL2VA / Ref2VA separately; the merged pick is one pre-merged checkpoint for both and wins when set. The VAE picks are decoder-specific (video / audio) — the image decoder is workbench-only.</p>
         </details>}
-        <div className="canvas-properties-row">
-          <label htmlFor="canvas-duration">seconds</label>
-          <input id="canvas-duration" data-canvas-duration type="number" min={2} max={15} step={1} value={draft.duration} onChange={(event) => patch({ duration: Math.max(2, Math.min(15, Number(event.target.value) || 6)) })} />
-          <label htmlFor="canvas-resolution">size</label>
-          <select id="canvas-resolution" data-canvas-resolution value={draft.resolution} onChange={(event) => patch({ resolution: event.target.value })}>
-            {RESOLUTIONS.map((resolution) => <option key={resolution} value={resolution}>{resolution.replace('x', ' × ')}</option>)}
-          </select>
-        </div>
-        <div className="canvas-properties-row">
-          <label htmlFor="canvas-seed">seed</label>
-          <input id="canvas-seed" data-canvas-seed type="number" min={0} value={draft.seed} onChange={(event) => patch({ seed: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} />
-          <button type="button" className="canvas-chip" aria-label="Randomize seed" onClick={() => patch({ seed: Math.floor(Math.random() * 1_000_000_000) })}><Dices size={12} /></button>
-        </div>
+        {(engineFamily.panel.duration || engineFamily.panel.resolution) && (
+          <div className="canvas-properties-row">
+            {engineFamily.panel.duration && (<>
+              <label htmlFor="canvas-duration">seconds</label>
+              <input id="canvas-duration" data-canvas-duration type="number" min={2} max={15} step={1} value={draft.duration} onChange={(event) => patch({ duration: Math.max(2, Math.min(15, Number(event.target.value) || 6)) })} />
+            </>)}
+            {engineFamily.panel.resolution && (<>
+              <label htmlFor="canvas-resolution">size</label>
+              <select id="canvas-resolution" data-canvas-resolution value={draft.resolution} onChange={(event) => patch({ resolution: event.target.value })}>
+                {RESOLUTIONS.map((resolution) => <option key={resolution} value={resolution}>{resolution.replace('x', ' × ')}</option>)}
+              </select>
+            </>)}
+          </div>
+        )}
+        {engineFamily.panel.seed && (
+          <div className="canvas-properties-row">
+            <label htmlFor="canvas-seed">seed</label>
+            <input id="canvas-seed" data-canvas-seed type="number" min={0} value={draft.seed} onChange={(event) => patch({ seed: Math.max(0, Math.floor(Number(event.target.value) || 0)) })} />
+            <button type="button" className="canvas-chip" aria-label="Randomize seed" onClick={() => patch({ seed: Math.floor(Math.random() * 1_000_000_000) })}><Dices size={12} /></button>
+          </div>
+        )}
       </section>
 
       {/* The LoRA timeline (7twfk6o) — its OWN section (dated decision
           2026-09-19), disjoint from every other lane's panel work. Video
-          chains only: painting ranges over the clip's duration. */}
-      {draft.mediaType === 'video' && (
+          chains only (engine data, A-3): painting ranges over the clip's
+          duration. */}
+      {engineFamily.panel.loraTimeline && (
         <LoraTimelineSection
           chainId={chain.id}
           duration={draft.duration}

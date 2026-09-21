@@ -13,6 +13,7 @@
  */
 import type { AppSettings, CharacterProject, GenerationMode, LocationProject, MediaFile, ModelOverrideSlots, ModelSelection, MovieReferenceBinding, UpscaleMode, WardrobeProject } from '../types'
 import type { ComfyPrompt } from '../lib/graph'
+import { imageEngineChoices } from '../lib/graph/engineFamilies'
 import { buildMiniMaxWorkflow } from '../lib/workflow'
 import { allocateWorkspaceReferences } from '../lib/promptComposer'
 import { characterReferences } from '../lib/characterLibrary'
@@ -111,15 +112,14 @@ export type CanvasChainSettings = {
 
 const RESOLUTIONS = ['1344x768', '768x1344', '768x768']
 
-/** The image intent's engine selection (34afx79) — the two-slot seam table
- *  the properties panel renders. The second slot is a TYPED HOLE: Krea 2
- *  stills (mf3wfq6) docks into submitChain's imageEngine switch without
+/** The image intent's engine selection (34afx79) — DERIVED from the
+ *  engine-family registry (A-3, Wave 3 rung 1) so the two-slot table and
+ *  the registry cannot drift. The second slot is a TYPED HOLE: Krea 2
+ *  stills (mf3fwq6) docks into submitChain's imageEngine switch without
  *  another rewire (the audio-engine precedent — one union, one switch, one
- *  honest refusal until its core lands). */
-export const IMAGE_ENGINES: Array<{ id: 'h3-1f' | 'krea2'; label: string; note: string }> = [
-  { id: 'h3-1f', label: 'H3 1F (T=1 Fast)', note: 'One latent frame through the Mamad8 T=1 image VAE on the hybrid stack — seconds-class stills.' },
-  { id: 'krea2', label: 'Krea 2 (still images)', note: 'Queued (mf3wfq6) — the stills-only Krea 2 path; not wired yet.' },
-]
+ *  honest refusal until its core lands). The cast pins the settings
+ *  schema's literal union (the registry is the open set). */
+export const IMAGE_ENGINES: Array<{ id: 'h3-1f' | 'krea2'; label: string; note: string }> = imageEngineChoices() as Array<{ id: 'h3-1f' | 'krea2'; label: string; note: string }>
 
 /** Defaults mirror the Create workspace's defaults (workspaceDefaults) plus
  *  the project's saved generation defaults — the canvas chain starts where

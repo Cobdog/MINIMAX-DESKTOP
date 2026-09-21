@@ -22,6 +22,7 @@
  *     The dead ControlNet-Union-on-Z-Image path is gone with Z-Image.
  */
 import type { MediaFile } from '../types'
+import { engineFamilyForChain } from '../lib/graph/engineFamilies'
 import type { CanvasChainSettings } from './generation'
 import type { WorkbenchGenerationRequest } from '../images/submit'
 
@@ -43,11 +44,12 @@ export type CanvasEditHandoff = {
   intent: string
 }
 
-/** The honest refusal for the queued second slot (the typed hole's other
- *  half — the switch case exists, the engine does not yet). */
+/** The honest refusal for a queued engine slot (the typed hole's other half
+ *  — the switch case exists, the engine does not yet). Registry-driven
+ *  (A-3): the refusal copy lives on the engine-family ENTRY, so docking the
+ *  engine is one entry edit, not a stillIntent change. */
 export function queuedImageEngineRefusal(engine: 'h3-1f' | 'krea2'): string | null {
-  if (engine !== 'krea2') return null
-  return 'The Krea 2 stills engine is queued (mf3wfq6) and not wired yet — switch the image engine to H3 1F in the panel, or open the Image workbench for Krea 2 refine passes.'
+  return engineFamilyForChain({ mediaType: 'image', imageEngine: engine })?.queuedRefusal ?? null
 }
 
 /** The canvas chain settings as one H3-1F workbench generation — the same

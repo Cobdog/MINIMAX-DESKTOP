@@ -158,6 +158,14 @@ maybe('(a) golden snapshots — the build contract', () => {
 
 maybe('(b) recipe pins — the pinned-defaults table', () => {
   eq(h3image.H3IMG_RECIPE_PINS.packetTiers, [5, 9, 13, 39], 'packet tiers 5/9/13 + directed 39')
+  // The packet-economy truth (d4er4ati): on stock nodes align_frame_count
+  // snaps 9 and 13 onto the 17n+5 grid's 22 — only 5 and 39 are native
+  // points. The labels at the choice point carry these true costs.
+  eq(h3image.STOCK_SAMPLED_FRAMES, { 5: 5, 9: 22, 13: 22, 39: 39 }, 'stock sampled frames: 5/22/22/39 (9 and 13 snap to 22)')
+  eq(h3image.packetTierLabel(5), '5 frames', 'tier 5 label: native grid point, no qualifier')
+  eq(h3image.packetTierLabel(9), '9 frames · samples 22 on stock nodes', 'tier 9 label carries the true sampled count')
+  eq(h3image.packetTierLabel(13), '13 frames · samples 22 on stock nodes', 'tier 13 label carries the true sampled count')
+  eq(h3image.packetTierLabel(39), '39 frames', 'tier 39 label: native grid point, no qualifier')
   eq(h3image.H3IMG_RECIPE_PINS.directedTail, { first: 34, last: 38 }, 'directed tail frames 34-38')
   eq(h3image.H3IMG_RECIPE_PINS.t1.steps, 8, 'T=1 steps 8')
   eq(h3image.H3IMG_RECIPE_PINS.t1.sampler, 'er_sde', 'T=1 sampler er_sde')
@@ -455,8 +463,24 @@ maybe('(i) validation + detection', () => {
     const detections = h3image.detectH3ImgFamilies(HYBRID_INFO, MODEL_FILES)
     const packet = detections.find((entry) => entry.family.id === 'h3img.generate.packet')
     ok(packet.detection.available && packet.detection.hybrid, 'packet: available + hybrid on the full stack')
+    // THE ENGINE-TRUTH GATE (d4er4ati, Wave 3 rung 0): this assertion used to
+    // read "T=1: available when the VAE + turbo resolve" — the false
+    // capability claim. Stock engines REFUSE length:1 at prompt validation
+    // (execution.py schema-min, issue #15644) and promote max(5,·) past it, so
+    // graph-shape availability was never execution truth. The family now
+    // gates honestly in BOTH directions (pack absent → fetch guidance; pack
+    // present → the pending pack-side-graph reason) — never a
+    // submit-then-server-400.
     const t1 = detections.find((entry) => entry.family.id === 'h3img.generate.t1')
-    ok(t1.detection.available, 'T=1: available when the VAE + turbo resolve')
+    ok(!t1.detection.available, 'T=1: gated on stock-only engines (the old availability assertion was the false claim)')
+    const t1Missing = t1.detection.missingNodes.join('\n')
+    ok(t1Missing.includes('H3ImagePrepare') && t1Missing.includes('MiniMax H3 Image Studio') && t1Missing.includes('#15644'), 'T=1 refusal names the pack class, the pack row, and the stock-floor reason')
+    ok(t1Missing.includes('Fetch') || t1Missing.includes('Node packs'), 'T=1 refusal carries the fetch/install affordance')
+    const STUDIO_INFO = { ...HYBRID_INFO, H3ImagePrepare: node({}) }
+    const t1WithPack = h3image.detectH3ImgFamilies(STUDIO_INFO, MODEL_FILES).find((entry) => entry.family.id === 'h3img.generate.t1')
+    ok(!t1WithPack.detection.available, 'T=1 with the pack installed: still gated (the studio-side pack graph has not landed — the stock length=1 path is illegal regardless)')
+    ok(t1WithPack.detection.missingNodes.join('\n').includes('pack-conditioned'), 'T=1 pack-present refusal names the pending pack-side graph, not a missing install')
+    ok(t1WithPack.detection.notes.some((note) => note.includes('H3 Image Studio pack detected')), 'T=1 pack-present detection carries the explanatory note')
     const klein = detections.find((entry) => entry.family.id === 'h3img.refine.klein')
     ok(!klein.detection.available, 'klein on the H3-only info: Flux2 nodes absent → unavailable with guidance')
     const kleinFull = h3image.detectH3ImgFamilies(KLEIN_INFO, MODEL_FILES).find((entry) => entry.family.id === 'h3img.refine.klein')
