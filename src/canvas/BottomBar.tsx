@@ -126,7 +126,7 @@ export function BottomBar() {
           className={`canvas-bar-engine ${engine.connected ? (engine.modelReady ? 'online' : 'degraded') : ''}`}
           data-canvas-bar-engine
           title={engine.connected ? (engine.modelReady ? 'Local engine connected — MiniMax H3 ready' : 'Engine connected but H3 model components are missing') : 'Engine offline — click to open Settings at the engine section'}
-          onClick={() => useCanvasStore.getState().setSettingsDock(true)}
+          onClick={() => useCanvasStore.getState().setSettingsDock(true, 'engine')}
         >
           <span className="status-dot" /> {engine.connected ? (engine.modelReady ? 'H3 ready' : 'models missing') : 'engine offline'}
         </button>

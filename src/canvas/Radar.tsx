@@ -100,7 +100,7 @@ export function Radar() {
       data-engine-connected={engine.connected}
       data-engine-ready={engine.modelReady}
       title={engine.connected ? (engine.modelReady ? 'Local engine connected — MiniMax H3 ready' : 'Engine connected but H3 model components are missing — install them and refresh') : 'Engine offline — click to open Settings at the engine section'}
-      onClick={() => useCanvasStore.getState().setSettingsDock(true)}
+      onClick={() => useCanvasStore.getState().setSettingsDock(true, 'engine')}
     >
       <span className="status-dot" /> {engine.connected ? (engine.modelReady ? 'H3 engine ready' : 'engine on · models missing') : 'engine offline'}
     </button>
