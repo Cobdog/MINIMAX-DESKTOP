@@ -60,7 +60,7 @@ Runs the entire verification chain in canonical order — `typecheck` →
 `lint` → `license:audit` → `build` → `unit` (ONE `vitest run` covering every
 `tests/*.test.js` suite: workflows, registry, h3img, storage, documents,
 realtime, filmstrip, llm, engine-process, runtime, fetcher, instance,
-lora-form, poserig, camera, canvas, benchmarks, launcher, datasets) →
+poserig, camera, canvas, benchmarks, launcher, datasets) →
 `smoke:server` → e2e → vision-capture — each gate step in its own process,
 wall-clock timed, known-benign output filtered (the filter tally prints so
 nothing disappears silently), one summary table, non-zero exit on any
@@ -153,17 +153,51 @@ google-chrome over chromium because Debian/Ubuntu chromium lacks H.264
 (filmstrip playback e2e carries a canPlayType skip guard as the honest
 fallback).
 
-## CI (two legs)
+## CI (the path-scoped ubuntu leg + the scheduled Windows sweep — eg6l3v5 / A-CI)
 
-- **Ubuntu** (`.github/workflows/ci.yml`): python+numpy + ffmpeg installs →
-  typecheck, lint, license:audit, build, `pnpm test` (the ONE vitest unit
-  run — every suite, including the ones the pre-migration ci.yml omitted),
-  smoke, e2e, vision-capture on every push/PR.
-- **Windows Engine** (`.github/workflows/engine-windows.yml`): server build
-  + the OS-sensitive suites as vitest filters (`pnpm test:engine`,
-  `test:runtime`, `test:fetcher`, `test:instance`,
-  `test:benchmarks` with BENCH_PYTHON=python — link placement and tar
-  extraction; transport mocked).
+**Local = depth, CI = breadth + speed** (the maintainer's ruling): `pnpm gate`
+stays the full-depth chain; CI runs the FULL suite only on merge-to-main.
+
+- **The manifest is the contract**: `scripts/ci-map.cjs` maps path globs →
+  affected vitest suites (+ build tier, python/ffmpeg needs, e2e
+  escalation). It is reviewed DATA — grep a path there to see what CI runs
+  when it changes. Seam files honestly fan wide (`server/core.ts` → every
+  booting suite; `src/lib/workflow.ts` → every client suite;
+  `src/canvas/store.ts` → canvas + forced e2e — no unit suite executes the
+  kernel). Unmapped `src/lib`/unknown paths fall back to the FULL run,
+  loudly. `tests/ci-map.test.js` walks the manifest on every PR: suite
+  catalog ↔ `tests/*.test.js` lockstep, seam fan-outs as declared, and a
+  completeness walk — a new unmapped `src/lib` or `server` module FAILS it.
+  Adding a suite = add the file + catalog it in `SUITES` (+ rules), or CI
+  reds.
+- **PRs (fast leg)**: changed files → manifest → full `typecheck` (the
+  structural safety net that licenses suite-scoping) + lint scoped to the
+  changed files + license:audit only when its inputs changed + the tiered
+  build (stale-dist rule holds wherever dist-booting suites run) + ONLY the
+  mapped suites (`vitest run <suites>`). e2e runs on PRs only when forced
+  (browser suites, playwright config, the canvas kernel). Docs-only diffs
+  run nothing but the cheap floor. The PR's "select" job prints the plan
+  into the run summary — the "what did CI run for this diff" evidence.
+- **Merge to main / dispatch (full leg)**: the complete chain, unchanged
+  (typecheck → lint → license:audit → build → `pnpm test` → smoke → e2e →
+  vision), plus a parallel **contracts** job, MAIN merges only: golden-
+  fixture regeneration drift (`MINIMAX_UPDATE_GOLDEN=1` + `UPDATE=1`
+  re-snapshot, then `git diff --exit-code` — the fixture IS the contract)
+  and registry-append verification (`scripts/check-registry-append.cjs` —
+  golden registry entry sets are append-only across a merge).
+- **Windows Engine** (`.github/workflows/engine-windows.yml`) — **demoted
+  to scheduled-only** (maintainer ruling, 2026-09-21: "Windows tests take
+  the back seat too, I am in a linux environment, I think windows testing
+  can get pushed to very low priority"): weekly cron + workflow_dispatch,
+  NOT on PRs or merge-to-main. It runs the leg's full OS-sensitive set
+  (`engine-process`, `runtime`, `fetcher`, `instance`,
+  `benchmarks` with BENCH_PYTHON=python — link placement and tar
+  extraction; transport mocked) so OS-difference coverage survives at
+  near-zero standing cost. The manifest's windows flags stay as data for
+  the scheduled leg and any future re-wiring into the PR path; nothing was
+  deleted. Consequence: PRs and main merges are all-Linux — a Windows-only
+  breakage surfaces at the weekly sweep (or a manual dispatch), not on the
+  PR that caused it.
 - Verify BOTH legs before calling landed work done (run links go into the
   Flux closure comment). The e2e error guard filters engine-connectivity
   noise (`environmental` in e2e/app.spec.ts) — CI has no engine. To simulate
