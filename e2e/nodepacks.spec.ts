@@ -70,15 +70,25 @@ test('node-pack status board — badges, versions, managed notices, refresh, no 
       res.end(JSON.stringify({ system: { comfyui_version: 'v0.34.0' }, devices: [] }))
       return
     }
-    if (url.pathname === '/object_info') {
-      // The instance serves the hybrid loader's classes (installed on the
-      // instance with NO folder — the live-only verdict) and nothing else.
+    // The instance serves the hybrid loader's classes (installed on the
+    // instance with NO folder — the live-only verdict) and nothing else —
+    // through BOTH the full and the targeted per-class form (Wave 2 A-8:
+    // key-miss = absence, never the status).
+    const objectInfo = {
+      UNETLoader: { input: { required: { unet_name: [['instance-only.safetensors'], {}] } } },
+      MiniMaxH3HybridLoader: { input: { required: {} } },
+      KSamplerSelect: { input: { required: {} } },
+    }
+    const targetedClass = /^\/object_info\/(.+)$/.exec(url.pathname)
+    if (targetedClass) {
+      const className = decodeURIComponent(targetedClass[1]!)
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({
-        UNETLoader: { input: { required: { unet_name: [['instance-only.safetensors'], {}] } } },
-        MiniMaxH3HybridLoader: { input: { required: {} } },
-        KSamplerSelect: { input: { required: {} } },
-      }))
+      res.end(JSON.stringify(className in objectInfo ? { [className]: objectInfo[className] } : {}))
+      return
+    }
+    if (url.pathname === '/object_info') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(objectInfo))
       return
     }
     if (url.pathname === '/models' || url.pathname === '/models/diffusion_models') {

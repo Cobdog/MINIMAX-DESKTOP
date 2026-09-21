@@ -1,4 +1,5 @@
 import type { AceStepGenerationOptions, AceStepModelSelection, ModelFile } from '../types'
+import { findRegistryModel } from './modelSelection'
 import type { ComfyPrompt } from './workflow'
 
 export const ACE_STEP_REQUIRED_NODES = [
@@ -7,8 +8,10 @@ export const ACE_STEP_REQUIRED_NODES = [
   'KSampler', 'VAEDecodeAudio', 'SaveAudioAdvanced',
 ] as const
 
+/** The shared registry-inference engine (Wave 2): basename anchors +
+ *  size-class ranking over the exact official names. */
 function matching(models: ModelFile[], kind: ModelFile['kind'], pattern: RegExp) {
-  return models.find((model) => model.kind === kind && pattern.test(model.name))?.name ?? ''
+  return findRegistryModel(models, kind, [pattern])
 }
 
 export function inferAceStepSelections(models: ModelFile[]): AceStepModelSelection {

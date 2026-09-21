@@ -231,6 +231,9 @@ export function FetchBrowser({ settings, setSettings, onAfterFetch, onAdoptCheck
             <div><dt>Destination</dt><dd>{destinationText(consentFor, settings)}</dd></div>
           </dl>
           {consentFor.licenseNote && <div className={`llm-test-result ${flaggedLicense(consentFor.licenseSpdx) ? 'fail' : 'ok'}`} role="status"><AlertCircle size={14} /><span>{consentFor.licenseNote}</span></div>}
+          {consentFor.destination.kind === 'model-root' && (settings.engine.mode === 'managed'
+            ? <div className="llm-test-result ok" role="status" data-fetch-visibility="managed"><Check size={14} /><span>Instance visibility: the managed engine mirrors this folder (extra_model_paths.yaml) — the engine serves these files from its next start.</span></div>
+            : <div className="llm-test-result fail" role="status" data-fetch-visibility="external"><AlertCircle size={14} /><span>Instance visibility: the connected external engine cannot see this folder by itself. The fetch lands on disk, but the engine will not serve it until you link or move the files where it reads (its own models tree, or extra_model_paths.yaml) and refresh — the studio's model list comes from the engine's registry alone.</span></div>)}
           {consentFor.destination.kind === 'engine-checkout' && <div className="field-group grow">
             <label htmlFor="fetch-engine-destination">Checkout directory (optional)</label>
             <input id="fetch-engine-destination" value={destinationDir} placeholder="empty = studio-managed location" onChange={(event) => setDestinationDir(event.target.value)} />
@@ -264,10 +267,23 @@ function stateLabel(entry: FetchEntryStatus, fetching: boolean): string {
   }
 }
 
+/** The destination line + its INSTANCE-VISIBILITY statement (R-13, ruling
+ *  D5): under registry-only, fetching weights an engine cannot see is
+ *  pointless-by-definition, so the consent dialog says up front whether the
+ *  destination is provably visible to the connected instance. Managed mode
+ *  mirrors the models root into the engine's extra_model_paths.yaml at
+ *  launch (visible after the next start); external mode has no mirroring —
+ *  the fetch lands, the instance still does not serve it until YOU place or
+ *  link it where the engine reads. */
 function destinationText(entry: FetchEntryStatus, settings: AppSettings): string {
   switch (entry.destination.kind) {
-    case 'model-root':
-      return `${entry.destination.root} — ${settings.paths[entry.destination.root as keyof typeof settings.paths] ?? `${settings.modelRoot}/${entry.destination.root}`}${entry.destination.subpath ? `/${entry.destination.subpath}` : ''}`
+    case 'model-root': {
+      const configured = (settings.paths[entry.destination.root as keyof typeof settings.paths] ?? '').trim()
+      const root = configured || (settings.modelRoot.trim() ? `${settings.modelRoot.replace(/\/+$/, '')}/${entry.destination.root}` : '')
+      if (!root) return `${entry.destination.root} — NOT CONFIGURED (no models root is set; fetching is refused until one is)`
+      const suffix = entry.destination.subpath ? `/${entry.destination.subpath}` : ''
+      return `${entry.destination.root} — ${root}${suffix}`
+    }
     case 'pack-ckpt':
       return `custom_nodes/${entry.destination.packDirectory}/${entry.destination.relativePath}`
     case 'node-pack':

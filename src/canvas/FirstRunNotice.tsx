@@ -1,10 +1,10 @@
 /**
- * First-run guidance (QOL wave, rrxlw2r, 2026-09-18): when the model scan
- * finds NOTHING, the launcher carries an onboarding empty state — the app is
- * never silently dead on a fresh install. Two honest paths: point the studio
- * at an existing ComfyUI install's model folders (Settings → Model locations;
- * weights stay in place — a managed engine mirrors them as
- * extra_model_paths.yaml, never copies), or open the consent-gated fetcher.
+ * First-run guidance (QOL wave, rrxlw2r, 2026-09-18; registry-only since
+ * Wave 2 R-12): when the engine's registry lists NOTHING, the launcher
+ * carries an onboarding empty state — the app is never silently dead on a
+ * fresh install. Two honest paths: connect the engine (the instance's own
+ * listing is the model source — nothing is configured manually), or open
+ * the consent-gated fetcher.
  *
  * Dismissible ONCE per browser (the LicenseNotice precedent — localStorage,
  * never a nag): dismissed means dismissed until the profile is reset.

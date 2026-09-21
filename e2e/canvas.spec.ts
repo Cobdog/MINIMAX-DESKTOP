@@ -4,7 +4,7 @@ import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { WebSocketServer } from 'ws'
 import { composeStructuredPrompt, parseStructuredPrompt } from '../src/lib/structuredPrompt'
-import { stockObjectInfo } from './fakeEngineInfo'
+import { H3_REGISTRY_LISTINGS, serveModelRegistry, serveObjectInfo, stockObjectInfo } from './fakeEngineInfo'
 
 // Canvas Phase 2 (task flyuh6h) — the ?canvas=1 route against the production
 // build, ENGINE-INDEPENDENT by design: submission paths assert the honest
@@ -1044,21 +1044,15 @@ test('H3-1F as the image op: the stills intent routes the T=1 family; image+cont
 
 test('the H3-1F still renders end to end through the fake engine and lands its take (34afx79)', async ({ page, request }) => {
   const problems = await trackErrors(page)
-  const { mkdirSync, writeFileSync } = await import('node:fs')
-  const { join } = await import('node:path')
   const http = await import('node:http')
 
-  // Dummy model files so the T=1 family's availability resolves (the images
-  // e2e precedent — scanner-safe dummy bytes, removed in finally).
-  const modelRoot = join(process.cwd(), 'test-home', 'canvas-t1-models')
-  for (const [kind, files] of Object.entries({
-    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
-    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
-    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors', 'minimax_h3_t1_image_vae_step1597.safetensors'],
-    loras: ['minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', 'MaxiMin-HHH-R2V-ThisIsFine.safetensors'],
-  })) {
-    mkdirSync(join(modelRoot, kind), { recursive: true })
-    for (const file of files as string[]) writeFileSync(join(modelRoot, kind, file), 'x')
+  // (Wave 2 R-12) No local model files: the engine's own /models listing is
+  // the whole inventory — the T=1 family's availability resolves from the
+  // registry (the T=1 image VAE + the MaxiMin detail adapter ride along).
+  const registryListings = {
+    ...H3_REGISTRY_LISTINGS,
+    vae: [...H3_REGISTRY_LISTINGS.vae, 'minimax_h3_t1_image_vae_step1597.safetensors'],
+    loras: [...H3_REGISTRY_LISTINGS.loras, 'MaxiMin-HHH-R2V-ThisIsFine.safetensors'],
   }
 
   const framePng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64')
@@ -1071,11 +1065,8 @@ test('the H3-1F still renders end to end through the fake engine and lands its t
       res.end(JSON.stringify({ system: {}, devices: [] }))
       return
     }
-    if (url.pathname === '/object_info') {
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify(stockObjectInfo({ MiniMaxH3HybridLoader: {} })))
-      return
-    }
+    if (serveObjectInfo(url, stockObjectInfo({ MiniMaxH3HybridLoader: {} }), res)) return
+    if (serveModelRegistry(url, registryListings, res)) return
     if (url.pathname === '/upload/image') {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ name: 'uploaded.png', subfolder: '', type: 'input' }))
@@ -1114,7 +1105,6 @@ test('the H3-1F still renders end to end through the fake engine and lands its t
     await request.post('/api/lan/settings', { data: { settings: {
       ...originalSettings,
       comfyUrl: `http://127.0.0.1:${enginePort}`,
-      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: join(modelRoot, 'diffusion_models'), text_encoders: join(modelRoot, 'text_encoders'), vae: join(modelRoot, 'vae'), loras: join(modelRoot, 'loras') },
     } } })
     await request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
     await page.goto('/?canvas=1')
@@ -1155,9 +1145,6 @@ test('the H3-1F still renders end to end through the fake engine and lands its t
   } finally {
     await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
     await request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
-    // The shared test-home returns to its empty-model-roots state (the
-    // first-run-guidance e2e keys on it) — scratch removed by its own test.
-    await import('node:fs').then((fs) => { fs.rmSync(modelRoot, { recursive: true, force: true }) })
     await new Promise<void>((resolve) => engine.close(() => resolve()))
   }
 })
@@ -2054,27 +2041,14 @@ test('the retired timeline tool fills the Flow box (LLM stubbed, provider route)
 // The concat contract END TO END: a structured submit drives the REAL
 // generation ladder through a fake engine speaking the real contract (the
 // images.spec precedent) — the graph the engine receives carries the exact
-// composed bytes. Dummy model files make availability resolve; the fake
-// engine accepts the submission and the job parks running on the chain.
+// composed bytes. The fake engine's /models listing resolves availability;
+// it accepts the submission and the job parks running on the chain.
 test('a structured submit lands a real job whose engine prompt is the composed bytes (fake engine)', async ({ page, request }) => {
   const problems = await trackErrors(page)
-  const fsModule = await import('node:fs')
-  const pathModule = await import('node:path')
   const http = await import('node:http')
 
-  // Dummy model files (scanner tags degrade to "no tag" on dummy bytes) —
-  // the shared H3 set the quality t2v ladder resolves.
-  const modelRoot = pathModule.join(process.cwd(), 'test-home', 'sp-models')
-  for (const [kind, files] of Object.entries({
-    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
-    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
-    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
-    loras: ['minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors'],
-  })) {
-    fsModule.mkdirSync(pathModule.join(modelRoot, kind), { recursive: true })
-    for (const file of files as string[]) fsModule.writeFileSync(pathModule.join(modelRoot, kind, file), 'x')
-  }
-
+  // (Wave 2 R-12) The fake engine's /models listing resolves availability —
+  // no local model files, no configured roots.
   const submittedGraphs: string[] = []
   const engine = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://engine.local')
@@ -2083,11 +2057,8 @@ test('a structured submit lands a real job whose engine prompt is the composed b
       res.end(JSON.stringify({ system: {}, devices: [] }))
       return
     }
-    if (url.pathname === '/object_info') {
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify(stockObjectInfo({ MiniMaxH3HybridLoader: {} })))
-      return
-    }
+    if (serveObjectInfo(url, stockObjectInfo({ MiniMaxH3HybridLoader: {} }), res)) return
+    if (serveModelRegistry(url, H3_REGISTRY_LISTINGS, res)) return
     if (url.pathname === '/prompt' && req.method === 'POST') {
       let body = ''
       req.on('data', (chunk) => { body += chunk })
@@ -2131,7 +2102,6 @@ test('a structured submit lands a real job whose engine prompt is the composed b
     await request.post('/api/lan/settings', { data: { settings: {
       ...originalSettings,
       comfyUrl: `http://127.0.0.1:${enginePort}`,
-      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: pathModule.join(modelRoot, 'diffusion_models'), text_encoders: pathModule.join(modelRoot, 'text_encoders'), vae: pathModule.join(modelRoot, 'vae'), loras: pathModule.join(modelRoot, 'loras') },
     } } })
     await resetSession(page)
     await page.goto('/?canvas=1')
@@ -2202,9 +2172,6 @@ test('a structured submit lands a real job whose engine prompt is the composed b
   } finally {
     await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
     await resetSession(page).catch(() => undefined)
-    // The shared test-home returns to its EMPTY-model-roots state (the
-    // first-run-guidance precondition — the c57938b discipline).
-    fsModule.rmSync(modelRoot, { recursive: true, force: true })
     await new Promise<void>((resolve) => engine.close(() => resolve()))
   }
 })
@@ -2214,45 +2181,26 @@ test('a structured submit lands a real job whose engine prompt is the composed b
 // selection-inference ladder. The maintainer's immediate use case: a
 // community-merge checkpoint that matches NO selection pattern becomes the
 // video family's checkpoint and rides the REAL submit path end to end.
-/** A minimal VALID safetensors file whose header carries an adaln_t_table
- *  tensor — exactly what the scan's H3 form detection reads to tag a
- *  diffusion model 'curve' (server/modelForms.ts reads the header only;
- *  tensor bytes are never touched). Without the real header the checkpoint
- *  pick would (correctly) refuse on the no-form rule. */
-function writeH3CurveSafetensors(fsModule: typeof import('node:fs'), file: string) {
-  const header = JSON.stringify({ __metadata__: {}, 'diffusion_model.adaln_t_table': { dtype: 'F32', shape: [64, 8], data_offsets: [0, 2048] } })
-  const length = Buffer.alloc(8)
-  length.writeBigUInt64LE(BigInt(Buffer.byteLength(header)))
-  fsModule.writeFileSync(file, Buffer.concat([length, Buffer.from(header), Buffer.alloc(2048)]))
-}
+// (writeH3CurveSafetensors — the scan's curve-form header crafter — was
+// removed with the local scan and its form gate, Wave 2 R-12, 2026-09-20:
+// registry rows carry no header reads at all. Git history is the archive.)
 
 type OverrideJobRecord = { promptId?: string; manifest?: { models?: Record<string, { name?: string }>; modelOverrides?: Record<string, string> } }
 
 test('a model override reaches the engine graph and the job manifest (fake engine, community merge)', async ({ page, request }) => {
   const problems = await trackErrors(page)
-  const fsModule = await import('node:fs')
-  const pathModule = await import('node:path')
   const http = await import('node:http')
 
-  // The shared official H3 set (plain dummy bytes — inference needs no form)
-  // plus the community merge carrying a REAL curve-form header: it matches no
-  // selection pattern, which is the entire point of the override layer.
-  // (rq0lsax) the pick rides the FL2VA lane — the split family's per-lane
-  // slot; the reference lane stays on inference underneath it.
+  // (Wave 2 R-12) The engine's registry listing replaces the seeded files:
+  // the community merge rides the /models listing — it matches no selection
+  // pattern, which is the entire point of the override layer. (rq0lsax) the
+  // pick rides the FL2VA lane; the reference lane stays on inference.
   const mergeName = 'TenStrip_10Eros-Max_beta5_int8.safetensors'
-  const modelRoot = pathModule.join(process.cwd(), 'test-home', 'override-models')
-  for (const [kind, files] of Object.entries({
-    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
-    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
-    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors', 'h3-community-video-decoder.safetensors', 'h3-community-audio-decoder.safetensors'],
-    loras: ['minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors'],
-  })) {
-    fsModule.mkdirSync(pathModule.join(modelRoot, kind), { recursive: true })
-    for (const file of files as string[]) fsModule.writeFileSync(pathModule.join(modelRoot, kind, file), 'x')
+  const overrideListings = {
+    ...H3_REGISTRY_LISTINGS,
+    diffusion_models: [...H3_REGISTRY_LISTINGS.diffusion_models, mergeName],
+    vae: [...H3_REGISTRY_LISTINGS.vae, 'h3-community-video-decoder.safetensors', 'h3-community-audio-decoder.safetensors'],
   }
-  fsModule.mkdirSync(pathModule.join(modelRoot, 'diffusion_models'), { recursive: true })
-  writeH3CurveSafetensors(fsModule, pathModule.join(modelRoot, 'diffusion_models', mergeName))
-
   const submittedGraphs: string[] = []
   const engine = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://engine.local')
@@ -2261,11 +2209,8 @@ test('a model override reaches the engine graph and the job manifest (fake engin
       res.end(JSON.stringify({ system: {}, devices: [] }))
       return
     }
-    if (url.pathname === '/object_info') {
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify(stockObjectInfo({ MiniMaxH3HybridLoader: {} })))
-      return
-    }
+    if (serveObjectInfo(url, stockObjectInfo({ MiniMaxH3HybridLoader: {} }), res)) return
+    if (serveModelRegistry(url, overrideListings, res)) return
     if (url.pathname === '/prompt' && req.method === 'POST') {
       let body = ''
       req.on('data', (chunk) => { body += chunk })
@@ -2299,7 +2244,6 @@ test('a model override reaches the engine graph and the job manifest (fake engin
     await request.post('/api/lan/settings', { data: { settings: {
       ...originalSettings,
       comfyUrl: `http://127.0.0.1:${enginePort}`,
-      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: pathModule.join(modelRoot, 'diffusion_models'), text_encoders: pathModule.join(modelRoot, 'text_encoders'), vae: pathModule.join(modelRoot, 'vae'), loras: pathModule.join(modelRoot, 'loras') },
       modelOverrides: { minimax: { fl2va: mergeName, videoVae: 'h3-community-video-decoder.safetensors', audioVae: 'h3-community-audio-decoder.safetensors' } },
     } } })
     await resetSession(page)
@@ -2345,36 +2289,41 @@ test('a model override reaches the engine graph and the job manifest (fake engin
   } finally {
     await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
     await resetSession(page).catch(() => undefined)
-    // The shared test-home returns to its EMPTY-model-roots state (the
-    // first-run-guidance precondition — the c57938b discipline).
-    fsModule.rmSync(modelRoot, { recursive: true, force: true })
     await new Promise<void>((resolve) => engine.close(() => resolve()))
   }
 })
 
 test('model overrides surface in Settings and the chain properties panel (both surfaces, honest states)', async ({ page, request }) => {
   const problems = await trackErrors(page)
-  const fsModule = await import('node:fs')
-  const pathModule = await import('node:path')
+  const http = await import('node:http')
 
+  // (Wave 2 R-12) A fake engine serves the registry listing (the community
+  // merge rides it) — the UI populates from the engine's own /models, no
+  // local files.
   const mergeName = 'TenStrip_10Eros-Max_beta5_int8.safetensors'
-  const modelRoot = pathModule.join(process.cwd(), 'test-home', 'override-ui-models')
-  for (const [kind, files] of Object.entries({
-    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
-    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
-    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
-  })) {
-    fsModule.mkdirSync(pathModule.join(modelRoot, kind), { recursive: true })
-    for (const file of files as string[]) fsModule.writeFileSync(pathModule.join(modelRoot, kind, file), 'x')
+  const uiListings = {
+    ...H3_REGISTRY_LISTINGS,
+    diffusion_models: [...H3_REGISTRY_LISTINGS.diffusion_models, mergeName],
   }
-  fsModule.mkdirSync(pathModule.join(modelRoot, 'diffusion_models'), { recursive: true })
-  writeH3CurveSafetensors(fsModule, pathModule.join(modelRoot, 'diffusion_models', mergeName))
+  const engine = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://engine.local')
+    if (url.pathname === '/system_stats') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ system: {}, devices: [] }))
+      return
+    }
+    if (serveObjectInfo(url, stockObjectInfo(), res)) return
+    if (serveModelRegistry(url, uiListings, res)) return
+    res.writeHead(404)
+    res.end()
+  })
+  const enginePort = await new Promise<number>((resolve) => engine.listen(0, '127.0.0.1', () => resolve((engine.address() as { port: number }).port)))
 
   const originalSettings = ((await (await request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
   try {
     await request.post('/api/lan/settings', { data: { settings: {
       ...originalSettings,
-      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: pathModule.join(modelRoot, 'diffusion_models'), text_encoders: pathModule.join(modelRoot, 'text_encoders'), vae: pathModule.join(modelRoot, 'vae') },
+      comfyUrl: `http://127.0.0.1:${enginePort}`,
     } } })
     await resetSession(page)
     await page.goto('/?canvas=1')
@@ -2459,35 +2408,31 @@ test('model overrides surface in Settings and the chain properties panel (both s
   } finally {
     await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
     await resetSession(page).catch(() => undefined)
-    fsModule.rmSync(modelRoot, { recursive: true, force: true })
+    await new Promise<void>((resolve) => engine.close(() => resolve()))
   }
 })
 
-// (rq0lsax) The instance-source form arm — the maintainer's H3/ssd bug as an
-// e2e: an engine-relative checkpoint name listed ONLY by the connected
-// instance (no local file, so no readable safetensors header) applies as an
-// override with the unverifiable-form WARNING visible, and the engine
-// receives that exact engine-relative name in the graph. Failing-without-it:
-// the pre-fix layer REFUSED the pick with "carries no detectable MiniMax-H3
-// form" — the row read Refused, no submission could carry the name.
-test('an instance-listed checkpoint pick applies with the unverifiable-form warning (fake engine, engine-relative names)', async ({ page, request }) => {
+// (rq0lsax → Wave 2 R-12) The maintainer's H3/ssd case as an e2e, now the
+// registry-only NORM: an engine-relative checkpoint name listed ONLY by the
+// connected instance applies as an override — no form vocabulary exists (the
+// registry lists filenames only; the engine is the final arbiter) — and the
+// engine receives that exact engine-relative name in the graph. This is the
+// pick→node leg of the R-12 invariant, proven end to end.
+test('an instance-listed subpathed checkpoint pick applies and the graph carries the engine-relative name (fake engine)', async ({ page, request }) => {
   const problems = await trackErrors(page)
-  const fsModule = await import('node:fs')
-  const pathModule = await import('node:path')
   const http = await import('node:http')
 
   // Engine-relative subpaths — exactly what /models serves and the graph
-  // loaders accept, and exactly what the name-pattern inference can never
-  // match (the override layer's reason to exist in instance mode).
+  // loaders accept. The loosened anchors resolve them by basename; the
+  // override picks carry them verbatim.
   const instanceFl2va = 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors'
   const instanceRef2va = 'H3/ssd/minimax_h3_ref2va_pruned_int8_convrot.safetensors'
-  // Empty dedicated local roots: EVERYTHING comes from the instance listing,
-  // so both checkpoint rows are source 'instance' with no h3Form.
-  const modelRoot = pathModule.join(process.cwd(), 'test-home', 'instance-override-models')
-  for (const kind of ['diffusion_models', 'text_encoders', 'vae', 'loras', 'vae_approx', 'clip_vision']) {
-    fsModule.mkdirSync(pathModule.join(modelRoot, kind), { recursive: true })
+  const listings: Record<string, string[]> = {
+    diffusion_models: [instanceFl2va, instanceRef2va],
+    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
+    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
+    loras: [], vae_approx: [], clip_vision: [],
   }
-
   const submittedGraphs: string[] = []
   const engine = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://engine.local')
@@ -2496,22 +2441,8 @@ test('an instance-listed checkpoint pick applies with the unverifiable-form warn
       res.end(JSON.stringify({ system: {}, devices: [] }))
       return
     }
-    if (url.pathname === '/object_info') {
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify(stockObjectInfo({ MiniMaxH3HybridLoader: {} })))
-      return
-    }
-    if (url.pathname.startsWith('/models/') && req.method === 'GET') {
-      const listings: Record<string, string[]> = {
-        diffusion_models: [instanceFl2va, instanceRef2va],
-        text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
-        vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
-        loras: [], vae_approx: [], clip_vision: [],
-      }
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify(listings[url.pathname.slice('/models/'.length)] ?? []))
-      return
-    }
+    if (serveObjectInfo(url, stockObjectInfo({ MiniMaxH3HybridLoader: {} }), res)) return
+    if (serveModelRegistry(url, listings, res)) return
     if (url.pathname === '/prompt' && req.method === 'POST') {
       let body = ''
       req.on('data', (chunk) => { body += chunk })
@@ -2542,13 +2473,6 @@ test('an instance-listed checkpoint pick applies with the unverifiable-form warn
     await request.post('/api/lan/settings', { data: { settings: {
       ...originalSettings,
       comfyUrl: `http://127.0.0.1:${enginePort}`,
-      paths: {
-        ...(originalSettings.paths as Record<string, string>),
-        diffusion_models: pathModule.join(modelRoot, 'diffusion_models'),
-        text_encoders: pathModule.join(modelRoot, 'text_encoders'),
-        vae: pathModule.join(modelRoot, 'vae'),
-        loras: pathModule.join(modelRoot, 'loras'),
-      },
       modelOverrides: { minimax: { fl2va: instanceFl2va, ref2va: instanceRef2va } },
     } } })
     await resetSession(page)
@@ -2556,20 +2480,19 @@ test('an instance-listed checkpoint pick applies with the unverifiable-form warn
     await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
     await expect(page.locator('[data-canvas-engine]')).toHaveAttribute('data-engine-connected', 'true', { timeout: 15_000 })
 
-    // The Settings row is APPLIED with the warning — never the old Refused.
+    // The Settings row is APPLIED, clean — never the old Refused, and (Wave 2)
+    // no warning vocabulary exists for registry rows.
     await page.locator('[data-canvas-settings-button]').click()
     const dock = page.locator('[data-canvas-settings-dock]')
     await expect(dock).toBeVisible()
     const fl2vaRow = dock.locator('[data-model-override-family="minimax"] [data-model-override-slot="fl2va"]')
     await expect(fl2vaRow.locator('select')).toHaveValue(instanceFl2va, { timeout: 15_000 })
-    await expect(fl2vaRow.locator('[data-model-override-problem]')).toContainText('instance-listed', { timeout: 15_000 })
+    await expect(fl2vaRow.locator('[data-model-override-problem]')).toHaveCount(0)
     await page.locator('[data-canvas-settings-close]').click()
 
-    // The submission carries the engine-relative names, with the warning
-    // surfaced as a neutral toast at submit time.
+    // The submission carries the engine-relative names verbatim.
     await page.locator('[data-canvas-prompt]').fill('instance override probe — the engine-relative name must load')
     await page.locator('[data-canvas-submit]').click()
-    await expect(page.locator('[data-canvas-toast="neutral"]').first()).toContainText('instance-listed', { timeout: 10_000 })
     const tile = page.locator('[data-canvas-tile]').first()
     await expect(tile).toBeVisible({ timeout: 10_000 })
     await expect(tile).toHaveAttribute('data-tile-status', 'running', { timeout: 20_000 })
@@ -2582,7 +2505,6 @@ test('an instance-listed checkpoint pick applies with the unverifiable-form warn
   } finally {
     await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
     await resetSession(page).catch(() => undefined)
-    fsModule.rmSync(modelRoot, { recursive: true, force: true })
     await new Promise<void>((resolve) => engine.close(() => resolve()))
   }
 })
@@ -2595,21 +2517,9 @@ test('an instance-listed checkpoint pick applies with the unverifiable-form warn
 // bytes carrying the choreography.
 test('the camera path editor compiles a path into the Camera box; the composed bytes reach the engine (fake engine)', async ({ page, request }) => {
   const problems = await trackErrors(page)
-  const fsModule = await import('node:fs')
-  const pathModule = await import('node:path')
   const http = await import('node:http')
 
-  // Dummy model files — the shared H3 set the t2v ladder resolves.
-  const modelRoot = pathModule.join(process.cwd(), 'test-home', 'camera-models')
-  for (const [kind, files] of Object.entries({
-    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
-    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
-    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
-    loras: ['minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors'],
-  })) {
-    fsModule.mkdirSync(pathModule.join(modelRoot, kind), { recursive: true })
-    for (const file of files as string[]) fsModule.writeFileSync(pathModule.join(modelRoot, kind, file), 'x')
-  }
+  // (Wave 2 R-12) The engine's /models listing resolves the models — no local files.
 
   const submittedGraphs: string[] = []
   const engine = http.createServer((req, res) => {
@@ -2619,11 +2529,8 @@ test('the camera path editor compiles a path into the Camera box; the composed b
       res.end(JSON.stringify({ system: {}, devices: [] }))
       return
     }
-    if (url.pathname === '/object_info') {
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify(stockObjectInfo({ MiniMaxH3HybridLoader: {} })))
-      return
-    }
+    if (serveObjectInfo(url, stockObjectInfo({ MiniMaxH3HybridLoader: {} }), res)) return
+    if (serveModelRegistry(url, H3_REGISTRY_LISTINGS, res)) return
     if (url.pathname === '/prompt' && req.method === 'POST') {
       let body = ''
       req.on('data', (chunk) => { body += chunk })
@@ -2666,7 +2573,6 @@ test('the camera path editor compiles a path into the Camera box; the composed b
     await request.post('/api/lan/settings', { data: { settings: {
       ...originalSettings,
       comfyUrl: `http://127.0.0.1:${enginePort}`,
-      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: pathModule.join(modelRoot, 'diffusion_models'), text_encoders: pathModule.join(modelRoot, 'text_encoders'), vae: pathModule.join(modelRoot, 'vae'), loras: pathModule.join(modelRoot, 'loras') },
     } } })
     await resetSession(page)
     await page.goto('/?canvas=1')
@@ -2777,9 +2683,6 @@ test('the camera path editor compiles a path into the Camera box; the composed b
   } finally {
     await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
     await resetSession(page).catch(() => undefined)
-    // The shared test-home returns to its EMPTY-model-roots state (the
-    // first-run-guidance precondition — the c57938b discipline).
-    fsModule.rmSync(modelRoot, { recursive: true, force: true })
     await new Promise<void>((resolve) => engine.close(() => resolve()))
   }
 })
@@ -2794,22 +2697,11 @@ test('the camera path editor compiles a path into the Camera box; the composed b
 // ranges/stacks + the job manifests take-landing reads for metrics.loras).
 test('the LoRA timeline compiles painted ranges into per-LoRA segment chains (fake engine)', async ({ page, request }) => {
   const problems = await trackErrors(page)
-  const fsModule = await import('node:fs')
-  const pathModule = await import('node:path')
   const http = await import('node:http')
 
-  // Dummy model files — the shared H3 set plus two STYLE LoRAs the picker
-  // offers (the timeline's raw material).
-  const modelRoot = pathModule.join(process.cwd(), 'test-home', 'lora-timeline-models')
-  for (const [kind, files] of Object.entries({
-    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
-    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
-    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors'],
-    loras: ['e2e-style-rain.safetensors', 'e2e-style-neon.safetensors'],
-  })) {
-    fsModule.mkdirSync(pathModule.join(modelRoot, kind), { recursive: true })
-    for (const file of files as string[]) fsModule.writeFileSync(pathModule.join(modelRoot, kind, file), 'x')
-  }
+  // (Wave 2 R-12) The registry listing — the shared H3 set plus two STYLE
+  // LoRAs the picker offers (the timeline's raw material).
+  const timelineListings = { ...H3_REGISTRY_LISTINGS, loras: ['e2e-style-rain.safetensors', 'e2e-style-neon.safetensors'] }
 
   const submittedGraphs: string[] = []
   const engine = http.createServer((req, res) => {
@@ -2819,11 +2711,8 @@ test('the LoRA timeline compiles painted ranges into per-LoRA segment chains (fa
       res.end(JSON.stringify({ system: {}, devices: [] }))
       return
     }
-    if (url.pathname === '/object_info') {
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify(stockObjectInfo({ MiniMaxH3HybridLoader: {} })))
-      return
-    }
+    if (serveObjectInfo(url, stockObjectInfo({ MiniMaxH3HybridLoader: {} }), res)) return
+    if (serveModelRegistry(url, timelineListings, res)) return
     if (url.pathname === '/prompt' && req.method === 'POST') {
       let body = ''
       req.on('data', (chunk) => { body += chunk })
@@ -2863,7 +2752,6 @@ test('the LoRA timeline compiles painted ranges into per-LoRA segment chains (fa
     await request.post('/api/lan/settings', { data: { settings: {
       ...originalSettings,
       comfyUrl: `http://127.0.0.1:${enginePort}`,
-      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: pathModule.join(modelRoot, 'diffusion_models'), text_encoders: pathModule.join(modelRoot, 'text_encoders'), vae: pathModule.join(modelRoot, 'vae'), loras: pathModule.join(modelRoot, 'loras') },
     } } })
     await resetSession(page)
     await page.goto('/?canvas=1')
@@ -2971,7 +2859,6 @@ test('the LoRA timeline compiles painted ranges into per-LoRA segment chains (fa
   } finally {
     await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
     await resetSession(page).catch(() => undefined)
-    fsModule.rmSync(modelRoot, { recursive: true, force: true })
     await new Promise<void>((resolve) => engine.close(() => resolve()))
   }
 })
@@ -2988,20 +2875,15 @@ test('the LoRA timeline compiles painted ranges into per-LoRA segment chains (fa
 // message) and the tile never parks running.
 test('a legacy pre-split vae pick of the T=1 decoder never refuses the video path (tmz8vh7)', async ({ page, request }) => {
   const problems = await trackErrors(page)
-  const { mkdirSync, writeFileSync } = await import('node:fs')
-  const { join } = await import('node:path')
   const http = await import('node:http')
 
+  // (Wave 2 R-12) The registry listing carries the T=1 decoder + the
+  // MaxiMin adapter the wedge case needs.
   const T1_FILE = 'minimax_h3_t1_image_vae_step1597.safetensors'
-  const modelRoot = join(process.cwd(), 'test-home', 't1wedge-models')
-  for (const [kind, files] of Object.entries({
-    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
-    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
-    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors', T1_FILE],
-    loras: ['minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', 'MaxiMin-HHH-R2V-ThisIsFine.safetensors'],
-  })) {
-    mkdirSync(join(modelRoot, kind), { recursive: true })
-    for (const file of files as string[]) writeFileSync(join(modelRoot, kind, file), 'x')
+  const wedgeListings = {
+    ...H3_REGISTRY_LISTINGS,
+    vae: [...H3_REGISTRY_LISTINGS.vae, T1_FILE],
+    loras: [...H3_REGISTRY_LISTINGS.loras, 'MaxiMin-HHH-R2V-ThisIsFine.safetensors'],
   }
 
   const PROMPT_ID = 't1wedge-1'
@@ -3013,11 +2895,8 @@ test('a legacy pre-split vae pick of the T=1 decoder never refuses the video pat
       res.end(JSON.stringify({ system: {}, devices: [] }))
       return
     }
-    if (url.pathname === '/object_info') {
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify(stockObjectInfo({ MiniMaxH3HybridLoader: {} })))
-      return
-    }
+    if (serveObjectInfo(url, stockObjectInfo({ MiniMaxH3HybridLoader: {} }), res)) return
+    if (serveModelRegistry(url, wedgeListings, res)) return
     if (url.pathname === '/prompt' && req.method === 'POST') {
       let body = ''
       req.on('data', (chunk: Buffer) => { body += chunk })
@@ -3050,7 +2929,6 @@ test('a legacy pre-split vae pick of the T=1 decoder never refuses the video pat
       ...originalSettings,
       comfyUrl: `http://127.0.0.1:${enginePort}`,
       modelOverrides: { ...(originalSettings.modelOverrides as Record<string, Record<string, string>> ?? {}), minimax: { vae: T1_FILE } },
-      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: join(modelRoot, 'diffusion_models'), text_encoders: join(modelRoot, 'text_encoders'), vae: join(modelRoot, 'vae'), loras: join(modelRoot, 'loras') },
     } } })
     await request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
 
@@ -3088,7 +2966,6 @@ test('a legacy pre-split vae pick of the T=1 decoder never refuses the video pat
       ...originalSettings,
       comfyUrl: `http://127.0.0.1:${enginePort}`,
       modelOverrides: { ...(originalSettings.modelOverrides as Record<string, Record<string, string>> ?? {}), minimax: { videoVae: T1_FILE } },
-      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: join(modelRoot, 'diffusion_models'), text_encoders: join(modelRoot, 'text_encoders'), vae: join(modelRoot, 'vae'), loras: join(modelRoot, 'loras') },
     } } })
     const graphsBeforeArm2 = submitted.length
     await page.reload()
@@ -3104,7 +2981,6 @@ test('a legacy pre-split vae pick of the T=1 decoder never refuses the video pat
   } finally {
     await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
     await request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
-    await import('node:fs').then((fs) => { fs.rmSync(modelRoot, { recursive: true, force: true }) })
     await new Promise<void>((resolve) => engine.close(() => resolve()))
   }
 })
@@ -3119,20 +2995,10 @@ test('a legacy pre-split vae pick of the T=1 decoder never refuses the video pat
 // ever surfaces.
 test('an image-intent chain with a reference binding refuses honestly — never a silent H3 video render (tmz8vh7)', async ({ page, request }) => {
   const problems = await trackErrors(page)
-  const { mkdirSync, writeFileSync } = await import('node:fs')
-  const { join } = await import('node:path')
   const http = await import('node:http')
 
-  const modelRoot = join(process.cwd(), 'test-home', 'p12-models')
-  for (const [kind, files] of Object.entries({
-    diffusion_models: ['minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'minimax_h3_ref2va_pruned_int8_convrot.safetensors'],
-    text_encoders: ['qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'],
-    vae: ['minimax_h3_video_vae_fp16.safetensors', 'minimax_h3_audio_vae_fp32.safetensors', 'minimax_h3_t1_image_vae_step1597.safetensors'],
-    loras: ['minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors'],
-  })) {
-    mkdirSync(join(modelRoot, kind), { recursive: true })
-    for (const file of files as string[]) writeFileSync(join(modelRoot, kind, file), 'x')
-  }
+  // (Wave 2 R-12) The registry listing carries the T=1 decoder.
+  const p12Listings = { ...H3_REGISTRY_LISTINGS, vae: [...H3_REGISTRY_LISTINGS.vae, 'minimax_h3_t1_image_vae_step1597.safetensors'] }
 
   const PROMPT_ID = 'p12-still-1'
   const submitted: Array<Record<string, { class_type: string; inputs: Record<string, unknown> }>> = []
@@ -3143,11 +3009,8 @@ test('an image-intent chain with a reference binding refuses honestly — never 
       res.end(JSON.stringify({ system: {}, devices: [] }))
       return
     }
-    if (url.pathname === '/object_info') {
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify(stockObjectInfo({ MiniMaxH3HybridLoader: {} })))
-      return
-    }
+    if (serveObjectInfo(url, stockObjectInfo({ MiniMaxH3HybridLoader: {} }), res)) return
+    if (serveModelRegistry(url, p12Listings, res)) return
     if (url.pathname === '/prompt' && req.method === 'POST') {
       let body = ''
       req.on('data', (chunk: Buffer) => { body += chunk })
@@ -3186,7 +3049,6 @@ test('an image-intent chain with a reference binding refuses honestly — never 
     await request.post('/api/lan/settings', { data: { settings: {
       ...originalSettings,
       comfyUrl: `http://127.0.0.1:${enginePort}`,
-      paths: { ...(originalSettings.paths as Record<string, string>), diffusion_models: join(modelRoot, 'diffusion_models'), text_encoders: join(modelRoot, 'text_encoders'), vae: join(modelRoot, 'vae'), loras: join(modelRoot, 'loras') },
     } } })
     await resetSession(page)
     await page.goto('/?canvas=1')
@@ -3254,7 +3116,6 @@ test('an image-intent chain with a reference binding refuses honestly — never 
   } finally {
     await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
     await resetSession(page).catch(() => undefined)
-    await import('node:fs').then((fs) => { fs.rmSync(modelRoot, { recursive: true, force: true }) })
     await new Promise<void>((resolve) => engine.close(() => resolve()))
   }
 })

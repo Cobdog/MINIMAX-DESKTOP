@@ -8,6 +8,7 @@
  *  VAE decodes tiled (1536/64) — the low-VRAM path — before
  *  SaveAudioAdvanced (mp3 V0). */
 import type { ModelFile } from '../types'
+import { findRegistryModel } from './modelSelection'
 
 export type Music3ModelSelection = {
   diffusion: string
@@ -29,17 +30,14 @@ export type Music3GenerationOptions = {
 export const MUSIC3_REQUIRED_NODES = ['MiniMaxMusic3TextEncode', 'EmptyMiniMaxMusic3LatentAudio', 'ConditioningZeroOut', 'VAEDecodeAudioTiled', 'SaveAudioAdvanced', 'KSampler'] as const
 
 /** Prefers the INT8 diffusion build (the low-VRAM recommendation) and falls
- *  back to fp16 when only that is installed. */
+ *  back to fp16 when only that is installed. Resolves registry rows through
+ *  the shared inference engine (Wave 2): basename anchors + size-class
+ *  ranking, so subpathed and renamed Music 3 files resolve too. */
 export function inferMusic3Selection(models: ModelFile[]): Music3ModelSelection {
-  const byKind = (kind: string) => models.filter((model) => model.kind === kind)
-  const diffusion = byKind('diffusion_models')
-  const vae = byKind('vae')
-  const textEncoders = byKind('text_encoders')
   return {
-    diffusion: diffusion.find((m) => /music3.*int8|music3_dit_int8/i.test(m.name))?.name
-      ?? diffusion.find((m) => /music3/i.test(m.name))?.name ?? '',
-    textEncoder: textEncoders.find((m) => /music3.*text_encoder/i.test(m.name))?.name ?? '',
-    vae: vae.find((m) => /music3.*dav/i.test(m.name))?.name ?? '',
+    diffusion: findRegistryModel(models, 'diffusion_models', [/music3.*int8|music3_dit_int8/i, /music3/i]),
+    textEncoder: findRegistryModel(models, 'text_encoders', [/music3.*text_encoder/i]),
+    vae: findRegistryModel(models, 'vae', [/music3.*dav/i]),
   }
 }
 

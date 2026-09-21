@@ -9,6 +9,7 @@
 import { useCallback, useEffect } from 'react'
 import type { AppSettings, ComfyStatus } from '../types'
 import { onRealtimeStatus, subscribe } from '../lib/useRealtime'
+import { dbg } from '../lib/dbg'
 import { engineTransition, logEngineProbe, nextRecheckDelayMs } from '../lib/engineWatch'
 import { useSessionStore } from '../state/sessionStore'
 import type { TelemetrySample } from '../types'
@@ -34,7 +35,7 @@ async function runEngineCheck(url: string, source: 'boot' | 'loop' | 'visibility
         store.bumpInfoEpoch()
         if (transition === 'recovered') {
           // The restart-watch payload: object_info AND the model inventory
-          // (instance /models merged with local roots) re-pulled together.
+          // (the instance's own registry listing — R-12) re-pulled together.
           void window.minimax.scanModels(useSessionStore.getState().settings ?? ({} as AppSettings)).then((found) => {
             useSessionStore.getState().setModels(found)
           }).catch(() => undefined)
@@ -100,11 +101,14 @@ export function useStudioSession() {
   const engineMode = useSessionStore((state) => state.settings?.engine.mode)
   const { setSettings, setModels, setScanning, setChecking, setGpu, setOllamaModels, setLlm, setEngineRuntime } = useSessionStore.getState()
 
-  const scanModels = useCallback(async (nextSettings: AppSettings) => {
+  const scanModels = useCallback(async (nextSettings: AppSettings, options?: { refresh?: boolean }) => {
     setScanning(true)
+    if (options?.refresh) dbg('inventory.refresh', { source: 'user' })
     try {
-      const found = await window.minimax.scanModels(nextSettings)
+      const found = await window.minimax.scanModels(nextSettings, options)
       setModels(found)
+      // (A-DBG) The inventory epoch junction: what the registry answered.
+      dbg('inventory.epoch', { refresh: Boolean(options?.refresh), files: found.length })
     } finally {
       setScanning(false)
     }

@@ -1,8 +1,10 @@
 /**
- * Instance-sourced model inventory (task 9om4bi9): when the studio talks to
- * an engine it did not launch — or any reachable ComfyUI — the instance
- * already knows every model it serves, and the studio asks IT instead of
- * demanding the user configure local roots first.
+ * THE model inventory, registry-only (remediation Wave 2, R-12 — maintainer
+ * directive 2987ef3e): the connected ComfyUI instance is the app's ONLY
+ * model source of truth. **Instance-invisible = nonexistent** — there is no
+ * local scan, no local/instance merge, and no fallback that could feed a
+ * graph a file the engine cannot load. The studio asks the instance what it
+ * serves and uses exactly that.
  *
  * Two instance surfaces, most-authoritative first:
  *   GET /models            the folder types the instance serves
@@ -12,11 +14,11 @@
  * consumes for availability detection (UNETLoader.unet_name and friends
  * list exactly the files each folder serves).
  *
- * Everything here is PURE: the HTTP fetches live in core.ts, the parsing and
- * merge logic is exercised directly by scripts/test-instance.cjs against
- * crafted payloads (the /models response shape is verified against the
- * reference ComfyUI server.py: a JSON array of filename strings, 404 for an
- * unknown folder).
+ * Everything here is PURE: the HTTP fetches live in core.ts, the parsing is
+ * exercised directly by tests/instance.test.js against crafted payloads
+ * (the /models response shape is verified against the reference ComfyUI
+ * server.py — docs/devdocs/comfyui-api/index.md §4: a JSON array of
+ * filename strings, 404 for an unknown folder).
  */
 import type { ModelFile, ModelKind } from '../src/types'
 
@@ -94,29 +96,16 @@ export function emptyInventory(): Record<ModelKind, string[]> {
   }
 }
 
-/** Merge the local-root scan with the instance listing (task 9om4bi9's union
- *  rule): keyed by (kind, name) — the engine-relative name for instance rows
- *  (subpaths included, exactly what the graph loaders accept), the scanned
- *  filename for local rows. A file visible from both sides collapses to ONE
- *  row tagged 'both'; instance-only rows carry bytes: 0 (the instance API
- *  does not report sizes — the Settings surface renders that honestly).
- *  Local rows keep their h3Form tag; instance rows cannot read headers. */
-export function mergeModelInventories(local: ModelFile[], instance: Record<ModelKind, string[]>): ModelFile[] {
-  const merged = new Map<string, ModelFile>()
-  for (const file of local) {
-    merged.set(`${file.kind}\u0000${file.name}`, { ...file, source: 'local' })
-  }
+/** The instance registry AS the app's whole inventory (R-12): every kind's
+ *  resolved listing becomes ModelFile rows, engine-relative names verbatim —
+ *  subpaths included, exactly what the graph loaders accept. Rows carry
+ *  bytes: 0 (the /models contract reports no sizes — the Settings surface
+ *  renders that honestly) and no header-derived tags: the registry lists
+ *  filenames only, so nothing about a file's internals is claimed. */
+export function registryInventoryFiles(inventory: Record<ModelKind, string[]>): ModelFile[] {
+  const files: ModelFile[] = []
   for (const kind of INVENTORY_MODEL_KINDS) {
-    for (const name of instance[kind] ?? []) {
-      const key = `${kind}\u0000${name}`
-      const existing = merged.get(key)
-      if (existing && existing.kind === kind && existing.source !== 'instance') {
-        merged.set(key, { ...existing, source: 'both' })
-        continue
-      }
-      if (existing) continue
-      merged.set(key, { name, kind, bytes: 0, source: 'instance' })
-    }
+    for (const name of inventory[kind] ?? []) files.push({ name, kind, bytes: 0 })
   }
-  return Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name))
+  return files.sort((a, b) => a.name.localeCompare(b.name))
 }

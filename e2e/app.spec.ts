@@ -637,6 +637,14 @@ test('external instance: instance-sourced models, live pack chips, install into 
       res.end(JSON.stringify({ system: { comfyui_version: 'v0.34.0' }, devices: [] }))
       return
     }
+    const targeted = /^\/object_info\/(.+)$/.exec(url.pathname)
+    if (targeted) {
+      // (Wave 2 A-8) The targeted per-class form: key-miss = absence.
+      const className = decodeURIComponent(targeted[1]!)
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(className in objectInfo ? { [className]: objectInfo[className] } : {}))
+      return
+    }
     if (url.pathname === '/object_info') {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify(objectInfo))
@@ -662,11 +670,10 @@ test('external instance: instance-sourced models, live pack chips, install into 
   })
   const enginePort = await new Promise<number>((resolve) => engine.listen(0, '127.0.0.1', () => resolve((engine.address() as { port: number }).port)))
 
-  // Empty local roots (the external case needs none), an external custom
-  // nodes folder, and a local repo copy to install krea2edit from.
+  // (Wave 2 R-12) No local roots at all — the instance listing is the whole
+  // inventory. An external custom nodes folder + a local repo copy to
+  // install krea2edit from.
   const home = join(process.cwd(), 'test-home')
-  const modelRoot = join(home, 'e2e-instance-models')
-  for (const kind of ['diffusion_models', 'text_encoders', 'vae', 'loras', 'vae_approx', 'clip_vision']) mkdirSync(join(modelRoot, kind), { recursive: true })
   const externalDir = join(home, 'e2e-external-nodes')
   mkdirSync(externalDir, { recursive: true })
   const localCopy = join(home, 'e2e-krea2edit-copy')
@@ -678,8 +685,6 @@ test('external instance: instance-sourced models, live pack chips, install into 
     const applied = await page.request.post('/api/lan/settings', { data: { settings: {
       ...originalSettings,
       comfyUrl: `http://127.0.0.1:${enginePort}`,
-      modelRoot,
-      paths: Object.fromEntries(['diffusion_models', 'text_encoders', 'vae', 'loras', 'vae_approx', 'clip_vision'].map((kind) => [kind, join(modelRoot, kind)])),
       engine: { ...(originalSettings.engine as Record<string, unknown>), mode: 'external', externalCustomNodesDir: externalDir },
     } } })
     expect(applied.status(), `settings POST must succeed: ${JSON.stringify(await applied.json().catch(() => ({})))}`).toBe(200)
@@ -702,12 +707,12 @@ test('external instance: instance-sourced models, live pack chips, install into 
     await expect(page.locator('[data-input-path]')).toHaveValue(/[\\/]data[\\/]input$/)
     await expect(page.locator('#output-path')).toHaveValue(/[\\/]data[\\/]output$/)
 
-    // The merged inventory: instance rows with zero local files.
+    // The registry-only inventory: the instance's own listing, no local files.
     const diffusionCount = page.locator('[data-model-kind-count="diffusion_models"]')
     await expect(diffusionCount).toBeVisible({ timeout: 20_000 })
-    // (The local-arm count display was trimmed with the registry-only
-    // inventory row — a zero local arm no longer renders; Phase 0, 2026-09-20.)
-    await expect(diffusionCount).toContainText('2 files · 2 instance')
+    // (Wave 2 R-12) The count row names the ENGINE as the source — the
+    // instance/local split display died with the merge.)
+    await expect(diffusionCount).toContainText('2 files on the engine')
 
     // Live chips from the instance's own node list: the hybrid loader pack is
     // INSTALLED ON INSTANCE (its class is served) with no folder install at

@@ -30,6 +30,7 @@
  */
 import type { ObjectInfo } from '../comfyInfo'
 import type { ModelFile } from '../../types'
+import { findRegistryModel } from '../modelSelection'
 import type { Krea2ModelSelection } from './krea2edit'
 import { buildKrea2Graph, findKrea2EditFamily } from './krea2edit'
 
@@ -322,23 +323,20 @@ export type H3ImgModelSelection = {
 // Selection inference
 // ---------------------------------------------------------------------------
 
-function findModel(files: ModelFile[], kind: ModelFile['kind'], patterns: RegExp[]): string {
-  const candidates = files.filter((file) => file.kind === kind)
-  for (const pattern of patterns) {
-    const match = candidates.find((file) => pattern.test(file.name))
-    if (match) return match.name
-  }
-  return ''
-}
+/** The shared registry-inference engine (Wave 2 R-12): basename-anchored
+ *  ladder tiers + size-class ranking + optional substring fallback, from
+ *  src/lib/modelSelection.ts — the workbench resolves registry rows exactly
+ *  like the video ladder, no drifted copy. */
+const findModel = findRegistryModel
 
 export function inferH3ImgSelection(files: ModelFile[], krea2: Krea2ModelSelection | null = null): H3ImgModelSelection {
   return {
-    fl2va: findModel(files, 'diffusion_models', [/^minimax_h3_fl2va_pruned_int8_convrot\.safetensors$/i, /^minimax_h3_fl2va.*\.safetensors$/i]),
-    ref2va: findModel(files, 'diffusion_models', [/^minimax_h3_ref2va_pruned_int8_convrot\.safetensors$/i, /^minimax_h3_ref2va.*\.safetensors$/i]),
-    textEncoder: findModel(files, 'text_encoders', [/^qwen3vl_32b_minimax_h3_nvfp4_awq\.safetensors$/i, /^qwen3vl_32b_minimax_h3.*\.safetensors$/i]),
-    videoVae: findModel(files, 'vae', [/^minimax_h3_video_vae_fp16\.safetensors$/i, /^minimax_h3_video_vae.*\.safetensors$/i]),
-    audioVae: findModel(files, 'vae', [/^minimax_h3_audio_vae_fp32\.safetensors$/i, /^minimax_h3_audio_vae.*\.safetensors$/i]),
-    t1ImageVae: findModel(files, 'vae', [/^minimax_h3_t1_image_vae_step1597\.safetensors$/i, /^minimax_h3_t1_image_vae.*\.safetensors$/i, T1_IMAGE_VAE_PATTERN]),
+    fl2va: findModel(files, 'diffusion_models', [/^minimax_h3_fl2va_pruned_int8_convrot\.safetensors$/i, /^minimax_h3_fl2va.*\.safetensors$/i], 'fl2va'),
+    ref2va: findModel(files, 'diffusion_models', [/^minimax_h3_ref2va_pruned_int8_convrot\.safetensors$/i, /^minimax_h3_ref2va.*\.safetensors$/i], 'ref2va'),
+    textEncoder: findModel(files, 'text_encoders', [/^qwen3vl_32b_minimax_h3_nvfp4_awq\.safetensors$/i, /^qwen3vl_32b_minimax_h3.*\.safetensors$/i], 'qwen3vl'),
+    videoVae: findModel(files, 'vae', [/^minimax_h3_video_vae_fp16\.safetensors$/i, /^minimax_h3_video_vae.*\.safetensors$/i], 'video_vae'),
+    audioVae: findModel(files, 'vae', [/^minimax_h3_audio_vae_fp32\.safetensors$/i, /^minimax_h3_audio_vae.*\.safetensors$/i], 'audio_vae'),
+    t1ImageVae: findModel(files, 'vae', [/^minimax_h3_t1_image_vae_step1597\.safetensors$/i, /^minimax_h3_t1_image_vae.*\.safetensors$/i, T1_IMAGE_VAE_PATTERN], 't1_image_vae'),
     turboLora: findModel(files, 'loras', [/^minimax_h3_fl2v_turbo_8step.*\.safetensors$/i, /^minimax_h3_fl2v_turbo.*\.safetensors$/i, /fl2v.*8.?step|8.?step.*fl2v/i]),
     detailAdapterLora: findModel(files, 'loras', [/thisisfine/i, /^maximin.*hhh.*r2v/i, /detail.?adapter/i]),
     krea2,

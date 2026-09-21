@@ -6,7 +6,8 @@
 // 404 for an unknown folder). Sections:
 //   (a) instance inventory parsing: object_info loader enums (combo and
 //       options forms), /models endpoint list parsing, endpoint-vs-enums
-//       preference, and the instance∪local merge with source tags
+//       preference, and the registry AS the inventory (Wave 2 R-12: the
+//       instance∪local merge and its source tags died with the local scan)
 //   (b) external install target: mode-following target resolution, install
 //       path construction, install from a local copy into the external
 //       folder, foreign-folder refusal, folder/instance status fields
@@ -15,10 +16,11 @@
 //   (d) app-relative io defaults through the real settings pipeline: unset
 //       → <home>/data/{input,output}; absolute values survive (migration-
 //       safe); relative values are refused at the write boundary
-//   (e) routes against the real built server + fake engine: the merged
-//       bootstrap inventory (instance/both/local), live pack chips, install
-//       into the external folder, the restart-needed state, foreign refusal,
-//       uninstall
+//   (e) routes against the real built server + fake engine: the REGISTRY-ONLY
+//       bootstrap inventory (local roots configured but ignored — R-12), the
+//       engine-down empty inventory, live pack chips (through the targeted
+//       per-class object_info asks), install into the external folder, the
+//       restart-needed state, foreign refusal, uninstall
 // Run after `pnpm build` (modules load from dist-server; the server needs
 // the web build present).
 //
@@ -56,7 +58,7 @@ if (!hasServerBuild) {
 }
 const maybe = hasServerBuild ? test : test.skip
 
-const { instanceNamesForKind, inventoryFromObjectInfo, mergeModelInventories, parseModelsEndpointList } = hasServerBuild ? require(path.join(REPO, 'dist-server', 'server', 'instanceInventory.js')) : {}
+const { instanceNamesForKind, inventoryFromObjectInfo, parseModelsEndpointList, registryInventoryFiles } = hasServerBuild ? require(path.join(REPO, 'dist-server', 'server', 'instanceInventory.js')) : {}
 const { ENGINE_NODE_PACKS, checkNodePack, installNodePack, nodePackInstanceState, nodePackInstallDir, resolveNodePackTarget, resolveVendorRoot, uninstallNodePack } = hasServerBuild ? require(path.join(REPO, 'dist-server', 'server', 'engineNodes.js')) : {}
 const { compareSemverish, gitOrderRevision, managedNoticeText, parsePyproject, readGitHeadSha, relateVersionToPin } = hasServerBuild ? require(path.join(REPO, 'dist-server', 'server', 'packVersioning.js')) : {}
 
@@ -152,30 +154,23 @@ maybe('(a) /models endpoint parsing + preference', () => {
   }
 })
 
-maybe('(a) instance ∪ local merge with source tags', () => {
-  console.log('instance: instance ∪ local merge with source tags')
+maybe('(a) the registry AS the inventory (Wave 2 R-12 — the merge died with the local scan)', () => {
+  console.log('instance: registryInventoryFiles — the listing is the whole inventory')
   {
-    const local = [
-      { name: 'shared.safetensors', kind: 'diffusion_models', bytes: 1234, h3Form: 'curve', path: '/models/diffusion_models/shared.safetensors' },
-      { name: 'local-only.safetensors', kind: 'vae', bytes: 99, path: '/models/vae/local-only.safetensors' },
-      { name: 'shared.safetensors', kind: 'vae', bytes: 7, path: '/models/vae/shared.safetensors' },
-    ]
-    const merged = mergeModelInventories(local, {
-      diffusion_models: ['shared.safetensors', 'instance-only.gguf'],
-      vae: [],
+    const files = registryInventoryFiles({
+      diffusion_models: ['H3/ssd/shared.safetensors', 'instance-only.gguf'],
+      vae: ['instance-vae.safetensors'],
       text_encoders: [],
       loras: [],
       vae_approx: [],
       clip_vision: [],
     })
-    const byKey = new Map(merged.map((file) => [`${file.kind}/${file.name}`, file]))
-    ok(byKey.get('diffusion_models/shared.safetensors')?.source === 'both', 'a file visible from both sides collapses to one row tagged both')
-    ok(byKey.get('diffusion_models/shared.safetensors')?.bytes === 1234 && byKey.get('diffusion_models/shared.safetensors')?.h3Form === 'curve', 'the both row keeps the local scan\'s bytes + h3Form')
-    ok(byKey.get('diffusion_models/instance-only.gguf')?.source === 'instance' && byKey.get('diffusion_models/instance-only.gguf')?.bytes === 0, 'an instance-only row carries source instance and bytes 0 (the instance API reports no sizes)')
-    ok(byKey.get('vae/local-only.safetensors')?.source === 'local', 'a local-only row keeps its local tag')
-    ok(byKey.get('vae/shared.safetensors')?.source === 'local', 'the same name under a DIFFERENT kind never merges across kinds')
-    ok(merged.length === 4, 'union cardinality is exact (no duplicates, no drops)')
-    ok(mergeModelInventories([], { diffusion_models: ['only.safetensors'], text_encoders: [], vae: [], loras: [], vae_approx: [], clip_vision: [] }).length === 1, 'an instance alone fills the inventory — zero local roots required')
+    const byKey = new Map(files.map((file) => [`${file.kind}/${file.name}`, file]))
+    ok(files.length === 3, 'registry cardinality is exact (every listed file, nothing invented)')
+    ok(byKey.get('diffusion_models/H3/ssd/shared.safetensors')?.bytes === 0, 'rows carry bytes 0 — the /models contract reports no sizes')
+    ok(byKey.get('diffusion_models/H3/ssd/shared.safetensors')?.source === undefined && byKey.get('diffusion_models/H3/ssd/shared.safetensors')?.h3Form === undefined, 'no source tags, no form tags: the registry lists filenames only (the local/both merge and the h3Form header read died with the scan — R-12)')
+    ok(byKey.get('vae/instance-vae.safetensors')?.kind === 'vae', 'kinds map straight through')
+    ok(registryInventoryFiles({ diffusion_models: [], text_encoders: [], vae: [], loras: [], vae_approx: [], clip_vision: [] }).length === 0, 'an empty registry is an empty inventory — instance-invisible = nonexistent')
   }
 })
 
@@ -407,6 +402,16 @@ routesMaybe('(d) app-relative io defaults through the real settings pipeline + (
       res.end(JSON.stringify(objectInfo))
       return
     }
+    // (Wave 2 A-8) The TARGETED per-class form the live-verdict probe asks:
+    // `{ "<class>": info }` when served, 200 `{}` when not — key-miss is
+    // the absence signal, never the status (the pinned contract).
+    const targeted = /^\/object_info\/(.+)$/.exec(url.pathname)
+    if (targeted) {
+      const className = decodeURIComponent(targeted[1])
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(className in objectInfo ? { [className]: objectInfo[className] } : {}))
+      return
+    }
     if (url.pathname === '/models') {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify(['diffusion_models', 'text_encoders', 'vae', 'loras']))
@@ -568,17 +573,29 @@ routesMaybe('(d) app-relative io defaults through the real settings pipeline + (
       ok(configured.body.settings.engine.externalCustomNodesDir === externalDir, 'the configured folder round-trips exactly')
     }
 
-    console.log('instance: merged inventory through /api/lan/bootstrap')
+    console.log('instance: the registry-only inventory through /api/lan/bootstrap (Wave 2 R-12 — external mode, local roots configured but IGNORED)')
     {
       const boot = await api('/api/lan/bootstrap')
       ok(boot.status === 200 && boot.body.connected === true, 'bootstrap connects to the fake engine')
       const models = boot.body.models
       const byKey = new Map(models.map((file) => [`${file.kind}/${file.name}`, file]))
-      ok(byKey.get('diffusion_models/shared.safetensors')?.source === 'both', 'the file visible locally AND on the instance is one row tagged both')
-      ok(byKey.get('diffusion_models/instance-only.gguf')?.source === 'instance', 'an instance-only diffusion model arrives with no local root configured for it')
-      ok(byKey.get('text_encoders/instance-encoder.safetensors')?.source === 'instance', 'an EMPTY /models answer falls back to the object_info enums (endpoint never masks the fallback)')
-      ok(byKey.get('vae/local-only.safetensors')?.source === 'local', 'a local-only file keeps its local tag')
+      ok(byKey.get('diffusion_models/shared.safetensors') !== undefined && byKey.get('diffusion_models/shared.safetensors')?.source === undefined, 'the file listed by the instance arrives as a plain registry row — no source tag exists anymore (the local twin on disk is invisible: instance-invisible = nonexistent)')
+      ok(byKey.get('diffusion_models/instance-only.gguf') !== undefined, 'an instance-only diffusion model arrives with no local root configured for it')
+      ok(byKey.get('text_encoders/instance-encoder.safetensors') !== undefined, 'an EMPTY /models answer falls back to the object_info enums (endpoint never masks the fallback)')
+      ok(byKey.get('vae/local-only.safetensors') === undefined, 'a file that exists ONLY on the local configured root NEVER reaches the inventory (R-12: no local fallback feeds a graph the engine cannot load)')
       ok(!models.some((file) => file.path), 'filesystem paths stay stripped from the renderer payload')
+      ok(models.every((file) => typeof file.bytes === 'number'), 'every row carries the honest bytes field')
+    }
+
+    console.log('instance: engine-down bootstrap answers an EMPTY inventory (R-12: instance-invisible = nonexistent)')
+    {
+      const current = (await api('/api/lan/settings')).body.settings
+      await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...current, comfyUrl: `http://127.0.0.1:${await freePort()}` } }) })
+      const down = await api('/api/lan/bootstrap')
+      ok(down.status === 200 && down.body.connected === false, 'a dead engine answers connected false')
+      ok(Array.isArray(down.body.models) && down.body.models.length === 0, 'a dead engine serves NO models — the local scan is gone, so nothing localizes the inventory (got ' + JSON.stringify(down.body.models) + ')')
+      ok(typeof down.body.error === 'string' && down.body.error.length > 0, 'the honest error rides along')
+      await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: current }) })
     }
 
     console.log('instance: live pack chips + external install through the routes')
