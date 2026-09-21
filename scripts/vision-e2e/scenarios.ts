@@ -1042,9 +1042,29 @@ export const SCENARIOS: VisionScenario[] = [
           await expect(panel).toBeVisible()
           // The scroller is the Rnd PANEL ROOT itself (overflow-hidden but
           // programmatically scrollable — the body's own overflow never
-          // engages because its grid row is unconstrained).
-          await panel.evaluate((element) => { element.scrollTop = 0 })
-          await expect.poll(async () => panel.evaluate((element) => element.scrollTop)).toBe(0)
+          // engages because its grid row is unconstrained). The debounced
+          // draft commit (~500 ms after the last box edit) re-renders the
+          // editor and the browser restores the focused input into view —
+          // a single early pin gets re-scrolled before the capture. Outlast
+          // the commit, blur the input (nothing left to restore), then pin
+          // and RE-pin after a settle.
+          await page.waitForTimeout(700)
+          // Pin BOTH scrollers: the BODY is the real one (its grid row is
+          // 1fr-constrained since the root-grid fix — 2509px content in a
+          // 627px box); the root carries a 10px residual of its own.
+          await panel.evaluate((element) => {
+            (document.activeElement as HTMLElement | null)?.blur?.()
+            element.scrollTop = 0
+            const body = element.querySelector('.canvas-properties-body')
+            if (body) body.scrollTop = 0
+          })
+          await page.waitForTimeout(250)
+          await panel.evaluate((element) => {
+            element.scrollTop = 0
+            const body = element.querySelector('.canvas-properties-body')
+            if (body) body.scrollTop = 0
+          })
+          await expect.poll(async () => panel.evaluate((element) => (element.querySelector('.canvas-properties-body') as HTMLElement | null)?.scrollTop ?? element.scrollTop)).toBe(0)
           await expect(page.locator('[data-canvas-prompt-mode]')).toHaveAttribute('data-canvas-prompt-mode', 'structured')
           await expect(page.locator('[data-structured-box="concept"]')).toBeVisible()
         },
@@ -1074,7 +1094,7 @@ export const SCENARIOS: VisionScenario[] = [
           // top checkpoint's note); scrollIntoViewIfNeeded is a no-op for
           // internally-clipped content.
           await panel.locator('[data-structured-box="flow"]').evaluate((element) => element.scrollIntoView({ block: 'start' }))
-          await expect.poll(async () => panel.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+          await expect.poll(async () => panel.evaluate((element) => (element.querySelector('.canvas-properties-body') as HTMLElement | null)?.scrollTop ?? element.scrollTop)).toBeGreaterThan(0)
           await expect(page.locator('[data-structured-flow-row]').first()).toBeVisible()
           await expect(page.locator('[data-structured-flow-row]')).toHaveCount(2)
         },
@@ -1095,8 +1115,12 @@ export const SCENARIOS: VisionScenario[] = [
         drive: async (page) => {
           const panel = page.locator('[data-canvas-properties]')
           await expect(panel).toBeVisible()
-          await panel.locator('[data-structured-box="audio"]').evaluate((element) => element.scrollIntoView({ block: 'start' }))
-          await expect.poll(async () => panel.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+          // The rubric wants the Audio box AND the open compose preview in
+          // frame — anchoring the AUDIO box to the top pushed the preview
+          // below the fold (judge-confirmed twice). Anchor the PREVIEW
+          // (block:'center'): the audio box sits directly above it.
+          await panel.locator('[data-structured-preview]').evaluate((element) => element.scrollIntoView({ block: 'center' }))
+          await expect.poll(async () => panel.evaluate((element) => (element.querySelector('.canvas-properties-body') as HTMLElement | null)?.scrollTop ?? element.scrollTop)).toBeGreaterThan(0)
           await expect(page.locator('[data-structured-input="audio-soundscape"]')).toBeVisible()
           await expect(page.locator('[data-structured-preview] pre')).toContainText('integrated_multimodal_description:')
         },
