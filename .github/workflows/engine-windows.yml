@@ -2,18 +2,61 @@
 # taskkill /T /F tree-kill path, the python.exe unbuffered flags, and the
 # portability of the fixtures only execute on Windows. Deliberately minimal —
 # server build only, no browser install (the ubuntu CI leg owns e2e).
+#
+# Path-scoped the same way as the ubuntu leg (task eg6l3v5, A-CI): on PRs
+# the SAME manifest (scripts/ci-map.cjs) resolves the diff and this leg
+# runs the intersection with its OS-sensitive suite set — engine-process,
+# runtime, fetcher, instance, lora-form, benchmarks — skipping entirely
+# when the diff touches none of their surface. Merge-to-main and dispatch
+# keep the full set (engine-dependence unchanged: transport mocked, no
+# ComfyUI needed).
 name: Engine CI (Windows)
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
-  engine:
-    runs-on: windows-latest
+  select:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      windows_suites: ${{ steps.plan.outputs.windows_suites }}
+      python: ${{ steps.plan.outputs.python }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve the diff against the base branch
+        run: git diff --name-only "origin/${{ github.base_ref }}...HEAD" > changed-files.txt
+      - name: Run the CI manifest (windows intersection)
+        id: plan
+        run: node scripts/ci-map.cjs --gha < changed-files.txt
+
+  engine:
+    needs: select
+    if: |
+      always() &&
+      (github.event_name != 'pull_request' || needs.select.outputs.windows_suites != '')
+    runs-on: windows-latest
+    env:
+      # The benchmark suite's python bridge (task cp96zdm): python.exe, not python3.
+      BENCH_PYTHON: python
+    steps:
+      - uses: actions/checkout@v4
+      # PRs run the manifest intersection (possibly a subset); main merges
+      # and dispatch run the leg's full set. Kept explicit — an empty PR
+      # intersection must SKIP, not fall through to the default.
+      - id: setsuites
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "suites=${{ needs.select.outputs.windows_suites }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "suites=engine-process runtime fetcher instance lora-form benchmarks" >> "$GITHUB_OUTPUT"
+          fi
       - uses: pnpm/action-setup@v4
         with:
           version: 11
@@ -24,34 +67,26 @@ jobs:
       # Form-adapter node (task k271ykk): the math/golden suite runs on
       # python3+numpy on both legs (the first-party install path is also
       # symlink-sensitive — exactly why this suite runs on Windows too).
+      # Conditional on PRs: only when a selected suite needs python.
       - uses: actions/setup-python@v5
+        if: github.event_name != 'pull_request' || needs.select.outputs.python == 'true'
         with:
           python-version: '3.x'
       - run: python -m pip install --disable-pip-version-check numpy
+        if: github.event_name != 'pull_request' || needs.select.outputs.python == 'true'
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:server
-      # Vitest migration (z7ogmig, 2026-09-20): the OS-sensitive suites are
-      # vitest filters now (pnpm test:<suite>), one worker process each.
-      # EngineProcess supervision (the taskkill /T /F path) — needs
-      # neither python nor a web build.
-      - run: pnpm test:engine
-      # Managed ComfyUI runtime: the stub-checkout suite needs neither python
-      # nor a real checkout; the python section self-skips.
-      - run: pnpm test:runtime
-      # Local-first fetcher (task hgjbea2): both legs run it in full — symlink
-      # placement and the tar extractor are exactly the OS-sensitive paths.
-      - run: pnpm test:fetcher
-      # External-instance integration (task 9om4bi9): the module sections run
-      # in full here — the external custom-nodes install target is exactly a
-      # symlink/path-sensitive surface. The route sections self-skip without
-      # the web build (the NOTE pattern).
-      - run: pnpm test:instance
-      # Form-adapter suite (task k271ykk): math + golden (numpy) and the
-      # first-party pack install path on Windows symlinks/junctions.
-      - run: pnpm test:lora-form
-      # Benchmark harness offline suite (task cp96zdm): registry/leaderboard,
-      # CLI, catalog bridge, mock-candidate build smoke (python+numpy above —
-      # the suite passes BENCH_PYTHON=python on Windows), metric fixtures.
-      - run: pnpm test:benchmarks
-        env:
-          BENCH_PYTHON: python
+      # The OS-sensitive suites as ONE vitest invocation over the selected
+      # set (vitest filters; per-suite comments preserved from the
+      # pre-A-CI leg):
+      #   engine-process — EngineProcess supervision (taskkill /T /F);
+      #   runtime        — managed ComfyUI runtime (stub checkouts);
+      #   fetcher        — local-first fetcher: symlink placement + tar;
+      #   instance       — external-instance integration (9om4bi9): the
+      #                    symlink/path-sensitive install surface;
+      #   lora-form      — form adapter: math + golden (numpy) + first-party
+      #                    pack install on Windows symlinks/junctions;
+      #   benchmarks     — harness offline suite (BENCH_PYTHON=python above).
+      - name: OS-sensitive suites (path-scoped)
+        if: steps.setsuites.outputs.suites != ''
+        run: pnpm exec vitest run ${{ steps.setsuites.outputs.suites }}

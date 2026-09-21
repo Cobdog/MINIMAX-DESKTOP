@@ -1,12 +1,149 @@
+# CI — path-scoped and diff-driven (task eg6l3v5, remediation-plan §6 A-CI;
+# directive 96e1fe5b + the maintainer's ruling: "Testing should be fast but
+# also accurate — not all or nothing … CI should be for obvious things." →
+# LOCAL = DEPTH (pnpm gate, unchanged), CI = BREADTH + SPEED.
+#
+# Three shapes:
+#   pull_request    → select (the manifest walk) + "fast (path-scoped)":
+#                     typecheck + lint/build scoped by the changed paths,
+#                     ONLY the mapped vitest suites (scripts/ci-map.cjs is
+#                     the reviewed data contract; tests/ci-map.test.js
+#                     keeps it honest). The every-push-runs-everything gate
+#                     is dead — a docs-only diff runs nothing but the cheap
+#                     structural floor.
+#   push to main    → "full gate" (the pre-A-CI chain, verbatim — merge to
+#                     main is where depth lives) + "contracts" in parallel:
+#                     golden-fixture regeneration drift + registry-append
+#                     verification, MAIN merges only.
+#   workflow_dispatch → the full gate (explicit request).
+#
+# The Windows engine leg (.github/workflows/engine-windows.yml) is scoped
+# the same way through the same manifest.
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
-  verify:
+  # ---- the manifest walk: changed files → the plan (PR legs only) -------
+  select:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      suites: ${{ steps.plan.outputs.suites }}
+      build_tier: ${{ steps.plan.outputs.build_tier }}
+      run_e2e: ${{ steps.plan.outputs.run_e2e }}
+      lint_all: ${{ steps.plan.outputs.lint_all }}
+      lint_files_json: ${{ steps.plan.outputs.lint_files_json }}
+      stylelint_files_json: ${{ steps.plan.outputs.stylelint_files_json }}
+      license_audit: ${{ steps.plan.outputs.license_audit }}
+      python: ${{ steps.plan.outputs.python }}
+      ffmpeg: ${{ steps.plan.outputs.ffmpeg }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve the diff against the base branch
+        id: diff
+        run: git diff --name-only "origin/${{ github.base_ref }}...HEAD" > changed-files.txt
+      - name: Run the CI manifest (scripts/ci-map.cjs)
+        id: plan
+        run: |
+          node scripts/ci-map.cjs --gha < changed-files.txt
+          node scripts/ci-map.cjs < changed-files.txt > plan.txt
+          cat plan.txt
+          {
+            echo '## CI plan (path-scoped)'
+            echo '```'
+            cat plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Fail loudly on unmapped paths
+        if: steps.plan.outputs.unmatched != ''
+        run: |
+          echo "::warning::unmapped paths fell back to the FULL run — map them in scripts/ci-map.cjs: ${{ steps.plan.outputs.unmatched }}"
+
+  # ---- the fast PR leg ---------------------------------------------------
+  fast:
+    if: github.event_name == 'pull_request'
+    needs: select
+    runs-on: ubuntu-latest
+    env:
+      SUITES: ${{ needs.select.outputs.suites }}
+      BUILD_TIER: ${{ needs.select.outputs.build_tier }}
+      RUN_E2E: ${{ needs.select.outputs.run_e2e }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      # Conditional tool prerequisites: only when the mapped suites need
+      # them (the manifest carries python/ffmpeg flags per suite).
+      - uses: actions/setup-python@v5
+        if: needs.select.outputs.python == 'true'
+        with:
+          python-version: '3.x'
+      - run: python -m pip install --disable-pip-version-check numpy
+        if: needs.select.outputs.python == 'true'
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        if: needs.select.outputs.ffmpeg == 'true'
+      - run: pnpm install --frozen-lockfile
+      # TYPECHECK always, in full: tsc cannot soundly check a flat project
+      # partially — this is the structural safety net that licenses running
+      # only the mapped suites above it.
+      - run: pnpm typecheck
+      # LINT scoped to the changed files (eslint flat config accepts path
+      # args; unchanged files are green on main by the full gate). Config
+      # files changed → the full lint instead.
+      - name: Lint (scoped by the manifest)
+        if: needs.select.outputs.lint_all == 'true' || needs.select.outputs.lint_files_json != '[]' || needs.select.outputs.stylelint_files_json != '[]'
+        run: |
+          set -e
+          if [ "${{ needs.select.outputs.lint_all }}" = "true" ]; then
+            pnpm lint
+          else
+            ESLINT_FILES=$(node -e 'console.log(process.argv[1].filter(f=>/\.(js|cjs|mjs|ts|tsx)$/.test(f)).join(" "))' '${{ needs.select.outputs.lint_files_json }}')
+            STYLELINT_FILES=$(node -e 'console.log(process.argv[1].filter(f=>/\.css$/.test(f)).join(" "))' '${{ needs.select.outputs.stylelint_files_json }}')
+            if [ -n "$ESLINT_FILES" ]; then pnpm exec eslint --max-warnings 0 $ESLINT_FILES; fi
+            if [ -n "$STYLELINT_FILES" ]; then pnpm exec stylelint $STYLELINT_FILES; fi
+          fi
+      # License audit only when its inputs changed (deps, vendored packs,
+      # the node-pack registry, the recorded decisions).
+      - run: pnpm license:audit
+        if: needs.select.outputs.license_audit == 'true'
+      # BUILD before any dist-booting suite (the stale-dist rule, z7ogmig):
+      # the tier comes from the mapped suites' declared needs; e2e forcing
+      # implies the full build.
+      - name: Build (tiered)
+        if: env.BUILD_TIER != 'none' || env.RUN_E2E == 'true'
+        run: |
+          if [ "$BUILD_TIER" = "server" ] && [ "$RUN_E2E" != "true" ]; then
+            pnpm build:server
+          else
+            pnpm build:web && pnpm build:server
+          fi
+      # THE MAPPED SUITES ONLY — one vitest invocation, parallel workers,
+      # exactly what the manifest selected for this diff.
+      - name: Unit suites (path-scoped)
+        if: env.SUITES != ''
+        run: pnpm exec vitest run $SUITES
+      # e2e forced by the manifest (browser suites / playwright config /
+      # the canvas kernel) — system Chromium, no download (see testing.md).
+      - name: e2e (forced by the manifest)
+        if: env.RUN_E2E == 'true'
+        run: pnpm exec playwright test --project=e2e
+
+  # ---- the full gate: merge to main + explicit dispatch -----------------
+  # The pre-A-CI chain, verbatim — do not slow or narrow this leg.
+  full:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,19 +177,49 @@ jobs:
       # the dist-server-booting suites test fresh code, never a stale dist.
       - run: pnpm build
       # ONE vitest run: every unit suite in parallel worker processes — the
-      # full tests/ set (workflows, registry, h3img, storage, documents,
-      # realtime, filmstrip, llm, engine, runtime, fetcher, instance,
-      # lora-form, poserig, camera, canvas, benchmarks, launcher, datasets;
-      # per-suite iteration aliases: pnpm test:registry, …; watch: pnpm
-      # test:watch).
+      # full tests/ set (per-suite iteration aliases: pnpm test:registry, …;
+      # watch: pnpm test:watch).
       - run: pnpm test
       - run: pnpm smoke:server
       # NO browser download: the Playwright config launches the runner's
       # SYSTEM browser (ubuntu images ship Google Chrome + Chromium) and
-      # throws with a one-line reason if none is found. Local dev needs a
-      # system Chromium/Chrome too, or MINIMAX_TEST_BROWSER=path (see README).
+      # throws with a one-line reason if none is found.
       - run: pnpm test:e2e
       # Vision phase 1 (capture only): writes a screenshot bundle under
       # test-results/vision/. Judgment (JUDGE.md subagent) never runs in CI;
       # `pnpm vision:report` is the local pre-release gate for the verdicts.
       - run: pnpm test:vision
+
+  # ---- contracts: MAIN merges only, parallel to the full gate ------------
+  # (1) Golden-fixture regeneration drift: regenerate every golden in a
+  #     clean checkout and require the tree unchanged — the committed
+  #     fixture IS the contract (testing.md); drift must be a deliberate,
+  #     reviewed `*:update` run, never a silent rider on a merge.
+  # (2) Registry-append verification (scripts/check-registry-append.cjs):
+  #     the golden registries' entry sets are append-only across the merge
+  #     boundary — additions free, removals fail.
+  contracts:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Golden regeneration drift check
+        run: |
+          MINIMAX_UPDATE_GOLDEN=1 pnpm exec vitest run registry h3img
+          UPDATE=1 pnpm exec vitest run poserig
+          if ! git diff --exit-code -- scripts/fixtures; then
+            echo '::error::golden fixtures DRIFTED — the committed goldens do not match what the code generates. Regenerate deliberately (MINIMAX_UPDATE_GOLDEN=1 / UPDATE=1), review the diff, and commit it with the change that caused it.'
+            exit 1
+          fi
+      - name: Registry-append verification (HEAD~1 → HEAD)
+        run: node scripts/check-registry-append.cjs HEAD~1 HEAD
