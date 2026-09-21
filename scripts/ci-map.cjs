@@ -480,7 +480,12 @@ function resolve(changed) {
     lintAll,
     licenseAudit,
     python: selected.some((s) => SUITES[s].python),
-    ffmpeg: selected.some((s) => SUITES[s].ffmpeg),
+    // The forced e2e battery includes the ffmpeg-dependent specs (datasets,
+    // filmstrip, the canvas gap-menu splice) — a plan that forces e2e needs
+    // ffmpeg installed even when NO mapped unit suite flags it (PR #40's
+    // lesson: e2e forced by an e2e/** diff reds on spawn-ffmpeg-ENOENT
+    // otherwise). Same coupling as the full run below it.
+    ffmpeg: selected.some((s) => SUITES[s].ffmpeg) || runE2e,
     windowsSuites,
     windowsPython,
     matched,
