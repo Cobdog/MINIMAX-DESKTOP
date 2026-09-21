@@ -408,10 +408,12 @@ test('(n) typed-hole option menus (§3 filtering + hints)', () => {
   ok(produceIds.includes('produce:fork-decoded'), 'produce(image): decoded fork offered')
   ok(!produceIds.includes('produce:fork-frame'), 'produce(image): frame extraction NOT offered (needs video)')
   ok(produce.find((row) => row.id === 'produce:i2v').available, 'produce(image): i2v offered (chain creation is engine-free; the refusal lives at submit)')
-  ok(produce.find((row) => row.id === 'produce:i2v').hint.includes('17n+5'), 'produce: the 17n+5 frame-grid hint surfaces in-menu')
+  // (R-22) The hint speaks outcome now — the humanized form carries the
+  // duration + resolution contract; the frame grid stays in provenance.
+  ok(produce.find((row) => row.id === 'produce:i2v').hint.includes('s clip ·'), 'produce: the humanized clip-length hint surfaces in-menu')
   ok(!options.endpointOptions('produce', [], ready).some((row) => row.id === 'produce:ref2v'.replace('ref2v', 'i2v')), 'produce(no kinds): nothing to offer')
-  ok(produce.find((row) => row.id === 'produce:i2v').hint.includes('32px'), 'produce: the 32px-multiples hint surfaces in-menu')
-  ok(produce.find((row) => row.id === 'produce:i2v').hint.includes('2–15 s'), 'produce: the ≤15s duration hint surfaces in-menu')
+  ok(produce.find((row) => row.id === 'produce:i2v').hint.includes('1344x768'), 'produce: the resolution contract surfaces in-menu')
+  ok(produce.find((row) => row.id === 'produce:music3'), 'produce: the Music 3 row exists (R-20 — the audio engines\' one canonical home)')
 
   const produceVideo = options.endpointOptions('produce', ['video'], ready)
   ok(!produceVideo.some((row) => row.id === 'produce:i2v'), 'produce(video): i2v filtered out — image-only route')
