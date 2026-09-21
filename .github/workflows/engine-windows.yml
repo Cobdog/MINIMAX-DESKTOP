@@ -2,16 +2,35 @@
 # taskkill /T /F tree-kill path, the python.exe unbuffered flags, and the
 # portability of the fixtures only execute on Windows. Deliberately minimal —
 # server build only, no browser install (the ubuntu CI leg owns e2e).
+#
+# DEMOTED TO SCHEDULED-ONLY (maintainer directive, 2026-09-21, folded into
+# PR #35 / eg6l3v5): "Windows tests take the back seat too, I am in a linux
+# environment, I think windows testing can get pushed to very low priority."
+# The leg no longer runs on PRs OR merge-to-main — weekly cadence +
+# workflow_dispatch for on-demand runs, so OS-difference coverage survives
+# at near-zero standing cost. Nothing is deleted: the manifest's windows
+# flags (scripts/ci-map.cjs SUITES[].windows + windowsSuites/windowsPython)
+# stay as data for this leg and any future re-wiring into the PR path.
+# Posture: every PR = the scoped Linux select→fast leg; merge-to-main =
+# full + contracts, all Linux.
+#
+# The scheduled run is the FULL set — engine-process, runtime, fetcher,
+# instance, lora-form, benchmarks — engine-dependence unchanged (transport
+# mocked, no ComfyUI needed).
 name: Engine CI (Windows)
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  schedule:
+    # Weekly, Monday 03:00 UTC (low-traffic window).
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
 
 jobs:
   engine:
     runs-on: windows-latest
+    env:
+      # The benchmark suite's python bridge (task cp96zdm): python.exe, not python3.
+      BENCH_PYTHON: python
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -30,28 +49,14 @@ jobs:
       - run: python -m pip install --disable-pip-version-check numpy
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:server
-      # Vitest migration (z7ogmig, 2026-09-20): the OS-sensitive suites are
-      # vitest filters now (pnpm test:<suite>), one worker process each.
-      # EngineProcess supervision (the taskkill /T /F path) — needs
-      # neither python nor a web build.
-      - run: pnpm test:engine
-      # Managed ComfyUI runtime: the stub-checkout suite needs neither python
-      # nor a real checkout; the python section self-skips.
-      - run: pnpm test:runtime
-      # Local-first fetcher (task hgjbea2): both legs run it in full — symlink
-      # placement and the tar extractor are exactly the OS-sensitive paths.
-      - run: pnpm test:fetcher
-      # External-instance integration (task 9om4bi9): the module sections run
-      # in full here — the external custom-nodes install target is exactly a
-      # symlink/path-sensitive surface. The route sections self-skip without
-      # the web build (the NOTE pattern).
-      - run: pnpm test:instance
-      # Form-adapter suite (task k271ykk): math + golden (numpy) and the
-      # first-party pack install path on Windows symlinks/junctions.
-      - run: pnpm test:lora-form
-      # Benchmark harness offline suite (task cp96zdm): registry/leaderboard,
-      # CLI, catalog bridge, mock-candidate build smoke (python+numpy above —
-      # the suite passes BENCH_PYTHON=python on Windows), metric fixtures.
-      - run: pnpm test:benchmarks
-        env:
-          BENCH_PYTHON: python
+      # The OS-sensitive suites as ONE vitest invocation (vitest filters):
+      #   engine-process — EngineProcess supervision (taskkill /T /F);
+      #   runtime        — managed ComfyUI runtime (stub checkouts);
+      #   fetcher        — local-first fetcher: symlink placement + tar;
+      #   instance       — external-instance integration (9om4bi9): the
+      #                    symlink/path-sensitive install surface;
+      #   lora-form      — form adapter: math + golden (numpy) + first-party
+      #                    pack install on Windows symlinks/junctions;
+      #   benchmarks     — harness offline suite (BENCH_PYTHON=python above).
+      - name: OS-sensitive suites (full weekly set)
+        run: pnpm exec vitest run engine-process runtime fetcher instance lora-form benchmarks
