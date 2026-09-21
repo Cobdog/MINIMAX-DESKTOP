@@ -2,9 +2,10 @@
 'use strict'
 
 /**
- * License audit — the machine-checkable third-party inventory (task 68rnn84).
+ * License audit — the machine-checkable third-party inventory (task 68rnn84;
+ * lockstep check added by the license-infrastructure pass, task nwtoz6y).
  *
- * Three checks, mirroring docs/LICENSES.md:
+ * Four checks, mirroring docs/LICENSES.md + docs/licenses/registry.md:
  *
  *   1. dependencies — every DIRECT dep in package.json must resolve to a
  *      license field in its node_modules manifest, classified against the
@@ -19,6 +20,12 @@
  *      entry whose licenseSpdx is not permissive may be installMode
  *      'vendor'. NO-LICENSE, GPL-*, AGPL-*, CC-*, anything unresolved =
  *      user-fetch only, never vendored.
+ *   4. registry lockstep — every package.json dep, every fetch-catalog
+ *      entry id, every node-pack registry id, and every vendored/first-party
+ *      directory must be NAMED in docs/licenses/registry.md. The registry
+ *      row is part of landing an addition, never a follow-up; this check is
+ *      the mechanical never-forget (the license infrastructure's maintenance
+ *      charter, docs/licenses/policy.md §6).
  *
  * Output: PASS/FAIL/WARN lines + the markdown table body for the
  * docs/LICENSES.md dependency section (regenerate there after dep changes).
@@ -107,6 +114,7 @@ for (const dir of firstPartyDirs) {
 const registryPath = path.join(repoRoot, 'src', 'lib', 'nodePackRegistry.ts')
 const registry = fs.readFileSync(registryPath, 'utf8')
 const arrayMatch = /ENGINE_NODE_PACKS[^=]*=\s*\[([\s\S]*?)\n\]/.exec(registry)
+const packIds = []
 if (!arrayMatch) {
   failures.push('src/lib/nodePackRegistry.ts: could not locate the ENGINE_NODE_PACKS array — registry discipline not checkable')
 } else {
@@ -116,6 +124,7 @@ if (!arrayMatch) {
     const id = /id:\s*'([^']+)'/.exec(entry)?.[1]
     const spdx = /licenseSpdx:\s*'([^']+)'/.exec(entry)?.[1]
     const mode = /installMode:\s*'([^']+)'/.exec(entry)?.[1]
+    if (id) packIds.push(id)
     if (!id || !spdx || !mode) {
       failures.push(`registry entry ${id ?? '(unparsed)'}: id/licenseSpdx/installMode must all be present — every entry carries an explicit license verdict`)
       continue
@@ -128,6 +137,32 @@ if (!arrayMatch) {
     }
     console.log(`registry ${id}: ${spdx} / ${mode} ${((mode === 'vendor' || mode === 'first-party') && VENDORABLE.has(spdx)) ? 'ok' : '(user-fetch — license gate holds)'}`)
   }
+}
+
+// --- 4. registry lockstep (docs/licenses/registry.md) ------------------------
+// The heavy diligence record must name everything reality contains: deps,
+// fetch-catalog ids, pack-registry ids, shipped directories. An addition
+// without its registry row fails here — the row lands with the change.
+const licenseRegistryPath = path.join(repoRoot, 'docs', 'licenses', 'registry.md')
+if (!fs.existsSync(licenseRegistryPath)) {
+  failures.push('docs/licenses/registry.md: missing — the license registry is the diligence record every addition must land a row in')
+} else {
+  const licenseRegistry = fs.readFileSync(licenseRegistryPath, 'utf8')
+  // Token-boundary match: `react` must not be satisfied by `react-dom`,
+  // `d3-selection` must not be satisfied by `@types/d3-selection`. Colon is a
+  // boundary, so the pack id `lora-form-adapter` matches inside the catalog
+  // id `pack:lora-form-adapter` (same component, deliberately).
+  const covers = (key) => new RegExp(`(^|[^A-Za-z0-9@/._-])${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9@/._-])`).test(licenseRegistry)
+  const fetchCatalogPath = path.join(repoRoot, 'server', 'fetchCatalog.ts')
+  const catalogIds = [...fs.readFileSync(fetchCatalogPath, 'utf8').matchAll(/^\s*id: '([^']+)'/gm)].map((match) => match[1])
+  const missing = []
+  for (const name of depNames) if (!covers(name)) missing.push(`dependency ${name}`)
+  for (const id of catalogIds) if (!covers(id)) missing.push(`fetch-catalog entry ${id}`)
+  for (const id of packIds) if (!covers(id)) missing.push(`node-pack registry entry ${id}`)
+  for (const dir of vendored) if (!covers(dir)) missing.push(`vendored pack ${dir}`)
+  for (const dir of firstPartyDirs) if (!covers(dir)) missing.push(`first-party pack ${dir}`)
+  for (const item of missing) failures.push(`registry lockstep: ${item} has no docs/licenses/registry.md row — the row is part of landing the addition, never a follow-up`)
+  console.log(`registry lockstep: ${depNames.length} deps, ${catalogIds.length} fetch-catalog ids, ${packIds.length} pack ids, ${vendored.length + firstPartyDirs.length} shipped dirs — ${missing.length === 0 ? 'all named in docs/licenses/registry.md' : `${missing.length} MISSING`}`)
 }
 
 // --- report -------------------------------------------------------------------
