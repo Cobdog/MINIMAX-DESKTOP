@@ -4,6 +4,7 @@ import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { WebSocketServer } from 'ws'
 import { composeStructuredPrompt, parseStructuredPrompt } from '../src/lib/structuredPrompt'
+import { stockObjectInfo } from './fakeEngineInfo'
 
 // Canvas Phase 2 (task flyuh6h) — the ?canvas=1 route against the production
 // build, ENGINE-INDEPENDENT by design: submission paths assert the honest
@@ -1072,7 +1073,7 @@ test('the H3-1F still renders end to end through the fake engine and lands its t
     }
     if (url.pathname === '/object_info') {
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ MiniMaxH3HybridLoader: {}, KSamplerSelect: {}, BasicScheduler: {}, VAELoader: {} }))
+      res.end(JSON.stringify(stockObjectInfo({ MiniMaxH3HybridLoader: {} })))
       return
     }
     if (url.pathname === '/upload/image') {
@@ -2084,7 +2085,7 @@ test('a structured submit lands a real job whose engine prompt is the composed b
     }
     if (url.pathname === '/object_info') {
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ MiniMaxH3HybridLoader: {}, KSamplerSelect: {}, BasicScheduler: {}, VAELoader: {} }))
+      res.end(JSON.stringify(stockObjectInfo({ MiniMaxH3HybridLoader: {} })))
       return
     }
     if (url.pathname === '/prompt' && req.method === 'POST') {
@@ -2262,7 +2263,7 @@ test('a model override reaches the engine graph and the job manifest (fake engin
     }
     if (url.pathname === '/object_info') {
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ MiniMaxH3HybridLoader: {}, KSamplerSelect: {}, BasicScheduler: {}, VAELoader: {} }))
+      res.end(JSON.stringify(stockObjectInfo({ MiniMaxH3HybridLoader: {} })))
       return
     }
     if (url.pathname === '/prompt' && req.method === 'POST') {
@@ -2497,7 +2498,7 @@ test('an instance-listed checkpoint pick applies with the unverifiable-form warn
     }
     if (url.pathname === '/object_info') {
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ MiniMaxH3HybridLoader: {}, KSamplerSelect: {}, BasicScheduler: {}, VAELoader: {}, UNETLoader: {}, CLIPLoader: {} }))
+      res.end(JSON.stringify(stockObjectInfo({ MiniMaxH3HybridLoader: {} })))
       return
     }
     if (url.pathname.startsWith('/models/') && req.method === 'GET') {
@@ -2620,7 +2621,7 @@ test('the camera path editor compiles a path into the Camera box; the composed b
     }
     if (url.pathname === '/object_info') {
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ MiniMaxH3HybridLoader: {}, KSamplerSelect: {}, BasicScheduler: {}, VAELoader: {} }))
+      res.end(JSON.stringify(stockObjectInfo({ MiniMaxH3HybridLoader: {} })))
       return
     }
     if (url.pathname === '/prompt' && req.method === 'POST') {
@@ -2820,7 +2821,7 @@ test('the LoRA timeline compiles painted ranges into per-LoRA segment chains (fa
     }
     if (url.pathname === '/object_info') {
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ MiniMaxH3HybridLoader: {}, KSamplerSelect: {}, BasicScheduler: {}, VAELoader: {} }))
+      res.end(JSON.stringify(stockObjectInfo({ MiniMaxH3HybridLoader: {} })))
       return
     }
     if (url.pathname === '/prompt' && req.method === 'POST') {
@@ -3014,7 +3015,7 @@ test('a legacy pre-split vae pick of the T=1 decoder never refuses the video pat
     }
     if (url.pathname === '/object_info') {
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ MiniMaxH3HybridLoader: {}, KSamplerSelect: {}, BasicScheduler: {}, VAELoader: {} }))
+      res.end(JSON.stringify(stockObjectInfo({ MiniMaxH3HybridLoader: {} })))
       return
     }
     if (url.pathname === '/prompt' && req.method === 'POST') {
@@ -3144,7 +3145,7 @@ test('an image-intent chain with a reference binding refuses honestly — never 
     }
     if (url.pathname === '/object_info') {
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ MiniMaxH3HybridLoader: {}, KSamplerSelect: {}, BasicScheduler: {}, VAELoader: {} }))
+      res.end(JSON.stringify(stockObjectInfo({ MiniMaxH3HybridLoader: {} })))
       return
     }
     if (url.pathname === '/prompt' && req.method === 'POST') {

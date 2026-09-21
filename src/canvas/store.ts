@@ -100,6 +100,7 @@ import { locationReferences, loadLocationProjects } from '../lib/locationLibrary
 import { loadWardrobeProjects } from '../lib/wardrobeLibrary'
 import { useJobsStore } from '../state/jobsStore'
 import { useSessionStore } from '../state/sessionStore'
+import { dbg } from '../lib/dbg'
 import type { AceStepGenerationOptions, GenerationJob, MediaFile, ModelOverrideSlots, ModelSelection } from '../types'
 
 /** The camera singleton for this route — attach in Substrate, never subscribe
@@ -156,10 +157,12 @@ function familyOverrides(family: ModelFamilyId, chainOverrides?: ModelOverrideSl
 }
 
 /** The override RESOLUTION for a family (refusals block submissions;
- *  degradations warn) — the honest-UI companion to the resolved selection. */
+ *  degradations warn) — the honest-UI companion to the resolved selection.
+ *  (R-06) The raw layers ride along so refusals name WHERE the pick lives
+ *  and migrated legacy picks auto-clear instead of wedging (ruling D3). */
 function overrideOutcomeFor(family: ModelFamilyId, chainOverrides?: ModelOverrideSlots): OverrideResolution {
-  const { models } = engineFacts()
-  return resolveModelOverrides(family, models, familyOverrides(family, chainOverrides))
+  const { models, settings } = engineFacts()
+  return resolveModelOverrides(family, models, familyOverrides(family, chainOverrides), { chain: chainOverrides, global: settings?.modelOverrides?.[family] })
 }
 
 /** H3 readiness for one turbo tier (the App-root computation, per chain).
@@ -1465,6 +1468,16 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       const projectId = get().activeProjectId
       if (!context || !projectId) return { ok: false, message: 'The chain is not on an open canvas.' }
       const { settings, bindings, firstFrame, lastFrame, referenceMedia, referenceVideos, referenceAudios } = context
+      // (A-DBG) The selection-routing junction: every submit names the branch
+      // it took and WHY — the triage transcript's first line for any render.
+      dbg('route', {
+        chainId, mediaType: settings.mediaType,
+        family: settings.mediaType === 'audio' ? `audio:${settings.audio.engine}` : settings.mediaType === 'image' ? `image:${settings.imageEngine}` : 'minimax-video',
+        mode: effectiveMode(settings),
+        refs: referenceMedia.length + referenceVideos.length + referenceAudios.length,
+        frames: Boolean(firstFrame || lastFrame),
+        latentFork: Boolean(context.isLatentFork),
+      })
       // §5.4 engines-as-ops (Phase 4): AUDIO chains submit through their
       // shared cores — the dock edits the settings blob, this path executes
       // (reruns are settings-stable for audio too).

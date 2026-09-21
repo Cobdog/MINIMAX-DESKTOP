@@ -101,11 +101,14 @@ for (const dir of firstPartyDirs) {
 }
 
 // --- 3. registry discipline (never vendor what we can't ship) -----------------
-const registryPath = path.join(repoRoot, 'server', 'engineNodes.ts')
+// (Wave 1 R-02) the registry DATA moved to src/lib/nodePackRegistry.ts so the
+// renderer's submit-time preflight maps classes to pack rows from the same
+// entries — the license discipline checks it where it lives now.
+const registryPath = path.join(repoRoot, 'src', 'lib', 'nodePackRegistry.ts')
 const registry = fs.readFileSync(registryPath, 'utf8')
 const arrayMatch = /ENGINE_NODE_PACKS[^=]*=\s*\[([\s\S]*?)\n\]/.exec(registry)
 if (!arrayMatch) {
-  failures.push('server/engineNodes.ts: could not locate the ENGINE_NODE_PACKS array — registry discipline not checkable')
+  failures.push('src/lib/nodePackRegistry.ts: could not locate the ENGINE_NODE_PACKS array — registry discipline not checkable')
 } else {
   const entries = arrayMatch[1].match(/\{[^{}]+\}/g) ?? []
   if (entries.length === 0) failures.push('server/engineNodes.ts: ENGINE_NODE_PACKS parsed as empty — check the entry shape')

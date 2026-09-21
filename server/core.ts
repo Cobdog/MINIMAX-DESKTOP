@@ -23,6 +23,7 @@ import { FILMSTRIP_CELL_WIDTH, FILMSTRIP_FPS, filmstripLayout } from '../src/med
 import type { AppSettings, GpuTelemetry, LanStatus, ModelKind } from '../src/types'
 import { failureRef, logEvent, logFailure } from './logger'
 import { sanitizeEngineLogLine, sanitizeErrorMessage } from './logSanitize'
+import { structuralPromptError } from '../src/lib/promptError'
 import { createStudioRepository, type StudioRepository } from './repo'
 import { CANVAS_SCHEMA_VERSION, CanvasSchemaVersionError, DocumentsRuleError, PlanConflictError } from './documents'
 import { exportProjectArchive, importProjectArchive } from './documentArchive'
@@ -184,32 +185,9 @@ async function comfyFetch(url: string, path: string, init?: RequestInit) {
   }
 }
 
-/** Reduces a ComfyUI /prompt rejection body to the structural failure signal:
- *  per-node validation detail (node id + the engine's short reason, each
- *  fragment sanitized). Non-JSON bodies fall through to whole-text
- *  sanitization — either way no raw engine text crosses to the client. */
-function structuralPromptError(raw: string): string {
-  try {
-    const parsed = JSON.parse(raw) as {
-      node_errors?: Record<string, { errors?: Array<{ details?: unknown; extra_info?: { error_message?: unknown } }> }>
-    }
-    const nodeErrors = parsed.node_errors
-    if (nodeErrors && typeof nodeErrors === 'object') {
-      const ids = Object.keys(nodeErrors)
-      const lines: string[] = []
-      for (const id of ids.slice(0, 6)) {
-        const errors = Array.isArray(nodeErrors[id]?.errors) ? nodeErrors[id].errors : []
-        const first = errors[0] as { details?: unknown; extra_info?: { error_message?: unknown } } | undefined
-        const detail = typeof first?.details === 'string' ? first.details : ''
-        const message = typeof first?.extra_info?.error_message === 'string' ? first.extra_info.error_message : ''
-        const text = sanitizeErrorMessage([detail, message].filter(Boolean).join(': '))
-        if (text) lines.push(`node ${id}: ${text}`)
-      }
-      if (lines.length) return `Graph validation failed — ${lines.join('; ')}${ids.length > 6 ? ` (+${ids.length - 6} more nodes)` : ''}`
-    }
-  } catch { /* not JSON — whole-text sanitization below */ }
-  return sanitizeErrorMessage(raw)
-}
+/** (Wave 1 R-03) The ComfyUI /prompt rejection reducer lives in
+ *  src/lib/promptError.ts — extracted pure so the unit suite drives it with
+ *  the engine's real error shapes. See that module for the shape contract. */
 
 function comfyChoices(info: Record<string, unknown>, node: string, field: string) {
   const definition = info[node] as { input?: { required?: Record<string, unknown[]> } } | undefined
@@ -3450,7 +3428,15 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
       const filePath = normalize(join(distRoot, requested))
       if (!(filePath === distRoot || filePath.startsWith(distRoot + sep)) || !existsSync(filePath)) {
         const fallback = join(distRoot, 'index.html')
-        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'content-security-policy': CONTENT_SECURITY_POLICY }); return createReadStream(fallback).pipe(response)
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'content-security-policy': CONTENT_SECURITY_POLICY })
+        if (process.env.MINIMAX_DBG) {
+          // (A-DBG) same junction-logging channel as the primary index.html
+          // serve below — SPA-route reloads get the hot start too.
+          return void readFile(fallback, 'utf8').then((html) => {
+            response.end(html.replace('<head>', '<head><meta name="minimax-dbg" content="1">'))
+          }).catch(() => createReadStream(fallback).pipe(response))
+        }
+        return createReadStream(fallback).pipe(response)
       }
       const mime: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' }
       const headers: Record<string, string> = {
@@ -3478,6 +3464,18 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
         headers['content-encoding'] = 'gzip'
       }
       response.writeHead(200, headers)
+      if (requested === 'index.html' && servedPath === filePath && process.env.MINIMAX_DBG) {
+        // (A-DBG, directive c250ab36) The junction logger's launcher channel:
+        // MINIMAX_DBG=1 at boot starts the renderer's dbg() hot — the meta
+        // tag is read once at module init (src/lib/dbg.ts). The localStorage
+        // / ?dbg=1 toggles remain the runtime flips. (Precompressed bodies
+        // are never re-written — the env flag just falls back to the plain
+        // stream there.)
+        readFile(servedPath, 'utf8').then((html) => {
+          response.end(html.replace('<head>', '<head><meta name="minimax-dbg" content="1">'))
+        }).catch(() => createReadStream(servedPath).pipe(response))
+        return
+      }
       createReadStream(servedPath).pipe(response)
     } catch (error) {
       // Malformed request bodies are the CLIENT's error, not a structural

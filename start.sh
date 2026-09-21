@@ -70,6 +70,7 @@ const DEFAULTS = {
   port: 4178, host: "0.0.0.0", https: true, token: false, qrPrint: true,
   dataDir: "", engineUrl: "", logLevel: "info",
   dev: true, prettyLogs: true, sourceMaps: true, vitePort: 5173,
+  dbg: false,
 };
 const DEFAULT_ENGINE = "http://127.0.0.1:8188";
 const LOG_LEVELS = ["fatal", "error", "warn", "info", "debug", "trace"];
@@ -81,6 +82,7 @@ const ALIASES = {
   dev: "dev", "pretty-logs": "prettyLogs", prettylogs: "prettyLogs",
   "source-maps": "sourceMaps", sourcemaps: "sourceMaps",
   "vite-port": "vitePort", viteport: "vitePort",
+  dbg: "dbg",
 };
 function fail(code, message) { process.stderr.write(message + "\n"); process.exit(code); }
 function validate(cfg) {
@@ -90,7 +92,7 @@ function validate(cfg) {
     if (!Number.isInteger(v) || v < 1024 || v > 65535) problems.push(k + ": expected an integer between 1024 and 65535, got " + JSON.stringify(v));
   };
   intField("port"); intField("vitePort");
-  for (const k of ["https", "token", "qrPrint", "dev", "prettyLogs", "sourceMaps"]) {
+  for (const k of ["https", "token", "qrPrint", "dev", "prettyLogs", "sourceMaps", "dbg"]) {
     if (typeof cfg[k] !== "boolean") problems.push(k + ": expected true or false, got " + JSON.stringify(cfg[k]));
   }
   if (typeof cfg.host !== "string" || !/^[A-Za-z0-9._:-]{1,255}$/.test(cfg.host)) {
@@ -237,7 +239,7 @@ if (mode === "load") {
 # --- config state ------------------------------------------------------------
 CFG_PORT=""; CFG_HOST=""; CFG_HTTPS=""; CFG_TOKEN=""; CFG_QR=""; CFG_DATA_DIR=""
 CFG_ENGINE_URL=""; CFG_LOG_LEVEL=""; CFG_DEV=""; CFG_PRETTY=""; CFG_SMAPS=""
-CFG_VITE_PORT=""
+CFG_VITE_PORT=""; CFG_DBG=""
 SEEDED=0
 
 config_load() {
@@ -263,6 +265,7 @@ config_load() {
       prettyLogs) CFG_PRETTY=$launcher_value ;;
       sourceMaps) CFG_SMAPS=$launcher_value ;;
       vitePort) CFG_VITE_PORT=$launcher_value ;;
+      dbg) CFG_DBG=$launcher_value ;;
     esac
   done < "$LAUNCHER_TMP"
   rm -f "$LAUNCHER_TMP"
@@ -549,7 +552,7 @@ run_configure() { # $1 show_dev (0/1)
   SHOW_DEV=$1
   W_PORT=$CFG_PORT; W_HOST=$CFG_HOST; W_HTTPS=$CFG_HTTPS; W_TOKEN=$CFG_TOKEN; W_QR=$CFG_QR
   W_DATA_DIR=$CFG_DATA_DIR; W_ENGINE_URL=$CFG_ENGINE_URL; W_LOG_LEVEL=$CFG_LOG_LEVEL
-  W_DEV=$CFG_DEV; W_PRETTY=$CFG_PRETTY; W_SMAPS=$CFG_SMAPS; W_VITE_PORT=$CFG_VITE_PORT
+  W_DEV=$CFG_DEV; W_PRETTY=$CFG_PRETTY; W_SMAPS=$CFG_SMAPS; W_VITE_PORT=$CFG_VITE_PORT; W_DBG=$CFG_DBG
   REGEN_TOKEN=0
 
   while :; do
@@ -586,6 +589,9 @@ run_configure() { # $1 show_dev (0/1)
           wt_menu "Source maps" "Map stack traces to the TS sources (--enable-source-maps)?" "$( [ "$W_SMAPS" = "true" ] && echo on || echo off )" \
             on "mapped traces" off "compiled-file traces"
           W_SMAPS=$( [ "$WT_VALUE" = "on" ] && echo true || echo false )
+          wt_menu "Junction logging" "Start the renderer's dbg() junction logger hot at boot (MINIMAX_DBG=1 — the console becomes a triage transcript)?" "$( [ "$W_DBG" = "true" ] && echo on || echo off )" \
+            on "junction logging on at boot" off "off (?dbg=1 still enables per-session)"
+          W_DBG=$( [ "$WT_VALUE" = "on" ] && echo true || echo false )
           wt_input "Vite port" "Dev UI port for the vite server (1024-65535, must differ from the LAN port)." "$W_VITE_PORT"; W_VITE_PORT=$WT_VALUE
         fi
       fi
@@ -595,7 +601,7 @@ run_configure() { # $1 show_dev (0/1)
  log=$W_LOG_LEVEL"
       if [ "$SHOW_DEV" = "1" ]; then
         SUMMARY="$SUMMARY
- dev=$W_DEV  pretty=$W_PRETTY  maps=$W_SMAPS  vite=$W_VITE_PORT"
+ dev=$W_DEV  pretty=$W_PRETTY  maps=$W_SMAPS  vite=$W_VITE_PORT  dbg=$W_DBG"
       fi
       if ! whiptail --title "Confirm" --yesno "$SUMMARY" 16 72; then continue; fi
     else
@@ -616,6 +622,7 @@ run_configure() { # $1 show_dev (0/1)
         if [ "$W_DEV" = "true" ]; then
           prompt_bool "Pretty logs (pino-pretty)" "$W_PRETTY"; W_PRETTY=$PROMPT_BOOL
           prompt_bool "Source-map stack traces" "$W_SMAPS"; W_SMAPS=$PROMPT_BOOL
+          prompt_bool "Junction logging (renderer dbg() hot at boot)" "$W_DBG"; W_DBG=$PROMPT_BOOL
           prompt_line "Vite dev-server port" "$W_VITE_PORT"; [ -n "$PROMPT_VALUE" ] && W_VITE_PORT=$PROMPT_VALUE
         fi
       fi
@@ -630,7 +637,7 @@ run_configure() { # $1 show_dev (0/1)
     if SAVE_ERR=$(node -e "$LAUNCHER_JS" save "$CONFIG_FILE" \
         "port=$W_PORT" "host=$W_HOST" "https=$W_HTTPS" "token=$W_TOKEN" "qrPrint=$W_QR" \
         "dataDir=$W_DATA_DIR" "engineUrl=$W_ENGINE_URL" "logLevel=$W_LOG_LEVEL" \
-        "dev=$W_DEV" "prettyLogs=$W_PRETTY" "sourceMaps=$W_SMAPS" "vitePort=$W_VITE_PORT" 2>&1); then
+        "dev=$W_DEV" "prettyLogs=$W_PRETTY" "sourceMaps=$W_SMAPS" "vitePort=$W_VITE_PORT" "dbg=$W_DBG" 2>&1); then
       break
     fi
     echo "$SAVE_ERR" >&2
@@ -823,6 +830,7 @@ export MINIMAX_LOG_LEVEL="$R_LOG"
 [ "$R_TOKEN_ON" = 1 ] && export MINIMAX_LAN_TOKEN=1
 [ "$R_HTTPS_ON" = 0 ] && export MINIMAX_NO_HTTPS=1
 [ "$R_HOST" != "0.0.0.0" ] && export MINIMAX_LAN_HOST="$R_HOST"
+[ "$CFG_DBG" = "true" ] && export MINIMAX_DBG=1
 if [ "$CFG_DEV" = "true" ] && [ "$CFG_PRETTY" = "true" ] && [ -z "${MINIMAX_LOG_PRETTY:-}" ]; then
   export MINIMAX_LOG_PRETTY=1
 fi

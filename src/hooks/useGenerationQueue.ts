@@ -21,9 +21,12 @@ import { extractOutputFile, extractOutputUrl, withTiledVideoDecode } from '../li
 import { extractAutomatedReferenceSet, hydrateLoadedJobs, playableOutputUrl, recordCharacterSheetImages, recordCharacterTurntable, recordLocationWalkthrough, recordMovieOutput } from '../lib/jobRecords'
 import { fetchServerJobs, saveServerJobs, serverStorageMigrationDone } from '../lib/serverStorage'
 import { registerOutputAsset } from '../media/httpPreview'
+import { dbg } from '../lib/dbg'
+import { engineRestartFailure, engineUnreachableFailure, ENGINE_LOST_JOB_GRACE_MS } from '../lib/engineWatch'
 import type { LiveProgress } from '../lib/useLivePreview'
 import { subscribe } from '../lib/useRealtime'
 import { useJobsStore } from '../state/jobsStore'
+import { useSessionStore } from '../state/sessionStore'
 import { useDebouncedPersist } from './useDebouncedPersist'
 
 export type NoticeTone = 'error' | 'success' | 'neutral'
@@ -183,6 +186,7 @@ export function useGenerationQueue(options: {
           }
           const reduction = reduceJobPoll(job, observation, Date.now())
           if (reduction.transitionedTo === 'completed') {
+            dbg('landing', { jobId: job.id, promptId, verdict: 'completed', mediaType, node: observation.kind === 'executionError' ? observation.node : undefined })
             // Re-check live state: an earlier in-flight response may have
             // already completed this job and fired these side effects.
             const current = jobsRef.current.find((item) => item.id === job.id)
@@ -212,6 +216,7 @@ export function useGenerationQueue(options: {
             }
           }
           applyReduction(job.id, reduction)
+          if (reduction.transitionedTo === 'failed') dbg('queue', { jobId: job.id, promptId, verdict: 'failed', reason: (reduction.job.error ?? '').slice(0, 160) })
         }).catch(() => undefined)
       }
     }
@@ -229,6 +234,58 @@ export function useGenerationQueue(options: {
   useEffect(() => subscribe('job', (envelope) => {
     if (envelope.type === 'resync') sweepRef.current?.()
   }), [])
+
+  // R-01 (Wave 1): engine-loss honesty — the acceptance bar's step 5. Two
+  // paths, both seconds-to-minutes (the 60-min deadline sweep below stays as
+  // the backstop):
+  //   LOST: the engine stayed unreachable past the grace → active jobs fail
+  //   with the engine-unreachable advice instead of spinning "running".
+  //   RECOVERED: the engine came back — any active prompt the fresh instance
+  //   has never heard of died with the old process; it fails with the
+  //   restart advice. A prompt the instance still knows survives the blip.
+  // The notify callback is held through a ref: its identity changes on every
+  // host render, and a deps-change re-subscription would clear the pending
+  // grace timer the moment the loss toast re-renders the tree (found by the
+  // Wave-1 walk: the grace never fired because the toast itself cancelled it).
+  const notifyRef = useRef(notify)
+  notifyRef.current = notify
+  useEffect(() => {
+    let graceTimer = 0
+    const failJobs = (ids: Set<string>, reason: string) => {
+      if (!ids.size) return
+      dbg('queue', { verdict: 'engine-loss', failed: ids.size })
+      setJobs((current) => current.map((item) => ids.has(item.id) && !isTerminalStatus(item.status) ? { ...item, status: 'failed', error: reason } : item))
+      notifyRef.current('error', reason)
+    }
+    const activeIds = () => new Set(jobsRef.current.filter((job) => job.status === 'queued' || job.status === 'running').map((job) => job.id))
+    const unsubscribe = useSessionStore.subscribe((state, previous) => {
+      if (state.engineWatch === previous.engineWatch) return
+      window.clearTimeout(graceTimer)
+      const { lostAt, recoveredAt } = state.engineWatch
+      if (lostAt !== null) {
+        const wait = Math.max(0, lostAt + ENGINE_LOST_JOB_GRACE_MS - Date.now())
+        graceTimer = window.setTimeout(() => {
+          // Still lost at fire time (a recovery clears lostAt and re-schedules
+          // nothing) → the grace has genuinely elapsed.
+          if (useSessionStore.getState().engineWatch.lostAt === lostAt) failJobs(activeIds(), engineUnreachableFailure())
+        }, wait)
+      } else if (recoveredAt !== null) {
+        // The engine is back: reconcile active prompts against the fresh
+        // instance's history. A fetch failure here is inconclusive — skip
+        // (the grace path covers a still-dead engine).
+        const comfyUrl = state.settings?.comfyUrl
+        if (!comfyUrl) return
+        for (const job of jobsRef.current.filter((entry) => entry.status === 'queued' || entry.status === 'running')) {
+          const promptId = job.promptId
+          if (!promptId) continue
+          void window.minimax.getHistory(comfyUrl, promptId).then((history) => {
+            if (history && !history[promptId]) failJobs(new Set([job.id]), engineRestartFailure())
+          }).catch(() => undefined)
+        }
+      }
+    })
+    return () => { unsubscribe(); window.clearTimeout(graceTimer) }
+  }, [setJobs])
 
   // Deadline sweep, independent of ComfyUI connectivity: a job whose polls
   // stopped resolving (server died mid-render) must still reach a terminal

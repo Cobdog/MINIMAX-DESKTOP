@@ -17,6 +17,8 @@ import { createId } from './createId'
 import { buildMiniMaxWorkflow, frameIndexForSeconds, guideFrameWarning } from './workflow'
 import { prepareImage } from './imageCrop'
 import { buildRenderManifest } from './manifest'
+import { preflightOrFail } from './preflight'
+import { dbg } from './dbg'
 import type { OverrideResolution } from './modelOverrides'
 import type { ObjectInfo } from './comfyInfo'
 import type { AppSettings, GenerationJob, GenerationMode, MediaFile, ModelFile, ModelSelection, UpscaleMode } from '../types'
@@ -125,10 +127,13 @@ export function validateH3Render(request: H3RenderRequest, facts: Pick<H3SubmitF
   // Model overrides (task euxwdva): a wrong-kind pick refuses BEFORE the
   // readiness rung — the render never ships a graph the family contract
   // rejects. Degraded picks (file gone since set) already fell back to auto
-  // and only warn, at submit.
+  // and only warn, at submit. (R-06) The refusal NAMES THE LAYER the pick
+  // lives on — a wedged override is invisible otherwise. Migrated legacy
+  // picks never reach this rung: they auto-clear with a warning (ruling D3).
   const overrideRefusal = facts.modelOverrides?.refusals[0]
   if (overrideRefusal) {
-    return `Model override refused — ${overrideRefusal.slot}: ${overrideRefusal.reason}`
+    const origin = overrideRefusal.layer === 'chain' ? "this chain's pick — clear it in the properties panel" : 'the global Settings pick — clear it in Settings → Model overrides'
+    return `Model override refused — ${overrideRefusal.slot} (${origin}): ${overrideRefusal.reason}`
   }
   if (!facts.modelReady) return 'One or more required MiniMax H3 model components are missing.'
   if (request.livePreview.enabled && request.livePreview.mode === 'h3-override' && !facts.h3PreviewOverrideNode) {
@@ -170,6 +175,7 @@ export async function submitH3Render(
 ): Promise<{ ok: true; jobId: string } | { ok: false; message: string }> {
   const refusal = validateH3Render(request, facts)
   if (refusal) {
+    dbg('submit', { verdict: 'refused-at-validate', family: 'minimax', mode: request.mode, reason: refusal.slice(0, 160) })
     io.notify('error', refusal)
     return { ok: false, message: refusal }
   }
@@ -241,6 +247,12 @@ export async function submitH3Render(
       ...(request.loraStack?.length ? { loraStack: request.loraStack } : {}),
       chain: request.chain,
     }, facts.selection, { first, last, images, videos, audios, guides: guideUploads }, facts.info)
+    // R-02 preflight (Wave 1): the built graph's class_types diffed against
+    // the engine's object_info BEFORE submission — a missing class refuses
+    // here with its pack row, instead of a mangled engine 400 after the
+    // fact. Throws inside this try, so the job fails with the readable list.
+    const preflight = preflightOrFail(graph, facts.info, 'preflight.h3video')
+    if (preflight) throw new Error(preflight)
     const manifest = buildRenderManifest({
       mode: request.mode, prompt: request.prompt, width: request.width, height: request.height, duration: request.duration,
       seed: request.seed, steps: request.steps, turbo: request.turbo, experimentalSampling: request.experimentalSampling,
@@ -276,6 +288,7 @@ export async function submitH3Render(
     } else {
       io.setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: 'Waiting for ComfyUI to start', manifest, graph } : item))
       io.notify('success', 'Generation added to the local ComfyUI queue.')
+      dbg('submit', { verdict: 'submitted', family: 'minimax', mode: request.mode, jobId: localId, promptId: response.prompt_id, nodes: Object.keys(graph).length })
     }
     return { ok: true, jobId: localId }
   } catch (error) {

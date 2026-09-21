@@ -48,6 +48,19 @@ const KEYWORDS = [
   'openssl', 'python', 'ollama', 'enoent', 'eacces', 'econnrefused', 'etimedout', 'epipe',
   'traversal', 'token', 'tokens', 'retry', 'retries', 'exhausted', 'deadline', 'stack', 'trace',
   'handshake', 'upgrade', 'shutdown', 'restart', 'cancelled', 'canceled', 'skipped', 'dropped',
+  // ComfyUI failure phrases (Wave 1 R-03, audit C F1): the taxonomy's
+  // node-missing/validation patterns must SURVIVE sanitization — without
+  // these tokens "node type not found" sanitizes to "node [redacted]" and
+  // the failure lands "Unclassified". Structural vocabulary only (never
+  // prompt semantics): shapes verified against the installed ComfyUI's
+  // execution.py/server.py error builders.
+  'type', 'types', 'not', 'found', 'registered', 'returns', 'returned', 'cannot',
+  'find', 'module', 'modules', 'named', 'exists', 'exist', 'unknown', 'loaded', 'unloaded',
+  'installed', 'install', 'update', 'class', 'classes', 'value', 'values', 'list', 'combo',
+  'input', 'inputs', 'output', 'outputs', 'required', 'mismatch', 'linked',
+  'validation', 'validate', 'validated', 'prompt', 'prompts', 'execution',
+  'execute', 'executed', 'widget', 'sampler', 'scheduler', 'loader', 'decoder',
+  'encoder', 'latent', 'image', 'video', 'audio', 'model', 'models', 'file', 'files',
 ]
 
 function keywordPattern(word: string): string {

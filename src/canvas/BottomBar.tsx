@@ -124,9 +124,15 @@ export function BottomBar() {
         <button type="button" className="canvas-chip" data-canvas-bar-music3 onClick={() => useCanvasStore.getState().setAudioDock({ engine: 'music3' })}>Music 3</button>
         <button type="button" className="canvas-chip" data-canvas-bar-acestep onClick={() => useCanvasStore.getState().setAudioDock({ engine: 'acestep' })}>ACE-Step</button>
         <button type="button" className="canvas-chip" data-canvas-bar-library title="The library projection (V)" onClick={() => useCanvasStore.getState().setLibraryOpen(true)}>library <kbd>V</kbd></button>
-        <span className={`canvas-bar-engine ${engine.connected ? (engine.modelReady ? 'online' : 'degraded') : ''}`} data-canvas-bar-engine>
+        <button
+          type="button"
+          className={`canvas-bar-engine ${engine.connected ? (engine.modelReady ? 'online' : 'degraded') : ''}`}
+          data-canvas-bar-engine
+          title={engine.connected ? (engine.modelReady ? 'Local engine connected — MiniMax H3 ready' : 'Engine connected but H3 model components are missing') : 'Engine offline — click to open Settings at the engine section'}
+          onClick={() => useCanvasStore.getState().setSettingsDock(true)}
+        >
           <span className="status-dot" /> {engine.connected ? (engine.modelReady ? 'H3 ready' : 'models missing') : 'engine offline'}
-        </span>
+        </button>
       </>
     )}
 

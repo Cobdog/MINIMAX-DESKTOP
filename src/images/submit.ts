@@ -13,6 +13,8 @@ import { buildH3ImageGraph, detectH3ImgFamilies, findH3ImgFamily, inferH3ImgSele
 import { resolveModelOverrides, resolveModels } from '../lib/modelOverrides'
 import { resolveKrea2EditModels } from '../lib/graph/krea2edit'
 import { prepareImage } from '../lib/imageCrop'
+import { preflightOrFail } from '../lib/preflight'
+import { dbg } from '../lib/dbg'
 import type { ObjectInfo } from '../lib/comfyInfo'
 import type { AppSettings, GenerationJob, MediaFile, ModelFile } from '../types'
 import type { H3ImgRefRole, H3ImgRefSlot, H3ImgTransport } from '../lib/graph/h3image'
@@ -182,6 +184,10 @@ export async function submitWorkbenchGeneration(
       buildH3ImgSelection(facts),
       facts.info,
     )
+    // R-02 preflight (Wave 1): the built graph's class_types diffed against
+    // the engine's object_info BEFORE submission — same seam as H3 video.
+    const preflight = preflightOrFail(graph, facts.info, 'preflight.h3image')
+    if (preflight) throw new Error(preflight)
 
     const provenance = {
       family: request.refine ? (request.refine.engine === 'krea2' ? 'h3img.refine.krea2' : 'h3img.refine.klein') : request.settings.family,
@@ -218,6 +224,7 @@ export async function submitWorkbenchGeneration(
     } else {
       io.setJobs((current) => current.map((item) => item.id === localId ? { ...item, promptId: response.prompt_id, status: 'running', progress: 4, progressLabel: 'Waiting for ComfyUI to start', manifest, graph } : item))
       io.notify('success', `${family.label} added to the local ComfyUI queue.`)
+      dbg('submit', { verdict: 'submitted', family: request.settings.family, jobId: localId, promptId: response.prompt_id, nodes: Object.keys(graph).length })
     }
     return { ok: true, jobId: localId }
   } catch (error) {
