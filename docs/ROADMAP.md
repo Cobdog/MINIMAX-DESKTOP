@@ -24,6 +24,15 @@ lines, manifest at `docs/audit/removals-phase0.md`). Main is at `665ed96`; 33 PR
 merged lifetime. **The maintainer is reading the direction-audit report and ruling
 on the plan's decision points — no wave dispatches until that approval lands.**
 
+> **FRONTIER UPDATE (2026-09-21): the approval landed — all six [REC]s as
+> recommended, with the direction-audit addendum folded (plan §6). The sprint is
+> RUNNING: Wave 1 (PR #37), Wave 2 (PR #38), the CI redesign (PR #35), devdocs
+> round 1 (PR #34), Qwen fetch rows (PR #36), and engine-contract testing (PR #39)
+> all MERGED; Wave 3 in flight (PR #40 + the surfaces rung). The engagement queue
+> after the waves: the maintainer's first-generation session, the design-system
+> blessing, and the testing-harness brainstorm. This note supersedes the
+> approval-gate sentences above — kept for the record.**
+
 **The rename, locked (2026-09-20)**: the app is **MONOKA** and the aesthetic is
 **shibui** (sumi base, washi neutrals, vermillion seal-accent, wood-warm chrome;
 font/icon criteria on the epic) — directives `55857485` + `2561df9e` on 4lphxv8.
