@@ -273,6 +273,7 @@ const RULES = [
   { match: ['src/poserig/**'], suites: ['poserig'], reason: 'pose rig domain (logic modules; PoseRigApp.tsx rides the dir).' },
   { match: ['src/lib/graph/h3image.ts'], suites: ['canvas', 'h3img', 'registry', 'workflows'], reason: 'the H3 image graph factory — loaded by four suites.' },
   { match: ['src/lib/graph/engineFamilies.ts', 'tests/engine-families.test.js'], suites: ['canvas', 'engine-families', 'workflows'], reason: 'the engine-family registry (A-3): the canvas selector/panel seam + its own suite; workflows loads the graph barrel.' },
+  { match: ['src/lib/preflightRemediation.ts'], suites: ['enginewatch'], reason: 'the R-17 remediation rows: pure data over the same registries preflight maps (enginewatch owns the preflight seams).' },
   { match: ['src/lib/graph/krea2edit.ts'], suites: ['h3img', 'registry'], reason: 'Krea-2 edit families (h3img directly; registry via graph/index re-export + golden).' },
   { match: ['src/lib/graph/**'], suites: ['registry'], reason: 'the optimization registry surface (graph/index re-exports the tree; the registry golden is the contract).' },
   { match: ['src/lib/serverStorage.ts'], suites: ['storage'], reason: 'the client storage layer the storage suite transpiles + drives against the server.' },

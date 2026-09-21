@@ -157,6 +157,50 @@ test('(d) preflight — the graph-vs-object_info diff and the pack-row refusal (
   // (the honest refusal is the connection check's job, not this seam's).
   eq(preflight.preflightGraph(graph, undefined), [], 'no info → no false positives')
 
+  // (d2) R-17 remediation rows — the refusal's missing list as ONE ACTION
+  // PER ROW over the same registries the Settings board renders.
+  const remediation = loadTs('src/lib/preflightRemediation.ts')
+  const missingMix = [
+    { className: 'MiniMaxH3HybridLoader', packId: 'h3-hybrid-loader', stock: false },
+    { className: 'ApplyVDNH3', packId: 'vdn-h3', stock: false },
+    { className: 'MiniMaxH3LoraFormLoader', packId: 'lora-form-adapter', stock: false },
+    { className: 'H3ImagePrepare', packId: 'h3-image-studio', stock: false },
+    { className: 'CreateVideo', stock: true },
+    { className: 'MysteryNode', stock: false },
+  ]
+  const rows = remediation.remediationRows(missingMix)
+  eq(rows.length, 6, 'one row per missing class')
+  const byClass = Object.fromEntries(rows.map((row) => [row.className, row]))
+  ok(byClass.MiniMaxH3HybridLoader.action.kind === 'fetch' && byClass.MiniMaxH3HybridLoader.action.licenseSpdx === 'MIT', 'user-fetch pack row → fetch action carrying the license verdict')
+  ok(byClass.MiniMaxH3HybridLoader.action.catalogEntryId === 'pack:h3-hybrid-loader', 'the fetch action targets the catalog entry (the Library deep-link)')
+  ok(byClass.H3ImagePrepare.action.kind === 'fetch' && byClass.H3ImagePrepare.action.licenseSpdx === 'Unlicense', 'the h3-image-studio gate pack rows as a fetch with its Unlicense verdict')
+  ok(byClass.ApplyVDNH3.action.kind === 'install' && byClass.ApplyVDNH3.action.packId === 'vdn-h3', 'vendored pack row → install action (no network)')
+  ok(byClass.MiniMaxH3LoraFormLoader.action.kind === 'install' && byClass.MiniMaxH3LoraFormLoader.label.includes('no network'), 'first-party pack row → install action stating no network')
+  ok(byClass.CreateVideo.action.kind === 'stock' && byClass.CreateVideo.label.includes('update ComfyUI'), 'stock class row → the update-ComfyUI advice (nothing to fetch)')
+  ok(byClass.MysteryNode.action.kind === 'unknown' && byClass.MysteryNode.label.includes('restart'), 'unknown class row → the honest dead end with the restart note')
+  // The refusal event fires from the seam — window-guarded, so in the plain
+  // node harness (no DOM) the seam stays SILENT (the skip path is itself the
+  // contract: a missing window never blocks the refusal). Where a DOM exists
+  // the e2e proves the payload reaches the dock.
+  {
+    const hasWindow = typeof globalThis.window !== 'undefined' && typeof globalThis.window.addEventListener === 'function'
+    console.log(`  NOTE - refusal-event dispatch: ${hasWindow ? 'asserted here' : 'no window in this harness — the silent-skip path runs; the e2e carries the payload proof'}`)
+    if (hasWindow) {
+      let refusalEvent = null
+      const listener = (event) => { refusalEvent = event.detail }
+      globalThis.window.addEventListener('minimax:preflight-refusal', listener)
+      const refusal = preflight.preflightOrFail({ '1': { class_type: 'MiniMaxH3HybridLoader', inputs: {} } }, { UNETLoader: {} }, 'preflight.test')
+      ok(refusal && refusal.includes('MiniMaxH3HybridLoader'), 'the seam still refuses (the event never replaces the refusal)')
+      ok(refusalEvent && refusalEvent.missing.length === 1 && refusalEvent.missing[0].packId === 'h3-hybrid-loader', 'the refusal event carries the missing payload (the RemediationDock opens from it)')
+      globalThis.window.removeEventListener('minimax:preflight-refusal', listener)
+    } else {
+      // The no-window path: the refusal still returns, nothing dispatches,
+      // nothing throws.
+      const refusal = preflight.preflightOrFail({ '1': { class_type: 'MiniMaxH3HybridLoader', inputs: {} } }, { UNETLoader: {} }, 'preflight.test')
+      ok(typeof refusal === 'string' && refusal.includes('MiniMaxH3HybridLoader'), 'no-window harness: the refusal still refuses (the event skip never blocks it)')
+    }
+  }
+
   // The fake-engine helper contract the e2e suites reuse: every stock class
   // the factories can emit, served as a bare object (the rq0lsax lean-shape
   // precedent — detection is key-presence only).

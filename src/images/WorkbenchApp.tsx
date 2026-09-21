@@ -23,6 +23,7 @@ import { useSessionStore } from '../state/sessionStore'
 import { submitH3DiagnosticPair } from '../lib/h3Diagnostics'
 import { SettingsDock } from '../canvas/SettingsDock'
 import { LibraryDock } from '../components/LibraryDock'
+import { RemediationDock } from '../canvas/RemediationDock'
 import { CanvasSessionContext } from '../canvas/sessionContext'
 import { useJobsStore } from '../state/jobsStore'
 import { useCanvasStore, engineBridge } from '../canvas/store'
@@ -87,6 +88,7 @@ function WorkbenchEngineHost({ children }: { children: ReactNode }) {
     {children}
     <SettingsDock />
     <LibraryDock />
+    <RemediationDock />
   </CanvasSessionContext.Provider>
 }
 

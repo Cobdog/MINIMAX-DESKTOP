@@ -32,6 +32,7 @@ import { Launcher } from './Launcher'
 import { Radar } from './Radar'
 import { SettingsDock } from './SettingsDock'
 import { LibraryDock } from '../components/LibraryDock'
+import { RemediationDock } from './RemediationDock'
 import { CanvasToasts } from './CanvasToasts'
 import { Substrate } from './Substrate'
 import { useCanvasStore } from './store'
@@ -228,6 +229,7 @@ export function CanvasApp() {
       <AudioDock />
       <SettingsDock />
       <LibraryDock />
+      <RemediationDock />
       <DiagnosticsDock />
       <IndexOverlay />
       <LibraryOverlay />

@@ -194,6 +194,17 @@
 .canvas-wizard-progress li.past { color: var(--color-text-soft); }
 .canvas-wizard-actions { display: flex; gap: 8px; }
 .canvas-first-run-secondary { margin-left: 6px; }
+
+/* R-17 (Wave 3): the remediation dock — one action per row. */
+.canvas-remediation-lede { margin: 0 0 10px; color: var(--color-text-soft); }
+.canvas-remediation-rows { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.canvas-remediation-row { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.canvas-remediation-main { display: grid; gap: 2px; min-width: 0; }
+.canvas-remediation-main strong { font-size: var(--text-sm); overflow-wrap: anywhere; }
+.canvas-remediation-main small { color: var(--muted-2); font-size: var(--text-sm); }
+.canvas-remediation-action { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.canvas-remediation-done { display: flex; align-items: center; gap: 5px; color: var(--accent); font-size: var(--text-sm); }
+.canvas-remediation-note { color: var(--muted-2); font-size: var(--text-sm); margin: 10px 0 0; }
 .canvas-inspector-body dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 12px; margin: 0; font-size: var(--text-sm); }
 .canvas-inspector-body dt { color: var(--muted-2); }
 .canvas-inspector-body dd { margin: 0; color: var(--color-text-soft); overflow-wrap: anywhere; }
