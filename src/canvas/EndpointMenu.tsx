@@ -9,6 +9,7 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useCanvasStore } from './store'
+import { dbg } from '../lib/dbg'
 import { endpointOptions, type SourceKind } from './options'
 import { readChainSettings } from './generation'
 import type { DocumentChain } from './derive'
@@ -104,6 +105,7 @@ export function EndpointMenu() {
               // a from-scratch input) never do.
               const needsSource = menu.direction === 'consume' && option.group === 'input' && !context.sourceChainId
               const gated = !option.available || needsSource
+              if (gated) dbg('menu.gate', { option: option.id, direction: menu.direction, because: needsSource ? 'no-source-chain' : (option.reason ?? 'unavailable') })
               const gateReason = needsSource ? 'Select the object to consume from first — click it, then open this menu.' : option.reason
               return (
               <div key={option.id} className="canvas-menu-rowwrap">

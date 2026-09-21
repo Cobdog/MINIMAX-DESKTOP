@@ -20,6 +20,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Check, HardDrive, LoaderCircle, RefreshCw, Sparkles, X } from 'lucide-react'
 import { useContext } from 'react'
+import { dbg } from '../lib/dbg'
 import { h3StackReport } from '../lib/h3Stack'
 import { useSessionStore } from '../state/sessionStore'
 import { useCanvasStore } from './store'
@@ -169,8 +170,15 @@ function EngineStep(props: {
         try {
           const probeStatus = await window.minimax.getComfyStatus(url)
           if (probeStatus.connected) found.push({ port, latencyMs: probeStatus.latencyMs ?? 0 })
-        } catch { /* this port answers nothing — expected */ }
+          // (A-DBG) The probe verdict per port — click-consented, one burst
+          // per Test press; the connected case is summarized below.
+          dbg('wizard.probe', { port, connected: probeStatus.connected, latencyMs: probeStatus.latencyMs })
+        } catch (error) {
+          dbg('wizard.probe', { port, connected: false, error: error instanceof Error ? error.message : String(error) })
+        }
       }
+      // (A-DBG) The burst summary: what the wizard will offer as one-click.
+      dbg('wizard', { step: 'engine', reachable: found.map((entry) => entry.port) })
       setReachable(found)
     } finally {
       setProbing(false)

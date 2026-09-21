@@ -22,6 +22,7 @@
  *   unknown — a class no registry row provides: the honest dead end with
  *             the restart note (a pack the engine has not loaded yet).
  */
+import { dbg } from './dbg'
 import type { MissingNodeClass } from './preflight'
 import { ENGINE_NODE_PACKS } from './nodePackRegistry'
 
@@ -73,5 +74,9 @@ export function remediationRows(missing: MissingNodeClass[]): RemediationRow[] {
     }
     rows.push({ className: item.className, label: 'no registry row provides this class — a pack may be installed but not loaded (restart the engine)', action: { kind: 'unknown', className: item.className } })
   }
+  // (A-DBG) One junction per row: which action the surface offers for each
+  // missing class — the refusal's triage transcript (fires once per
+  // PREFLIGHT_REFUSAL_EVENT, never per render).
+  for (const row of rows) dbg('preflight.remediation', { className: row.className, action: row.action.kind, packId: 'packId' in row.action ? row.action.packId : undefined, license: 'licenseSpdx' in row.action ? row.action.licenseSpdx : undefined })
   return rows
 }

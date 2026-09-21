@@ -1569,6 +1569,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         const facts = engineFacts()
         const queued = queuedImageEngineRefusal(settings.imageEngine)
         if (queued) {
+          dbg('family', { verdict: 'queued-refusal', engine: settings.imageEngine, surface: 'submit' })
           get().toast('error', queued)
           return { ok: false, message: queued }
         }
@@ -1668,7 +1669,10 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       // too — never a silent fall-through to the H3 video ladder.
       if (settings.mediaType === 'image') {
         const queued = queuedImageEngineRefusal(settings.imageEngine)
-        if (queued) return queued
+        if (queued) {
+          dbg('family', { verdict: 'queued-refusal', engine: settings.imageEngine, surface: 'validate' })
+          return queued
+        }
         if (effectiveMode(settings) === 'frames' || effectiveMode(settings) === 'reference') {
           return 'The image intent has no first+last-frame or reference mode — those are video concepts. Clear the frame/reference bindings on this object, or re-spawn it as a video prompt.'
         }
@@ -2535,7 +2539,10 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
       if (settings.mediaType === 'image') {
         const facts = engineFacts()
         const queued = queuedImageEngineRefusal(settings.imageEngine)
-        if (queued) return { mode: 'image-queued-engine', validation: queued, graph: null }
+        if (queued) {
+          dbg('family', { verdict: 'queued-refusal', engine: settings.imageEngine, surface: 'probe' })
+          return { mode: 'image-queued-engine', validation: queued, graph: null }
+        }
         // (tmz8vh7): frames/reference bindings refuse here exactly like the
         // real submit ladder — the probe and the ladder stay one contract.
         if (effectiveMode(settings) === 'frames' || effectiveMode(settings) === 'reference') {
