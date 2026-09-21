@@ -798,7 +798,7 @@ export function PropertiesPanel() {
           2026-09-19), disjoint from every other lane's panel work. Video
           chains only (engine data, A-3): painting ranges over the clip's
           duration. */}
-      {engineFamily.panel.loraTimeline && (
+      {engineFamily.panel.loraTimeline && models.filter((file) => file.kind === 'loras').length > 0 && (
         <LoraTimelineSection
           chainId={chain.id}
           duration={draft.duration}
@@ -916,7 +916,11 @@ export function PropertiesPanel() {
         </div>
       </section>
 
-      <section className="canvas-properties-section" data-canvas-section="identity">
+      {/* (R-18) Contextual disclosure: identity rides REFERENCES — with no
+          reference set and no payload authored, the section is expert
+          jargon for a first prompt. Authored content never hides (the
+          section stays while subjectText is non-empty). */}
+      {(bindings.length > 0 || subjectText.trim() !== '') && <section className="canvas-properties-section" data-canvas-section="identity">
         <label>Identity payload <span className="canvas-properties-hint">re-injected every window</span></label>
         <p className="canvas-properties-anchor" data-canvas-identity-anchor>
           anchor · {referenceSlots ? `${referenceSlots} bound picture${referenceSlots === 1 ? '' : 's'}` : 'no reference set'}
@@ -948,10 +952,12 @@ export function PropertiesPanel() {
           Stiff preserves the reference identity exactly; loose lets the take
           drift with the prompt. Re-anchor by forking an earlier take (B).
         </p>
-      </section>
+      </section>}
 
-      <section className="canvas-properties-section" data-canvas-section="guides">
-        <label>Keyframe guides <span className="canvas-properties-hint">AddGuide frames</span></label>
+      {/* (R-18) Guides + takes behind disclosure: expert surfaces with
+          counts in the summary — present when authored, folded when not. */}
+      <details className="canvas-properties-section canvas-properties-disclosure" data-canvas-section="guides" data-guides-count={draft.timelineGuides.length}>
+        <summary>Keyframe guides <span className="canvas-properties-hint">{draft.timelineGuides.length ? `${draft.timelineGuides.length} guide${draft.timelineGuides.length === 1 ? '' : 's'} · AddGuide frames` : 'AddGuide frames'}</span></summary>
         {draft.timelineGuides.map((guide, index) => (
           <div className="canvas-properties-row" key={`${guide.file.path}-${index}`} data-canvas-guide={index}>
             <span className="canvas-properties-ref-tag">@</span>
@@ -983,10 +989,10 @@ export function PropertiesPanel() {
             + guide image
           </button>
         </div>
-      </section>
+      </details>
 
-      <section className="canvas-properties-section" data-canvas-section="takes">
-        <label>Takes <span className="canvas-properties-hint">{tile.priors} prior{tile.priors === 1 ? '' : 's'}</span></label>
+      <details className="canvas-properties-section canvas-properties-disclosure" data-canvas-section="takes" data-takes-count={tile.takes.length} open={tile.takes.length > 0}>
+        <summary>Takes <span className="canvas-properties-hint">{tile.priors} prior{tile.priors === 1 ? '' : 's'}{tile.canonical ? ' · 1 canonical' : ' · none yet'}</span></summary>
         <ul className="canvas-properties-takes" data-canvas-takes>
           {tile.takes.slice(0, 5).map((take) => (
             <li key={take.id} data-canvas-take={take.id} className={take.supersededBy ? 'prior' : 'canonical'}>
@@ -998,7 +1004,7 @@ export function PropertiesPanel() {
           ))}
           {!tile.takes.length && <li className="canvas-properties-empty">No takes yet.</li>}
         </ul>
-      </section>
+      </details>
 
     </div>
       {libraryOpen && <PromptLibraryBrowser onClose={() => setLibraryOpen(false)} onInsert={(prompt) => {

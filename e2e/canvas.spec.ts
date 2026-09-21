@@ -261,10 +261,33 @@ test('the properties panel edits per-chain settings and the identity payload', a
   const tile = page.locator('[data-canvas-tile]').first()
   await expect(tile).toBeVisible({ timeout: 10_000 })
 
-  // The panel opens on selection with the absorption sections.
+  // The panel opens on selection with the absorption sections. (R-18) The
+  // panel is CONTEXTUAL: with no reference bound, Identity is absent from
+  // the DOM — the disclosure contract — and Guides/Takes render as folded
+  // <details> rows (visible elements, folded content).
   const panel = page.locator('[data-canvas-properties]')
   await expect(panel).toBeVisible()
-  for (const section of ['prompt', 'engine', 'references', 'identity', 'guides', 'takes']) {
+  for (const section of ['prompt', 'engine', 'references', 'guides', 'takes']) {
+    await expect(panel.locator(`[data-canvas-section="${section}"]`)).toBeVisible()
+  }
+  await expect(panel.locator('[data-canvas-section="identity"]')).toHaveCount(0)
+  // Bind a reference (the drop + documents-API write, the misroute test's
+  // pattern): the identity section APPEARS with its payload anchored.
+  await page.keyboard.press('Escape')
+  await dropPng(page, 'panel-probe-reference.png')
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(2, { timeout: 10_000 })
+  {
+    const document = await activeDocument(page)
+    const imageChain = document.chains.find((chain) => chain.kind === 'generation')!
+    const mediaChain = document.chains.find((chain) => chain.kind === 'media')!
+    const sourceOutput = mediaChain.outputs[0]!.id
+    await page.request.post('/api/lan/documents/chains/update', { data: { id: imageChain.id, settings: { ...imageChain.settings, referenceOutputIds: [sourceOutput] } } })
+    await page.reload()
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    await page.locator(`[data-canvas-tile="${imageChain.id}"]`).click()
+    await expect(panel).toBeVisible()
+  }
+  for (const section of ['identity']) {
     await expect(panel.locator(`[data-canvas-section="${section}"]`)).toBeVisible()
   }
   // The universal prompt field carries the spawned prompt.
@@ -397,7 +420,23 @@ test('the structured/freeform toggle round-trips without losing text; box edits 
   await expect(panel.locator('[data-structured-preview] pre')).toHaveText(expected)
 
   // AC 2 — subject cards accept identity pins: the chain's identity payload
-  // text pins straight into a card (badge + verbatim appearance).
+  // text pins straight into a card (badge + verbatim appearance). (R-18)
+  // Identity is contextual now — bind a reference first (the drop + API
+  // write + reload pattern) so the section renders.
+  await page.keyboard.press('Escape')
+  await dropPng(page, 'structured-identity-reference.png')
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(2, { timeout: 10_000 })
+  {
+    const document = await activeDocument(page)
+    const imageChain = document.chains.find((chain) => chain.kind === 'generation')!
+    const mediaChain = document.chains.find((chain) => chain.kind === 'media')!
+    const sourceOutput = mediaChain.outputs[0]!.id
+    await page.request.post('/api/lan/documents/chains/update', { data: { id: imageChain.id, settings: { ...imageChain.settings, referenceOutputIds: [sourceOutput] } } })
+    await page.reload()
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    await page.locator(`[data-canvas-tile="${imageChain.id}"]`).click()
+    await expect(panel.locator('[data-canvas-section="identity"]')).toBeVisible({ timeout: 10_000 })
+  }
   await panel.locator('[data-canvas-identity-subject]').fill('the drummer, black coat, case in left hand')
   await page.waitForTimeout(1_200) // the identity commit + document reload land
   await editor.locator('[data-structured-subject-pin]').selectOption('identity')
