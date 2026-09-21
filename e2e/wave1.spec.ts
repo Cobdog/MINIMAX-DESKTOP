@@ -201,7 +201,7 @@ test('Wave 1 acceptance walk — the maintainer\'s first session, end to end on 
     await expect(chip).toHaveAttribute('data-engine-connected', 'true', { timeout: 20_000 })
     await page.waitForTimeout(1_000) // the recovery's object_info re-pull settles
     const submittedBefore = submittedGraphs.length
-    await page.keyboard.press('Escape') // deselect — the bottom bar's prompt lives on the empty-canvas context
+    await page.keyboard.press('Escape') // deselect — with objects present the contextual bar is the prompt surface (R-20)
     await page.locator('[data-canvas-bar-prompt]').fill('a second shot the registry cannot run')
     await page.locator('[data-canvas-bar-prompt]').press('Enter')
     await expect(page.locator('[data-canvas-tile]')).toHaveCount(2, { timeout: 10_000 })
@@ -211,6 +211,17 @@ test('Wave 1 acceptance walk — the maintainer\'s first session, end to end on 
     await expect(refusal).toContainText('nothing was submitted')
     await page.waitForTimeout(1_500)
     expect(submittedGraphs.length, 'the refusal happened BEFORE the engine').toBe(submittedBefore)
+    // (R-17, Wave 3) the refusal ALSO opens the per-item remediation surface:
+    // the stock row carries the update-ComfyUI advice (nothing to fetch) and
+    // exactly one action (the graph-compatibility view).
+    const remediation = page.locator('[data-canvas-remediation-dock]')
+    await expect(remediation).toBeVisible()
+    const stockRow = remediation.locator('[data-remediation-row="CreateVideo"]')
+    await expect(stockRow).toHaveAttribute('data-remediation-kind', 'stock')
+    await expect(stockRow).toContainText('update ComfyUI')
+    await expect(stockRow.locator('[data-remediation-stock]')).toBeVisible()
+    await remediation.locator('[data-remediation-close]').click()
+    await expect(remediation).toHaveCount(0)
 
     // ---- STEP 4b: an engine error comes back classified, unmangled (R-03)
     // The registry heals (another restart + re-pull) but the ENGINE itself
@@ -343,6 +354,154 @@ async function activeDocument(page: Page) {
     }
   })
 }
+
+// ---------------------------------------------------------------------------
+// R-17 (Wave 3): the per-item-consented REMEDIATION surface — the full loop.
+// A chain whose graph carries the first-party form-adapter node; the engine
+// loses the class across a restart (the registry-truth moment); the next
+// render attempt refuses at the preflight AND opens the remediation dock —
+// whose one Install action (first-party payload, no network) lands the pack
+// into the configured external target; the post-install restart heals the
+// registry and the re-render SUBMITS. The loop from refusal to render,
+// closed by one action on one row.
+// ---------------------------------------------------------------------------
+test('R-17: the remediation dock closes the loop — refusal → one install action → the re-render submits', async ({ page, request }) => {
+  test.setTimeout(180_000)
+  const problems = await trackErrors(page)
+  const os = await import('node:os')
+  const externalDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-r17-target-'))
+
+  const engineState = {
+    registry: stockObjectInfo({ MiniMaxH3LoraFormLoader: {} }) as Record<string, unknown>,
+    promptSeq: 0,
+    served: new Set<string>(),
+  }
+  const listings = { ...H3_REGISTRY_LISTINGS, loras: [...H3_REGISTRY_LISTINGS.loras, 'civitai_h3_style.safetensors'] }
+  const submittedGraphs: Array<Record<string, { class_type: string }>> = []
+  const engineHandler = (req: http.IncomingMessage, res: http.ServerResponse) => {
+    const url = new URL(req.url ?? '/', 'http://engine.local')
+    if (url.pathname === '/system_stats') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ system: { comfyui_version: 'v0.34.0' }, devices: [] }))
+      return
+    }
+    if (serveObjectInfo(url, engineState.registry, res)) return
+    if (serveModelRegistry(url, listings, res)) return
+    if (url.pathname === '/prompt' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (chunk: Buffer) => { body += chunk })
+      req.on('end', () => {
+        engineState.promptSeq += 1
+        submittedGraphs.push((JSON.parse(body) as { prompt: Record<string, { class_type: string }> }).prompt)
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ prompt_id: `r17-${engineState.promptSeq}`, number: engineState.promptSeq, node_errors: {} }))
+      })
+      return
+    }
+    if (url.pathname.startsWith('/history/')) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end('{}')
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  }
+  // One FIXED port for every restart (the acceptance walk's pattern): the
+  // app's comfyUrl never changes, so the re-check loop sees loss and
+  // recovery on its own cadence without a settings reload.
+  const holder = http.createServer()
+  const enginePort = await new Promise<number>((resolve) => holder.listen(0, '127.0.0.1', () => resolve((holder.address() as AddressInfo).port)))
+  await new Promise<void>((resolve) => holder.close(() => resolve()))
+  let engine: http.Server | null = null
+  const startEngine = async () => {
+    engine = http.createServer(engineHandler)
+    await new Promise<void>((resolve) => engine!.listen(enginePort, '127.0.0.1', () => resolve()))
+  }
+  const stopEngine = async () => { if (engine) { const closing = engine; engine = null; await new Promise<void>((resolve) => closing.close(() => resolve())) } }
+  await startEngine()
+
+  const originalSettings = ((await (await request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
+  try {
+    await request.post('/api/lan/settings', { data: { settings: {
+      ...originalSettings,
+      comfyUrl: `http://127.0.0.1:${enginePort}`,
+      engine: { ...(originalSettings.engine as Record<string, unknown>), mode: 'external', externalCustomNodesDir: externalDir },
+    } } })
+    await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+    await page.goto('/?canvas=1')
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    await expect(page.locator('[data-canvas-engine]')).toHaveAttribute('data-engine-connected', 'true', { timeout: 30_000 })
+
+    // Seed the chain directly: a video chain with ONE stack LoRA — with the
+    // form-adapter class served, the built graph wraps slot 0 in
+    // MiniMaxH3LoraFormLoader (the first-party pack's node).
+    const project = await (await page.request.post('/api/lan/documents/projects', { data: { name: 'R-17 remediation loop' } })).json()
+    const chain = await (await page.request.post('/api/lan/documents/chains', { data: { projectId: project.project.id, kind: 'generate', settings: { prompt: 'a bronze bell in the fog', mediaType: 'video', loraStack: [{ name: 'civitai_h3_style.safetensors', strength: 0.8 }] } } })).json()
+    await page.request.post('/api/lan/documents/session', { data: { openProjects: [project.project.id], activeProject: project.project.id } })
+    await page.reload()
+    await expect(page.locator(`[data-canvas-tile="${chain.chain.id}"]`)).toBeVisible({ timeout: 15_000 })
+    await page.locator(`[data-canvas-tile="${chain.chain.id}"]`).click()
+    await page.locator('[data-canvas-generate]').click()
+    await expect.poll(() => submittedGraphs.length, { timeout: 20_000 }).toBe(1)
+    expect(Object.values(submittedGraphs[0]!).some((node) => node.class_type === 'MiniMaxH3LoraFormLoader'), 'the graph carries the first-party adapter node').toBe(true)
+
+    // The registry-truth moment: the engine loses the class across a
+    // restart (the loop sees loss + recovery, object_info re-pulls without
+    // the class). NOTE the honest boundary this test asserts: the BUILDER
+    // availability-gates pack nodes, so a real submit here would fall back
+    // to the stock loader rather than emit a missing class — the preflight's
+    // pack branch is defense-in-depth by construction. The remediation DOCK
+    // is driven through the app's own seam (the PREFLIGHT_REFUSAL_EVENT the
+    // submit cores fire — the exact payload shape preflightRefusal emits),
+    // so the surface, its rows, and its one-action install are exercised
+    // against the real server without faking a builder state that cannot
+    // occur.
+    await stopEngine()
+    await expect(page.locator('[data-canvas-engine]')).toHaveAttribute('data-engine-connected', 'false', { timeout: 30_000 })
+    delete engineState.registry.MiniMaxH3LoraFormLoader
+    await startEngine()
+    await expect(page.locator('[data-canvas-engine]')).toHaveAttribute('data-engine-connected', 'true', { timeout: 30_000 })
+    await page.waitForTimeout(1_000) // the recovery's object_info re-pull settles
+
+    await page.evaluate(() => {
+      window.dispatchEvent(new CustomEvent('minimax:preflight-refusal', { detail: { missing: [{ className: 'MiniMaxH3LoraFormLoader', packId: 'lora-form-adapter', stock: false }] } }))
+    })
+    const remediation = page.locator('[data-canvas-remediation-dock]')
+    await expect(remediation).toBeVisible({ timeout: 15_000 })
+    const row = remediation.locator('[data-remediation-row="MiniMaxH3LoraFormLoader"]')
+    await expect(row).toHaveAttribute('data-remediation-kind', 'install')
+    await expect(row).toContainText('no network')
+    await expect(remediation.locator('[data-remediation-lede]')).toContainText('nothing was submitted')
+
+    // ONE ACTION on the row: the first-party payload installs into the
+    // configured external target — no network — and the row says what comes
+    // next (restart to activate).
+    await row.locator('[data-remediation-install="lora-form-adapter"]').click()
+    await expect(row.locator('[data-remediation-installed]')).toBeVisible({ timeout: 30_000 })
+    expect(fs.existsSync(path.join(externalDir, 'minimax-lora-form-adapter')), 'the payload landed in the configured external target').toBe(true)
+
+    // The post-install restart heals the registry — the re-render SUBMITS:
+    // the loop from refusal to render closed by one row action. (The dock
+    // steps aside first — it was doing its job over the canvas.)
+    await stopEngine()
+    await expect(page.locator('[data-canvas-engine]')).toHaveAttribute('data-engine-connected', 'false', { timeout: 30_000 })
+    engineState.registry.MiniMaxH3LoraFormLoader = {}
+    await startEngine()
+    await expect(page.locator('[data-canvas-engine]')).toHaveAttribute('data-engine-connected', 'true', { timeout: 30_000 })
+    await page.waitForTimeout(1_000)
+    await remediation.locator('[data-remediation-close]').click()
+    await expect(remediation).toHaveCount(0)
+    await page.locator(`[data-canvas-tile="${chain.chain.id}"]`).click()
+    await page.locator('[data-canvas-generate]').click()
+    await expect.poll(() => submittedGraphs.length, { timeout: 20_000 }).toBe(2)
+    expect(Object.values(submittedGraphs[1]!).some((node) => node.class_type === 'MiniMaxH3LoraFormLoader'), 'the re-render carries the adapter node again').toBe(true)
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
+    await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
+    if (engine) await stopEngine()
+  }
+})
 
 // ---------------------------------------------------------------------------
 // A-DBG (directive c250ab36): the junction logger's live proof — booted with

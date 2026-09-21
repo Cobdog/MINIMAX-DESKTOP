@@ -25,11 +25,10 @@ export function BottomBar() {
   const activeProjectId = useCanvasStore((state) => state.activeProjectId)
   const engine = useCanvasStore((state) => state.engine)
   const select = useCanvasStore((state) => state.select)
-  const submitPrompt = useCanvasStore((state) => state.submitPrompt)
   const setForkMenu = useCanvasStore((state) => state.setForkMenu)
+  const submitPrompt = useCanvasStore((state) => state.submitPrompt)
   const requestCamera = useCanvasStore((state) => state.requestCamera)
   const toast = useCanvasStore((state) => state.toast)
-  const [prompt, setPrompt] = useState('')
   const [opMenuOpen, setOpMenuOpen] = useState(false)
 
   const doc = activeProjectId ? documents[activeProjectId] : null
@@ -38,11 +37,13 @@ export function BottomBar() {
   const primaryChain = primary && doc ? doc.chains.find((chain) => chain.id === primary.id) ?? null : null
   const context: 'empty' | 'media' | 'chain' | 'multi' = selectedTiles.length === 0 ? 'empty' : selectedTiles.length === 1 ? (primary?.kind === 'media' && primary.canonical ? 'media' : 'chain') : 'multi'
 
-  const submit = async () => {
-    const text = prompt.trim()
-    if (!text) return
-    setPrompt('')
-    await submitPrompt(text, 'video')
+  // The bar prompt spawn (R-20: only when objects exist — the launcher owns
+  // the empty canvas).
+  const [barPrompt, setBarPrompt] = useState('')
+  const submit = async (text: string) => {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    await submitPrompt(trimmed, 'video')
   }
 
   // Transport (media context): the tile's own preview element is the player —
@@ -110,26 +111,22 @@ export function BottomBar() {
   return <footer className="canvas-bottombar" data-canvas-bottombar data-canvas-bar-context={context}>
     {context === 'empty' && (
       <>
-        <span className="canvas-bar-title">generate</span>
-        <input
-          className="canvas-bar-prompt"
-          data-canvas-bar-prompt
-          value={prompt}
-          placeholder="Describe a shot — Enter spawns it at the bar"
-          onChange={(event) => setPrompt(event.target.value)}
-          onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }}
-        />
-        {/* §5.4 (Phase 4): the audio engines as typed-hole selections from the
-            nothing-selected context (the launcher carries the same rows). */}
-        <button type="button" className="canvas-chip" data-canvas-bar-music3 onClick={() => useCanvasStore.getState().setAudioDock({ engine: 'music3' })}>Music 3</button>
-        <button type="button" className="canvas-chip" data-canvas-bar-acestep onClick={() => useCanvasStore.getState().setAudioDock({ engine: 'acestep' })}>ACE-Step</button>
-        <button type="button" className="canvas-chip" data-canvas-bar-library title="The library projection (V)" onClick={() => useCanvasStore.getState().setLibraryOpen(true)}>library <kbd>V</kbd></button>
+        {/* (R-20/m5, Wave 3) The duplicate prompt is gone: on an EMPTY canvas
+            the launcher IS the prompt surface and the bar carries
+            queue/engine state only. With objects on the canvas the launcher
+            is gone — the bar's prompt input is then the ONLY prompt entry,
+            which is why it renders exactly then (never alongside the
+            launcher). The engine chips moved to the typed-hole produce menu
+            (one canonical home per engine). */}
+        {tiles.length === 0
+          ? <><span className="canvas-bar-title">canvas</span><span className="canvas-bar-hint" data-canvas-bar-hint>Describe a shot in the prompt bar above — or press <kbd>/</kbd></span></>
+          : <><span className="canvas-bar-title">generate</span><input className="canvas-bar-prompt" data-canvas-bar-prompt value={barPrompt} placeholder="Describe a shot — Enter spawns it at the bar" onChange={(event) => setBarPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); const text = barPrompt; setBarPrompt(''); void submit(text) } } } /></>}
         <button
           type="button"
           className={`canvas-bar-engine ${engine.connected ? (engine.modelReady ? 'online' : 'degraded') : ''}`}
           data-canvas-bar-engine
           title={engine.connected ? (engine.modelReady ? 'Local engine connected — MiniMax H3 ready' : 'Engine connected but H3 model components are missing') : 'Engine offline — click to open Settings at the engine section'}
-          onClick={() => useCanvasStore.getState().setSettingsDock(true)}
+          onClick={() => useCanvasStore.getState().setSettingsDock(true, 'engine')}
         >
           <span className="status-dot" /> {engine.connected ? (engine.modelReady ? 'H3 ready' : 'models missing') : 'engine offline'}
         </button>

@@ -194,7 +194,7 @@ export const SCENARIOS: VisionScenario[] = [
         rubric: [
           SHELL_CONTEXT,
           'Center of the canvas: a centered launcher block. Its TOP may carry the first-run onboarding notice (QOL wave 2026-09-18): a dashed-blue-bordered card titled "No models visible — one setup step before the first render." with two small buttons ("Open settings — engine connection", "Browse fetchable items") and an × dismiss — INTENDED guidance on the models-empty test home, never a defect. Below it a large heading "A blank canvas", a one-line subtitle mentioning describing a shot or dropping anything, and below it the PROMPT BAR — a wide dark rounded textarea (placeholder mentioning "/" to focus and Enter to spawn) with a submit button at its right reading "Spawn video seed" with a small video icon.',
-          'Below the prompt bar, a CHIP ROW of small rounded pill buttons, at minimum: "image prompt", "video prompt" (one of these highlighted as the active media type), "noDialogue handoff", "drop / pick media", "Music 3", "ACE-Step", "prompt library", and "movie plan" — each with a small icon. All chips must sit fully inside the viewport with readable labels.',
+          'Below the prompt bar, a CHIP ROW of small rounded pill buttons, exactly four: "image prompt", "video prompt" (one of these highlighted as the active media type), "no dialogue", and "drop / pick media" — each with a small icon. (R-20 amendment, Wave 3: the audio-engine chips, prompt library, and movie-plan chips are RETIRED — their one canonical home each is the typed-hole produce menu / the titlebar buttons; their absence is the intended design, never a defect.) All chips must sit fully inside the viewport with readable labels.',
           'A "Resume" section below the chips: a header row with the word "Resume" and a "new canvas" button, then either recent-canvas cards (name + date, any count) or the muted line "No other canvases yet — the first prompt creates one." — either state is correct.',
           'NO left sidebar, NO grouped navigation (Create / Queue / Library / Clip editor), NO "retired" pills anywhere — the old shell is deleted by design; any of those appearing is a REGRESSION, flag it.',
           'Defects to flag: overlapping titlebar controls, the prompt bar or chips clipped by the viewport, unreadable text mid-glyph, a pure-white or pure-black dead region covering the surface.',
@@ -484,6 +484,14 @@ export const SCENARIOS: VisionScenario[] = [
             const rows = Array.from(document.querySelectorAll<HTMLElement>('.node-packs-section .node-pack-row'))
             const target = rows.find((row) => row.textContent?.includes('comfyui-krea2-controlnet'))
             target?.scrollIntoView({ block: 'start' })
+            // The sticky Settings rail is OPAQUE since the ghost-token fix
+            // (it used to compute transparent — the judge could read rows
+            // through it). block:'start' parks the target row exactly UNDER
+            // the rail band; back off by the rail's height so the row's
+            // header clears it.
+            const scroller = target?.closest('.canvas-settings-body') as HTMLElement | null
+            const rail = scroller?.querySelector('[data-settings-nav]') as HTMLElement | null
+            if (scroller && rail) scroller.scrollTop = Math.max(0, scroller.scrollTop - rail.offsetHeight - 8)
           })
           await page.waitForTimeout(400)
         },
@@ -734,15 +742,16 @@ export const SCENARIOS: VisionScenario[] = [
       await page.goto('/')
       await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
       await expect(page.locator('[data-canvas-prompt]')).toBeVisible()
-      // Keyboard-only walk backward to the prompt-library chip (the same
-      // route the keyboard-operability e2e takes) and open with Enter, so the
-      // capture shows the dialog PLUS a genuine :focus-visible ring.
-      const prompt = page.locator('[data-canvas-prompt]')
-      await prompt.focus()
-      for (let index = 0; index < 60; index += 1) {
-        if (await page.evaluate(() => document.activeElement?.getAttribute('data-canvas-chip') === 'prompt-library')) break
-        await page.keyboard.press('Shift+Tab')
-      }
+      // (R-20) The prompt-library chip is retired — the library's launcher-side
+      // entry is the PROPERTIES PANEL's library button. Spawn the seed, open
+      // the panel's library button by keyboard (focus + Enter, so the capture
+      // shows the dialog PLUS a genuine :focus-visible ring).
+      await page.locator('[data-canvas-prompt]').fill('a lone trumpeter on a night platform')
+      await page.locator('[data-canvas-submit]').click()
+      await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+      const panelButton = page.locator('[data-canvas-prompt-library]')
+      await expect(panelButton).toBeVisible({ timeout: 10_000 })
+      await panelButton.focus()
       await page.keyboard.press('Enter')
       await expect(page.locator('.prompt-library-modal')).toBeVisible()
       await page.waitForTimeout(400)
@@ -757,7 +766,7 @@ export const SCENARIOS: VisionScenario[] = [
         label: 'Launcher — prompt library dialog opened by keyboard, focus ring visible',
         rubric: [
           SHELL_CONTEXT,
-          'The canvas launcher behind a dimmed modal overlay — background controls stay recognizable (titlebar, prompt bar silhouettes), never fully black.',
+          'The canvas behind a dimmed modal overlay — background controls stay recognizable (titlebar, a spawned seed object, the properties panel silhouette), never fully black. (R-20 amendment: the dialog now opens from the properties panel library button, not a launcher chip.)',
           'A dialog panel floats roughly centered: kicker "PROMPT LIBRARY", bold title about community & saved prompts, a one-line explainer, and a tab strip with a "Community" tab (active) and a "Saved" tab (its count varies — any count is fine).',
           'Dialog furniture: a search input row (search field plus filter dropdown/checkboxes), a "Load more" button and an attribution/footer line at the bottom when content is present, and an X close button at the panel\'s TOP-RIGHT corner — all inside the panel bounds.',
           'A keyboard-focus indicator is clearly visible: a bright green/chartreuse rectangular ring around the close (X) button.',
@@ -919,12 +928,11 @@ export const SCENARIOS: VisionScenario[] = [
       await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
       await page.goto('/?canvas=1')
       await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
-      // The audio dock FIRST — the empty canvas shows the launcher, whose
-      // Music 3 chip opens the dock (§5.4). It stays floating while the
-      // object + panel arrive (selecting never closes an open dock).
-      await page.locator('[data-canvas-chip="music3"]').click()
-      await expect(page.locator('[data-canvas-audio-dock]')).toBeVisible()
-      await page.locator('[data-canvas-audio-caption]').fill('slow cinematic ambient piano, wide reverb, 60 seconds')
+      // (R-20) The audio dock opens from its ONE canonical home — the
+      // typed-hole produce menu on a source object. The PNG lands first
+      // (the scenario's own drop below), its tail menu opens the dock, and
+      // the dock stays floating while the panel arrives (selecting never
+      // closes an open dock).
       // A real, decodable PNG lands as a media object…
       await page.evaluate(() => {
         const canvas = document.createElement('canvas')
@@ -943,6 +951,11 @@ export const SCENARIOS: VisionScenario[] = [
         )
         document.querySelector('[data-canvas-root]')!.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true }))
       })
+      const visionSourceTile = page.locator('[data-canvas-tile]').first()
+      await visionSourceTile.locator('[data-canvas-endpoint="tail"]').click()
+      await page.locator('[data-canvas-menu-row="produce:music3"]').click()
+      await expect(page.locator('[data-canvas-audio-dock]')).toBeVisible()
+      await page.locator('[data-canvas-audio-caption]').fill('slow cinematic ambient piano, wide reverb, 60 seconds')
       await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
       await page.waitForTimeout(500)
       // …and selecting it (a direct dispatch — the tile may sit under the
@@ -962,7 +975,7 @@ export const SCENARIOS: VisionScenario[] = [
         rubric: [
           'Context: a dark-theme desktop studio at 1920x1080 on the ?canvas=1 canvas route — slim top titlebar (canvas tab, radar chip reading "calm" or a queue count, "engine offline" chip, then small "library V", "settings", "index ⌘K" buttons at the right — ALL intended Phase-4 additions), a near-black dotted-grid canvas surface below, and a slim contextual bottom bar at the foot.',
           'ONE media tile visible on the canvas (dark rounded card, 16:9 preview showing a dark blue rectangle with a gold square, head/tail endpoint dots) — it may be partially covered by floating panels; silhouette presence is enough.',
-          'A PROPERTIES panel (floating, right side): header with the object title + a mode pill; a PROMPT section with a textarea placeholder and a row of four small pill buttons beneath it (enhance / audio pass / timeline → Flow / library — the timeline pill\'s label carries an arrow reading "timeline → Flow"; muted icons + labels, possibly dimmed because no local LLM is connected in tests: dimming is CORRECT. Amended 2026-09-20 to match the shipped label after the Phase-0 vision judge read the arrow label as "inverse flow"); sections below for Engine, References, Identity payload with a strength slider, Guides, Takes.',
+          'A PROPERTIES panel (floating, right side): header with the object title + a mode pill; a PROMPT section with a textarea placeholder and a row of four small pill buttons beneath it (enhance / audio pass / timeline → Flow / library — the timeline pill\'s label carries an arrow reading "timeline → Flow"; muted icons + labels, possibly dimmed because no local LLM is connected in tests: dimming is CORRECT. Amended 2026-09-20 to match the shipped label after the Phase-0 vision judge read the arrow label as "inverse flow"); sections below for Engine and References. (R-18 amendment, Wave 3 2026-09-21: the panel is CONTEXTUAL now — Identity renders only with a reference or authored payload, the LoRA timeline only with installed LoRAs, and Guides + Takes are COLLAPSED disclosure rows reading "Keyframe guides · AddGuide frames" and "Takes · N prior(s)…" with a + marker; their folded state is the INTENDED design, never a missing-section defect.)',
           'A separate AUDIO DOCK panel (floating, left-of-center or left side): header with a music note icon + "Music 3 — complete song"; body with a filled multi-line caption textarea containing visible caption text about ambient piano, a Lyrics textarea (empty placeholder), a "seconds" number input showing 60, and a muted note line about the track landing as its own object; footer with a "generate song" button (may be dimmed — the engine is offline in tests, CORRECT).',
           'Blessings: floating panels may overlap the tile; dense small sub-labels are the design language; dimmed/disabled buttons are intended offline states; the bottom bar may read "generate" with a prompt input + Music 3 / ACE-Step / library chips.',
           'Defects to flag: either panel missing entirely, panels overlapping EACH OTHER so their headers cannot both be read, the caption textarea empty or clipped, unreadable text mid-glyph, a pure-white or pure-black dead region, no titlebar buttons at all.',
@@ -1029,7 +1042,7 @@ export const SCENARIOS: VisionScenario[] = [
     checkpoints: [
       {
         id: 'structured-prompt-editor-top-1080p',
-        label: 'Structured editor — panel scrolled to TOP: the toggle + Concept/Subjects/Setting/Lighting boxes',
+        label: 'Structured editor — panel scrolled to TOP: the toggle + Concept/Subjects/Setting (the fold arbitrates the rest)',
         // The panel scrolls internally; this checkpoint captures the TOP —
         // DOM truth: the scroller's offset is pinned at 0 before capture.
         drive: async (page) => {
@@ -1037,9 +1050,29 @@ export const SCENARIOS: VisionScenario[] = [
           await expect(panel).toBeVisible()
           // The scroller is the Rnd PANEL ROOT itself (overflow-hidden but
           // programmatically scrollable — the body's own overflow never
-          // engages because its grid row is unconstrained).
-          await panel.evaluate((element) => { element.scrollTop = 0 })
-          await expect.poll(async () => panel.evaluate((element) => element.scrollTop)).toBe(0)
+          // engages because its grid row is unconstrained). The debounced
+          // draft commit (~500 ms after the last box edit) re-renders the
+          // editor and the browser restores the focused input into view —
+          // a single early pin gets re-scrolled before the capture. Outlast
+          // the commit, blur the input (nothing left to restore), then pin
+          // and RE-pin after a settle.
+          await page.waitForTimeout(700)
+          // Pin BOTH scrollers: the BODY is the real one (its grid row is
+          // 1fr-constrained since the root-grid fix — 2509px content in a
+          // 627px box); the root carries a 10px residual of its own.
+          await panel.evaluate((element) => {
+            (document.activeElement as HTMLElement | null)?.blur?.()
+            element.scrollTop = 0
+            const body = element.querySelector('.canvas-properties-body')
+            if (body) body.scrollTop = 0
+          })
+          await page.waitForTimeout(250)
+          await panel.evaluate((element) => {
+            element.scrollTop = 0
+            const body = element.querySelector('.canvas-properties-body')
+            if (body) body.scrollTop = 0
+          })
+          await expect.poll(async () => panel.evaluate((element) => (element.querySelector('.canvas-properties-body') as HTMLElement | null)?.scrollTop ?? element.scrollTop)).toBe(0)
           await expect(page.locator('[data-canvas-prompt-mode]')).toHaveAttribute('data-canvas-prompt-mode', 'structured')
           await expect(page.locator('[data-structured-box="concept"]')).toBeVisible()
         },
@@ -1048,8 +1081,8 @@ export const SCENARIOS: VisionScenario[] = [
           'GROUND TRUTH FOR THIS CAPTURE: the properties panel is scrolled to its TOP — the FIRST thing visible inside the panel body is the "Prompt // presets" label, IMMEDIATELY followed by the segmented freeform/structured toggle. If you can read the words "freeform" and "structured" as two adjoining small buttons near the top of the panel, the toggle clause PASSES — read carefully before judging it missing.',
           'ONE seed tile on the canvas (dark rounded card, head/tail endpoint dots). The panel header carries the object title + a "text → video" mode pill.',
           'The segmented toggle: "structured" is ACTIVE (accent-highlighted, brighter than the muted "freeform").',
-          'Below the toggle, the STRUCTURED EDITOR: a vertical stack of small bordered box sections, each with a collapsible header (a chevron icon, a bold label like Concept / Subjects / Setting / Lighting, a muted hint). In view from the top: Concept, Subjects, Setting, Lighting (and possibly Style).',
-          'Populated content visible: the Concept box\'s textarea contains watchman/observatory prose; the Subjects box shows ONE dashed subject card with a name input reading "Idris", an appearance textarea about a weathered keeper in a wool coat, and wardrobe/features inputs; the Setting and Lighting boxes show readable prose (lighting mentions moonlight); the Style box (its own section, when in view) reads "Cinematic".',
+          'Below the toggle, the STRUCTURED EDITOR: a vertical stack of small bordered box sections, each with a collapsible header (a chevron icon, a bold label like Concept / Subjects / Setting / Lighting, a muted hint). In view from the top: Concept, the Subjects card, and Setting. (Wave-3 density arbitration: with ONE populated subject card — name + appearance + wardrobe + features inputs — Setting is the last box that fits in the ~640px panel viewport at 1080p. Lighting, Style, Camera, Flow, and Audio sit BELOW the panel\'s internal fold — that is the design, never a defect; each has its own scroll checkpoint (Flow, Audio), and the pre-Wave-3 debt this checkpoint guards — the left-edge glyph clip — stays a flaggable defect if it ever reappears.)',
+          'Populated content visible: the Concept box\'s textarea contains watchman/observatory prose; the Subjects box shows ONE dashed subject card with a name input reading "Idris", an appearance textarea about a weathered keeper in a wool coat, and wardrobe/features inputs; the Setting box shows readable prose (mountain observatory / storm clouds); the Style box (its own section, when in view) reads "Cinematic".',
           'Per-box assist buttons ("distill" / "enhance") appear DIMMED — no local LLM in tests, CORRECT. Chip rows (small rounded pills like "a busy city street", "golden hour") may render under the Setting/Lighting boxes.',
           'Blessings: dense small text and muted sub-labels are the design language; dimmed disabled controls are intended offline states; boxes further down (Style, Camera, Flow, Audio, Engine, References…) sit BELOW the panel\'s internal fold — their absence from THIS capture is NOT a defect (a second checkpoint covers them); the bottom bar shows the generate surface.',
           'Defects to flag: the toggle truly absent from the panel top, no box sections at all, empty textareas where populated content is described above, the subject card lacking its input fields, overlapping boxes rendering text unreadably, a pure-white or pure-black dead region.',
@@ -1069,7 +1102,7 @@ export const SCENARIOS: VisionScenario[] = [
           // top checkpoint's note); scrollIntoViewIfNeeded is a no-op for
           // internally-clipped content.
           await panel.locator('[data-structured-box="flow"]').evaluate((element) => element.scrollIntoView({ block: 'start' }))
-          await expect.poll(async () => panel.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+          await expect.poll(async () => panel.evaluate((element) => (element.querySelector('.canvas-properties-body') as HTMLElement | null)?.scrollTop ?? element.scrollTop)).toBeGreaterThan(0)
           await expect(page.locator('[data-structured-flow-row]').first()).toBeVisible()
           await expect(page.locator('[data-structured-flow-row]')).toHaveCount(2)
         },
@@ -1084,24 +1117,59 @@ export const SCENARIOS: VisionScenario[] = [
       },
       {
         id: 'structured-prompt-editor-audio-1080p',
-        label: 'Structured editor — panel scrolled to the Audio box + the compose preview',
+        label: 'Structured editor — panel scrolled to the Audio box (the preview gets its own checkpoint)',
         // The audio box + the distill pill + the OPEN compose preview — the
         // exact-string contract visible at the panel's foot.
         drive: async (page) => {
           const panel = page.locator('[data-canvas-properties]')
           await expect(panel).toBeVisible()
+          // The rubric wants the Audio box AND the open compose preview in
+          // frame. Neither pure anchor can hold both: the preview is
+          // TALLER than the panel body (block:'center' on it centers a
+          // >640px element and throws the whole Audio box above the fold —
+          // the visible region started at the DIALOGUE label, bundle 4),
+          // and the populated Audio box is ~700px on its own (chips rows +
+          // three labeled fields + the helper row), so anchoring IT at the
+          // top fills the body and pushes the preview below the fold
+          // (bundle 5). The honest shape is one state per checkpoint: this
+          // one frames the Audio box; the preview checkpoint below frames
+          // the preview.
           await panel.locator('[data-structured-box="audio"]').evaluate((element) => element.scrollIntoView({ block: 'start' }))
-          await expect.poll(async () => panel.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+          await expect.poll(async () => panel.evaluate((element) => (element.querySelector('.canvas-properties-body') as HTMLElement | null)?.scrollTop ?? element.scrollTop)).toBeGreaterThan(0)
           await expect(page.locator('[data-structured-input="audio-soundscape"]')).toBeVisible()
           await expect(page.locator('[data-structured-preview] pre')).toContainText('integrated_multimodal_description:')
         },
         rubric: [
           SHELL_CONTEXT,
-          'GROUND TRUTH FOR THIS CAPTURE: the properties panel is scrolled DOWN so the AUDIO box sits at the top of the visible panel area. Everything above it (the toggle, Concept/Subjects/Setting/Lighting/Style/Camera/Flow) is ABOVE the fold — its absence from THIS capture is NOT a defect (earlier checkpoints cover it).',
+          'GROUND TRUTH FOR THIS CAPTURE: the properties panel is scrolled DOWN so the AUDIO box sits at the top of the visible panel area. Everything above it (the toggle, Concept/Subjects/Setting/Lighting/Style/Camera/Flow) is ABOVE the fold, and the compose preview sits BELOW it — neither absence is a defect (earlier checkpoints cover the top; the next checkpoint frames the preview).',
           'The AUDIO box: three labeled sub-fields — "soundscape" (a small uppercase label with a "→ overall_soundscape" note; its textarea is filled with readable prose about wind and keys), "music" (with a "→ non_diegetic_music" note), and "dialogue" whose textarea contains a readable <d>[English] Almost dawn.</d> fragment. Under the dialogue field: a compact helper row — a small language select, a one-line text input, and a "+ <d>" button. Chip pills (e.g. "room tone", "rain") may render under the soundscape field.',
-          'Below the Audio box: a right-aligned muted "distill into boxes…" pill (may be dimmed — CORRECT offline) and an OPEN "compose preview" block (dashed border; its summary line reads "compose preview — this exact string is submitted") showing monospace composed text that begins "integrated_multimodal_description: [Shot 1] Cinematic,".',
-          'Blessings: dense small text and muted sub-labels are the design language; dimmed controls are intended offline states; sections below (Engine, References, Identity, Guides, Takes) may sit below the fold — absence is NOT a defect; the bottom bar shows the generate surface.',
-          'Defects to flag: the Audio box missing any of its three labeled sub-fields, the soundscape or dialogue textareas empty, the helper row absent, the compose preview absent or empty, overlapping sections rendering text unreadably, a pure-white or pure-black dead region.',
+          'Below the Audio box, a right-aligned muted "distill into boxes…" pill (may be dimmed — CORRECT offline). The compose preview sits BELOW the fold here — the populated Audio box fills the ~830px panel body on its own; that is the design, never a defect (the NEXT checkpoint frames the preview itself).',
+          'Blessings: dense small text and muted sub-labels are the design language; dimmed controls are intended offline states; sections below (Engine, References, then the folded Guides/Takes disclosure rows) may sit below the fold — absence is NOT a defect (R-18: Identity and the LoRA timeline are contextual and legitimately absent here); the bottom bar shows the generate surface.',
+          'Defects to flag: the Audio box missing any of its three labeled sub-fields, the soundscape or dialogue textareas empty, the helper row absent, overlapping sections rendering text unreadably, a pure-white or pure-black dead region.',
+        ].join(' '),
+      },
+      {
+        id: 'structured-prompt-editor-preview-1080p',
+        label: 'Structured editor — the open compose preview: the exact-string contract at the panel\'s foot',
+        // The Audio box and the preview CANNOT share the ~830px panel body
+        // (see the audio checkpoint's comment) — the preview gets its own
+        // frame. block:'start' on the preview: the distill pill sits just
+        // above the fold (blessed absent), the preview summary + its
+        // monospace body own the frame.
+        drive: async (page) => {
+          const panel = page.locator('[data-canvas-properties]')
+          await expect(panel).toBeVisible()
+          await panel.locator('[data-structured-preview]').evaluate((element) => element.scrollIntoView({ block: 'start' }))
+          await expect.poll(async () => panel.evaluate((element) => (element.querySelector('.canvas-properties-body') as HTMLElement | null)?.scrollTop ?? element.scrollTop)).toBeGreaterThan(0)
+          await expect(page.locator('[data-structured-preview] pre')).toBeVisible()
+          await expect(page.locator('[data-structured-preview] pre')).toContainText('integrated_multimodal_description:')
+        },
+        rubric: [
+          SHELL_CONTEXT,
+          'GROUND TRUTH FOR THIS CAPTURE: the properties panel is scrolled to its BOTTOM region — the OPEN compose preview block owns the visible panel area. Everything above (all eight boxes) is above the fold — absence is NOT a defect (earlier checkpoints cover them); the panel\'s footer (status + generate) stays visible at the panel\'s foot.',
+          'The compose preview: a bordered block with an OPEN state (no chevron fold), its summary/header line reads "compose preview — this exact string is submitted", followed by a MONOSPACE body (light text on dark, small, dense — the design language) showing the composed prompt: it begins "integrated_multimodal_description: [Shot 1] Cinematic," and continues with readable lines for the setting (mountain observatory / storm clouds), the subject (Idris — weathered keeper, wool coat, brass-buttoned coat, scar through one eyebrow), camera prose, audio keys (wind/keys), a <d>[English] Almost dawn.</d> dialogue fragment, and beat/flow lines.',
+          'Blessings: dense small monospace is the design; long composed lines may WRAP within the block (wrapping is correct — the pre-wrap fix); a right-aligned muted "distill into boxes…" pill may sit just above the fold or be scrolled out (its own dimmed offline state is correct); sections below (Engine, References, folded Guides/Takes) may sit below the fold — absence is NOT a defect.',
+          'Defects to flag: the preview block absent or empty, its monospace body clipped at the panel\'s LEFT edge (glyphs cut mid-character — the pre-Wave-3 debt), overlapping sections rendering text unreadably, a pure-white or pure-black dead region.',
         ].join(' '),
       },
     ],

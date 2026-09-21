@@ -9,6 +9,7 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useCanvasStore } from './store'
+import { dbg } from '../lib/dbg'
 import { endpointOptions, type SourceKind } from './options'
 import { readChainSettings } from './generation'
 import type { DocumentChain } from './derive'
@@ -96,28 +97,39 @@ export function EndpointMenu() {
           if (!rows.length) return null
           return <div key={group} className="canvas-menu-group" data-canvas-menu-group={group}>
             <span className="canvas-menu-group-label">{group === 'generate' ? 'generate' : group === 'input' ? 'inputs' : group === 'control' ? 'control inputs' : group === 'utility' ? 'utilities' : 'fork'}</span>
-            {rows.map((option) => (
+            {rows.map((option) => {
+              // (R-22) Consume rows are GATED on a selected source — the menu
+              // enforces instead of teaching: without a source the rows say so
+              // and refuse, the dead-end footer is gone.
+              // Input roles consume a source; CONTROL rows (the pose rig —
+              // a from-scratch input) never do.
+              const needsSource = menu.direction === 'consume' && option.group === 'input' && !context.sourceChainId
+              const gated = !option.available || needsSource
+              if (gated) dbg('menu.gate', { option: option.id, direction: menu.direction, because: needsSource ? 'no-source-chain' : (option.reason ?? 'unavailable') })
+              const gateReason = needsSource ? 'Select the object to consume from first — click it, then open this menu.' : option.reason
+              return (
               <div key={option.id} className="canvas-menu-rowwrap">
                 <button
                   type="button"
-                  className={`canvas-menu-row ${option.available ? '' : 'unavailable'}`}
+                  className={`canvas-menu-row ${gated ? 'unavailable' : ''}`}
                   data-canvas-menu-row={option.id}
-                  disabled={!option.available}
-                  title={[option.reason, option.available && menu.direction === 'consume' && !context.sourceChainId ? 'Select the object to consume from first.' : '', option.hint].filter(Boolean).join('\n')}
+                  disabled={gated}
+                  title={[gateReason, option.hint].filter(Boolean).join('\n')}
                   onClick={() => void runEndpointAction(menu.chainId, menu.direction, option, context.sourceChainId ?? undefined)}
                 >
                   <span className="canvas-menu-row-label">{option.label}</span>
-                  <span className="canvas-menu-row-note">{option.available ? option.description : option.reason}</span>
-                  {option.hint && option.available && <span className="canvas-menu-row-hint">{option.hint}</span>}
+                  <span className="canvas-menu-row-note">{gated ? gateReason : option.description}</span>
+                  {option.hint && !gated && <span className="canvas-menu-row-hint">{option.hint}</span>}
                 </button>
               </div>
-            ))}
+              )
+            })}
           </div>
         })}
       </div>
       <footer>
         {menu.direction === 'produce' && !hasOutput && 'This object has no output yet — generate or drop media first.'}
-        {menu.direction === 'consume' && !context.sourceChainId && 'Select the object to consume from, then open this menu.'}
+        {menu.direction === 'consume' && !context.sourceChainId && 'Pick the source object first — every input row unlocks once one is selected.'}
         {((menu.direction === 'produce' && hasOutput) || (menu.direction === 'consume' && context.sourceChainId)) && 'Esc closes · hints show the parameter contracts'}
       </footer>
     </div>

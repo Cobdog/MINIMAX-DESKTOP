@@ -155,12 +155,63 @@
    style on the same element, which otherwise beats this rule (the 6f656ca dock
    class of bug) — the grid rows never apply, the body never gets constrained by
    minmax(0,1fr), and the properties panel becomes an unscrollable clip. */
-.canvas-inspector { z-index: 40; display: grid !important; grid-template-rows: auto minmax(0, 1fr); border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); box-shadow: 0 18px 48px rgba(0,0,0,.5); overflow: hidden; }
+.canvas-inspector { z-index: 40; display: grid !important; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); box-shadow: 0 18px 48px rgba(0,0,0,.5); overflow: hidden; }
 .canvas-inspector-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 11px; border-bottom: 1px solid var(--line); background: var(--surface-2); cursor: grab; }
 .canvas-inspector-header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .canvas-inspector-header button { display: grid; place-items: center; width: 22px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
 .canvas-inspector-header button:hover { background: var(--surface-3); color: var(--text); }
 .canvas-inspector-body { display: grid; align-content: start; gap: 8px; padding: 10px 11px; overflow-y: auto; }
+
+/* R-15 (Wave 3): the dock's sticky, dirty-aware save footer + the library
+   dock + the first-run wizard — structural, token-driven. */
+.canvas-settings-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--surface); }
+.settings-dirty-state { font-size: var(--text-sm); color: var(--muted-2); }
+.settings-dirty-state.dirty { color: var(--warning, #d9a441); font-weight: 600; }
+.canvas-wizard { max-width: 640px; margin: 0 auto 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+.canvas-wizard-header { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.canvas-wizard-header strong { display: grid; }
+.canvas-wizard-step { color: var(--muted-2); font-size: var(--text-sm); font-weight: 500; }
+.canvas-wizard-skip { margin-left: auto; }
+.canvas-wizard-close { display: grid; place-items: center; }
+.canvas-wizard-body { padding: 14px; }
+.canvas-wizard-step { display: block; }
+.canvas-wizard-lede { margin: 0 0 12px; color: var(--color-text-soft); }
+.canvas-wizard-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
+.canvas-wizard-row input { flex: 1; min-width: 220px; height: 34px; padding: 0 10px; }
+.canvas-wizard-hint { color: var(--muted-2); font-size: var(--text-sm); }
+.canvas-wizard-ok { display: flex; align-items: center; gap: 7px; color: var(--accent); }
+.canvas-wizard-warn { color: var(--warning, #d9a441); }
+.canvas-wizard-note { color: var(--muted-2); font-size: var(--text-sm); margin: 10px 0 0; }
+.canvas-wizard-ports { display: flex; gap: 8px; list-style: none; margin: 8px 0; padding: 0; flex-wrap: wrap; }
+.canvas-wizard-models { display: flex; gap: 8px; list-style: none; margin: 8px 0; padding: 0; flex-wrap: wrap; }
+.canvas-wizard-models li { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.canvas-wizard-models strong { font-size: var(--text-sm); color: var(--muted-2); text-transform: capitalize; }
+.canvas-wizard-models span { font-size: var(--text-lg); }
+.canvas-wizard textarea { width: 100%; resize: vertical; }
+.canvas-wizard-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line); }
+.canvas-wizard-progress { display: flex; gap: 12px; list-style: none; margin: 0; padding: 0; font-size: var(--text-sm); color: var(--muted-2); }
+.canvas-wizard-progress li.current { color: var(--accent); font-weight: 700; }
+.canvas-wizard-progress li.past { color: var(--color-text-soft); }
+.canvas-wizard-actions { display: flex; gap: 8px; }
+.canvas-first-run-secondary { margin-left: 6px; }
+
+/* R-17 (Wave 3): the remediation dock — one action per row. */
+.canvas-remediation-lede { margin: 0 0 10px; color: var(--color-text-soft); }
+.canvas-remediation-rows { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.canvas-remediation-row { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.canvas-remediation-main { display: grid; gap: 2px; min-width: 0; }
+.canvas-remediation-main strong { font-size: var(--text-sm); overflow-wrap: anywhere; }
+.canvas-remediation-main small { color: var(--muted-2); font-size: var(--text-sm); }
+.canvas-remediation-action { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.canvas-remediation-done { display: flex; align-items: center; gap: 5px; color: var(--accent); font-size: var(--text-sm); }
+.canvas-remediation-note { color: var(--muted-2); font-size: var(--text-sm); margin: 10px 0 0; }
+
+/* R-18 (Wave 3): the panel's contextual disclosure sections. */
+details.canvas-properties-disclosure { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; }
+details.canvas-properties-disclosure > summary { display: flex; align-items: baseline; gap: 8px; cursor: pointer; list-style: none; font-size: var(--text-sm); font-weight: 600; }
+details.canvas-properties-disclosure > summary::-webkit-details-marker { display: none; }
+details.canvas-properties-disclosure > summary::after { content: '+'; margin-left: auto; color: var(--muted-2); }
+details.canvas-properties-disclosure[open] > summary::after { content: '−'; }
 .canvas-inspector-body dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 12px; margin: 0; font-size: var(--text-sm); }
 .canvas-inspector-body dt { color: var(--muted-2); }
 .canvas-inspector-body dd { margin: 0; color: var(--color-text-soft); overflow-wrap: anywhere; }
@@ -321,6 +372,18 @@
 .structured-subject-head button:hover { color: var(--warning); }
 .structured-pin-badge { width: max-content; padding: 1px 7px; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: 999px; color: var(--accent); font-size: var(--text-2xs); }
 .structured-flow-row { display: grid; gap: 4px; padding: 6px 7px; border: 1px dashed var(--line-strong); border-radius: 8px; }
+
+/* (R-18/vision debt, Wave 3) THE LEFT-EDGE CLIP, fixed at its source: the
+   compose preview's <pre> carried one unbreakable line (the composed prompt
+   is a single enormous string) — white-space:pre forced the panel body's
+   min-content wider than the panel, and any scrollIntoView then scrolled
+   the panel ROOT horizontally (inline:'nearest' rides along with
+   block:'start'), cutting every row's first ~2 glyphs at the left border.
+   The preview wraps; the structured boxes can never force width; the body
+   grid item takes min-width:0 (the classic grid blowout guard). */
+[data-structured-preview] pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
+.canvas-properties-body > * { min-width: 0; max-width: 100%; }
+.structured-editor, .structured-box, .structured-box-body, .structured-flow-row { min-width: 0; }
 .structured-flow-times { display: flex; align-items: center; gap: 5px; color: var(--muted-2); font-size: var(--text-2xs); }
 .structured-flow-times input { width: 64px; text-align: right; font-family: ui-monospace, Consolas, monospace; }
 .structured-flow-row-tools { display: flex; gap: 4px; }

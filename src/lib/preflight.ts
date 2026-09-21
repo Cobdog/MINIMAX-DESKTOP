@@ -110,6 +110,13 @@ export function preflightRefusal(missing: MissingNodeClass[]): string | null {
   return `The engine is missing ${missing.length === 1 ? 'a node class' : `${missing.length} node classes`} this render needs — nothing was submitted:\n${lines.map((line) => `• ${line}`).join('\n')}`
 }
 
+/** Fired with the missing-class payload whenever a submit-time preflight
+ *  refuses (R-17, Wave 3): the RemediationDock listens and opens the
+ *  per-item-consented remediation surface — the refusal toast stays the
+ *  immediate feedback, the panel is the action surface. Window-guarded so
+ *  the VM harness stays silent. */
+export const PREFLIGHT_REFUSAL_EVENT = 'minimax:preflight-refusal'
+
 /** The submit-core seam: run the diff, log the junction, refuse loudly.
  *  Returns the refusal message or null. */
 export function preflightOrFail(graph: ComfyPrompt | Record<string, { class_type: string }>, info: ObjectInfo | Record<string, unknown> | undefined, junction = 'preflight'): string | null {
@@ -119,5 +126,8 @@ export function preflightOrFail(graph: ComfyPrompt | Record<string, { class_type
     return null
   }
   dbg(junction, { verdict: 'refuse', missing: missing.map((item) => item.className) })
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    try { window.dispatchEvent(new CustomEvent(PREFLIGHT_REFUSAL_EVENT, { detail: { missing } })) } catch { /* never block the refusal on the surface */ }
+  }
   return preflightRefusal(missing)
 }

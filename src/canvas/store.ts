@@ -264,6 +264,17 @@ type CanvasState = {
   gapMenu: { planId: string; afterSegmentId: string } | null
   /** Phase 4 (§8): Settings docked as a floating panel (the thin surface). */
   settingsDock: boolean
+  /** (R-19) The section the dock should land at when it opens (e.g. 'llm' —
+   *  the Connect… affordances deep-link here); consumed once on open. */
+  settingsDockSection: string | null
+  /** R-15 (Wave 3): the Library / Get-models surface — FetchBrowser promoted
+   *  out of the settings scroll into its own overlay, reachable from every
+   *  surface (the typed-hole fetch affordances deep-link through focus ids). */
+  libraryDock: boolean
+  /** The fetch-entry focus ids an opener passed in (consumed once by the
+   *  FetchBrowser inside the Library dock — the openFetchBrowser deep-link
+   *  machinery, R-15/R-19). */
+  libraryFocus: string[] | null
   /** Dock stacking counter (review M11, 2026-09-19): a dock that opens or is
    *  grabbed takes the NEXT z — three open docks no longer stack at the same
    *  z with DOM order deciding the winner. Each dock keeps its own assigned
@@ -329,7 +340,9 @@ type CanvasActions = {
    *  seeds its chain (created + selected, NEVER submitted). Returns the new
    *  plan id, or null with the refusal reasons toasted. */
   applyLoraTimeline(chainId: string): Promise<{ ok: boolean; planId?: string; reasons?: string[] }>
-  setSettingsDock(open: boolean): void
+  setSettingsDock(open: boolean, section?: string): void
+  /** R-15: open the Library / Get-models overlay (optionally focusing catalog entries). */
+  setLibraryDock(open: boolean, focusEntryIds?: string[]): void
   /** Dock stacking (review M11): take the next z for a dock opening or
    *  being grabbed; returns the value to apply. */
   raiseDock(): number
@@ -787,6 +800,9 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
     timelinePlanId: null,
     gapMenu: null,
     settingsDock: false,
+    settingsDockSection: null,
+    libraryDock: false,
+    libraryFocus: null,
     dockZ: 60,
     diagnosticsDock: false,
     audioDock: null,
@@ -1262,8 +1278,11 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       }
     },
 
-    setSettingsDock: (open) => {
-      set({ settingsDock: open })
+    setSettingsDock: (open, section) => {
+      set({ settingsDock: open, ...(open && section ? { settingsDockSection: section } : {}) })
+    },
+    setLibraryDock: (open, focusEntryIds) => {
+      set({ libraryDock: open, ...(open && focusEntryIds ? { libraryFocus: focusEntryIds } : {}) })
     },
     raiseDock: () => {
       const next = get().dockZ + 1
@@ -1550,6 +1569,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         const facts = engineFacts()
         const queued = queuedImageEngineRefusal(settings.imageEngine)
         if (queued) {
+          dbg('family', { verdict: 'queued-refusal', engine: settings.imageEngine, surface: 'submit' })
           get().toast('error', queued)
           return { ok: false, message: queued }
         }
@@ -1649,7 +1669,10 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       // too — never a silent fall-through to the H3 video ladder.
       if (settings.mediaType === 'image') {
         const queued = queuedImageEngineRefusal(settings.imageEngine)
-        if (queued) return queued
+        if (queued) {
+          dbg('family', { verdict: 'queued-refusal', engine: settings.imageEngine, surface: 'validate' })
+          return queued
+        }
         if (effectiveMode(settings) === 'frames' || effectiveMode(settings) === 'reference') {
           return 'The image intent has no first+last-frame or reference mode — those are video concepts. Clear the frame/reference bindings on this object, or re-spawn it as a video prompt.'
         }
@@ -1794,6 +1817,12 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       if (!doc) return
       set({ endpointMenu: null })
       const action = option.action
+      // (R-20) The audio engines' produce rows dock the engine panel — the
+      // chain context rides along when the dock supports it.
+      if (action.kind === 'audio-dock') {
+        get().setAudioDock({ engine: action.engine })
+        return
+      }
       if (action.kind === 'set-first-frame' || action.kind === 'set-last-frame' || action.kind === 'add-reference') {
         // Consume-from: the chain consumes the SELECTED source's canonical output.
         if (!sourceChainId || sourceChainId === chainId) {
@@ -2510,7 +2539,10 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
       if (settings.mediaType === 'image') {
         const facts = engineFacts()
         const queued = queuedImageEngineRefusal(settings.imageEngine)
-        if (queued) return { mode: 'image-queued-engine', validation: queued, graph: null }
+        if (queued) {
+          dbg('family', { verdict: 'queued-refusal', engine: settings.imageEngine, surface: 'probe' })
+          return { mode: 'image-queued-engine', validation: queued, graph: null }
+        }
         // (tmz8vh7): frames/reference bindings refuse here exactly like the
         // real submit ladder — the probe and the ladder stay one contract.
         if (effectiveMode(settings) === 'frames' || effectiveMode(settings) === 'reference') {

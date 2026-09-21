@@ -165,7 +165,10 @@ test('launcher keeps the prompt bar and chips visible at 1080p', async ({ page }
   await expect(page.locator('[data-canvas-promptbar]')).toBeVisible()
   expect(await inViewport(page.locator('[data-canvas-prompt]'))).toBe(true)
   expect(await inViewport(page.locator('[data-canvas-submit]'))).toBe(true)
-  for (const chip of ['image', 'video', 'music3', 'acestep', 'movie', 'prompt-library']) {
+  // (R-20) The launcher is the four-chip surface: media-type toggle, the
+  // no-dialogue policy, and drop. The audio/library/movie chips retired to
+  // their one canonical home each.
+  for (const chip of ['image', 'video', 'noDialogue', 'drop']) {
     await expect(page.locator(`[data-canvas-chip="${chip}"]`)).toBeVisible()
     expect(await inViewport(page.locator(`[data-canvas-chip="${chip}"]`))).toBe(true)
   }
@@ -425,24 +428,22 @@ test('launcher core flow is keyboard-operable (focus rings + dialog discipline)'
   await page.keyboard.type('a lone drummer on a night train, windows streaked with rain')
   await expect(page.locator('[data-canvas-prompt]')).toHaveValue(/lone drummer/)
 
-  // The prompt-library dialog opens by keyboard (Tab forward to the chip —
-  // the chip row sits BELOW the prompt bar in the launcher's DOM order —
-  // then Enter) and keeps the Base UI discipline: focus inside, Escape
-  // restores the trigger.
-  for (let index = 0; index < 14; index += 1) {
-    if (await page.evaluate(() => document.activeElement?.getAttribute('data-canvas-chip') === 'prompt-library')) break
-    await page.keyboard.press('Tab')
-  }
-  expect(await page.evaluate(() => document.activeElement?.getAttribute('data-canvas-chip'))).toBe('prompt-library')
-  const chipFocus = await focusReport()
-  expect(chipFocus.focusVisible).toBe(true)
-  await page.keyboard.press('Enter')
+  // (R-20) The prompt-library chip is RETIRED — the library's launcher-side
+  // entry is the PROPERTIES PANEL's library button (the panel's prompt
+  // tools). Spawn the seed (Enter submits the launcher prompt), then the
+  // panel's library button keeps the Base UI discipline: click opens, focus
+  // moves inside, Escape restores the trigger.
+  await page.locator('[data-canvas-submit]').click()
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+  const panelLibraryButton = page.locator('[data-canvas-prompt-library]')
+  await expect(panelLibraryButton).toBeVisible({ timeout: 10_000 })
+  await panelLibraryButton.click()
   const dialog = page.locator('.prompt-library-modal')
   await expect(dialog).toBeVisible({ timeout: 10_000 })
   expect(await page.evaluate(() => Boolean(document.activeElement?.closest('.prompt-library-modal')))).toBe(true)
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
-  await expect(page.locator('[data-canvas-chip="prompt-library"]')).toBeFocused()
+  await expect(panelLibraryButton).toBeFocused()
 
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
@@ -579,24 +580,49 @@ test('surface switcher: Alt+2 jumps to datasets, Alt+1 back — never fights the
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
-test('first-run guidance: empty model roots show dismissible onboarding, never a dead app', async ({ page }) => {
+test('first-run guidance (R-16): the wizard owns the journey; the notice is the dismissible fallback', async ({ page }) => {
   const problems = await trackErrors(page)
   await resetSession(page)
   // The e2e home has empty model roots (nothing scanned) — the first-run
-  // condition by construction. The notice waits for the scan to settle.
+  // condition by construction. The WIZARD presents first (the notice waits
+  // behind it — the fallback surface, its latch keep-listed).
   await page.goto('/')
   await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  const wizard = page.locator('[data-canvas-wizard]')
+  await expect(wizard).toBeVisible({ timeout: 20_000 })
+  await expect(wizard).toHaveAttribute('data-wizard-step', '0')
+  await expect(wizard.locator('[data-wizard-comfy-url]')).toBeVisible()
+  // Resumable: step through engine → models → packs (each step persists).
+  await wizard.locator('[data-wizard-next]').click()
+  await expect(wizard).toHaveAttribute('data-wizard-step', '1')
+  await expect(page.locator('[data-wizard-no-models]')).toBeVisible()
+  await wizard.locator('[data-wizard-next]').click()
+  await expect(wizard).toHaveAttribute('data-wizard-step', '2')
+  // Back works; the final step takes a prompt (skipped here — the skip path
+  // is the fallback proof below).
+  await wizard.locator('[data-wizard-back]').click()
+  await expect(wizard).toHaveAttribute('data-wizard-step', '1')
+  // SKIP: the wizard stands down for good (never a nag)…
+  await wizard.locator('[data-wizard-skip]').click()
+  await expect(page.locator('[data-canvas-wizard]')).toHaveCount(0)
+  // …and the NOTICE catches the path (the fallback surface).
   const notice = page.locator('[data-canvas-first-run]')
-  await expect(notice).toBeVisible({ timeout: 20_000 })
+  await expect(notice).toBeVisible({ timeout: 10_000 })
   await expect(notice).toContainText('No models visible')
-  // Path one: straight into Settings (the engine connection — the
-  // registry-only model source).
-  await notice.getByRole('button', { name: 'Open settings — engine connection' }).click()
-  await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible()
-  await page.locator('[data-canvas-settings-close]').click()
-  await expect(page.locator('[data-canvas-settings-dock]')).toHaveCount(0)
-  // Path two: the fetcher browser is one click away too.
-  await notice.getByRole('button', { name: 'Browse fetchable items' }).click()
+  // "Resume setup" reopens the wizard (the fallback surface's CTA).
+  await notice.getByRole('button', { name: 'Resume setup' }).click()
+  await expect(page.locator('[data-canvas-wizard]')).toBeVisible()
+  await expect(page.locator('[data-canvas-wizard]')).toHaveAttribute('data-wizard-step', '0')
+  await page.locator('[data-wizard-skip]').click()
+  await expect(page.locator('[data-canvas-first-run]')).toBeVisible()
+  // "Get models" opens the LIBRARY surface (R-15 — its own dock, not the
+  // settings scroll).
+  await notice.getByRole('button', { name: 'Get models' }).click()
+  await expect(page.locator('[data-canvas-library-dock]')).toBeVisible({ timeout: 15_000 })
+  await page.locator('[data-canvas-library-close]').click()
+  await expect(page.locator('[data-canvas-library-dock]')).toHaveCount(0)
+  // "Engine settings" opens the docked Settings.
+  await notice.getByRole('button', { name: 'Engine settings' }).click()
   await expect(page.locator('[data-canvas-settings-dock]')).toBeVisible()
   await page.locator('[data-canvas-settings-close]').click()
   // Dismiss is durable (per-browser latch — non-nagging by design).

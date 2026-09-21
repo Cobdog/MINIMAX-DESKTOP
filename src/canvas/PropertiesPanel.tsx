@@ -606,6 +606,15 @@ export function PropertiesPanel() {
       <span className="canvas-properties-mode" data-canvas-mode={mode}>{MODE_LABEL[mode]}</span>
       <button type="button" aria-label="Close properties" onClick={() => setInspectorOpen(false)}><X size={13} /></button>
     </header>
+    {/* (R-23) The mode RULE at choice time — the mode is derived from what
+        the chain binds; the audit's finding was that the rule was stated
+        nowhere. One line, mode-specific. */}
+    <p className="canvas-properties-mode-hint" data-canvas-mode-hint>
+      {mode === 'text' ? 'Text-only shot — bind a picture to switch to reference mode; set both end frames for first + last frame mode.'
+        : mode === 'image' ? 'First-frame anchored — the bound image starts the shot.'
+        : mode === 'frames' ? 'First + last frame anchored — the shot travels between your two frames.'
+        : 'Reference-anchored — every bound picture rides the ordered reference set (≤9).'}
+    </p>
     <div className="canvas-inspector-body canvas-properties-body">
       <section className="canvas-properties-section" data-canvas-section="prompt">
         <label>Prompt <span className="canvas-properties-hint">// presets</span></label>
@@ -658,6 +667,16 @@ export function PropertiesPanel() {
             replace the whole-prompt tools); the timeline tool is retired into
             the Flow box everywhere (2026-09-18, spec AC 4). */}
         <div className="canvas-properties-prompttools" data-canvas-prompt-tools>
+          {/* (R-19) A disabled tool is never a dead end: when no local text
+              model is reachable, the Connect action opens Settings docked AT
+              the LLM section — one click from the point of need. */}
+          {!llmAvailable && (
+            <button type="button" className="canvas-chip" data-canvas-llm-connect
+              title="Connect a local text model — the llama.cpp router or Ollama, docked at the LLM section (nothing leaves this workstation)"
+              onClick={() => useCanvasStore.getState().setSettingsDock(true, 'llm')}>
+              Connect a text model…
+            </button>
+          )}
           {draft.promptMode === 'freeform' && (
             <>
               <button type="button" data-canvas-prompt-tool="enhance" disabled={!llmAvailable || Boolean(promptingTool)} title={!llmAvailable ? 'Connect a local text model (llama.cpp router or Ollama) in Settings — nothing leaves this workstation' : 'Rewrite the prompt for stronger MiniMax video direction'} onClick={() => void runPromptTool('enhance')}>
@@ -735,6 +754,16 @@ export function PropertiesPanel() {
                 <option key={entry.id} value={entry.id}>{entry.label}{detection.available ? '' : ' (not installed)'}</option>
               ))}
             </select>
+            {/* (R-19) "not installed" is never a dead end at the choice
+                point: the fetch affordance opens the Library focused on the
+                turbo LoRA entries (the EndpointMenu precedent). */}
+            {turboFamilies.some(({ detection }) => !detection.available) && (
+              <button type="button" className="canvas-chip" data-canvas-turbo-fetch
+                title="Open the library at the model catalog — the missing turbo LoRAs are fetchable there with consent"
+                onClick={() => useCanvasStore.getState().setLibraryDock(true)}>
+                fetch missing ({turboFamilies.filter(({ detection }) => !detection.available).length})
+              </button>
+            )}
           </div>
         )}
         {/* Model overrides (euxwdva): collapsed by default — 'auto' (with
@@ -798,7 +827,7 @@ export function PropertiesPanel() {
           2026-09-19), disjoint from every other lane's panel work. Video
           chains only (engine data, A-3): painting ranges over the clip's
           duration. */}
-      {engineFamily.panel.loraTimeline && (
+      {engineFamily.panel.loraTimeline && models.filter((file) => file.kind === 'loras').length > 0 && (
         <LoraTimelineSection
           chainId={chain.id}
           duration={draft.duration}
@@ -916,7 +945,11 @@ export function PropertiesPanel() {
         </div>
       </section>
 
-      <section className="canvas-properties-section" data-canvas-section="identity">
+      {/* (R-18) Contextual disclosure: identity rides REFERENCES — with no
+          reference set and no payload authored, the section is expert
+          jargon for a first prompt. Authored content never hides (the
+          section stays while subjectText is non-empty). */}
+      {(bindings.length > 0 || subjectText.trim() !== '') && <section className="canvas-properties-section" data-canvas-section="identity">
         <label>Identity payload <span className="canvas-properties-hint">re-injected every window</span></label>
         <p className="canvas-properties-anchor" data-canvas-identity-anchor>
           anchor · {referenceSlots ? `${referenceSlots} bound picture${referenceSlots === 1 ? '' : 's'}` : 'no reference set'}
@@ -948,10 +981,12 @@ export function PropertiesPanel() {
           Stiff preserves the reference identity exactly; loose lets the take
           drift with the prompt. Re-anchor by forking an earlier take (B).
         </p>
-      </section>
+      </section>}
 
-      <section className="canvas-properties-section" data-canvas-section="guides">
-        <label>Keyframe guides <span className="canvas-properties-hint">AddGuide frames</span></label>
+      {/* (R-18) Guides + takes behind disclosure: expert surfaces with
+          counts in the summary — present when authored, folded when not. */}
+      <details className="canvas-properties-section canvas-properties-disclosure" data-canvas-section="guides" data-guides-count={draft.timelineGuides.length}>
+        <summary>Keyframe guides <span className="canvas-properties-hint">{draft.timelineGuides.length ? `${draft.timelineGuides.length} guide${draft.timelineGuides.length === 1 ? '' : 's'} · AddGuide frames` : 'AddGuide frames'}</span></summary>
         {draft.timelineGuides.map((guide, index) => (
           <div className="canvas-properties-row" key={`${guide.file.path}-${index}`} data-canvas-guide={index}>
             <span className="canvas-properties-ref-tag">@</span>
@@ -983,10 +1018,10 @@ export function PropertiesPanel() {
             + guide image
           </button>
         </div>
-      </section>
+      </details>
 
-      <section className="canvas-properties-section" data-canvas-section="takes">
-        <label>Takes <span className="canvas-properties-hint">{tile.priors} prior{tile.priors === 1 ? '' : 's'}</span></label>
+      <details className="canvas-properties-section canvas-properties-disclosure" data-canvas-section="takes" data-takes-count={tile.takes.length} open={tile.takes.length > 0}>
+        <summary>Takes <span className="canvas-properties-hint">{tile.priors} prior{tile.priors === 1 ? '' : 's'}{tile.canonical ? ' · 1 canonical' : ' · none yet'}</span></summary>
         <ul className="canvas-properties-takes" data-canvas-takes>
           {tile.takes.slice(0, 5).map((take) => (
             <li key={take.id} data-canvas-take={take.id} className={take.supersededBy ? 'prior' : 'canonical'}>
@@ -998,7 +1033,7 @@ export function PropertiesPanel() {
           ))}
           {!tile.takes.length && <li className="canvas-properties-empty">No takes yet.</li>}
         </ul>
-      </section>
+      </details>
 
     </div>
       {libraryOpen && <PromptLibraryBrowser onClose={() => setLibraryOpen(false)} onInsert={(prompt) => {
