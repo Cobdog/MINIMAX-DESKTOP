@@ -152,17 +152,44 @@ google-chrome over chromium because Debian/Ubuntu chromium lacks H.264
 (filmstrip playback e2e carries a canPlayType skip guard as the honest
 fallback).
 
-## CI (two legs)
+## CI (two legs, path-scoped — eg6l3v5 / A-CI)
 
-- **Ubuntu** (`.github/workflows/ci.yml`): python+numpy + ffmpeg installs →
-  typecheck, lint, license:audit, build, `pnpm test` (the ONE vitest unit
-  run — every suite, including the ones the pre-migration ci.yml omitted),
-  smoke, e2e, vision-capture on every push/PR.
-- **Windows Engine** (`.github/workflows/engine-windows.yml`): server build
-  + the OS-sensitive suites as vitest filters (`pnpm test:engine`,
-  `test:runtime`, `test:fetcher`, `test:instance`, `test:lora-form`,
-  `test:benchmarks` with BENCH_PYTHON=python — link placement and tar
-  extraction; transport mocked).
+**Local = depth, CI = breadth + speed** (the maintainer's ruling): `pnpm gate`
+stays the full-depth chain; CI runs the FULL suite only on merge-to-main.
+
+- **The manifest is the contract**: `scripts/ci-map.cjs` maps path globs →
+  affected vitest suites (+ build tier, python/ffmpeg needs, e2e
+  escalation). It is reviewed DATA — grep a path there to see what CI runs
+  when it changes. Seam files honestly fan wide (`server/core.ts` → every
+  booting suite; `src/lib/workflow.ts` → every client suite;
+  `src/canvas/store.ts` → canvas + forced e2e — no unit suite executes the
+  kernel). Unmapped `src/lib`/unknown paths fall back to the FULL run,
+  loudly. `tests/ci-map.test.js` walks the manifest on every PR: suite
+  catalog ↔ `tests/*.test.js` lockstep, seam fan-outs as declared, and a
+  completeness walk — a new unmapped `src/lib` or `server` module FAILS it.
+  Adding a suite = add the file + catalog it in `SUITES` (+ rules), or CI
+  reds.
+- **PRs (fast leg)**: changed files → manifest → full `typecheck` (the
+  structural safety net that licenses suite-scoping) + lint scoped to the
+  changed files + license:audit only when its inputs changed + the tiered
+  build (stale-dist rule holds wherever dist-booting suites run) + ONLY the
+  mapped suites (`vitest run <suites>`). e2e runs on PRs only when forced
+  (browser suites, playwright config, the canvas kernel). Docs-only diffs
+  run nothing but the cheap floor. The PR's "select" job prints the plan
+  into the run summary — the "what did CI run for this diff" evidence.
+- **Merge to main / dispatch (full leg)**: the complete chain, unchanged
+  (typecheck → lint → license:audit → build → `pnpm test` → smoke → e2e →
+  vision), plus a parallel **contracts** job, MAIN merges only: golden-
+  fixture regeneration drift (`MINIMAX_UPDATE_GOLDEN=1` + `UPDATE=1`
+  re-snapshot, then `git diff --exit-code` — the fixture IS the contract)
+  and registry-append verification (`scripts/check-registry-append.cjs` —
+  golden registry entry sets are append-only across a merge).
+- **Windows Engine** (`.github/workflows/engine-windows.yml`): same
+  manifest, intersected with the leg's OS-sensitive set (`engine-process`,
+  `runtime`, `fetcher`, `instance`, `lora-form`, `benchmarks` with
+  BENCH_PYTHON=python — link placement and tar extraction; transport
+  mocked). A PR touching none of that surface skips the leg; main merges
+  and dispatch run it in full.
 - Verify BOTH legs before calling landed work done (run links go into the
   Flux closure comment). The e2e error guard filters engine-connectivity
   noise (`environmental` in e2e/app.spec.ts) — CI has no engine. To simulate
