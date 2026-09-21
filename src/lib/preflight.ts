@@ -40,6 +40,9 @@ export const STOCK_GRAPH_CLASSES: readonly string[] = [
   // h3image workbench stock classes (the hybrid loader is the h3-hybrid-loader PACK)
   'ReferenceLatent', 'ConditioningZeroOut', 'CLIPTextEncode', 'KSampler',
   'GetImageSize', 'EmptyFlux2LatentImage', 'Flux2Scheduler', 'ModelSamplingAuraFlow',
+  // krea2 edit t2i canvas (stock since ComfyUI's SD3 nodes; found missing from
+  // this list by the engine-contract fixture's coverage walk, 8dga2dy)
+  'EmptySD3LatentImage',
   // music3 / acestep audio engines (native ComfyUI music nodes)
   'EmptyMiniMaxMusic3LatentAudio', 'MiniMaxMusic3TextEncode',
 ]

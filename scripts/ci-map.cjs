@@ -60,6 +60,7 @@ const SUITES = {
   datasets: { build: 'server', windows: false, python: false, ffmpeg: true },
   documents: { build: 'server', windows: false, python: false, ffmpeg: false },
   'engine-process': { build: 'server', windows: true, python: false, ffmpeg: false },
+  'engine-contract': { build: null, windows: false, python: false, ffmpeg: false },
   'engine-families': { build: null, windows: false, python: false, ffmpeg: false },
   enginewatch: { build: null, windows: false, python: false, ffmpeg: false },
   fetcher: { build: 'server', windows: true, python: false, ffmpeg: false },
@@ -145,6 +146,11 @@ const RULES = [
     match: ['scripts/lib/h3img-matrix.cjs', 'scripts/fixtures/h3img-golden.json'],
     suites: ['h3img'],
     reason: 'h3img golden machinery + fixture.',
+  },
+  {
+    match: ['src/lib/engineContract.ts', 'src/lib/engineSemantics.ts', 'scripts/fixtures/engine-object-info.json', 'scripts/capture-engine-schemas.cjs'],
+    suites: ['engine-contract'],
+    reason: 'the engine-contract layer (8dga2dy): real captured object_info schemas + the execution.py validator mirror + the semantic-rules ledger — every builder graph validated against the engine\'s actual gate.',
   },
   {
     match: ['scripts/fixtures/camera-goldens.json', 'scripts/fixtures/camera-goldens.py'],
@@ -274,8 +280,8 @@ const RULES = [
   { match: ['src/lib/h3imageContract.ts', 'src/lib/h3imageOps.ts', 'src/lib/h3imageScorer.ts', 'src/lib/h3imageStaging.ts'], suites: ['h3img'], reason: 'H3 image contract/ops/scorer/staging.' },
   {
     match: ['src/lib/engineWatch.ts', 'src/lib/fabricWatch.ts', 'src/lib/dbg.ts', 'src/lib/preflight.ts'],
-    suites: ['enginewatch'],
-    reason: 'Wave-1 pure decision modules (jpc96dp: re-check cadence, WS re-probe/resync, the A-DBG tagged logger, submit preflight) — the enginewatch suite drives them through the VM harness.',
+    suites: ['enginewatch', 'engine-contract'],
+    reason: 'Wave-1 pure decision modules (jpc96dp: re-check cadence, WS re-probe/resync, the A-DBG tagged logger, submit preflight) — the enginewatch suite drives them through the VM harness; preflight\'s STOCK_GRAPH_CLASSES is coverage-lockstep-checked by the engine-contract fixture.',
   },
   {
     match: ['src/lib/nodePackRegistry.ts'],

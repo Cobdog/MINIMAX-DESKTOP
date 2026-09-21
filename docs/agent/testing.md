@@ -120,6 +120,72 @@ failure. A failed `build` skips only its dependents (unit/smoke/e2e/vision).
   strings. Relative-import modules need the two-file loader pattern (see
   the promptLibraryStorage test block in tests/workflows.test.js).
 
+## The truth ladder — wiring-truth vs execution-truth vs contract-truth (8dga2dy, 2026-09-21)
+
+Three different claims a test can make about a graph, in increasing order of
+strength — KNOW which one a suite proves before calling something verified:
+
+1. **WIRING-TRUTH** — the graph has the shape you intended: right nodes, right
+   links, canonical serialization. Goldens and fake-engine e2e prove THIS and
+   ONLY this. A synthetic object_info stub (`KSamplerSelect: {input: ...}`
+   hand-written in the test) cannot know the real engine's constraints, so it
+   blesses anything shape-correct.
+2. **EXECUTION-TRUTH** — the engine actually ran the graph and rendered. Only
+   a real submission proves it (the 8189 testbed, GPU, runbook discipline);
+   expensive, not CI-able, and the only truth that covers model-side
+   behavior (decode quality, VRAM, latency).
+3. **CONTRACT-TRUTH** — the graph passes the engine's own acceptance GATE:
+   every input the engine would check at `POST /prompt` validation (types,
+   enums, mins/maxs, link arity, socket compatibility) plus the engine's
+   documented reinterpretation rules. CI-able, no GPU, and it is the ONLY
+   layer that catches values the engine refuses or silently reinterprets.
+
+**The rule: capability claims never ride on synthetic evidence.** A new route,
+family, or builder is not "verified" against a fake engine serving stub
+schemas — synthetic object_info may only ever prove wiring. The T=1 lesson
+(named, 2026-09-21): the `h3img.generate.t1` family shipped emitting
+`length: 1` into `MiniMaxH3ImageToVideo`; every golden and fake-engine e2e
+passed; the engine refuses it at validation (`value_smaller_than_min`, min 5
+— `execution.py`'s schema-min enforcement) and the tier menu's 9/13 values
+silently snap to 22 frames (`temporal_shape` → `align_frame_count`, the 17k+5
+grid). Graph-shape verification could not see any of it.
+
+**The engine-contract layer** (`tests/engine-contract.test.js` +
+`scripts/fixtures/engine-object-info.json` + `src/lib/engineContract.ts` +
+`src/lib/engineSemantics.ts`):
+
+- **The fixture is a REAL capture** — `GET /object_info` from the canonical
+  shared install (revision `a87667f`, v0.34.0), schema-only `--cpu` boot, no
+  prompts, teardown verified per the runbook. Provenance + normalization
+  rules are recorded INSIDE the fixture; regenerate via the header of
+  `scripts/capture-engine-schemas.cjs` (a reviewed contract change like any
+  golden diff). File-listing combos are emptied (environment-enumerated —
+  membership is skipped); every real enum keeps its captured options. The
+  first-party form adapter's entry is source-derived from our own pack.
+- **The validator mirrors the engine's gate** (`execution.py` validate_inputs
+  at the pinned revision): the engine's own error vocabulary, including the
+  deliberate non-mirrors (custom VALIDATE_INPUTS bodies, dynamic v3 combos)
+  documented in the module header.
+- **The semantic-rules ledger** (`src/lib/engineSemantics.ts`) records the
+  reinterpretation rules we've verified (the 17k+5 grid, `video_latent_t`
+  slice counts, the max(5,·) promotion, audio-context widening) and the
+  KNOWN-DIVERGENCES registry — our emissions the engine refuses or
+  reinterprets, dated and owned, exact-match enforced: a NEW divergence fails
+  CI, a fix must retire its entry visibly. The first pass found five beyond
+  T=1: packet tiers 9/13 (snap to 22), the form adapter's missing required
+  `low_vram`, the klein `CFGGuider` input names + `resolution_steps` schema
+  drift, acestep's `timesignature`/`keyscale` enum formats, music3's dead
+  `bitrate` key. None had ever executed against a real engine.
+- **The fake engine graduated** (`e2e/fakeEngineInfo.ts`): stock classes are
+  served with the REAL captured schemas (extras still win; pack classes stay
+  extras-driven), so e2e inherits contract truth — a schema-refusing graph
+  fails CI, not the maintainer's evening.
+- Adding a builder: run its graphs through
+  `validateGraphAgainstSchemas(graph, REAL_INFO)` in the contract suite, and
+  ledger-or-fix whatever falls out. Adding an emitted node class: add it to
+  the capture script's class list (and preflight's STOCK list if stock), re-capture,
+  re-run — the fixture-integrity walk fails loudly until you do.
+
 ## Vision-in-the-loop QA (three phases; no test code calls any model)
 
 1. **Capture** — `pnpm test:vision` (build first, or ride the gate) drives
