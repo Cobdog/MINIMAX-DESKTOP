@@ -3,60 +3,36 @@
 # portability of the fixtures only execute on Windows. Deliberately minimal —
 # server build only, no browser install (the ubuntu CI leg owns e2e).
 #
-# Path-scoped the same way as the ubuntu leg (task eg6l3v5, A-CI): on PRs
-# the SAME manifest (scripts/ci-map.cjs) resolves the diff and this leg
-# runs the intersection with its OS-sensitive suite set — engine-process,
-# runtime, fetcher, instance, lora-form, benchmarks — skipping entirely
-# when the diff touches none of their surface. Merge-to-main and dispatch
-# keep the full set (engine-dependence unchanged: transport mocked, no
-# ComfyUI needed).
+# DEMOTED TO SCHEDULED-ONLY (maintainer directive, 2026-09-21, folded into
+# PR #35 / eg6l3v5): "Windows tests take the back seat too, I am in a linux
+# environment, I think windows testing can get pushed to very low priority."
+# The leg no longer runs on PRs OR merge-to-main — weekly cadence +
+# workflow_dispatch for on-demand runs, so OS-difference coverage survives
+# at near-zero standing cost. Nothing is deleted: the manifest's windows
+# flags (scripts/ci-map.cjs SUITES[].windows + windowsSuites/windowsPython)
+# stay as data for this leg and any future re-wiring into the PR path.
+# Posture: every PR = the scoped Linux select→fast leg; merge-to-main =
+# full + contracts, all Linux.
+#
+# The scheduled run is the FULL set — engine-process, runtime, fetcher,
+# instance, lora-form, benchmarks — engine-dependence unchanged (transport
+# mocked, no ComfyUI needed).
 name: Engine CI (Windows)
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  schedule:
+    # Weekly, Monday 03:00 UTC (low-traffic window).
+    - cron: '0 3 * * 1'
   workflow_dispatch:
 
 jobs:
-  select:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    outputs:
-      windows_suites: ${{ steps.plan.outputs.windows_suites }}
-      windows_python: ${{ steps.plan.outputs.windows_python }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Resolve the diff against the base branch
-        run: git diff --name-only "origin/${{ github.base_ref }}...HEAD" > changed-files.txt
-      - name: Run the CI manifest (windows intersection)
-        id: plan
-        run: node scripts/ci-map.cjs --gha < changed-files.txt
-
   engine:
-    needs: select
-    if: |
-      always() &&
-      (github.event_name != 'pull_request' || needs.select.outputs.windows_suites != '')
     runs-on: windows-latest
     env:
       # The benchmark suite's python bridge (task cp96zdm): python.exe, not python3.
       BENCH_PYTHON: python
     steps:
       - uses: actions/checkout@v4
-      # PRs run the manifest intersection (possibly a subset); main merges
-      # and dispatch run the leg's full set. Kept explicit — an empty PR
-      # intersection must SKIP, not fall through to the default.
-      - id: setsuites
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "suites=${{ needs.select.outputs.windows_suites }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "suites=engine-process runtime fetcher instance lora-form benchmarks" >> "$GITHUB_OUTPUT"
-          fi
       - uses: pnpm/action-setup@v4
         with:
           version: 11
@@ -67,18 +43,13 @@ jobs:
       # Form-adapter node (task k271ykk): the math/golden suite runs on
       # python3+numpy on both legs (the first-party install path is also
       # symlink-sensitive — exactly why this suite runs on Windows too).
-      # Conditional on PRs: only when a selected suite needs python.
       - uses: actions/setup-python@v5
-        if: github.event_name != 'pull_request' || needs.select.outputs.windows_python == 'true'
         with:
           python-version: '3.x'
       - run: python -m pip install --disable-pip-version-check numpy
-        if: github.event_name != 'pull_request' || needs.select.outputs.windows_python == 'true'
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:server
-      # The OS-sensitive suites as ONE vitest invocation over the selected
-      # set (vitest filters; per-suite comments preserved from the
-      # pre-A-CI leg):
+      # The OS-sensitive suites as ONE vitest invocation (vitest filters):
       #   engine-process — EngineProcess supervision (taskkill /T /F);
       #   runtime        — managed ComfyUI runtime (stub checkouts);
       #   fetcher        — local-first fetcher: symlink placement + tar;
@@ -87,6 +58,5 @@ jobs:
       #   lora-form      — form adapter: math + golden (numpy) + first-party
       #                    pack install on Windows symlinks/junctions;
       #   benchmarks     — harness offline suite (BENCH_PYTHON=python above).
-      - name: OS-sensitive suites (path-scoped)
-        if: steps.setsuites.outputs.suites != ''
-        run: pnpm exec vitest run ${{ steps.setsuites.outputs.suites }}
+      - name: OS-sensitive suites (full weekly set)
+        run: pnpm exec vitest run engine-process runtime fetcher instance lora-form benchmarks

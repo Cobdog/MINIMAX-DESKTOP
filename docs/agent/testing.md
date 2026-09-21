@@ -152,7 +152,7 @@ google-chrome over chromium because Debian/Ubuntu chromium lacks H.264
 (filmstrip playback e2e carries a canPlayType skip guard as the honest
 fallback).
 
-## CI (two legs, path-scoped — eg6l3v5 / A-CI)
+## CI (the path-scoped ubuntu leg + the scheduled Windows sweep — eg6l3v5 / A-CI)
 
 **Local = depth, CI = breadth + speed** (the maintainer's ruling): `pnpm gate`
 stays the full-depth chain; CI runs the FULL suite only on merge-to-main.
@@ -184,12 +184,19 @@ stays the full-depth chain; CI runs the FULL suite only on merge-to-main.
   re-snapshot, then `git diff --exit-code` — the fixture IS the contract)
   and registry-append verification (`scripts/check-registry-append.cjs` —
   golden registry entry sets are append-only across a merge).
-- **Windows Engine** (`.github/workflows/engine-windows.yml`): same
-  manifest, intersected with the leg's OS-sensitive set (`engine-process`,
-  `runtime`, `fetcher`, `instance`, `lora-form`, `benchmarks` with
-  BENCH_PYTHON=python — link placement and tar extraction; transport
-  mocked). A PR touching none of that surface skips the leg; main merges
-  and dispatch run it in full.
+- **Windows Engine** (`.github/workflows/engine-windows.yml`) — **demoted
+  to scheduled-only** (maintainer ruling, 2026-09-21: "Windows tests take
+  the back seat too, I am in a linux environment, I think windows testing
+  can get pushed to very low priority"): weekly cron + workflow_dispatch,
+  NOT on PRs or merge-to-main. It runs the leg's full OS-sensitive set
+  (`engine-process`, `runtime`, `fetcher`, `instance`, `lora-form`,
+  `benchmarks` with BENCH_PYTHON=python — link placement and tar
+  extraction; transport mocked) so OS-difference coverage survives at
+  near-zero standing cost. The manifest's windows flags stay as data for
+  the scheduled leg and any future re-wiring into the PR path; nothing was
+  deleted. Consequence: PRs and main merges are all-Linux — a Windows-only
+  breakage surfaces at the weekly sweep (or a manual dispatch), not on the
+  PR that caused it.
 - Verify BOTH legs before calling landed work done (run links go into the
   Flux closure comment). The e2e error guard filters engine-connectivity
   noise (`environmental` in e2e/app.spec.ts) — CI has no engine. To simulate

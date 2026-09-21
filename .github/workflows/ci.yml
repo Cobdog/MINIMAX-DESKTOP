@@ -17,8 +17,9 @@
 #                     verification, MAIN merges only.
 #   workflow_dispatch → the full gate (explicit request).
 #
-# The Windows engine leg (.github/workflows/engine-windows.yml) is scoped
-# the same way through the same manifest.
+# The Windows engine leg (.github/workflows/engine-windows.yml) is DEMOTED
+# to scheduled-only (maintainer, 2026-09-21: Linux environment, Windows
+# very low priority) — it is not part of the PR or merge-to-main path.
 name: CI
 
 on:

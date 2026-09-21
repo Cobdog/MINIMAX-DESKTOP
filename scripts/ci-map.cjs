@@ -45,7 +45,9 @@ const REPO = path.resolve(__dirname, '..')
  * Suite catalog — every tests/*.test.js file. Fields:
  *   build   — what must be built BEFORE the suite runs (stale-dist rule):
  *             'server' = build:server, 'full' = web + server, null = none.
- *   windows — runs on the Engine CI (Windows) leg (OS-sensitive surface).
+ *   windows — runs on the Engine CI (Windows) leg. DORMANT since the
+ *             2026-09-21 demotion (scheduled-only leg): the flag stays as
+ *             data for the weekly sweep + any future PR-path re-wiring.
  *   python  — needs python3 + numpy (lora-form math half, benchmarks).
  *   ffmpeg  — needs ffmpeg on PATH (filmstrip, datasets synthetic ingest).
  * The ci-map self-test enforces this stays in lockstep with tests/.
@@ -99,7 +101,7 @@ const RULES = [
     match: ['.github/workflows/engine-windows.yml'],
     suites: ['ci-map'],
     forceWindows: true,
-    reason: 'the Windows leg verifies itself: changing it runs the leg\'s FULL set on PRs (a scoped skip would hide logic bugs until merge).',
+    reason: 'DEMOTED TO SCHEDULED-ONLY (maintainer 2026-09-21: "Windows tests take the back seat … very low priority") — the leg no longer runs on PRs/main, so this escalation is DORMANT DATA: the windows flags + forceWindows machinery stay so the leg can be re-wired into the PR path without redesign if the posture reverses.',
   },
   {
     match: ['.github/**', 'scripts/ci-map.cjs', 'scripts/check-registry-append.cjs', 'tests/ci-map.test.js'],
