@@ -364,7 +364,9 @@ function suiteFromFile(testPath) {
  *   lintAll        run the FULL lint (config-file changes)
  *   licenseAudit   any license-audit input changed
  *   python/ffmpeg  selected suites need python3+numpy / ffmpeg
- *   windowsSuites  resolved ∩ the Windows leg's set (all of it on fullRun)
+ *   windowsSuites  resolved ∩ the Windows leg's set (all of it on fullRun
+ *                  or when the Windows workflow itself changed)
+ *   windowsPython  the Windows leg needs python+numpy (from ITS suites)
  *   matched        [{ file, suites, reason }] per changed file (audit trail)
  *   unmatched      files that hit the global fallback (loud in CI logs)
  */
@@ -425,6 +427,9 @@ function resolve(changed) {
   const windowsSuites = forceWindows
     ? Object.keys(SUITES).filter((s) => SUITES[s].windows).sort()
     : selected.filter((s) => SUITES[s].windows).sort()
+  // The Windows leg's OWN tool flags — derived from its suite set, not from
+  // the ubuntu selection (forceWindows can escalate one without the other).
+  const windowsPython = windowsSuites.some((s) => SUITES[s].python)
 
   for (const file of changed) {
     const clean = String(file).replace(/\\/g, '/').trim()
@@ -452,6 +457,7 @@ function resolve(changed) {
     python: selected.some((s) => SUITES[s].python),
     ffmpeg: selected.some((s) => SUITES[s].ffmpeg),
     windowsSuites,
+    windowsPython,
     matched,
     unmatched,
   }
@@ -493,6 +499,7 @@ function writeGha(plan) {
     ['python', String(plan.python)],
     ['ffmpeg', String(plan.ffmpeg)],
     ['windows_suites', plan.windowsSuites.join(' ')],
+    ['windows_python', String(plan.windowsPython)],
     ['unmatched', plan.unmatched.join(' ')],
   ]
   const body = pairs.map(([k, v]) => `${k}=${v}`).join('\n') + '\n'

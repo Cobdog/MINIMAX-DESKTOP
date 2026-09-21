@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       windows_suites: ${{ steps.plan.outputs.windows_suites }}
-      python: ${{ steps.plan.outputs.python }}
+      windows_python: ${{ steps.plan.outputs.windows_python }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -69,11 +69,11 @@ jobs:
       # symlink-sensitive — exactly why this suite runs on Windows too).
       # Conditional on PRs: only when a selected suite needs python.
       - uses: actions/setup-python@v5
-        if: github.event_name != 'pull_request' || needs.select.outputs.python == 'true'
+        if: github.event_name != 'pull_request' || needs.select.outputs.windows_python == 'true'
         with:
           python-version: '3.x'
       - run: python -m pip install --disable-pip-version-check numpy
-        if: github.event_name != 'pull_request' || needs.select.outputs.python == 'true'
+        if: github.event_name != 'pull_request' || needs.select.outputs.windows_python == 'true'
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:server
       # The OS-sensitive suites as ONE vitest invocation over the selected

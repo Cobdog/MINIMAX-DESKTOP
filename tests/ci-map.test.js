@@ -125,6 +125,9 @@ test('(5d) the Windows leg intersects its OS-sensitive set', () => {
   eq(resolve(['src/lib/workflow.ts']).windowsSuites, [], 'client graph change skips the Windows leg (nothing OS-sensitive)')
   eq(resolve(['package.json']).windowsSuites, ['benchmarks', 'engine-process', 'fetcher', 'instance', 'lora-form', 'runtime'], 'infrastructure change runs the full Windows set')
   eq(resolve(['.github/workflows/engine-windows.yml']).windowsSuites, ['benchmarks', 'engine-process', 'fetcher', 'instance', 'lora-form', 'runtime'], 'changing the Windows workflow runs its full set (the leg verifies itself)')
+  ok(resolve(['.github/workflows/engine-windows.yml']).windowsPython === true, 'the escalated Windows set carries its own python flag (lora-form/benchmarks need numpy)')
+  ok(resolve(['server/fetcher.ts']).windowsPython === true, 'fetcher drags lora-form onto the Windows leg — numpy needed')
+  ok(resolve(['server/engineProcess.ts']).windowsPython === false, 'a python-free Windows selection does not drag numpy in')
 })
 
 test('(5e) shared test infra fans out honestly', () => {
