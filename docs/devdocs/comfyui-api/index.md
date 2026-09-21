@@ -154,3 +154,18 @@ Body `{"unload_models": bool, "free_memory": bool}` — sets queue FLAGS consume
 ## 11. Source-of-truth check (run on the triggers above)
 
 The three questions from the library protocol apply verbatim: (1) did the endpoint/event shapes change against this capture? (2) was anything superseded (e.g. `/experiment/models` graduating, the jobs API absorbing queue+history)? (3) did an impossibility lift (e.g. targeted interrupt semantics, partial execution, per-node object_info caching hints)? Record dated addenda here, never silent replacement.
+
+## ADDENDUM (2026-09-21) — MiniMax H3 still-image `length` floor is server-side, not widget-only
+
+Recorded while assessing astropuzzo/ComfyUI-MiniMax-H3-Image-Studio ([../research/h3-image-studio-pack-assessment.md](../research/h3-image-studio-pack-assessment.md)). Upstream contract limitation: [Comfy-Org/ComfyUI#15644](https://github.com/Comfy-Org/ComfyUI/issues/15644) ("Minimax H3 as a single-image edit model", opened 2026-08-15 — labeled Feature, zero maintainer replies, no linked PR, no fix scheduled as of 2026-09-21). Verified at the shared install `a87667f` (`__version__ 0.34.0`) **and** upstream `master` (raw fetch, 2026-09-21) — identical in both.
+
+The stock H3 nodes (`MiniMaxH3ImageToVideo`, `MiniMaxH3ReferenceToVideo`, `EmptyMiniMaxH3LatentAV`) refuse `length < 5` on the raw `/prompt` path, twice over:
+
+1. **Prompt validation enforces the schema min server-side.** `execution.py:1020-1027` (`validate_inputs`) checks `"min"`/`"max"` from the input spec for typed scalar inputs NOT consumed by the node's own `VALIDATE_INPUTS` — and `comfy_extras/nodes_minimax_h3.py` defines no `VALIDATE_INPUTS` (checked, both revisions). A hand-built graph JSON with `"length": 1` is therefore rejected with `value_smaller_than_min` ("Value 1 smaller than min of 5") **before execution** — building the graph API-side does NOT bypass the widget floor.
+2. **Even past validation, execution promotes the value.** `temporal_shape()` (`nodes_minimax_h3.py:46-48`) computes `align_frame_count(max(5, length))`, and `align_frame_count` snaps UP to the 17k+5 grid (5, 22, 39, …; `while n % 17 != 5: n += 1`). Both conditioning nodes' `execute` build their latent via `_empty_av_latent(width, height, length)` — so the **latent output a conditioning node hands the sampler is always ≥5 frames and grid-snapped**, whatever was submitted. Side effect: every requested length 6-21 samples the same 22-frame packet (7 temporal latent slices).
+
+Implications for us:
+
+- **T=1 stills on stock nodes are impossible** without either the community core patch from the issue (never — we don't patch core) or a custom node that constructs the packed H3 AV latent itself (astropuzzo's Image Studio Prepare/Decode nodes do exactly this; a first-party equivalent is ~150 lines). Our `h3image` T=1 Fast profile as built submits `length: 1` into the stock conditioning node — refused at validation; its verification to date is graph-shape (goldens/fake-engine e2e), not execution.
+- **Packet tiers 9 and 13 snap to 22 frames** on stock nodes (both are 7-slice latents; 5 and 39 are native grid points) — the tier menu's cost ladder is wrong above 5 on the stock path.
+- Verify-on trigger: revisit if #15644 lands or if the schema/`temporal_shape` lines move in a new checkout.
