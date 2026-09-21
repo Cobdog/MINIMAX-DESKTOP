@@ -236,13 +236,25 @@ const AUDIO_VAE_FAMILIES: ReadonlySet<string> = new Set(['music3', 'acestep'])
  *  restores the honest state instead of propagating the wedge. Unmarked
  *  names keep the family-meaning landing above. */
 export function migrateLegacyModelOverrideSlots(familyId: string, slots?: ModelOverrideSlots): ModelOverrideSlots {
-  if (!slots) return {}
+  return migrateLegacyModelOverrideSlotsWithOrigin(familyId, slots).slots
+}
+
+/** The migration plus its PROVENANCE (Wave 1 R-06): which effective slots
+ *  this migration filled from a pre-split key. A refusing pick with a
+ *  migration origin is one the USER never made consciously at that slot —
+ *  D3 rules it auto-clears with a warning instead of wedging every render
+ *  in the family; a conscious chain/global pick never auto-clears. */
+export type LegacyMigrationOrigin = Partial<Record<ModelOverrideSlotName, 'checkpoint' | 'vae'>>
+
+export function migrateLegacyModelOverrideSlotsWithOrigin(familyId: string, slots?: ModelOverrideSlots): { slots: ModelOverrideSlots; migratedFrom: LegacyMigrationOrigin } {
+  if (!slots) return { slots: {}, migratedFrom: {} }
   let next: ModelOverrideSlots | null = null
+  const migratedFrom: LegacyMigrationOrigin = {}
   if (typeof slots.checkpoint === 'string' && slots.checkpoint.trim() && H3_LANE_FAMILIES.has(familyId)) {
     next = { ...slots }
     delete next.checkpoint
-    if (!next.fl2va) next.fl2va = slots.checkpoint.trim()
-    if (!next.ref2va) next.ref2va = slots.checkpoint.trim()
+    if (!next.fl2va) { next.fl2va = slots.checkpoint.trim(); migratedFrom.fl2va = 'checkpoint' }
+    if (!next.ref2va) { next.ref2va = slots.checkpoint.trim(); migratedFrom.ref2va = 'checkpoint' }
   }
   if (typeof slots.vae === 'string' && slots.vae.trim()) {
     const legacyVae = slots.vae.trim()
@@ -252,18 +264,18 @@ export function migrateLegacyModelOverrideSlots(familyId: string, slots?: ModelO
     if (VIDEO_VAE_FAMILIES.has(familyId)) {
       next = next ?? { ...slots }
       if (t1Class && familyId === 'h3image') {
-        if (!next.imageVae) next.imageVae = legacyVae
+        if (!next.imageVae) { next.imageVae = legacyVae; migratedFrom.imageVae = 'vae' }
       } else if (audioClass && !t1Class) {
-        if (!next.audioVae) next.audioVae = legacyVae
+        if (!next.audioVae) { next.audioVae = legacyVae; migratedFrom.audioVae = 'vae' }
       } else if (!t1Class) {
-        if (!next.videoVae) next.videoVae = legacyVae
+        if (!next.videoVae) { next.videoVae = legacyVae; migratedFrom.videoVae = 'vae' }
       }
       // A T=1-named pick on a pure video family has no legal slot — dropped.
       delete next.vae
     } else if (AUDIO_VAE_FAMILIES.has(familyId)) {
       next = next ?? { ...slots }
       if (!videoClass) {
-        if (!next.audioVae) next.audioVae = legacyVae
+        if (!next.audioVae) { next.audioVae = legacyVae; migratedFrom.audioVae = 'vae' }
       }
       delete next.vae
     }
@@ -274,7 +286,7 @@ export function migrateLegacyModelOverrideSlots(familyId: string, slots?: ModelO
       delete next.vae
     }
   }
-  return next ?? slots
+  return { slots: next ?? slots, migratedFrom }
 }
 
 /** chain > global, per slot; unset slots stay unset (auto). */
@@ -297,14 +309,21 @@ export type OverrideSlotOutcome =
   | { slot: ModelOverrideSlotName; state: 'auto' }
   | { slot: ModelOverrideSlotName; state: 'applied'; file: string; warning?: string }
   | { slot: ModelOverrideSlotName; state: 'degraded'; file: string; warning: string }
-  | { slot: ModelOverrideSlotName; state: 'refused'; file: string; reason: string }
+  | { slot: ModelOverrideSlotName; state: 'refused'; file: string; reason: string; layer?: 'chain' | 'global' }
+  /** (Wave 1 R-06, ruling D3) A MIGRATED legacy pick that refuses: the pick
+   *  predates the slots split, so the user never chose it at this slot —
+   *  it auto-clears (falls back to auto) with a visible warning instead of
+   *  wedging every render in the family. Conscious picks never land here. */
+  | { slot: ModelOverrideSlotName; state: 'cleared'; file: string; warning: string }
 
 export type OverrideResolution = {
   family: ModelFamilyId
   slots: Record<ModelOverrideSlotName, OverrideSlotOutcome>
-  /** Wrong-kind picks — submissions refuse with these. */
-  refusals: Array<{ slot: ModelOverrideSlotName; file: string; reason: string }>
-  /** Missing-file picks — submissions proceed on auto and surface these. */
+  /** Wrong-kind CONSCIOUS picks — submissions refuse with these (naming the
+   *  layer the pick lives on, R-06). */
+  refusals: Array<{ slot: ModelOverrideSlotName; file: string; reason: string; layer: 'chain' | 'global' }>
+  /** Missing-file picks and auto-cleared legacy picks — submissions proceed
+   *  (on auto) and surface these. */
   warnings: string[]
   /** The applied files per slot (provenance). */
   applied: ModelOverrideSlots
@@ -363,8 +382,14 @@ function slotRefusal(family: ModelFamilyInfo, slot: ModelOverrideSlotName, file:
 }
 
 /** Validates one pick against the family contract (the same verdict
- *  resolution and submission produce — one source for UI and ladder). */
-export function resolveModelOverrides(familyId: string, files: ModelFile[], overrides?: ModelOverrideSlots): OverrideResolution {
+ *  resolution and submission produce — one source for UI and ladder).
+ *
+ *  `layers` (Wave 1 R-06) supplies the RAW pre-merge layers when the caller
+ *  knows them (the canvas seam does): refusals then name WHERE the pick
+ *  lives (this chain vs the global Settings pick), and a refusing pick that
+ *  only exists because legacy MIGRATION filled it auto-clears with a
+ *  warning (ruling D3 — warn, don't wedge). */
+export function resolveModelOverrides(familyId: string, files: ModelFile[], overrides?: ModelOverrideSlots, layers?: { chain?: ModelOverrideSlots; global?: ModelOverrideSlots }): OverrideResolution {
   const family = modelFamilyInfo(familyId) as ModelFamilyInfo | null
   const resolution: OverrideResolution = {
     family: (family?.id ?? 'minimax') as ModelFamilyId,
@@ -384,11 +409,21 @@ export function resolveModelOverrides(familyId: string, files: ModelFile[], over
     applied: {},
   }
   if (!family) return resolution
-  const effective = migrateLegacyModelOverrideSlots(familyId, overrides)
+  const migrated = migrateLegacyModelOverrideSlotsWithOrigin(familyId, overrides)
+  const effective = migrated.slots
+  const migratedFrom = migrated.migratedFrom
   for (const slot of OVERRIDE_SLOTS) {
     const pick = effective[slot]
     if (typeof pick !== 'string' || !pick.trim()) continue
     const name = pick.trim()
+    // Layer attribution (R-06): which stored layer consciously set THIS slot
+    // (trimmed compare). A slot only migration filled has neither → it is a
+    // migrated-legacy pick for refusal/auto-clear purposes.
+    const layer: 'chain' | 'global' | null = typeof layers?.chain?.[slot] === 'string' && layers.chain[slot]!.trim()
+      ? 'chain'
+      : typeof layers?.global?.[slot] === 'string' && layers.global[slot]!.trim()
+        ? 'global'
+        : null
     // Exact filename against the scan, case-insensitive; the SCANNED file's
     // real name wins so a case-drifted pick never outlives its file.
     let scanned: ModelFile | null = null
@@ -418,8 +453,18 @@ export function resolveModelOverrides(familyId: string, files: ModelFile[], over
         resolution.warnings.push(warning)
         continue
       }
-      resolution.slots[slot] = { slot, state: 'refused', file: scanned.name, reason: refusal.reason }
-      resolution.refusals.push({ slot, file: scanned.name, reason: refusal.reason })
+      // D3 (Wave 1 R-06): a refusing pick the migration wrote — the user
+      // never chose it at this slot (migration is fill-if-unset, so a
+      // conscious pick is never migration-filled) — auto-clears to auto WITH
+      // a warning. Renders proceed; nothing wedges. Conscious picks refuse.
+      if (migratedFrom[slot]) {
+        const warning = `Cleared a legacy model pick stored before the slots split — '${scanned.name}' cannot load as the ${SLOT_LABELS[slot].toLowerCase()} (it was migrated from the old single ${migratedFrom[slot]} pick). Rendering with auto instead; set an explicit pick if you want one.`
+        resolution.slots[slot] = { slot, state: 'cleared', file: scanned.name, warning }
+        resolution.warnings.push(warning)
+        continue
+      }
+      resolution.slots[slot] = { slot, state: 'refused', file: scanned.name, reason: refusal.reason, ...(layer ? { layer } : {}) }
+      resolution.refusals.push({ slot, file: scanned.name, reason: refusal.reason, layer: layer ?? 'global' })
       continue
     }
     resolution.slots[slot] = { slot, state: 'applied', file: scanned.name }

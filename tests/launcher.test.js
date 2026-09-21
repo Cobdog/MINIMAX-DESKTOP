@@ -248,8 +248,9 @@ maybe('(g) prompts-configure save: engine-URL write + token regen; cancel saves 
   const port = await freePort()
   const vitePort = port === 7099 ? 7098 : 7099
   // Prompts, in order: port, token, qr, regen, data dir, engine, https,
-  // bind, log, [dev] dev, pretty, maps, vite port, save.
-  const answers = [String(port), 'y', 'y', 'y', '', 'http://127.0.0.1:8199', 'y', '', '', 'y', 'y', 'y', String(vitePort), 'y']
+  // bind, log, [dev] dev, pretty, maps, junction logging, vite port, save.
+  // (Wave 1 A-DBG added the junction-logging prompt inside the dev block.)
+  const answers = [String(port), 'y', 'y', 'y', '', 'http://127.0.0.1:8199', 'y', '', '', 'y', 'y', 'y', 'n', String(vitePort), 'y']
   const result = run(['--configure', '--dev', '--print'], {
     env: { MINIMAX_START_CONFIG: config, MINIMAX_STUDIO_HOME: home, MINIMAX_START_TUI: 'prompts' },
     input: `${answers.join('\n')}\n`,

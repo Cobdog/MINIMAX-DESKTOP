@@ -21,6 +21,7 @@ import { Settings, X } from 'lucide-react'
 import { h3StackReport } from '../lib/h3Stack'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 import { SettingsView } from '../views/SettingsView'
+import { useSessionStore } from '../state/sessionStore'
 import { CanvasSessionContext } from './sessionContext'
 import { dockDefaultGeometry } from './dockGeometry'
 import { useCanvasStore } from './store'
@@ -28,6 +29,10 @@ import { useCanvasStore } from './store'
 export function SettingsDock() {
   const open = useCanvasStore((state) => state.settingsDock)
   const setSettingsDock = useCanvasStore((state) => state.setSettingsDock)
+  // (R-01) The pack board re-resolves its live chips on every object_info
+  // re-pull (engine recovery included) — selected before the early return so
+  // the hook order is unconditional.
+  const infoEpoch = useSessionStore((state) => state.engineWatch.infoEpoch)
   const toast = useCanvasStore((state) => state.toast)
   const raiseDock = useCanvasStore((state) => state.raiseDock)
   // QOL wave (rrxlw2r): the fetch affordance's focus ids (an unavailable
@@ -97,6 +102,7 @@ export function SettingsDock() {
           settings={settings}
           setSettings={(value) => void setSettings(value)}
           info={session.info}
+          infoEpoch={infoEpoch}
           models={models}
           h3Report={h3StackReport(models, settings.modelOverrides?.minimax)}
           scanning={scanning}

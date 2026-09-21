@@ -19,9 +19,18 @@ const GROUPS: Array<{ id: FetchEntryStatus['group']; label: string; note: string
   { id: 'engine', label: 'Engine', note: 'the reference ComfyUI revision, fetched as a checkout you can nominate for the managed engine.' },
 ]
 
-/** Licenses that get the warning treatment at consent time. */
-function flaggedLicense(spdx: string): boolean {
-  return spdx === 'NO-LICENSE' || spdx.startsWith('GPL') || spdx.startsWith('AGPL') || spdx.startsWith('CC')
+/** Licenses that get the warning treatment at consent time: no license at
+ *  all, copyleft (GPL/AGPL), CC* (the conservative read — includes CC-BY),
+ *  and restricted-use ids — the Qwen Research License (non-commercial,
+ *  task 4z2h256) plus anything whose id says non-commercial or
+ *  research-only. Exported for the fetcher suite's consent-gate
+ *  assertions so the tested predicate IS the one rendering the chip — the
+ *  one-file fast-refresh granularity cost of this export is accepted for
+ *  that (edits here fall back to a full reload in dev). */
+// eslint-disable-next-line react-refresh/only-export-components
+export function flaggedLicense(spdx: string): boolean {
+  const id = spdx.trim().toLowerCase()
+  return id === 'no-license' || id.startsWith('gpl') || id.startsWith('agpl') || id.startsWith('cc') || /qwen-research|non-?commercial|research-?only/.test(id)
 }
 
 export function FetchBrowser({ settings, setSettings, onAfterFetch, onAdoptCheckout, focusEntryIds, onFocusConsumed }: { settings: AppSettings; setSettings(value: AppSettings): void; onAfterFetch(): void; onAdoptCheckout(path: string): void; focusEntryIds?: ReadonlyArray<string>; onFocusConsumed?(): void }) {

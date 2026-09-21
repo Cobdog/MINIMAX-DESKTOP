@@ -20,6 +20,8 @@
  */
 import type { LlmStreamRequest, PreviewMime, RealtimeEnvelope, RealtimeJsonChannel } from '../types'
 import { createId } from './createId'
+import { channelsToResyncOnReopen, WS_REPROBE_MS } from './fabricWatch'
+import { dbg } from './dbg'
 
 const WS_BACKOFF_FLOOR_MS = 1_000
 const WS_BACKOFF_CAP_MS = 15_000
@@ -135,7 +137,14 @@ function openSse() {
   const token = authToken()
   const addressed = token ? `${url}&token=${encodeURIComponent(token)}` : url
   source = new EventSource(addressed)
-  source.onopen = () => { backoffMs = WS_BACKOFF_FLOOR_MS; setStatus({ transport: 'sse', connected: true }) }
+  source.onopen = () => {
+    backoffMs = WS_BACKOFF_FLOOR_MS
+    // (R-08) Same reconnect-window resync on the SSE transport — a
+    // (re)connected EventSource starts a fresh server-side seq too.
+    for (const channel of channelsToResyncOnReopen(subscribedChannels)) emitResync(channel)
+    dbg('fabric', { transport: 'sse', event: 'reopen', resynced: subscribedChannels.size })
+    setStatus({ transport: 'sse', connected: true })
+  }
   source.onmessage = (event: MessageEvent<string>) => {
     let envelope: RealtimeEnvelope
     try { envelope = JSON.parse(event.data) as RealtimeEnvelope } catch { return }
@@ -184,6 +193,13 @@ function openWs() {
     wsFailures = 0
     backoffMs = WS_BACKOFF_FLOOR_MS
     lastSeq.clear()
+    // (R-08, audit B P1-4) The reconnect window is invisible to the seq-gap
+    // detector (the server restarts its per-client seq at 1): every
+    // subscribed channel gets a synthetic resync so consumers re-fetch
+    // authoritative state — envelopes emitted while disconnected were
+    // otherwise dropped with no signal at all.
+    for (const channel of channelsToResyncOnReopen(subscribedChannels)) emitResync(channel)
+    dbg('fabric', { transport: 'ws', event: 'reopen', resynced: subscribedChannels.size })
     setStatus({ transport: 'ws', connected: true })
     for (const channel of subscribedChannels) socket?.send(JSON.stringify({ type: 'sub', ch: channel }))
     if (previewInterest.size > 0) socket?.send(JSON.stringify({ type: 'sub', ch: 'preview' }))
@@ -214,8 +230,70 @@ function openWs() {
 
 function maybeDemoteOrRetry() {
   if (!started) return
-  if (!demotedToSse && wsFailures >= WS_FAILURES_BEFORE_SSE) demotedToSse = true
+  if (!demotedToSse && wsFailures >= WS_FAILURES_BEFORE_SSE) {
+    demotedToSse = true
+    scheduleWsReprobe()
+  }
   scheduleReconnect()
+}
+
+// ---- (R-07, audit B P1-3) SSE demotion recovery --------------------------------
+// Demotion used to be a life sentence: `demotedToSse` was never cleared, so
+// streamLlm (WS-only) failed for the rest of the session. While demoted, a
+// separate PROBE socket periodically re-tries the upgrade WITHOUT touching
+// the live SSE transport: it opens cleanly → we upgrade to WS; it fails →
+// the SSE stream never noticed.
+let wsReprobeTimer: ReturnType<typeof setTimeout> | undefined
+let wsReprobeSocket: WebSocket | null = null
+
+function disposeWsReprobe() {
+  if (wsReprobeTimer) { clearTimeout(wsReprobeTimer); wsReprobeTimer = undefined }
+  if (wsReprobeSocket) {
+    wsReprobeSocket.onopen = null; wsReprobeSocket.onerror = null; wsReprobeSocket.onclose = null
+    try { wsReprobeSocket.close() } catch { /* already closed */ }
+    wsReprobeSocket = null
+  }
+}
+
+function probeWsUpgrade() {
+  dbg('fabric', { event: 'ws-reprobe' })
+  disposeWsReprobe()
+  let probe: WebSocket
+  try {
+    probe = new WebSocket(fabricUrl('/ws'))
+  } catch {
+    scheduleWsReprobe()
+    return
+  }
+  wsReprobeSocket = probe
+  probe.onopen = () => {
+    dbg('fabric', { event: 'ws-upgrade', verdict: 'recovered' })
+    demotedToSse = false
+    wsFailures = 0
+    disposeWsReprobe()
+    openWs() // closes the SSE stream and takes over as the transport
+  }
+  const miss = () => {
+    if (wsReprobeSocket !== probe) return
+    wsReprobeSocket = null
+    scheduleWsReprobe()
+  }
+  probe.onerror = miss
+  probe.onclose = miss
+}
+
+function scheduleWsReprobe() {
+  if (!demotedToSse || wsReprobeTimer) return
+  wsReprobeTimer = setTimeout(() => {
+    wsReprobeTimer = undefined
+    if (demotedToSse) probeWsUpgrade()
+  }, WS_REPROBE_MS)
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && demotedToSse) probeWsUpgrade() // the tab came back — try the upgrade now
+  })
 }
 
 function scheduleReconnect() {

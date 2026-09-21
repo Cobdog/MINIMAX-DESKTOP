@@ -187,17 +187,20 @@ test('model overrides take 1 (euxwdva): consulted picks, auto-unchanged, precede
 
   // 4. WRONG-KIND REFUSALS — the pick exists in the scan but the family
   //    contract rejects it; the submission refuses, the selection stays auto.
-  //    (A legacy checkpoint pick refuses on its MIGRATED lane — the kind and
-  //    form checks govern every checkpoint-class slot.)
+  //    (Wave 1 R-06/D3 update: a LEGACY checkpoint pick refusing on its
+  //    MIGRATED lane now AUTO-CLEARS with a warning instead of refusing —
+  //    the user never chose it at that lane slot; a conscious post-split
+  //    pick in the same slot still refuses, asserted after these.)
   const wrongKind = resolveModelOverrides('minimax', overrideScan, { checkpoint: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors' })
-  assert.equal(wrongKind.slots.fl2va.state, 'refused')
-  assert.ok(wrongKind.refusals[0].reason.includes('text encoder'), 'reason names the kind mismatch: ' + wrongKind.refusals[0].reason)
+  assert.equal(wrongKind.slots.fl2va.state, 'cleared', 'D3: the migrated legacy wrong-kind pick auto-clears')
+  assert.equal(wrongKind.refusals.length, 0, 'D3: nothing refuses — the render proceeds')
+  assert.ok(wrongKind.warnings.some((warning) => warning.includes('legacy model pick')), 'D3: the clear warns visibly')
   assert.equal(wrongKind.applied.fl2va, undefined)
   const wrongKindResolved = resolveModels('minimax', inferredH3(), overrideScan, { checkpoint: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors' })
-  assert.equal(wrongKindResolved.selection.fl2va, inferredH3().fl2va, 'a refused pick never reaches the selection')
+  assert.equal(wrongKindResolved.selection.fl2va, inferredH3().fl2va, 'the cleared pick never reaches the selection')
   const noForm = resolveModelOverrides('minimax', overrideScan, { checkpoint: 'community_noform_transformer.safetensors' })
-  assert.equal(noForm.slots.fl2va.state, 'refused')
-  assert.ok(noForm.refusals[0].reason.includes('form'), 'reason names the missing H3 form: ' + noForm.refusals[0].reason)
+  assert.equal(noForm.slots.fl2va.state, 'cleared', 'D3: the migrated no-form pick auto-clears too')
+  assert.ok(noForm.warnings.some((warning) => warning.includes('cannot load')), 'the warning states why it cannot load')
   // The T=1 image VAE refuses for the video family via the decoder-split
   // videoVae key directly (an explicit POST-split pick). The legacy 'vae' key
   // no longer lands there at all (tmz8vh7 decoder-class routing — see take 3
@@ -1271,6 +1274,129 @@ test('failure taxonomy: ordered human-cause buckets over sanitized reasons', () 
     assert.ok(FAILURE_BUCKETS[id].label.length > 0, `bucket ${id} has a label`)
     assert.ok(FAILURE_BUCKETS[id].cause.length > 0, `bucket ${id} has a cause`)
   }
+})
+
+// ---------------------------------------------------------------------------
+// Wave 1 R-03 (audit C F1): the engine's OWN error shapes survive
+// sanitization and classify. Shapes verified against the installed ComfyUI's
+// builders (comfy/execution.py validate_prompt + server.py /prompt handler).
+// ---------------------------------------------------------------------------
+test('Wave 1 R-03: ComfyUI failure shapes — classifyFailure(sanitize(<real shapes>)) lands the right bucket; the audit C [redacted] body is the fixture', () => {
+  const { sanitizeErrorMessage } = load('src/lib/logSanitize.ts')
+  const { classifyFailure } = load('src/lib/failureTaxonomy.ts')
+  const { structuralPromptError } = load('src/lib/promptError.ts')
+
+  // Fixture A — a MISSING NODE CLASS (the maintainer's dead end #1): the
+  // engine's actual 400 body for an unknown class_type, node_errors EMPTY,
+  // everything in the top-level error (comfy/execution.py ~1152).
+  const missingNodeBody = JSON.stringify({
+    error: {
+      type: 'missing_node_type',
+      message: "Node 'MiniMaxH3SamplerStandalone' not found. The custom node may not be installed.",
+      details: "Node ID '#15'",
+      extra_info: { node_id: '15', class_type: 'MiniMaxH3SamplerStandalone', node_title: 'MiniMaxH3SamplerStandalone' },
+    },
+    node_errors: {},
+  })
+  // The SERVER path end to end: structuralPromptError is exactly what
+  // /api/lan/prompt answers with when the engine rejects the graph.
+  const missingNodeReduced = structuralPromptError(missingNodeBody)
+  assert.ok(missingNodeReduced.includes('missing_node_type'), `the structured type token surfaces (got: ${missingNodeReduced})`)
+  assert.ok(missingNodeReduced.includes('MiniMaxH3SamplerStandalone'), 'the class name surfaces')
+  assert.ok(missingNodeReduced.indexOf('not found') !== -1 || missingNodeReduced.includes('missing_node_type'), 'the failure phrase survives')
+  // THE audit's named test: the reduced shape classifies node-missing.
+  assert.equal(classifyFailure(missingNodeReduced).id, 'node-missing', 'missing_node_type classifies node-missing')
+
+  // Fixture B — per-node validation failure (class exists, input wrong):
+  // error.type prompt_outputs_failed_validation + node_errors carrying the
+  // class and errors[].type (comfy/execution.py ~1239).
+  const validationBody = JSON.stringify({
+    error: { type: 'prompt_outputs_failed_validation', message: 'Prompt outputs failed validation', details: '', extra_info: {} },
+    node_errors: {
+      13: {
+        errors: [{ type: 'value_not_in_list', message: 'Value not in list', details: "sampler_name: 'euler_x' not in (list of length 21)", extra_info: { input_name: 'sampler_name' } }],
+        dependent_outputs: ['19'],
+        class_type: 'KSamplerSelect',
+      },
+    },
+  })
+  const validationReduced = structuralPromptError(validationBody)
+  assert.ok(validationReduced.startsWith('Graph validation failed'), `the per-node shape reduces to node lines (got: ${validationReduced})`)
+  assert.ok(validationReduced.includes('value_not_in_list'), 'the per-node type token surfaces')
+  assert.ok(validationReduced.includes('KSamplerSelect'), 'the node class surfaces')
+  assert.equal(classifyFailure(validationReduced).id, 'validation', 'prompt_outputs_failed_validation + value_not_in_list classifies validation')
+
+  // Fixture C — the EMPIRICAL [redacted] body from audit C's walk, VERBATIM.
+  // Pre-fix this was all the user ever saw: the taxonomy could not classify
+  // it (node-missing patterns cannot survive a KEYWORDS list that lacks
+  // every ComfyUI failure token). It stays here as the canary of what must
+  // never ship again; the same failure now produces Fixture A's reduced
+  // shape above (the server surfaces error.type + class before any
+  // whole-text sanitization runs).
+  const auditCRedactedBody = '[redacted] error [redacted] prompt_outputs_failed_validation [redacted] failed [redacted] r:\\n- 1 [redacted] node [redacted] 1 [redacted] MiniMaxH3SamplerStandalone [redacted] extra_info [redacted] no'
+  assert.ok(auditCRedactedBody.includes('[redacted]'), 'the empirical body is on file (the pre-fix output)')
+  assert.ok(auditCRedactedBody.includes('MiniMaxH3SamplerStandalone'), 'the class name was in there — the taxonomy just could not reach it')
+
+  // Prose phrases from the older ComfyUI builds now survive too (the KEYWORDS
+  // carry type/not/found/registered/module/named — R-03's core addition).
+  assert.equal(classifyFailure(sanitizeErrorMessage('node type not found: MiniMaxH3SamplerStandalone')).id, 'node-missing', 'the prose "node type not found" shape classifies node-missing')
+  assert.equal(classifyFailure(sanitizeErrorMessage('the engine cannot find module nodes_h3, no module named nodes_h3')).id, 'node-missing', 'the module phrases classify node-missing')
+  // Note: the prose-only "Value not in list" redacts its 'in' (deliberately
+  // NOT keyword vocabulary) — that failure classifies through its STRUCTURED
+  // token above, which is the shape the current engine actually sends.
+  // The doctrine holds: prompt prose still dies.
+  const prose = sanitizeErrorMessage('the windswept qzxveldra auroras are not a technical message')
+  assert.ok(prose.indexOf('qzxveldra') === -1 && prose.indexOf('auroras') === -1, 'prompt semantics still collapse (got: ' + prose + ')')
+})
+
+// ---------------------------------------------------------------------------
+// Wave 1 R-06 (audit B P1-1 remainder + ruling D3): refusals name the LAYER
+// the pick lives on, and a refusing MIGRATED legacy pick auto-clears with a
+// warning instead of wedging every render in the family.
+// ---------------------------------------------------------------------------
+test('Wave 1 R-06: refusal layer attribution + D3 auto-clear of migrated legacy picks', () => {
+  const { resolveModelOverrides, mergeModelOverrides } = overridesModule
+  // A wrong-kind CONSCIOUS pick: the chain layer named in the refusal.
+  const conscious = resolveModelOverrides('minimax', vaeSplitScan,
+    mergeModelOverrides({ videoVae: 'minimax_h3_audio_vae_fp32.safetensors' }, {}),
+    { chain: { videoVae: 'minimax_h3_audio_vae_fp32.safetensors' }, global: {} })
+  assert.equal(conscious.refusals.length, 1)
+  assert.equal(conscious.refusals[0].layer, 'chain', 'the refusal names the chain layer')
+  assert.equal(conscious.slots.videoVae.state, 'refused')
+
+  // Same wrong-kind pick on the GLOBAL layer: named as global.
+  const globalWedge = resolveModelOverrides('minimax', vaeSplitScan,
+    mergeModelOverrides(undefined, { videoVae: 'minimax_h3_audio_vae_fp32.safetensors' }),
+    { chain: undefined, global: { videoVae: 'minimax_h3_audio_vae_fp32.safetensors' } })
+  assert.equal(globalWedge.refusals[0].layer, 'global', 'the refusal names the global Settings layer')
+
+  // D3 — the MIGRATED legacy pick that refuses: auto-clears, warns, renders.
+  // A legacy 'checkpoint' pick of a file with NO H3 form migrates onto both
+  // lanes and would refuse the form gate — pre-D3 that wedged every render
+  // in the family with the user never having made a lane pick at all.
+  const noFormFile = { kind: 'diffusion_models', name: 'community_noform_legacy.safetensors' }
+  const scanWithNoForm = vaeSplitScan.concat([noFormFile])
+  const legacyWedge = resolveModelOverrides('minimax', scanWithNoForm,
+    mergeModelOverrides(undefined, { checkpoint: 'community_noform_legacy.safetensors' }),
+    { chain: undefined, global: { checkpoint: 'community_noform_legacy.safetensors' } })
+  assert.equal(legacyWedge.refusals.length, 0, 'D3: the migrated refusing pick does NOT wedge the submission')
+  assert.equal(legacyWedge.slots.fl2va.state, 'cleared', 'the outcome is the D3 cleared state')
+  assert.ok(legacyWedge.warnings.some((warning) => warning.includes('legacy model pick')), 'the auto-clear surfaces a visible warning')
+  assert.equal(legacyWedge.applied.fl2va, undefined, 'the cleared slot falls back to auto')
+
+  // A conscious pick in the SAME slot never auto-clears (D3's other edge).
+  const consciousFormRefusal = resolveModelOverrides('minimax', scanWithNoForm,
+    mergeModelOverrides({ fl2va: 'community_noform_legacy.safetensors' }, {}),
+    { chain: { fl2va: 'community_noform_legacy.safetensors' }, global: {} })
+  assert.equal(consciousFormRefusal.refusals.length, 1, 'a conscious chain pick still refuses (never silently cleared)')
+  assert.equal(consciousFormRefusal.slots.fl2va.state, 'refused')
+
+  // Without the layers param (older callers), the D3 auto-clear still fires
+  // — migration provenance is computable from the merged set alone (the
+  // param only adds chain/global naming to refusals).
+  const noLayers = resolveModelOverrides('minimax', scanWithNoForm, { checkpoint: 'community_noform_legacy.safetensors' })
+  assert.equal(noLayers.refusals.length, 0, 'no layers param → provenance still known → auto-clear still fires')
+  assert.equal(noLayers.slots.fl2va.state, 'cleared')
 })
 
 test('diagnostic report: canary-proof blob by construction, version shape allow-list, model-scan counts only, failure histogram, deterministic output, sanitizer self-test verdict', () => {

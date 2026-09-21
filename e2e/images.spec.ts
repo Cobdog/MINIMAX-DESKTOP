@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { stockObjectInfo } from './fakeEngineInfo'
 
 // H3 Image Workbench (k9vu6t0, docs/specs/image-workbench-v1.md §2/§11): the
 // dedicated surface end to end at ?images=1 — engine-independent (the packet
@@ -289,7 +290,7 @@ test('a generation lands as ONE take whose artifacts are the packet frames (fake
     }
     if (url.pathname === '/object_info') {
       res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ MiniMaxH3HybridLoader: {}, KSamplerSelect: {}, BasicScheduler: {}, VAELoader: {} }))
+      res.end(JSON.stringify(stockObjectInfo({ MiniMaxH3HybridLoader: {} })))
       return
     }
     if (url.pathname === '/upload/image') {
