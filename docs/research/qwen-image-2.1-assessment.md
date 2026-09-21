@@ -271,3 +271,11 @@ Comfy-Org/ComfyUI master `comfy_extras/nodes_qwen.py`, `comfy/sd.py`,
 `image_qwen_image_2_1_t2i.json` + `image_qwen_image_2_1_image_edit.json`;
 api.github.com commits for city96/ComfyUI-GGUF and ostris/ai-toolkit;
 qwen.ai blog `?id=qwen-image-2.1` (client-rendered, content NOT captured).
+
+## ADDENDUM (2026-09-21, ratify-and-verify pass 1) — the revisit trigger fired: v0.37.0 is the first tagged release carrying the native nodes
+
+Recorded by the assumption register (`docs/audit/assumption-register-2026-09-21.md`, directive 6a857386); tag-level raw fetches same day.
+
+- **§3's "requires master/nightly or the next tagged release" is now resolved: ComfyUI v0.37.0 (tagged 2026-09-21) carries the `QwenImage21` classes** (6 references in that tag's `comfy_extras/nodes_qwen.py`; zero at v0.35.x and v0.36.0 — the day-one finding held). Operationally: an instance at **≥ v0.37.0** runs this family natively; master/nightly is no longer required.
+- License re-verified unchanged via HF API 2026-09-21: `Qwen/Qwen-Image-2.1` = `license: other` (the qwen-research full text read at capture), ungated; `Comfy-Org/Qwen-Image-2.1` still lists the bf16/int8-convrot DiT, the qwen3vl_8b int8-convrot + W4A8 TEs, and the bf16 VAE. Nothing else in this document changed.
+- Companion fact (same pass): **YuE2's native nodes first ship in v0.36.0, not the v0.35.0 docs.comfy.org states** — see the devdocs capture's 2026-09-21 addendum. One instance bump to v0.37.0+ unblocks BOTH families; version gates are sourced at tag level from here on, never from docs-site strings.

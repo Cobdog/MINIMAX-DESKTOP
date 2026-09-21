@@ -51,8 +51,33 @@
   redistributed). Before relying on a captured fact for non-trivial work,
   run the library's SOURCE-OF-TRUTH CHECK (three questions; dated addenda,
   never silent rewrites).
-- Full policy + rationale: `docs/LICENSES.md`, `docs/PROVENANCE.md`,
-  architecture.md §Third-party components.
+- Full policy + rationale: `docs/licenses/policy.md` (decision rules, AGPLv3
+  compliance map, the user-fetch workaround doctrine, maintenance charter),
+  `docs/licenses/registry.md` (the per-component diligence record — verdicts,
+  obligations, C&D blast radius), `docs/LICENSES.md` (the consolidated
+  notices file), `docs/PROVENANCE.md`, architecture.md §Third-party
+  components.
+
+### License workflow (the registry stays in lockstep with reality)
+
+- **What touches the registry** ([licenses/registry.md](../licenses/registry.md)):
+  any new dependency, node-pack row, fetch/model catalog entry, vendored /
+  ported / replicated third-party code, font or asset that ships, and any pin
+  bump or license-change event upstream.
+- **When: the same commit** — the row lands WITH the addition, never as a
+  follow-up. This is mechanically enforced: `pnpm license:audit`'s
+  registry-lockstep check (CI + gate) fails the build if a dep, fetch-catalog
+  id, pack-registry id, or shipped directory is missing from the registry —
+  an uncatalogued addition fails exactly like an uncatalogued test suite.
+- **Who signs the open calls: the maintainer** — genuinely ambiguous calls
+  (the Kreatine GPLv3 vendor-vs-fetch class, Image Studio vendor-vs-port,
+  anything the registry marks `[UNK]` or "maintainer call") are surfaced as
+  open-decision rows, never decided unilaterally; once decided, the registry
+  row records which option and why.
+- **Recurrence:** every addition (mechanical), plus license/pin
+  re-verification riding the quarterly curation sweeps; a license change
+  upstream invalidates stale consent and re-flags the row. Full trigger list:
+  policy.md §6.
 
 ## Research docs (docs/research/)
 
