@@ -32,7 +32,13 @@
  *  - the fasth3-live assessment's two artifacts (task gg7mu3s): the W4A8
  *    video VAE (VAE-side quantization candidate) and the MATLOWAI fused
  *    turbo (the VALIDATION candidate for the Ref2VA turbo bake-off's fused
- *    arm, queued on the experiment ladder — task muwufpp).
+ *    arm, queued on the experiment ladder — task muwufpp);
+ *  - the Qwen Image 2.1 Workbench-family weights (task 4z2h256): the
+ *    official Comfy-Org int8-convrot trio (DiT / text encoder / VAE) the
+ *    day-one assessment committed to (docs/research/
+ *    qwen-image-2.1-assessment.md), consent-gated under the non-commercial
+ *    Qwen Research License — weights rows only; the A-3 family registry and
+ *    lane graph factories are spec-round work.
  *
  * Pin discipline (LICENSES.md §9.1): entries pin `sha | tag | branch`.
  * Branch pins are moving — the fetch engine resolves them to the HEAD SHA
@@ -46,7 +52,13 @@
  * recovered through HF's own AV-scan VirusTotal reference because the
  * dataset's license gate masks the LFS oid for anonymous API reads — see
  * the entry's licenseNote and docs/LICENSES.md §5; the MATLOWAI sha256 is
- * a plain LFS oid from the ungated repo).
+ * a plain LFS oid from the ungated repo) and on 2026-09-20 (the Qwen
+ * Image 2.1 rows: tree-API sizes + LFS sha256 oids at repo HEAD
+ * ace0edeb3791a594ddfa36ed5f41a178a394e921 — NOTE: that repo lays its
+ * files under diffusion_models/, text_encoders/ and vae/ at the repo
+ * ROOT, with no split_files/ prefix; the placement basename rule lands
+ * them in the matching roots regardless, verified against the loader
+ * folder mappings in ComfyUI master's nodes.py).
  */
 import { join, resolve } from 'node:path'
 import type { AppSettings, FetchCatalogEntry, FetchDestination, FetchModelRoot, ModelKind } from '../src/types'
@@ -296,6 +308,65 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
     sizeBytes: 5_207_808_784,
     sizeClass: 'huge',
     homepage: 'https://huggingface.co/Mamad8/MiniMax-H3-Image-VAE',
+  },
+
+  // ---- Qwen Image 2.1 (task 4z2h256 — the Workbench edit-lane family) ----
+  // The maintainer's day-one ADOPT (docs/research/qwen-image-2.1-assessment.
+  // md): the first open checkpoint in the family that folds the Edit line
+  // into the base model — the edit option the Workbench directive already
+  // named. Three weights rows mirroring the official template's loader
+  // slots (UNETLoader → diffusion_models, CLIPLoader type qwen_image →
+  // text_encoders, VAELoader → vae; folder mappings verified against
+  // ComfyUI master nodes.py). ALL THREE carry the Qwen RESEARCH License —
+  // the family's Apache-2.0 lineage ended with 2.1, so every consent chip
+  // warns (flaggedLicense's restricted-use class).
+  {
+    id: 'qwen21-dit-convrot',
+    name: 'Qwen Image 2.1 DiT (int8 convrot)',
+    group: 'weights',
+    description: 'The 7.1B unified t2i+edit diffusion transformer — instruction editing, multi-reference composition with up to 10 reference images, RGBA transparent generation/editing and subject extraction, signature text rendering, native 2K — in ONE checkpoint. This row is the official Comfy-Org int8-convrot quant (7.26 GB vs 14.23 GB bf16, the quant class this studio runs), loaded by the stock UNETLoader; the text encoder and VAE are separate rows. Requires a ComfyUI newer than v0.36.0: the native nodes (TextEncodeQwenImage21 / QwenImage21Cache) landed on master after that tag in PR #16400 — on older instances the nodes are missing and renders refuse at preflight.',
+    licenseSpdx: 'qwen-research-license',
+    licenseNote: 'Qwen RESEARCH LICENSE (NOT Apache-2.0 — the family\'s licensing regime changed with 2.1): non-commercial — research/evaluation use only; commercial use requires a separate license from Alibaba (model-business@notice.qwencloud.com). Attribution + naming restrictions apply: outputs used to train or improve distributed models need "Built with Qwen" documentation, and "Qwen" must not be the primary name of a derivative product. Governed by Chinese law, Hangzhou courts. Full terms at the license link.',
+    licenseUrl: 'https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE',
+    source: { kind: 'hf', repo: 'Comfy-Org/Qwen-Image-2.1', revision: { kind: 'sha', value: 'ace0edeb3791a594ddfa36ed5f41a178a394e921' } },
+    destination: { kind: 'model-root', root: 'diffusion_models' },
+    files: [{ path: 'diffusion_models/qwen_image_2.1_int8_convrot.safetensors', sizeBytes: 7_256_783_064, sha256: 'cb74113cb03faecd79611b01fd7fd642f0aa60d6f0b95086abee214d75eaa57d' }],
+    detectGlob: 'qwen_image_2.1*',
+    sizeBytes: 7_256_783_064,
+    sizeClass: 'huge',
+    homepage: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1',
+  },
+  {
+    id: 'qwen21-te-convrot',
+    name: 'Qwen Image 2.1 text encoder (Qwen3-VL 8B, int8 convrot)',
+    group: 'weights',
+    description: 'The Qwen3-VL 8B text encoder 2.1 runs on — it encodes the prompt AND every condition image (the up-to-10 references), loaded by the stock CLIPLoader with type qwen_image (the encoder is auto-detected). Official int8-convrot cut, 9.35 GB; a bf16 (17.53 GB) or W4A8 (6.31 GB) file staged manually into text_encoders satisfies this row without a fetch (the presence glob matches all three cuts — fetch the convrot, stage what you already have). Requires the same post-v0.36.0 ComfyUI as the DiT row.',
+    licenseSpdx: 'qwen-research-license',
+    licenseNote: 'Qwen RESEARCH LICENSE (NOT Apache-2.0): non-commercial — research/evaluation use only; commercial use requires a separate license from Alibaba (model-business@notice.qwencloud.com). Attribution + naming restrictions apply ("Built with Qwen" documentation when outputs train other models; "Qwen" must not be a derivative product\'s primary name). Chinese law, Hangzhou courts. Full terms at the license link.',
+    licenseUrl: 'https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE',
+    source: { kind: 'hf', repo: 'Comfy-Org/Qwen-Image-2.1', revision: { kind: 'sha', value: 'ace0edeb3791a594ddfa36ed5f41a178a394e921' } },
+    destination: { kind: 'model-root', root: 'text_encoders' },
+    files: [{ path: 'text_encoders/qwen3vl_8b_int8_convrot.safetensors', sizeBytes: 9_350_798_360, sha256: '8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f' }],
+    detectGlob: 'qwen3vl_8b*',
+    sizeBytes: 9_350_798_360,
+    sizeClass: 'huge',
+    homepage: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1',
+  },
+  {
+    id: 'qwen21-vae',
+    name: 'Qwen Image 2.1 VAE (64ch RGBA, bf16)',
+    group: 'weights',
+    description: 'The 64-channel RGBA autoencoder (16× spatial downscale) — native transparency lives in the VAE itself (the Qwen-Image-Layered lineage, productized): transparent-layer generation/editing and subject extraction keep all four channels; the vision tower sees alpha composited over white. bf16 is the only variant Comfy-Org ships (0.68 GB); loaded by the stock VAELoader.',
+    licenseSpdx: 'qwen-research-license',
+    licenseNote: 'Qwen RESEARCH LICENSE (NOT Apache-2.0): non-commercial — research/evaluation use only; commercial use requires a separate license from Alibaba (model-business@notice.qwencloud.com). Attribution + naming restrictions apply ("Built with Qwen" documentation when outputs train other models; "Qwen" must not be a derivative product\'s primary name). Chinese law, Hangzhou courts. Full terms at the license link.',
+    licenseUrl: 'https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE',
+    source: { kind: 'hf', repo: 'Comfy-Org/Qwen-Image-2.1', revision: { kind: 'sha', value: 'ace0edeb3791a594ddfa36ed5f41a178a394e921' } },
+    destination: { kind: 'model-root', root: 'vae' },
+    files: [{ path: 'vae/qwen_image_2.1_vae_bf16.safetensors', sizeBytes: 675_509_688, sha256: 'bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9' }],
+    detectGlob: 'qwen_image_2.1_vae*',
+    sizeBytes: 675_509_688,
+    sizeClass: 'large',
+    homepage: 'https://huggingface.co/Comfy-Org/Qwen-Image-2.1',
   },
 
   // ---- Experiment prerequisites: preprocessor weights --------------------

@@ -37,6 +37,12 @@
 import { test } from 'vitest'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
+// The consent gate's flag predicate — imported from the REAL client
+// component (vitest transforms the tsx; the module has no browser-touching
+// module scope) so the warning contract below is asserted against the
+// function that renders the chip + fail-styled note, not a copy of it
+// (task 4z2h256).
+import { flaggedLicense } from '../src/components/FetchBrowser'
 
 const require = createRequire(import.meta.url)
 const __dirname = require('node:path').dirname(fileURLToPath(import.meta.url))
@@ -291,6 +297,36 @@ maybe('(a) catalog integrity: schema, licenses, destinations, single-sourcing, p
     ok(matlowai.experimentPrerequisite === true && /unverified/i.test(matlowai.description), 'the MATLOWAI entry is an experiment prerequisite with its author claims flagged unverified')
     ok(fetchExtraModelRoots().includes('model_patches') && fetchExtraModelRoots().includes('vdn') && fetchExtraModelRoots().includes('geometry_estimation'), 'extra model roots enumerate for config mirroring')
     ok(matchesGlob('minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors', '*fun_controlnet_union*'), 'the presence glob catches the staged quantized variant')
+    // Qwen Image 2.1 rows (task 4z2h256 — the Comfy-Org convrot trio under
+    // the Qwen Research License): three loader-slot rows mirroring the
+    // official template's loaders (UNETLoader → diffusion_models,
+    // CLIPLoader qwen_image → text_encoders, VAELoader → vae), sha-pinned
+    // at repo HEAD with the tree API's exact sizes + LFS oids — never
+    // guessed.
+    const qwenDiT = findFetchEntry('qwen21-dit-convrot')
+    ok(qwenDiT.destination.kind === 'model-root' && qwenDiT.destination.root === 'diffusion_models', 'the Qwen 2.1 DiT lands in diffusion_models (the UNETLoader slot)')
+    ok(qwenDiT.source.kind === 'hf' && qwenDiT.source.repo === 'Comfy-Org/Qwen-Image-2.1' && qwenDiT.source.revision.kind === 'sha' && qwenDiT.source.revision.value === 'ace0edeb3791a594ddfa36ed5f41a178a394e921', 'the Qwen 2.1 DiT is sha-pinned at the Comfy-Org repo HEAD (immutable)')
+    ok(qwenDiT.files.length === 1 && qwenDiT.files[0].path === 'diffusion_models/qwen_image_2.1_int8_convrot.safetensors' && qwenDiT.files[0].sizeBytes === 7_256_783_064 && qwenDiT.files[0].sha256 === 'cb74113cb03faecd79611b01fd7fd642f0aa60d6f0b95086abee214d75eaa57d', 'the Qwen 2.1 DiT pins the tree API exact path + size + LFS sha256')
+    ok(/unified t2i\+edit/.test(qwenDiT.description) && /10 reference/.test(qwenDiT.description) && /RGBA/.test(qwenDiT.description) && /text rendering/.test(qwenDiT.description), 'the DiT description states the family surface (unified t2i+edit, 10 refs, RGBA, text rendering)')
+    ok(/v0\.36\.0/.test(qwenDiT.description) && /#16400/.test(qwenDiT.description), 'the DiT description states the engine requirement (ComfyUI newer than v0.36.0, PR #16400)')
+    const qwenTE = findFetchEntry('qwen21-te-convrot')
+    ok(qwenTE.destination.kind === 'model-root' && qwenTE.destination.root === 'text_encoders' && qwenTE.files[0].path === 'text_encoders/qwen3vl_8b_int8_convrot.safetensors' && qwenTE.files[0].sizeBytes === 9_350_798_360 && qwenTE.files[0].sha256 === '8bfd0f6e12abf2d2d697ecc888e5e90b0d6741d6708f05799f53afa560452e8f', 'the Qwen 2.1 TE lands in text_encoders (the CLIPLoader qwen_image slot) pinned exactly')
+    const qwenVAE = findFetchEntry('qwen21-vae')
+    ok(qwenVAE.destination.kind === 'model-root' && qwenVAE.destination.root === 'vae' && qwenVAE.files[0].path === 'vae/qwen_image_2.1_vae_bf16.safetensors' && qwenVAE.files[0].sizeBytes === 675_509_688 && qwenVAE.files[0].sha256 === 'bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9', 'the Qwen 2.1 VAE lands in vae (the VAELoader slot) pinned exactly')
+    ok(matchesGlob('qwen_image_2.1_bf16.safetensors', qwenDiT.detectGlob) && matchesGlob('qwen3vl_8b_w4a8.safetensors', qwenTE.detectGlob) && matchesGlob('qwen_image_2.1_vae_bf16.safetensors', qwenVAE.detectGlob), 'the presence globs catch locally staged variants (bf16/W4A8 satisfy without a fetch)')
+    const qwenRows = FETCH_CATALOG.filter((entry) => entry.id.startsWith('qwen21-'))
+    ok(qwenRows.length === 3 && qwenRows.every((entry) => entry.removedAt === undefined), 'exactly three live Qwen rows (no removedAt history)')
+    ok(qwenRows.every((entry) => entry.licenseSpdx === 'qwen-research-license' && entry.licenseUrl === 'https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE'), 'every Qwen row carries the Qwen Research License verdict + the canonical license URL')
+    ok(qwenRows.every((entry) => /non-commercial/i.test(entry.licenseNote) && /Alibaba/.test(entry.licenseNote) && /Built with Qwen/.test(entry.licenseNote) && /primary name/.test(entry.licenseNote)), 'every Qwen licenseNote is actionable: non-commercial, Alibaba contact, attribution + naming restrictions')
+    // The consent gate itself: the REAL client predicate must flag the Qwen
+    // Research License (warn chip on the row AND in the dialog, fail-styled
+    // licenseNote) while leaving permissive/community ids clean.
+    ok(flaggedLicense('qwen-research-license') === true, 'flaggedLicense catches the Qwen Research License (the consent gate warns)')
+    ok(flaggedLicense('Apache-2.0') === false && flaggedLicense('MIT') === false && flaggedLicense('krea-2-community-license') === false && flaggedLicense('MiniMax H3 Community License') === false, 'flaggedLicense leaves permissive/community ids unflagged (the extension stays honest)')
+    // The Phase-0 removal discipline still holds with the new rows in: the
+    // LTX history rows stay removed, nothing resurrects (the served-catalog
+    // filter is re-proven over the routes in section (i)).
+    ok(findFetchEntry('ltx23-dev-checkpoint').removedAt === '2026-09-20' && findFetchEntry('ltx23-kijai-vaes').removedAt === '2026-09-20', 'the removed LTX rows remain filtered history (no resurrection)')
     // License discipline: no non-permissive pack is vendor mode (the audit's
     // invariant, re-checked here against the assembled catalog).
     for (const pack of ENGINE_NODE_PACKS) {
