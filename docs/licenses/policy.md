@@ -206,3 +206,17 @@ maintainer, never decided unilaterally — and recorded here once decided.
 LICENSES.md §1 after dependency changes — its output is the table body) and
 verifies the registry lockstep. The registry's prose verdicts are re-read,
 not machine-derivable — that re-read is what the quarterly trigger is for.
+
+## Addendum — obligations, not policing (maintainer stance, 2026-09-21)
+
+> "What the user does is not up to me, and that is my stance on everything here, I
+> don't care what people do, they are adults, they are responsible for their own
+> actions. I only care about what I am legally required to abide by, that is all."
+
+This stance governs the whole policy's interpretation. Monoka's obligations end at
+the maintainer's own legal requirements: honest license display at the consent
+gate, no redistribution of gated material by the app, our-side attribution and
+source-offer compliance. The app INFORMS (terms shown before fetch) — it never
+POLICES what users do with what they fetch or generate. Grey-zone notes in the
+registry (output monetization under NC licenses, jurisdictional questions) are
+informational for the user at the gate, not enforcement targets for us.
