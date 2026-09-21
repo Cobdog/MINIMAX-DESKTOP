@@ -34,7 +34,7 @@
 // suite's disjoint range (tests/lib/ports.cjs) instead of the old random
 // 4310-4389 pick (the (h) local origin keeps its listen(0) ephemerality —
 // it is an origin, not a suite server).
-import { test } from 'vitest'
+import { test, afterAll } from 'vitest'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 // The consent gate's flag predicate — imported from the REAL client
@@ -57,6 +57,10 @@ const zlib = require('node:zlib')
 const crypto = require('node:crypto')
 const assert = require('node:assert/strict')
 const { makePortAllocator } = require('./lib/ports.cjs')
+// Scratch-home ledger (Wave 4 test hygiene): every mkdtemp registers;
+// afterAll tears them all down — per-run homes never leak again.
+const { makeScratchDir, removeAllScratchDirs } = require('./lib/scratch.cjs')
+afterAll(() => { void removeAllScratchDirs() })
 
 const freePort = makePortAllocator('fetcher')
 
@@ -96,7 +100,7 @@ async function waitUntil(predicate, timeoutMs, label) {
 }
 
 function makeHome() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-fetch-home-'))
+  return makeScratchDir(path.join(os.tmpdir(), 'minimax-fetch-home-'))
 }
 
 function makeSettings(home, extra = {}) {
@@ -121,7 +125,7 @@ function makeSettings(home, extra = {}) {
 }
 
 function makeCheckout() {
-  const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-fetch-checkout-'))
+  const checkout = makeScratchDir(path.join(os.tmpdir(), 'minimax-fetch-checkout-'))
   fs.writeFileSync(path.join(checkout, 'main.py'), '# stub ComfyUI checkout\n')
   return checkout
 }

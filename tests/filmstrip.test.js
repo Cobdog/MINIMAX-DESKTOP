@@ -31,6 +31,10 @@ const path = require('node:path')
 const assert = require('node:assert/strict')
 const Database = require('better-sqlite3')
 const { makePortAllocator } = require('./lib/ports.cjs')
+// Scratch-home ledger (Wave 4 test hygiene): every mkdtemp registers;
+// afterAll tears them all down — per-run homes never leak again.
+const { makeScratchDir, removeAllScratchDirs } = require('./lib/scratch.cjs')
+afterAll(() => { void removeAllScratchDirs() })
 
 // ---- ffmpeg availability: skip gracefully with a logged reason ----------
 const ffmpegProbe = spawnSync('ffmpeg', ['-version'], { timeout: 10_000 })
@@ -42,7 +46,7 @@ const maybe = hasFfmpeg ? test : test.skip
 
 const freePort = makePortAllocator('filmstrip')
 
-const home = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-filmstrip-'))
+const home = makeScratchDir(path.join(os.tmpdir(), 'minimax-filmstrip-'))
 const outputDirectory = path.join(home, 'output')
 let child = null
 let output = ''

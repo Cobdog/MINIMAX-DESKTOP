@@ -4,6 +4,11 @@ import type { AddressInfo } from 'node:net'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { H3_REGISTRY_LISTINGS, serveModelRegistry, serveObjectInfo, stockObjectInfo } from './fakeEngineInfo'
+// Scratch-dir ledger (Wave 4 test hygiene): every per-run dir registers and
+// the file-level afterAll tears them down — per-run scratch never accumulates.
+import { makeScratchDir, removeAllScratchDirs } from '../tests/lib/scratch.cjs'
+
+test.afterAll(() => { void removeAllScratchDirs() })
 
 /**
  * THE WAVE-1 ACCEPTANCE BAR (task jpc96dp, plan §3): the maintainer's exact
@@ -369,7 +374,7 @@ test('R-17: the remediation dock closes the loop — refusal → one install act
   test.setTimeout(180_000)
   const problems = await trackErrors(page)
   const os = await import('node:os')
-  const externalDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-r17-target-'))
+  const externalDir = makeScratchDir(path.join(os.tmpdir(), 'mm-r17-target-'))
 
   const engineState = {
     registry: stockObjectInfo({ MiniMaxH3LoraFormLoader: {} }) as Record<string, unknown>,

@@ -55,6 +55,10 @@ const assert = require('node:assert/strict')
 const { createHash } = require('node:crypto')
 const Database = require('better-sqlite3')
 const { makePortAllocator } = require('./lib/ports.cjs')
+// Scratch-home ledger (Wave 4 test hygiene): every mkdtemp registers;
+// afterAll tears them all down — per-run homes never leak again.
+const { makeScratchDir, removeAllScratchDirs } = require('./lib/scratch.cjs')
+afterAll(() => { void removeAllScratchDirs() })
 
 const {
   gridTargetFor,
@@ -79,7 +83,7 @@ const freePort = makePortAllocator('datasets')
 const sha256File = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex')
 
 function makeHome(label) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `minimax-datasets-${label}-`))
+  return makeScratchDir(path.join(os.tmpdir(), `minimax-datasets-${label}-`))
 }
 
 function runFfmpeg(args) {
