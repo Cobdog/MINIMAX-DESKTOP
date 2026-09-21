@@ -680,14 +680,26 @@ test('(u) H3-1F as the image op — the two-slot seam, the T=1 request, the Edit
   const unavailable = submitCore.validateWorkbenchRequest(request, emptyStackFacts)
   ok(typeof unavailable === 'string' && unavailable.includes('Generate (T=1 Fast) is not available'), 'ladder: the missing H3 stack refuses with the family\'s install guidance')
   ok(typeof unavailable === 'string' && unavailable.includes('T=1 image VAE') && unavailable.includes('turbo LoRA'), 'ladder: the refusal names the T=1-specific components (the family\'s gating)')
-  const offline = submitCore.validateWorkbenchRequest(request, { settings: { comfyUrl: 'http://x' }, connected: false, models: fullStack, info: {} })
-  eq(offline, 'Start ComfyUI and verify the server connection in Settings.', 'ladder: offline (stack present) refuses with the honest connection message')
+  // THE ENGINE-TRUTH GATE (d4er4ati, Wave 3 rung 0): with the FULL stack on
+  // a stock-only engine, the next T=1 refusal is no longer the connection
+  // rung — it is the pack gate (stock engines refuse length:1 at server-side
+  // validation, issue #15644, and promote max(5,·) past it). Both pack states
+  // refuse honestly; the connection/intent rungs below are exercised through
+  // the packet family — the one that can be available.
+  const gated = submitCore.validateWorkbenchRequest(request, { settings: { comfyUrl: 'http://x' }, connected: true, models: fullStack, info: {} })
+  ok(typeof gated === 'string' && gated.includes('H3ImagePrepare') && gated.includes('MiniMax H3 Image Studio') && gated.includes('#15644'), 'ladder: the full T=1 stack on a stock-only engine still refuses at the pack gate (never a doomed submit)')
+  const pending = submitCore.validateWorkbenchRequest(request, { settings: { comfyUrl: 'http://x' }, connected: true, models: fullStack, info: { H3ImagePrepare: {} } })
+  ok(typeof pending === 'string' && pending.includes('pack-conditioned') && pending.includes('H3 Image Studio'), 'ladder: pack installed → the pending-studio-graph refusal (the stock length=1 path is illegal regardless)')
+  const packetRequest = { ...request, settings: { ...request.settings, family: 'h3img.generate.packet', tier: 5 } }
+  eq(submitCore.validateWorkbenchRequest(packetRequest, { settings: { comfyUrl: 'http://x' }, connected: false, models: fullStack, info: {} }),
+    'Start ComfyUI and verify the server connection in Settings.',
+    'ladder: offline (stack present) refuses with the honest connection message')
   eq(
-    submitCore.validateWorkbenchRequest(still.canvasH3OneFrameRequest('chain-1', { prompt: '   ', seed: 1, resolution: '1344x768' }), { settings: { comfyUrl: 'http://x' }, connected: true, models: fullStack, info: {} }),
+    submitCore.validateWorkbenchRequest({ ...packetRequest, settings: { ...packetRequest.settings, intent: '   ' } }, { settings: { comfyUrl: 'http://x' }, connected: true, models: fullStack, info: {} }),
     'Describe what you want before generating.',
     'ladder: an empty intent refuses before anything else on a ready engine',
   )
-  eq(submitCore.validateWorkbenchRequest(request, { settings: { comfyUrl: 'http://x' }, connected: true, models: fullStack, info: {} }), null, 'ladder: a ready engine passes clean')
+  eq(submitCore.validateWorkbenchRequest(packetRequest, { settings: { comfyUrl: 'http://x' }, connected: true, models: fullStack, info: {} }), null, 'ladder: a ready engine passes clean (the packet family — the available one)')
 
   // The builder's own pin (why the core derives the tier): a T=1 request
   // carrying a packet-tier value is a contract violation, caught by the
@@ -1478,7 +1490,7 @@ test('(aa) LoRA timeline — the compiler, the grid, the measured windows', () =
 // guard on EVERY T=1 submission — the run below would return the refusal and
 // no engine prompt would exist.
 // ---------------------------------------------------------------------------
-test('(u-run) H3-1F submission — the tier pin, the T=1 graph, the canvas link (34afx79)', async () => {
+test('(u-run) H3-1F submission — the engine-truth gate at the submit core; the shared-core machinery via the packet family (34afx79 + d4er4ati)', async () => {
   const still = loadTs('src/canvas/stillIntent.ts', { window: { localStorage: localStorageStub } })
   const request = still.canvasH3OneFrameRequest('chain-t1', { prompt: 'a ceramic bowl of lemons on an oak table, morning light', seed: 77, resolution: '1344x768' })
   let jobState = []
@@ -1490,8 +1502,30 @@ test('(u-run) H3-1F submission — the tier pin, the T=1 graph, the canvas link 
     cancellationRequests: { current: new Set() },
     onJobCreated: (jobId) => { linkedJobId = jobId },
   }
-  const result = await stillSubmitCore.submitWorkbenchGeneration(request, { settings: { comfyUrl: 'http://engine.test' }, connected: true, models: H3_T1_FULL_STACK, info: {} }, io)
-  eq(result.ok, true, 'submit: the text→still T=1 run submits clean through the shared core (the tier pin holds)')
+  // THE ENGINE-TRUTH GATE (d4er4ati) at the SUBMIT CORE, both pack states:
+  // the refusal precedes any upload or engine prompt — never a
+  // submit-then-server-400. (The old leg here drove a T=1 submit through a
+  // stubbed engine and asserted success — graph-shape truth standing in for
+  // execution truth, the false claim the gate retires.)
+  const facts = (info) => ({ settings: { comfyUrl: 'http://engine.test' }, connected: true, models: H3_T1_FULL_STACK, info })
+  const gated = await stillSubmitCore.submitWorkbenchGeneration(request, facts({}), io)
+  ok(!gated.ok && gated.message.includes('MiniMax H3 Image Studio') && gated.message.includes('#15644'), 'gate: a stock-only engine refuses at the core with the pack + stock-floor reason')
+  eq(t1SubmittedGraphs.length, 0, 'gate: nothing submitted to the engine (the refusal precedes the graph)')
+  ok(jobState.length === 0, 'gate: no job parked for the refused render')
+  const pending = await stillSubmitCore.submitWorkbenchGeneration(request, facts({ H3ImagePrepare: {} }), io)
+  ok(!pending.ok && pending.message.includes('pack-conditioned'), 'gate: pack installed → the pending-studio-graph refusal (the stock length=1 path is illegal regardless)')
+  eq(t1SubmittedGraphs.length, 0, 'gate: still nothing submitted in the pack-present state')
+  ok(jobState.length === 0, 'gate: still no job parked in the pack-present state')
+  // The shared-core submit machinery the old T=1 leg exercised (job parking,
+  // the canvas link at creation, the manifest provenance, the success
+  // notice) is proven through the PACKET family — the available one. The
+  // T=1 tier pin's own enforcement (a packet-tier value on the T=1 profile
+  // is a builder contract violation) stays covered by the (u) block's
+  // builder-pin assertion; while the family is gated the pin cannot misfire
+  // at submit.
+  const packetRequest = { ...request, settings: { ...request.settings, family: 'h3img.generate.packet', tier: 5 } }
+  const result = await stillSubmitCore.submitWorkbenchGeneration(packetRequest, facts({}), io)
+  eq(result.ok, true, 'submit: the packet run submits clean through the shared core')
   ok(jobState.length === 1 && jobState[0].status === 'running', 'submit: the job parks running after the engine accepts')
   ok(linkedJobId === jobState[0].id, 'submit: onJobCreated fires the moment the job record exists (the canvas-link discipline added with 34afx79)')
   ok(jobState[0].mediaType === 'image', 'submit: the job is an image job (the queue poll completes it with the image kind)')
@@ -1499,18 +1533,16 @@ test('(u-run) H3-1F submission — the tier pin, the T=1 graph, the canvas link 
   const graph = t1SubmittedGraphs[0].graph
   const nodes = Object.values(graph)
   const classes = nodes.map((node) => node.class_type)
-  ok(classes.filter((cls) => cls === 'SaveImage').length === 1, 'submit: ONE per-frame publish — the T=1 single frame (without the tier pin the builder refused here)')
+  ok(classes.filter((cls) => cls === 'SaveImage').length === 5, 'submit: five per-frame publishes — the packet tier rides the request through the profile-pin seam')
   ok(!classes.includes('LoadImage'), 'submit: no image loaders on the text intent')
-  ok(classes.includes('MiniMaxH3SigmaShift'), 'submit: the pinned T=1 sigma shifts ride the model chain')
-  ok(nodes.filter((node) => node.class_type === 'VAELoader').some((node) => /^minimax_h3_t1_image_vae/.test(String(node.inputs.vae_name))), 'submit: the decode rides the Mamad8 T=1 VAE (never the video VAE on this profile)')
-  eq(nodes.find((node) => node.class_type === 'KSamplerSelect').inputs.sampler_name, 'er_sde', 'submit: the pinned sampler er_sde')
-  eq(nodes.find((node) => node.class_type === 'BasicScheduler').inputs.scheduler, 'sgm_uniform', 'submit: the pinned scheduler sgm_uniform')
-  eq(nodes.find((node) => node.class_type === 'BasicScheduler').inputs.steps, 8, 'submit: the pinned 8-step recipe')
+  ok(nodes.filter((node) => node.class_type === 'VAELoader').some((node) => /minimax_h3_video_vae/.test(String(node.inputs.vae_name))), 'submit: the packet decodes through the video VAE (the T=1 decoder is factory-banned from packets)')
+  eq(nodes.find((node) => node.class_type === 'KSamplerSelect').inputs.sampler_name, 'res_multistep', 'submit: the packet sampler res_multistep')
+  eq(nodes.find((node) => node.class_type === 'BasicScheduler').inputs.steps, 20, 'submit: the packet 20-step recipe')
   eq(h3imageGraph.h3imgGraphAudit(graph), [], 'submit: the built graph audits clean (no video-only nodes, publish set matches)')
   const manifest = jobState[0].manifest
-  ok(manifest && manifest.h3img && manifest.h3img.family === 'h3img.generate.t1', 'submit: the h3img provenance rides the manifest (the packet-aware landing keys on it)')
-  ok(manifest.h3img.frames === 1, 'submit: the provenance records the single frame')
+  ok(manifest && manifest.h3img && manifest.h3img.family === 'h3img.generate.packet', 'submit: the h3img provenance rides the manifest (the packet-aware landing keys on it)')
+  ok(manifest.h3img.frames === 5, 'submit: the provenance records the packet frames')
   ok(manifest.canvas && manifest.canvas.chainId === 'chain-t1', 'submit: the canvas chain link rides the manifest (reload relink)')
-  ok(notices.some((entry) => entry.startsWith('success|') && entry.includes('Generate (T=1 Fast)')), 'submit: the success notice names the family honestly')
+  ok(notices.some((entry) => entry.startsWith('success|') && entry.includes('Generate (frame packet)')), 'submit: the success notice names the family honestly')
   console.log(`\ntest-canvas: ${passed} assertions passed`)
 })

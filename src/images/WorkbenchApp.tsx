@@ -32,7 +32,7 @@ import { createStageExecutor } from '../lib/h3imageStaging'
 import { H3IMG_OP_TONE_LOCK, canonicalFrameIndex, frameUrl, isWorkbenchChain, readSessionSettings, sessionContract, takeFrames, takeProvenance } from './session'
 import type { SessionRefSlot, WorkbenchSessionSettings } from './session'
 import { BEYOND_NINE_GUIDANCE, keepDialHint } from '../lib/h3imageContract'
-import { H3IMG_RECIPE_PINS, TRANSPORT_FOR_ROLE, findH3ImgFamily } from '../lib/graph/h3image'
+import { H3IMG_RECIPE_PINS, STOCK_SAMPLED_FRAMES, TRANSPORT_FOR_ROLE, findH3ImgFamily, packetTierLabel } from '../lib/graph/h3image'
 import type { H3ImgRefRole } from '../lib/graph/h3image'
 import { mediaForOutput, buildOutputIndex } from '../canvas/generation'
 import { chainSettingsDefaults } from '../canvas/generation'
@@ -768,8 +768,8 @@ function WorkbenchSurface() {
             {family?.profile === 'packet' && family.kind !== 'generate-directed' && (
               <label className="iw-tier" data-iw-tier>
                 <span>Packet tier</span>
-                <select value={settings.tier} onChange={(event) => void patchSettings({ tier: Number(event.target.value) as 5 | 9 | 13 | 39 })}>
-                  {[5, 9, 13].map((tier) => <option key={tier} value={tier}>{tier} frames</option>)}
+                <select value={settings.tier} title={STOCK_SAMPLED_FRAMES[settings.tier] !== undefined && STOCK_SAMPLED_FRAMES[settings.tier] !== settings.tier ? `Stock nodes snap this tier to a ${STOCK_SAMPLED_FRAMES[settings.tier]}-frame sample (17n+5 grid) — only 5 and 39 are native grid points. Exact 9/13 needs the H3 Image Studio pack's latent ladder.` : undefined} onChange={(event) => void patchSettings({ tier: Number(event.target.value) as 5 | 9 | 13 | 39 })}>
+                  {[5, 9, 13].map((tier) => <option key={tier} value={tier}>{packetTierLabel(tier)}</option>)}
                 </select>
               </label>
             )}
@@ -799,7 +799,7 @@ function WorkbenchSurface() {
             onClick={() => void generate()}
           >
             {busy ? <LoaderCircle className="spin" size={13} /> : <Sparkles size={13} />}
-            Generate {family?.profile === 't1' ? '(T=1 fast — structurally soft)' : `(${family?.kind === 'generate-directed' ? 39 : settings.tier}-frame packet)`}
+            Generate {family?.profile === 't1' ? '(T=1 fast — structurally soft)' : `(${family?.kind === 'generate-directed' ? '39-frame packet' : packetTierLabel(settings.tier)})`}
           </button>
           <p className="iw-staging-note" data-iw-staging>Staging: Generate → free → Refine/Burst → free → Exit (24 GB discipline — stages never run concurrently).</p>
 

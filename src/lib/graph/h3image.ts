@@ -100,6 +100,22 @@ export const HYBRID_LOADER_NODE = 'MiniMaxH3HybridLoader' as const
  * (cross-form safety, spec §6). */
 export const FORM_ADAPTER_NODE = 'MiniMaxH3LoraFormLoader' as const
 
+/** The H3 Image Studio pack's Prepare classes (astropuzzo
+ * ComfyUI-MiniMax-H3-Image-Studio, Unlicense, registry row 'h3-image-studio'
+ * — docs/research/h3-image-studio-pack-assessment.md). THE ENGINE-TRUTH GATE
+ * (task d4er4ati, Wave 3 rung 0): the stock conditioning nodes this family's
+ * graph emits (MiniMaxH3ImageToVideo / MiniMaxH3ReferenceToVideo) enforce a
+ * length floor of 5 SERVER-SIDE — prompt validation rejects length:1 before
+ * execution (execution.py value_smaller_than_min) and even past validation
+ * temporal_shape() promotes max(5, length) onto the 17n+5 grid (ComfyUI issue
+ * #15644, open). The pack's own conditioning implementation is the legal T=1
+ * path; until the studio-side pack-conditioned graph lands, this family
+ * refuses HONESTLY in both directions (pack absent → fetch/install guidance;
+ * pack present → the pending-studio-support reason) — never a
+ * submit-then-server-400. Detection is any-match over the Prepare set,
+ * mirroring the pack board's own rule. */
+export const H3_IMAGE_STUDIO_PREPARE_NODES = ['H3ImagePrepare', 'H3TextToImagePrepare', 'H3ImageToImagePrepare', 'H3ReferenceEditPrepare'] as const
+
 // ---------------------------------------------------------------------------
 // Research-pinned recipe constants (the single source — tests enforce these)
 // ---------------------------------------------------------------------------
@@ -155,6 +171,26 @@ export const H3IMG_RECIPE_PINS = {
    * color-space affinity to the subject references share the rest. */
   scorer: { sharpness: 0.5, contrast: 0.12, exposure: 0.13, stability: 0.12, refAffinity: 0.13 },
 } as const
+
+/** The TRUE sampled frame count per packet tier on STOCK nodes (task
+ *  d4er4ati, the packet-economy half): the stock conditioning's
+ *  align_frame_count snaps the requested length onto the 17n+5 grid — only 5
+ *  and 39 are native grid points, so the 9 and 13 tiers both sample a
+ *  7-slice latent and decode 22 frames (the app publishes the first 9/13 via
+ *  ImageFromBatch; the extra decoded frames are discarded, and 9 vs 13 cost
+ *  the same 22-frame sample). The H3 Image Studio pack's own latent ladder
+ *  hits 9 and 13 exactly — until that graph path lands, the choice-point
+ *  labels carry these true costs. [DOC: ComfyUI nodes_minimax_h3.py,
+ *  verified against the shared install 0.34.0 + upstream master 2026-09-21] */
+export const STOCK_SAMPLED_FRAMES: Readonly<Record<number, number>> = { 5: 5, 9: 22, 13: 22, 39: 39 }
+
+/** The honest choice-point label for one packet tier: the requested frames,
+ *  plus the true sampled count when the stock grid inflates it. */
+export function packetTierLabel(tier: number): string {
+  const sampled = STOCK_SAMPLED_FRAMES[tier]
+  if (sampled === undefined || sampled === tier) return `${tier} frames`
+  return `${tier} frames · samples ${sampled} on stock nodes`
+}
 
 /** The Mamad8 T=1 image VAE filename pattern — the never-in-video-graphs
  * constraint keys on this (Mamad8/MiniMax-H3-Image-VAE step1597). */
@@ -361,11 +397,29 @@ function infoHas(info: ObjectInfo | undefined, nodeClass: string): boolean {
   return Boolean(info && typeof info === 'object' && (info as Record<string, unknown>)[nodeClass] !== undefined)
 }
 
-function baseDetect(info: ObjectInfo | undefined, files: ModelFile[], needs: { ref2va?: boolean; t1?: boolean; turbo?: boolean; kleinNodes?: boolean }): H3ImgDetection {
+function baseDetect(info: ObjectInfo | undefined, files: ModelFile[], needs: { ref2va?: boolean; t1?: boolean; turbo?: boolean; kleinNodes?: boolean; t1StudioPack?: boolean }): H3ImgDetection {
   const selection = inferH3ImgSelection(files)
   const missingNodes: string[] = []
   const missingModels: string[] = []
   const notes: string[] = []
+  // THE ENGINE-TRUTH GATE (d4er4ati): the stock-graph T=1 path submits
+  // length:1 into the stock conditioning node, which stock ComfyUI refuses
+  // at prompt validation (issue #15644) — the family must therefore refuse
+  // BEFORE submission whether or not the pack is installed, with the reason
+  // matched to the engine's actual state. See H3_IMAGE_STUDIO_PREPARE_NODES.
+  if (needs.t1StudioPack) {
+    const studioPackPresent = H3_IMAGE_STUDIO_PREPARE_NODES.some((nodeClass) => infoHas(info, nodeClass))
+    if (!studioPackPresent) {
+      missingNodes.push(
+        `${H3_IMAGE_STUDIO_PREPARE_NODES[0]} — the MiniMax H3 Image Studio pack (user-fetch: Settings → Node packs → ComfyUI-MiniMax-H3-Image-Studio, Fetch…). Stock engines refuse this profile's single-frame latent at validation (ComfyUI issue #15644: the stock conditioning node enforces length ≥ 5 server-side), so without the pack's conditioning the render would fail on the engine — never a silent submit.`,
+      )
+    } else {
+      missingNodes.push(
+        `the studio-side pack-conditioned T=1 graph — the H3 Image Studio pack is installed and detected, but this studio does not emit its conditioning nodes yet (a pinned follow-up); the stock length=1 path it would otherwise submit is refused by stock engines (issue #15644). The family stays gated until the pack-side graph lands.`,
+      )
+      notes.push('H3 Image Studio pack detected on the engine — the T=1 Fast profile unlocks when the pack-conditioned graph path lands (tracked increment).')
+    }
+  }
   const hybrid = infoHas(info, HYBRID_LOADER_NODE) && Boolean(selection.fl2va && selection.ref2va)
   if (!hybrid) {
     // The hybrid profile is an UPGRADE, not a requirement — stock fallback
@@ -440,11 +494,11 @@ export const H3IMG_FAMILIES: H3ImgFamily[] = [
     profile: 't1',
     roles: GENERATE_ROLES,
     dials: ['seed', 'resolution'],
-    detect: (info, files) => baseDetect(info, files, { ref2va: true, t1: true, turbo: true }),
+    detect: (info, files) => baseDetect(info, files, { ref2va: true, t1: true, turbo: true, t1StudioPack: true }),
     ui: {
-      description: 'The Fast profile: one latent frame through the Mamad8 T=1 image VAE on the hybrid b25-49 checkpoint, FL2VA turbo 8-step @0.75 + detail adapter @0.5, er_sde/sgm_uniform, shifts 12/3. Seconds-class drafts; auto-labeled "fast, structurally soft".',
+      description: 'The Fast profile: one latent frame through the Mamad8 T=1 image VAE on the hybrid b25-49 checkpoint, FL2VA turbo 8-step @0.75 + detail adapter @0.5, er_sde/sgm_uniform, shifts 12/3. Seconds-class drafts; auto-labeled "fast, structurally soft". GATED on the H3 Image Studio pack: stock conditioning nodes refuse single-frame latents server-side (issue #15644) — the pack\'s parallel conditioning is the legal path.',
       warning: 'The T=1 VAE reconstructs from a single temporal latent — outputs can stay soft and lose fine text, thin contours, hair, foliage. It is pinned to this profile and can never appear in a video graph (factory-enforced). Refine is always opt-in: a one-tap affordance follows every T=1 output.',
-      installHint: 'Needs the Mamad8 T=1 image VAE (minimax_h3_t1_image_vae_step1597.safetensors — consolidated into the central model home; fetchable), an FL2VA turbo LoRA, and ideally the hybrid loader.',
+      installHint: 'Needs the MiniMax H3 Image Studio pack (user-fetch from Settings → Node packs — its conditioning makes single-frame latents legal; stock engines refuse length<5 at validation), the Mamad8 T=1 image VAE (minimax_h3_t1_image_vae_step1597.safetensors), an FL2VA turbo LoRA, and ideally the hybrid loader.',
       promptGuidance: 'Scene-style prompt, as Generate. With a source image the T=1 path auto-switches to Picture-1 reference conditioning (a frame-0 keyframe would fill the only output slot).',
     },
   },

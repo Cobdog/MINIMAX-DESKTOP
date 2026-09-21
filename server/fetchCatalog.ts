@@ -143,6 +143,11 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   // docs/research/autocontext-deepread.md §7): sha-pinned Apache-2.0 row,
   // single-sourced from ENGINE_NODE_PACKS like every pack entry.
   nodePackEntry('autocontext'),
+  // astropuzzo's H3 image studio (task d4er4ati, Wave 3 rung 0): the
+  // T=1-legality pack — sha-pinned Unlicense row, single-sourced from
+  // ENGINE_NODE_PACKS. This entry is the fetch affordance the T=1 Fast
+  // family's honest refusal names.
+  nodePackEntry('h3-image-studio'),
   // First-party pack (task k271ykk): installs from the studio's own
   // custom-nodes/ payload — the fetch engine short-circuits to a local
   // install and never touches the transport. License + repo stay

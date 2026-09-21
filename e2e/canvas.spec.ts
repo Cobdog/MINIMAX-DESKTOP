@@ -1042,10 +1042,20 @@ test('H3-1F as the image op: the stills intent routes the T=1 family; image+cont
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
-test('the H3-1F still renders end to end through the fake engine and lands its take (34afx79)', async ({ page, request }) => {
+test('the H3-1F stills intent gates honestly at the render attempt — both pack states (d4er4ati)', async ({ page, request }) => {
   const problems = await trackErrors(page)
   const http = await import('node:http')
 
+  // The engine-truth gate (Wave 3 rung 0): the stock conditioning nodes this
+  // family's graph emits refuse length:1 at SERVER-SIDE validation (ComfyUI
+  // issue #15644 — execution.py schema-min, then temporal_shape promotes
+  // max(5,·) even past it). This test used to drive a fake-engine submit and
+  // assert a landed T=1 take — that was graph-shape truth standing in for
+  // execution truth, exactly the false capability claim the gate retires
+  // (docs/research/h3-image-studio-pack-assessment.md §2). The submit→poll→
+  // packet-aware-landing mechanics it used to cover are the SHARED core the
+  // packet-family flow in images.spec.ts still exercises end to end.
+  //
   // (Wave 2 R-12) No local model files: the engine's own /models listing is
   // the whole inventory — the T=1 family's availability resolves from the
   // registry (the T=1 image VAE + the MaxiMin detail adapter ride along).
@@ -1055,8 +1065,9 @@ test('the H3-1F still renders end to end through the fake engine and lands its t
     loras: [...H3_REGISTRY_LISTINGS.loras, 'MaxiMin-HHH-R2V-ThisIsFine.safetensors'],
   }
 
-  const framePng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', 'base64')
-  const PROMPT_ID = 'canvas-t1-e2e-1'
+  // The pack's Prepare class rides the object_info ONLY in the second half
+  // of the test (the pack-present refusal direction).
+  let servePack = false
   const submitted: Array<Record<string, { class_type: string; inputs: Record<string, unknown> }>> = []
   const engine = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://engine.local')
@@ -1065,7 +1076,7 @@ test('the H3-1F still renders end to end through the fake engine and lands its t
       res.end(JSON.stringify({ system: {}, devices: [] }))
       return
     }
-    if (serveObjectInfo(url, stockObjectInfo({ MiniMaxH3HybridLoader: {} }), res)) return
+    if (serveObjectInfo(url, stockObjectInfo({ ...(servePack ? { H3ImagePrepare: {} } : {}), MiniMaxH3HybridLoader: {} }), res)) return
     if (serveModelRegistry(url, registryListings, res)) return
     if (url.pathname === '/upload/image') {
       res.writeHead(200, { 'content-type': 'application/json' })
@@ -1078,18 +1089,8 @@ test('the H3-1F still renders end to end through the fake engine and lands its t
       req.on('end', () => {
         submitted.push(JSON.parse(body).prompt)
         res.writeHead(200, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ prompt_id: PROMPT_ID, number: 1, node_errors: {} }))
+        res.end(JSON.stringify({ prompt_id: 'never-reached', number: 1, node_errors: {} }))
       })
-      return
-    }
-    if (url.pathname === `/history/${PROMPT_ID}`) {
-      res.writeHead(200, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ [PROMPT_ID]: { prompt: [], outputs: { '700': { images: [{ filename: 'canvas-t1-frame-00001_.png', subfolder: '', type: 'output' }] } }, status: { completed: true } } }))
-      return
-    }
-    if (url.pathname === '/view') {
-      res.writeHead(200, { 'content-type': 'image/png' })
-      res.end(framePng)
       return
     }
     res.writeHead(404)
@@ -1099,14 +1100,14 @@ test('the H3-1F still renders end to end through the fake engine and lands its t
 
   const originalSettings = ((await (await request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
   try {
-    const listed = await (await request.get('/api/lan/jobs')).json() as { jobs?: Array<Record<string, unknown>> }
-    const stale = (listed.jobs ?? []).filter((job) => job.status === 'queued' || job.status === 'running').map((job) => ({ ...job, status: 'cancelled' }))
-    if (stale.length) await request.post('/api/lan/jobs', { data: { jobs: stale } })
     await request.post('/api/lan/settings', { data: { settings: {
       ...originalSettings,
       comfyUrl: `http://127.0.0.1:${enginePort}`,
     } } })
     await request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+
+    // ---- Pack ABSENT: the refusal names the pack row, the class, the
+    // stock-floor reason, and the fetch affordance — never a submit. ----
     await page.goto('/?canvas=1')
     await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
     await page.locator('[data-canvas-chip="image"]').click()
@@ -1114,33 +1115,36 @@ test('the H3-1F still renders end to end through the fake engine and lands its t
     await page.locator('[data-canvas-submit]').click()
     const tile = page.locator('[data-canvas-tile]').first()
     await expect(tile).toBeVisible({ timeout: 10_000 })
-    await expect(page.locator('[data-canvas-toast="success"]').first()).toContainText('T=1 Fast')
-
-    // The submitted graph is the T=1 family through the shared core: hybrid
-    // loader, the Mamad8 decoder, the pinned recipe, ONE publish.
-    await expect.poll(() => submitted.length, { timeout: 10_000 }).toBe(1)
-    const nodes = Object.values(submitted[0]!)
-    const classes = nodes.map((node) => node.class_type)
-    expect(classes).toContain('MiniMaxH3HybridLoader') // both checkpoints resolved → the b25-49 merge
-    expect(classes.filter((cls) => cls === 'SaveImage')).toHaveLength(1)
-    expect(nodes.filter((node) => node.class_type === 'VAELoader').map((node) => node.inputs.vae_name)).toContain('minimax_h3_t1_image_vae_step1597.safetensors')
-    expect(nodes.find((node) => node.class_type === 'KSamplerSelect')!.inputs.sampler_name).toBe('er_sde')
-    expect(nodes.find((node) => node.class_type === 'BasicScheduler')!.inputs.scheduler).toBe('sgm_uniform')
-    expect(nodes.find((node) => node.class_type === 'BasicScheduler')!.inputs.steps).toBe(8)
-    expect(classes).not.toContain('QwenImageDiffsynthControlnet') // the dead ControlNet-Union path stays dead
-
-    // The take lands through the packet-aware branch: ONE take, one frame
-    // artifact, h3img provenance naming the T=1 family.
-    await expect.poll(async () => {
-      const document = await activeDocument(page)
-      const take = document.chains[0]?.outputs[0]?.takes[0]
-      return take?.metrics?.h3img ? (take.metrics.h3img as Record<string, unknown>).family : null
-    }, { timeout: 30_000 }).toBe('h3img.generate.t1')
+    const refusal = page.locator('[data-canvas-toast="error"]').first()
+    await expect(refusal).toContainText('T=1')
+    await expect(refusal).toContainText('H3ImagePrepare')
+    await expect(refusal).toContainText('MiniMax H3 Image Studio')
+    await expect(refusal).toContainText('#15644')
+    await expect(refusal).toContainText(/Fetch|Node packs/)
+    // Nothing was submitted — the honest gate, not a submit-then-server-400.
+    await expect.poll(() => submitted.length, { timeout: 2_000 }).toBe(0)
+    await expect(page.locator('[data-canvas-radar]')).toHaveAttribute('data-queued', '0')
     const document = await activeDocument(page)
-    const landed = document.chains[0]!.outputs[0]!.takes[0]!
-    expect(landed.artifacts).toHaveLength(1)
-    expect((landed.metrics!.h3img as Record<string, unknown>).frames).toBe(1)
-    expect(landed.metrics!.kind).toBe('image')
+    expect(document.chains[0]!.settings.mediaType).toBe('image')
+    expect(document.chains[0]!.settings.imageEngine).toBe('h3-1f')
+
+    // ---- Pack PRESENT: still gated — the studio-side pack-conditioned
+    // graph has not landed, and the stock length=1 path is illegal
+    // regardless. A DIFFERENT honest reason, never a doomed submit. ----
+    servePack = true
+    await page.reload()
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    await page.locator('[data-canvas-chip="image"]').click()
+    await page.locator('[data-canvas-prompt]').fill('a lighthouse over a black sea, still')
+    await page.locator('[data-canvas-submit]').click()
+    await expect(page.locator('[data-canvas-tile]').first()).toBeVisible({ timeout: 10_000 })
+    // Toasts render oldest-first — read the NEWEST (the first half's refusal may still be on screen).
+    const pendingRefusal = page.locator('[data-canvas-toast="error"]').last()
+    await expect(pendingRefusal).toContainText('T=1')
+    await expect(pendingRefusal).toContainText('pack-conditioned')
+    await expect(pendingRefusal).toContainText('H3 Image Studio')
+    await expect.poll(() => submitted.length, { timeout: 2_000 }).toBe(0)
+    await expect(page.locator('[data-canvas-radar]')).toHaveAttribute('data-queued', '0')
     expect(problems.filter((entry) => !environmental(entry))).toEqual([])
   } finally {
     await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
