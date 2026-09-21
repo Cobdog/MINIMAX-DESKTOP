@@ -7,10 +7,86 @@
  *  narrow updates select directly from the store. Store actions are stable
  *  references, captured once. */
 import { useCallback, useEffect } from 'react'
-import type { AppSettings } from '../types'
+import type { AppSettings, ComfyStatus } from '../types'
 import { onRealtimeStatus, subscribe } from '../lib/useRealtime'
+import { engineTransition, logEngineProbe, nextRecheckDelayMs } from '../lib/engineWatch'
 import { useSessionStore } from '../state/sessionStore'
 import type { TelemetrySample } from '../types'
+
+/** One engine probe + its transition bookkeeping (R-01). The source names
+ *  who asked: 'boot' (first check — no transition, no re-pull beyond its
+ *  own), 'loop' (the re-check cadence), 'visibility' (tab came back),
+ *  'manual' (Settings Test-connection / save). object_info + inventory
+ *  re-pull ONLY on a disconnect→connect transition (A-8: never per tick —
+ *  a loaded instance's full object_info is megabytes). */
+async function runEngineCheck(url: string, source: 'boot' | 'loop' | 'visibility' | 'manual'): Promise<ComfyStatus> {
+  const store = useSessionStore.getState()
+  const wasConnected = source === 'boot' ? undefined : store.status.connected
+  const nextStatus = await window.minimax.getComfyStatus(url)
+  const transition = engineTransition(wasConnected, nextStatus.connected)
+  logEngineProbe(source, url, transition, nextStatus.connected, nextStatus.latencyMs ?? 0)
+  store.setStatus(nextStatus)
+  if (nextStatus.connected) {
+    const shouldPullInfo = transition === 'recovered' || source === 'boot' || source === 'manual'
+    if (shouldPullInfo) {
+      try {
+        store.setInfo(await window.minimax.getObjectInfo(url))
+        store.bumpInfoEpoch()
+        if (transition === 'recovered') {
+          // The restart-watch payload: object_info AND the model inventory
+          // (instance /models merged with local roots) re-pulled together.
+          void window.minimax.scanModels(useSessionStore.getState().settings ?? ({} as AppSettings)).then((found) => {
+            useSessionStore.getState().setModels(found)
+          }).catch(() => undefined)
+        }
+      } catch { store.setInfo({}) }
+    }
+    if (transition === 'recovered') store.markEngineRecovered(Date.now())
+  } else {
+    store.setInfo({})
+    if (transition === 'lost') store.markEngineLost(Date.now())
+  }
+  return nextStatus
+}
+
+/** The module-singleton loop (two surfaces mount this hook; ONE loop must
+ *  run regardless — duplicate probes are harmless but duplicate transition
+ *  toasts are not). Reads the CURRENT settings url every tick, so a URL
+ *  change in Settings re-targets without restart. */
+let engineWatchStarted = false
+function ensureEngineWatchLoop(): () => void {
+  if (!engineWatchStarted) {
+    engineWatchStarted = true
+    let timer = 0
+    let probing = false
+    const tick = async () => {
+      if (probing) return
+      probing = true
+      try {
+        const url = useSessionStore.getState().settings?.comfyUrl
+        if (url) await runEngineCheck(url, 'loop').catch(() => undefined)
+      } finally {
+        probing = false
+        schedule()
+      }
+    }
+    const schedule = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(tick, nextRecheckDelayMs(useSessionStore.getState().status.connected))
+    }
+    const onVisibility = () => {
+      if (!document.hidden) {
+        window.clearTimeout(timer)
+        void tick()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    schedule()
+  }
+  // The loop is app-lifetime by design (the session outlives surface
+  // switches); the unmount hook intentionally does not stop it.
+  return () => undefined
+}
 
 export function useStudioSession() {
   const settings = useSessionStore((state) => state.settings)
@@ -22,7 +98,7 @@ export function useStudioSession() {
   const info = useSessionStore((state) => state.info)
   const ollamaModels = useSessionStore((state) => state.ollamaModels)
   const engineMode = useSessionStore((state) => state.settings?.engine.mode)
-  const { setSettings, setModels, setScanning, setStatus, setChecking, setGpu, setInfo, setOllamaModels, setLlm, setEngineRuntime } = useSessionStore.getState()
+  const { setSettings, setModels, setScanning, setChecking, setGpu, setOllamaModels, setLlm, setEngineRuntime } = useSessionStore.getState()
 
   const scanModels = useCallback(async (nextSettings: AppSettings) => {
     setScanning(true)
@@ -36,14 +112,22 @@ export function useStudioSession() {
 
   const checkConnection = useCallback(async (url: string) => {
     setChecking(true)
-    const nextStatus = await window.minimax.getComfyStatus(url)
-    setStatus(nextStatus)
-    if (nextStatus.connected) {
-      try { setInfo(await window.minimax.getObjectInfo(url)) } catch { setInfo({}) }
-    } else setInfo({})
+    const next = await runEngineCheck(url, 'manual')
     setChecking(false)
-    return nextStatus
-  }, [setChecking, setInfo, setStatus])
+    return next
+  }, [setChecking])
+
+  // R-01 (Wave 1, audits B P0-1 / C F3): the engine re-check loop. The
+  // connection was a boot-time snapshot — start the engine after boot and
+  // every submit still refused; kill it and the chip said connected for the
+  // rest of the session. Now a module-singleton loop probes the engine on
+  // the engineWatch cadence (fast when down, slow when up; immediate on
+  // tab-visibility), and a connected TRANSITION re-pulls object_info + the
+  // model inventory — the external restart-watch: the app notices by itself,
+  // no manual Test-connection, no restart dance. This deliberately supersedes
+  // the old "external mode issues not a single new request" rule (byte-parity
+  // conservatism, ruled accidental by audit C).
+  useEffect(ensureEngineWatchLoop, [])
 
   const refreshOllama = useCallback(async (nextSettings: AppSettings) => {
     try {
@@ -69,9 +153,9 @@ export function useStudioSession() {
   useEffect(() => {
     void window.minimax.getSettings().then((loaded) => {
       setSettings(loaded)
-      void Promise.all([scanModels(loaded), checkConnection(loaded.comfyUrl), refreshOllama(loaded), refreshLlm()])
+      void Promise.all([scanModels(loaded), runEngineCheck(loaded.comfyUrl, 'boot').catch(() => undefined), refreshOllama(loaded), refreshLlm()])
     })
-  }, [checkConnection, refreshLlm, refreshOllama, scanModels, setSettings])
+  }, [refreshLlm, refreshOllama, scanModels, setSettings])
 
   // GPU telemetry rides the realtime fabric (wave 1): the server pushes each
   // sample while this client is subscribed, so the 4 s HTTP poll is gone. A
@@ -104,9 +188,9 @@ export function useStudioSession() {
   }, [setGpu])
 
   // Managed engine runtime (increment 1): poll ONLY while managed mode is
-  // active — external mode must not issue a single new request (external is
-  // byte-for-byte the pre-runtime behavior). One poll feeds the titlebar
-  // tile and the Settings section alike.
+  // active — this poll reads the studio's OWN managed process (state,
+  // log-tail, phases); external mode has no such process to ask. The
+  // engine-connection loop above (R-01) now covers BOTH modes equally.
   useEffect(() => {
     if (engineMode !== 'managed') {
       setEngineRuntime(null)

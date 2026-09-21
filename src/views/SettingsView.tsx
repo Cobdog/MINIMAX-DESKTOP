@@ -43,7 +43,7 @@ function PathCheckNote({ path }: { path: string }) {
     : <><AlertCircle size={13} /> {detail || 'Path check failed.'}</>}</p>
 }
 
-export function SettingsView({ settings, setSettings, info, models, h3Report, scanning, status, checking, diagnosticRunning, ollamaModels, onRefreshOllama, onScan, onCheck, onSave, onRunDiagnostics }: { settings: AppSettings; setSettings(value: AppSettings): void; info: ObjectInfo; models: ModelFile[]; h3Report: ReturnType<typeof h3StackReport>; scanning: boolean; status: ComfyStatus; checking: boolean; diagnosticRunning: boolean; ollamaModels: OllamaModel[]; onRefreshOllama(): void; onScan(): void; onCheck(): void; onSave(): void | Promise<void>; onRunDiagnostics(): void }) {
+export function SettingsView({ settings, setSettings, info, infoEpoch = 0, models, h3Report, scanning, status, checking, diagnosticRunning, ollamaModels, onRefreshOllama, onScan, onCheck, onSave, onRunDiagnostics }: { settings: AppSettings; setSettings(value: AppSettings): void; info: ObjectInfo; infoEpoch?: number; models: ModelFile[]; h3Report: ReturnType<typeof h3StackReport>; scanning: boolean; status: ComfyStatus; checking: boolean; diagnosticRunning: boolean; ollamaModels: OllamaModel[]; onRefreshOllama(): void; onScan(): void; onCheck(): void; onSave(): void | Promise<void>; onRunDiagnostics(): void }) {
   const pathRows: Array<{ kind: ModelKind; label: string; note: string }> = [
     { kind: 'diffusion_models', label: 'Diffusion models', note: 'FL2VA and Ref2VA checkpoints' },
     { kind: 'text_encoders', label: 'Text encoders', note: 'Qwen3-VL MiniMax encoder' },
@@ -206,7 +206,10 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
   // field re-edit.
   const [packSaveTick, setPackSaveTick] = useState(0)
   const bumpPackSaveTick = () => setPackSaveTick((tick) => tick + 1)
-  useEffect(() => { void refreshNodePacks() }, [settings.engine.checkoutPath, settings.engine.externalCustomNodesDir, settings.engine.mode, packSaveTick])
+  // (R-01) infoEpoch: every successful object_info re-pull (boot, manual
+  // check, engine recovery) re-resolves the live pack chips — an engine that
+  // came back flips "absent" rows to "active" here without a manual Refresh.
+  useEffect(() => { void refreshNodePacks() }, [settings.engine.checkoutPath, settings.engine.externalCustomNodesDir, settings.engine.mode, packSaveTick, infoEpoch])
   const saveAndRefreshPacks = async () => {
     try { await onSave() } finally { bumpPackSaveTick() }
   }
@@ -342,7 +345,10 @@ export function SettingsView({ settings, setSettings, info, models, h3Report, sc
       {nodePackError && <div className="llm-test-result fail" role="status"><AlertCircle size={14} /><span>{nodePackError}</span></div>}
       <p className="settings-note">Uninstall deletes only folders the studio placed (a marker install) — never a pack that was already there: pre-existing folders in the target are reported as "present — not studio-managed" (or "managed by ComfyUI" when the folder carries a git checkout or a Comfy-Registry pyproject), refused for install-over, and never deleted. A revision bump refetches at the pin. "Restart to activate" means the files are in place but the running instance has not loaded them yet. Packs without a license are never vendored — they install only through the consent-gated fetcher below.</p>
     </section>
-    <FetchBrowser settings={settings} setSettings={setSettings} onAfterFetch={onScan} onAdoptCheckout={(path) => updateEngine({ checkoutPath: path })} focusEntryIds={packFetchFocus ?? undefined} onFocusConsumed={() => setPackFetchFocus(null)} />
+    {/* (R-10, audit C F4) Fetch completion refreshes the PACK board too — a
+        fetched pack auto-installs and its chip must flip without the board's
+        own Refresh click; onScan alone left the models scan stale-chip pair. */}
+    <FetchBrowser settings={settings} setSettings={setSettings} onAfterFetch={() => { onScan(); void refreshNodePacks() }} onAdoptCheckout={(path) => updateEngine({ checkoutPath: path })} focusEntryIds={packFetchFocus ?? undefined} onFocusConsumed={() => setPackFetchFocus(null)} />
     <section className="settings-section h3-stack-section">
       <div className="settings-heading"><div><Gauge size={19} /><span><strong>H3 engine stack</strong><small>Compares the selected files with the validated official ComfyUI stack.</small></span></div><span className={`health-pill ${h3Report.validated ? 'online' : ''}`}>{h3Report.validated ? 'Validated' : h3Report.ready ? 'Custom' : 'Incomplete'}</span></div>
       <div className="h3-stack-list">{h3Report.rows.map((row) => <div key={row.label} className={row.validated ? 'validated' : 'custom'}><span>{row.validated ? <Check size={14} /> : <AlertCircle size={14} />}</span><div><strong>{row.label}</strong><small title={row.selected || row.expected}>{row.selected || `Missing · expected ${row.expected}`}</small></div><em>{row.override ? 'Override' : row.validated ? 'Recommended' : row.selected ? 'Non-standard' : 'Missing'}</em></div>)}</div>

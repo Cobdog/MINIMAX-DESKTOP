@@ -21,6 +21,11 @@ export type SessionState = {
   /** Self-managed engine runtime snapshot — null unless managed mode is
    *  active (external mode never polls, so it stays null there). */
   engineRuntime: ManagedEngineStatus | null
+  /** (Wave 1 R-01) The engine-watch bookkeeping the re-check loop writes:
+   *  lostAt/recoveredAt timestamp the connectivity TRANSITIONS (consumers
+   *  toast + fail active jobs honestly), infoEpoch counts successful
+   *  object_info pulls (the pack board re-resolves its live chips on each). */
+  engineWatch: { lostAt: number | null; recoveredAt: number | null; infoEpoch: number }
   setSettings(settings: AppSettings | null): void
   setModels(models: ModelFile[]): void
   setScanning(scanning: boolean): void
@@ -31,6 +36,9 @@ export type SessionState = {
   setOllamaModels(ollamaModels: OllamaModel[]): void
   setLlm(llm: LlmModelsResult | null): void
   setEngineRuntime(engineRuntime: ManagedEngineStatus | null): void
+  markEngineLost(at: number): void
+  markEngineRecovered(at: number): void
+  bumpInfoEpoch(): void
 }
 
 export const useSessionStore = create<SessionState>()((set) => ({
@@ -44,6 +52,7 @@ export const useSessionStore = create<SessionState>()((set) => ({
   ollamaModels: [],
   llm: null,
   engineRuntime: null,
+  engineWatch: { lostAt: null, recoveredAt: null, infoEpoch: 0 },
   setSettings: (settings) => set({ settings }),
   setModels: (models) => set({ models }),
   setScanning: (scanning) => set({ scanning }),
@@ -54,4 +63,7 @@ export const useSessionStore = create<SessionState>()((set) => ({
   setOllamaModels: (ollamaModels) => set({ ollamaModels }),
   setLlm: (llm) => set({ llm }),
   setEngineRuntime: (engineRuntime) => set({ engineRuntime }),
+  markEngineLost: (at) => set((state) => ({ engineWatch: { ...state.engineWatch, lostAt: at, recoveredAt: null } })),
+  markEngineRecovered: (at) => set((state) => ({ engineWatch: { ...state.engineWatch, lostAt: null, recoveredAt: at } })),
+  bumpInfoEpoch: () => set((state) => ({ engineWatch: { ...state.engineWatch, infoEpoch: state.engineWatch.infoEpoch + 1 } })),
 }))
