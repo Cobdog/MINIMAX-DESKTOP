@@ -66,6 +66,9 @@ let demotedToSse = false
 let backoffMs = WS_BACKOFF_FLOOR_MS
 let socket: WebSocket | null = null
 let source: EventSource | null = null
+/** (R-27) The channel list the LIVE SSE stream was constructed with — a
+ *  registration that does not change it never reopens the stream. */
+let liveSseChannels: string | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined
 const subscribedChannels = new Set<RealtimeJsonChannel>()
 const previewInterest = new Set<number>()
@@ -133,7 +136,9 @@ function sseChannels(): string {
 
 function openSse() {
   closeSocket()
-  const url = `/api/lan/realtime?channels=${encodeURIComponent(sseChannels())}`
+  const channels = sseChannels()
+  liveSseChannels = channels
+  const url = `/api/lan/realtime?channels=${encodeURIComponent(channels)}`
   const token = authToken()
   const addressed = token ? `${url}&token=${encodeURIComponent(token)}` : url
   source = new EventSource(addressed)
@@ -315,7 +320,14 @@ function ensureStarted() {
 function resubscribeForSse() {
   // SSE subscriptions are fixed at connect time: adding a channel while on
   // the fallback transport means reconnecting with the extended list.
-  if (status.transport === 'sse' && started) openSse()
+  // (R-27, audit B P2-3) But a registration that does NOT change the channel
+  // set (a second preview job, another handler on a live channel) must not
+  // reopen the EventSource — every reopen drops the stream and resets seq.
+  // A missing source (the error path closed it) reopens regardless: the
+  // scheduled reconnect would have done the same.
+  if (status.transport !== 'sse' || !started) return
+  if (source && liveSseChannels === sseChannels()) return
+  openSse()
 }
 
 // ---- public API -------------------------------------------------------------

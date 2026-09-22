@@ -50,6 +50,10 @@ const assert = require('node:assert/strict')
 const WebSocket = require('ws')
 const { WebSocketServer } = require('ws')
 const { makePortAllocator } = require('./lib/ports.cjs')
+// Scratch-home ledger (Wave 4 test hygiene): every mkdtemp registers;
+// afterAll tears them all down — per-run homes never leak again.
+const { makeScratchDir, removeAllScratchDirs } = require('./lib/scratch.cjs')
+afterAll(() => { void removeAllScratchDirs() })
 const {
   normalizeComfyEvent,
   encodePreviewFrame,
@@ -231,7 +235,7 @@ test('(a) units against dist-server/server/realtime.js: framing, hashing, normal
 })
 
 test('(b) boot + WS hello + telemetry push without any ComfyUI engine', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-realtime-'))
+  const home = makeScratchDir(path.join(os.tmpdir(), 'minimax-realtime-'))
 
   // Fake upstream ComfyUI on a kernel-assigned port, known to the server via
   // settings BEFORE boot (the fabric connects upstream lazily on subscribe).
@@ -392,7 +396,7 @@ test('(e) SSE v2 fallback pushes telemetry', async () => {
 })
 
 test('(f) token mode: WS without/with a wrong token is refused before the handshake; the correct token connects', async () => {
-  const tokenHome = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-realtime-token-'))
+  const tokenHome = makeScratchDir(path.join(os.tmpdir(), 'minimax-realtime-token-'))
   const tokenPort = await freePort()
   bootServer(tokenHome, tokenPort, { MINIMAX_LAN_TOKEN: '1' })
   let refusedStatus = 0
@@ -465,7 +469,7 @@ test('(g) F6 live progress: stable server-side clientId + native-preview wiring 
   const enginePort = await listen(engineHttp)
   servers.push(engineHttp)
 
-  const f6Home = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-realtime-f6-'))
+  const f6Home = makeScratchDir(path.join(os.tmpdir(), 'minimax-realtime-f6-'))
   fs.writeFileSync(path.join(f6Home, 'settings.json'), JSON.stringify({ comfyUrl: `http://127.0.0.1:${enginePort}` }))
   const f6Port = await freePort()
   bootServer(f6Home, f6Port)
@@ -544,4 +548,67 @@ test('(g) F6 live progress: stable server-side clientId + native-preview wiring 
   })
   assert.equal(engineClientIds[1], hubId, 'the reconnect registers the SAME stable clientId')
   console.log('PASS: realtime event fabric — WS + SSE v2 transports behind the constant-time token gate; job channel normalized once from one SHARED upstream ComfyUI socket (prompt correlation server-side, binary preview frames hash-stamped, no base64 on the WS path, per-channel seq gapless); telemetry pushes without an engine and stops with zero subscribers; llm channel streams tokens from a local OpenAI-compatible endpoint with abort + SSRF rejection; backpressure is bounded-queue/oldest-dropped for JSON and newest-wins for previews; F6 — one stable server-side clientId registered on the shared upstream, carried by every submission (targeted events land, page ids retired), native taesd previews requested per prompt and fanned out as binary frames to every client.')
+})
+
+// (f) The CLIENT module (src/lib/useRealtime.ts through the VM harness) —
+// R-27 (Wave 4, audit B P2-3): while on the SSE fallback, a preview
+// registration that does NOT change the channel set must not reopen the
+// EventSource. Every reopen drops the stream and resets seq; the old code
+// reopened on every onPreviewFrame call (second job on the preview channel,
+// second handler on a live channel — churn with zero subscription change).
+test('(f) client fabric (R-27): SSE reopen only when the channel set changed', () => {
+  const { loadTs } = require('../scripts/lib/ts-vm.cjs')
+
+  // Manual timers: the module's reconnect/reprobe scheduling fires only when
+  // this test says so (live timers in creation order: 1st = the first
+  // reconnect, 2nd = the post-demotion reconnect; the ws-upgrade reprobe is
+  // queued between them and deliberately left cold so the probe loop cannot
+  // requeue itself — fire() skips it by index).
+  const timers = []
+  let timerSeq = 1
+  const context = {
+    setTimeout: (fn) => { const id = timerSeq++; timers.push({ id, fn, live: true }); return id },
+    clearTimeout: (id) => { const entry = timers.find((candidate) => candidate.id === id); if (entry) entry.live = false },
+    WebSocket: class { constructor() { throw new Error('ws unavailable in this scope') } },
+    window: { location: { protocol: 'http:', host: '127.0.0.1:1', search: '' }, dispatchEvent: () => undefined },
+  }
+  const eventSources = []
+  context.EventSource = class {
+    constructor(url) {
+      this.url = url
+      this.readyState = 0
+      eventSources.push(this)
+    }
+    close() { this.readyState = 2 }
+  }
+  const fire = (nth) => {
+    const entry = timers.filter((candidate) => candidate.live)[nth]
+    assert.ok(entry, `live timer ${nth} exists to fire`)
+    entry.live = false
+    entry.fn()
+  }
+
+  const fabric = loadTs('src/lib/useRealtime.ts', context)
+
+  // Demote to SSE: subscribe starts the WS attempt (fails), the first
+  // reconnect fails again → demotion; the next reconnect opens SSE. The fake
+  // stream's onopen fires manually — the module's handler is assigned by the
+  // time openSse returns, and the open is what flips status to transport 'sse'.
+  fabric.subscribe('job', () => undefined)
+  fire(0) // first reconnect: WS fails again → demotedToSse (+ a cold reprobe timer)
+  fire(1) // the post-demotion reconnect: openSse → EventSource #1 (channels=job)
+  eventSources[0].onopen()
+  assert.equal(eventSources.length, 1, 'demotion opened exactly one SSE stream')
+  assert.match(eventSources[0].url, /channels=job/, 'the SSE stream subscribes the job channel')
+
+  // A preview registration CHANGES the channel set → a reopen is legitimate.
+  fabric.onPreviewFrame('job-a', () => undefined)
+  assert.equal(eventSources.length, 2, 'the first preview registration reopens with the extended channel list')
+  assert.match(eventSources[1].url, /channels=job%2Cpreview|channels=job,preview/, 'the reopened stream carries the preview channel')
+
+  // (R-27) Further registrations leave the channel set unchanged → NO churn.
+  fabric.onPreviewFrame('job-b', () => undefined)
+  fabric.subscribe('job', () => undefined)
+  assert.equal(eventSources.length, 2, 'a second preview job and a second job handler do NOT reopen the stream (R-27)')
+  assert.equal(eventSources[1].readyState, 0, 'the live SSE stream was never closed/replaced')
 })

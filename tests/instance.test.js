@@ -32,7 +32,7 @@
 // suite's disjoint range (tests/lib/ports.cjs) instead of the old random
 // 6500-6599 picks; the shared git fixture repo builds once at module scope
 // as before.
-import { test } from 'vitest'
+import { test, afterAll } from 'vitest'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
@@ -47,6 +47,10 @@ const os = require('node:os')
 const path = require('node:path')
 const assert = require('node:assert/strict')
 const { makePortAllocator } = require('./lib/ports.cjs')
+// Scratch-home ledger (Wave 4 test hygiene): every mkdtemp registers;
+// afterAll tears them all down — per-run homes never leak again.
+const { makeScratchDir, removeAllScratchDirs } = require('./lib/scratch.cjs')
+afterAll(() => { void removeAllScratchDirs() })
 
 const freePort = makePortAllocator('instance')
 
@@ -84,7 +88,7 @@ async function waitUntil(predicate, timeoutMs, label) {
 }
 
 function makeHome() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-instance-home-'))
+  return makeScratchDir(path.join(os.tmpdir(), 'minimax-instance-home-'))
 }
 
 // ---- the shared git fixture set (version matrix + routes status board) ----
@@ -712,6 +716,76 @@ routesMaybe('(d) app-relative io defaults through the real settings pipeline + (
     await waitUntil(() => child.exitCode !== null, 5_000, 'server exit').catch(() => child.kill('SIGKILL'))
     engine.close()
     if (serverOutput.includes('minimax-instance CRASH')) console.log(serverOutput)
+  }
+})
+
+// (f) R-30 (Wave 4, audit C F8) + R-31: the per-mode /engine/status shape.
+// External mode must answer the honest EXTERNAL readout (latency, version,
+// queue depth from the engine itself) — `state`/`logTail`/`pid` are
+// managed-runtime concepts that never existed for a foreign instance, and
+// the old shape answered `state:'stopped'` in external mode (a non-concept
+// that misled every consumer). Failing-without-it: the route returned the
+// managed runtime's snapshot unconditionally.
+routesMaybe('(f) /engine/status speaks per-mode shapes (R-30/R-31)', async () => {
+  const home = makeHome()
+  const enginePort = await freePort()
+  const engine = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://engine.local')
+    if (url.pathname === '/system_stats') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ system: { comfyui_version: 'v0.3.45', python_version: '3.12.7', os: 'linux' }, devices: [{ name: 'FakeGPU 9900' }] }))
+      return
+    }
+    if (url.pathname === '/queue') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ queue_running: [{}, {}, {}], queue_pending: [{}] }))
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  await new Promise((resolve) => engine.listen(enginePort, '127.0.0.1', resolve))
+  const serverPort = await freePort()
+  const child = spawn(process.execPath, [path.join(REPO, 'dist-server', 'server', 'index.js')], {
+    cwd: REPO,
+    env: { ...process.env, MINIMAX_STUDIO_HOME: home, MINIMAX_LAN_PORT: String(serverPort), MINIMAX_NO_HTTPS: '1' },
+    stdio: ['ignore', 'ignore', 'ignore'],
+  })
+  const base = `http://127.0.0.1:${serverPort}`
+  const api = async (route, init) => {
+    const response = await fetch(`${base}${route}`, init)
+    return { status: response.status, body: await response.json().catch(() => ({})) }
+  }
+  try {
+    await waitUntil(async () => {
+      try { return (await fetch(`${base}/api/lan/settings`)).ok } catch { return false }
+    }, 15_000, 'server boot')
+    const fresh = (await api('/api/lan/settings')).body.settings
+    const applied = await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...fresh, comfyUrl: `http://127.0.0.1:${enginePort}`, engine: { ...fresh.engine, mode: 'external' } } }) })
+    ok(applied.status === 200, 'external mode + fake engine settings applied')
+
+    const live = await api('/api/lan/engine/status')
+    ok(live.status === 200, 'the status route answers in external mode')
+    ok(live.body.mode === 'external', `mode reads 'external' (got ${JSON.stringify(live.body.mode)})`)
+    ok(!('state' in live.body), `the managed 'state' field is absent externally (got ${JSON.stringify(Object.keys(live.body))})`)
+    ok(!('logTail' in live.body) && !('pid' in live.body), 'no log tail, no pid — managed-runtime concepts never leak')
+    const facts = live.body.external ?? {}
+    ok(facts.connected === true, 'the engine answers connected')
+    ok(typeof facts.latencyMs === 'number' && facts.latencyMs >= 0, `latency is measured (got ${JSON.stringify(facts.latencyMs)})`)
+    ok(facts.version === 'v0.3.45', `the engine's own version is reported (got ${JSON.stringify(facts.version)})`)
+    ok(facts.queueDepth === 4, `queue depth counts running + pending (got ${JSON.stringify(facts.queueDepth)})`)
+    ok(facts.device === 'FakeGPU 9900', 'the device name rides along')
+
+    // A dead URL answers honestly offline — never a managed 'stopped'.
+    const deadPort = await freePort()
+    await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: { ...applied.body.settings, comfyUrl: `http://127.0.0.1:${deadPort}` } }) })
+    const dead = await api('/api/lan/engine/status')
+    ok(dead.body.mode === 'external' && dead.body.external.connected === false, `an unreachable engine answers connected:false (got ${JSON.stringify(dead.body.external)})`)
+    ok(!('state' in dead.body), 'the offline answer still carries no managed state')
+  } finally {
+    child.kill('SIGINT')
+    await waitUntil(() => child.exitCode !== null, 5_000, 'server exit').catch(() => child.kill('SIGKILL'))
+    engine.close()
   }
 })
 

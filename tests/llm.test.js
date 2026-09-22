@@ -50,6 +50,10 @@ const path = require('node:path')
 const assert = require('node:assert/strict')
 const WebSocket = require('ws')
 const { makePortAllocator } = require('./lib/ports.cjs')
+// Scratch-home ledger (Wave 4 test hygiene): every mkdtemp registers;
+// afterAll tears them all down — per-run homes never leak again.
+const { makeScratchDir, removeAllScratchDirs } = require('./lib/scratch.cjs')
+afterAll(() => { void removeAllScratchDirs() })
 const { inferFamily, familyManifest, buildCompletionParams, stripChannelMarkup } = require(path.join(REPO, 'dist-server', 'server', 'llm', 'registry.js'))
 
 const freePort = makePortAllocator('llm')
@@ -296,7 +300,7 @@ test('(b) model listing + provider selection through /api/lan/llm/models (router
   ollamaPort = await listen(ollama)
   servers.push(router, comfy, ollama)
 
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-llm-'))
+  const home = makeScratchDir(path.join(os.tmpdir(), 'minimax-llm-'))
   fs.writeFileSync(path.join(home, 'settings.json'), JSON.stringify({
     comfyUrl: `http://127.0.0.1:${comfyPort}`,
     ollamaUrl: `http://127.0.0.1:${ollamaPort}`,
@@ -466,7 +470,7 @@ test('(g) vision captioning: Gemma image-part-first content order on the wire', 
 test('(h) Ollama fallback with an EMPTY router URL: listing, legacy routes, prepare refusing streaming', async () => {
   for (const child of children.splice(0)) child.kill()
 
-  const fallbackHome = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-llm-fallback-'))
+  const fallbackHome = makeScratchDir(path.join(os.tmpdir(), 'minimax-llm-fallback-'))
   fs.writeFileSync(path.join(fallbackHome, 'settings.json'), JSON.stringify({
     comfyUrl: `http://127.0.0.1:${comfyPort}`,
     ollamaUrl: `http://127.0.0.1:${ollamaPort}`,

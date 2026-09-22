@@ -60,6 +60,25 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
+// Shared-home isolation (Wave 4 test hygiene, the fh94g76 flake): the e2e
+// home persists across runs, and the seed clips are byte-DETERMINISTIC
+// (ffmpeg testsrc2) — every run's ingest dedupes onto the SAME source row,
+// so layers accumulate on one master until an old 4:3 layer becomes the
+// list's `.first()` and an aspect chip reads already-active+disabled. Every
+// run now starts from a clean dataset slate, cleaned through the app's OWN
+// API (trash the seeded sources, then empty the trash) — never by hand.
+test.beforeAll(async ({ request }) => {
+  const library = await (await request.get('/api/lan/datasets/library')).json() as {
+    sources?: Array<{ id: string; absPath?: string }>
+    trashed?: { sources?: Array<{ id: string; absPath?: string }> }
+  }
+  const seeded = (row: { id: string; absPath?: string }) => /e2e-(clip|still)\.(mp4|png)/.test(row.absPath ?? '')
+  for (const row of [...(library.sources ?? []), ...(library.trashed?.sources ?? [])]) {
+    if (seeded(row)) await request.post('/api/lan/datasets/sources/trash', { data: { sourceId: row.id } }).catch(() => undefined)
+  }
+  await request.post('/api/lan/datasets/trash/empty', { data: {} }).catch(() => undefined)
+})
+
 /** One synthetic 512² still, ingested by reference (the app-tour wave's
  * poll-terminus coverage — images resolve their probe facts at ingest). */
 async function seedStill(request: APIRequestContext) {

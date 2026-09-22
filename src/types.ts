@@ -86,6 +86,26 @@ export type ManagedEngineConfig = {
 
 export type ManagedEngineState = 'stopped' | 'starting' | 'running' | 'stopping' | 'failed'
 export type ManagedEngineHealth = 'unknown' | 'ok' | 'unreachable'
+
+/** The honest external-mode engine status (R-30, audit C F8): `state`,
+ *  log-tail, and pid are MANAGED-RUNTIME concepts that never existed for an
+ *  instance the studio did not launch. What an external instance can honestly
+ *  answer is what the engine itself serves — reachability + latency
+ *  (/system_stats), its version, and its queue depth (/queue) — the same
+ *  facts the external health card renders (R-31). */
+export type ExternalEngineFacts = {
+  url: string
+  connected: boolean
+  latencyMs: number
+  /** ComfyUI's own version string (system_stats.system.comfyui_version). */
+  version?: string
+  pythonVersion?: string
+  device?: string
+  /** ComfyUI /queue depth (running + pending) — best-effort. */
+  queueDepth?: number
+  error?: string
+}
+export type ExternalEngineStatus = { mode: 'external'; external: ExternalEngineFacts }
 export type ManagedEngineStatus = {
   mode: EngineMode
   state: ManagedEngineState
@@ -129,6 +149,11 @@ export type NodePackDefinition = {
   id: string
   name: string
   description: string
+  /** (R-32, audit C F11) The feature area this pack serves — the Settings
+   *  board groups rows by feature BEFORE any version/install state, so a
+   *  reader scans "what does this do for me" first and the version
+   *  vocabulary second. A plain human label (e.g. 'H3 video'). */
+  featureGroup: string
   repoUrl: string
   pinnedRevision: string
   /** SPDX id — 'NO-LICENSE' means the repo carries no license file
@@ -719,6 +744,10 @@ export type GenerationJob = {
   /** Consecutive polls where ComfyUI history says completed but no output file
    *  has been found yet; drives the give-up cap in lib/jobReducer. */
   noOutputPolls?: number
+  /** Consecutive polls whose history fetch could not reach the engine at all
+   *  (R-26, audit B P2-2); drives the seconds-class honest failure in
+   *  lib/jobReducer — the 60-min deadline sweep stays as the backstop. */
+  pollFailureStreak?: number
   mode: GenerationMode
   prompt: string
   createdAt: number
@@ -792,7 +821,7 @@ export type DesktopApi = {
   listPromptLibrary(query: { text?: string; limit?: number; cursor?: string; nsfw?: boolean; sort?: string; scope?: 'h3' | 'all' }): Promise<{ items: PromptLibraryItem[]; cursor?: string }>
   runSetupDoctor(): Promise<{ checks: Array<{ id: string; label: string; status: 'ok' | 'warn' | 'fail'; detail: string; recommendation?: string }>; ranAt: number }>
   freeComfyMemory(url: string): Promise<{ freed: boolean }>
-  getEngineStatus(): Promise<ManagedEngineStatus>
+  getEngineStatus(): Promise<ManagedEngineStatus | ExternalEngineStatus>
   startManagedEngine(): Promise<ManagedEngineStatus & { already?: boolean }>
   stopManagedEngine(): Promise<ManagedEngineStatus>
   listEngineNodePacks(options?: { refresh?: boolean }): Promise<{ packs: NodePackStatus[] }>

@@ -32,10 +32,14 @@ const assert = require('node:assert/strict')
 const ts = require('typescript')
 const Database = require('better-sqlite3')
 const { makePortAllocator } = require('./lib/ports.cjs')
+// Scratch-home ledger (Wave 4 test hygiene): every mkdtemp registers;
+// afterAll tears them all down — per-run homes never leak again.
+const { makeScratchDir, removeAllScratchDirs } = require('./lib/scratch.cjs')
+afterAll(() => { void removeAllScratchDirs() })
 
 const freePort = makePortAllocator('storage')
 
-const home = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-storage-'))
+const home = makeScratchDir(path.join(os.tmpdir(), 'minimax-storage-'))
 let child = null
 let output = ''
 
@@ -452,7 +456,7 @@ test('in-process seams: comfyFetch SSRF funnel + rotateToken scheme', async () =
   const { pathToFileURL } = require('node:url')
   const coreUrl = pathToFileURL(path.join(REPO, 'dist-server', 'server', 'core.js')).href
   const { createStudioServer } = await import(coreUrl)
-  const guardHome = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-storage-guard-'))
+  const guardHome = makeScratchDir(path.join(os.tmpdir(), 'minimax-storage-guard-'))
   const guardPort = await freePort()
   const studio = createStudioServer({
     settingsFile: path.join(guardHome, 'settings.json'),
@@ -489,7 +493,7 @@ test('(h) settings-GET Option B: token-gated whenever token mode is on', async (
   const { pathToFileURL } = require('node:url')
   const coreUrl = pathToFileURL(path.join(REPO, 'dist-server', 'server', 'core.js')).href
   const { createStudioServer } = await import(coreUrl)
-  const tokenHome = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-storage-settings-'))
+  const tokenHome = makeScratchDir(path.join(os.tmpdir(), 'minimax-storage-settings-'))
   const tokenPort = await freePort()
   fs.writeFileSync(path.join(tokenHome, 'lan-access-token.txt'), '0123456789abcdef0123456789abcdef\n')
   const studio = createStudioServer({

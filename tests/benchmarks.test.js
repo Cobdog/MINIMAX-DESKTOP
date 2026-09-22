@@ -25,7 +25,7 @@
 // per section with the shared temp-registry state hoisted to module scope
 // (tests run sequentially within the file, so the cross-section state flow
 // is unchanged); the module-scope eol guard became the final test.
-import { test } from 'vitest'
+import { test, afterAll } from 'vitest'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
@@ -37,6 +37,10 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
+// Scratch-home ledger (Wave 4 test hygiene): every mkdtemp registers;
+// afterAll tears them all down — per-run homes never leak again.
+const { makeScratchDir, removeAllScratchDirs } = require('./lib/scratch.cjs')
+afterAll(() => { void removeAllScratchDirs() })
 const assert = require('node:assert/strict')
 
 const REPO = path.resolve(__dirname, '..')
@@ -50,7 +54,7 @@ function ok(condition, label) {
 }
 
 function tmpdir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'bench-tests-'))
+  return makeScratchDir(path.join(os.tmpdir(), 'bench-tests-'))
 }
 
 async function importLib(name) {

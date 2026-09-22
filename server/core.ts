@@ -25,6 +25,8 @@ import type { AppSettings, GpuTelemetry, LanStatus, ModelKind } from '../src/typ
 import { failureRef, logEvent, logFailure } from './logger'
 import { sanitizeEngineLogLine, sanitizeErrorMessage } from './logSanitize'
 import { structuralPromptError } from '../src/lib/promptError'
+import { CORE_RENDER_CLASSES, missingCoreNodeClasses, preflightRefusal } from '../src/lib/preflight'
+import type { ExternalEngineStatus } from '../src/types'
 import { createStudioRepository, type StudioRepository } from './repo'
 import { CANVAS_SCHEMA_VERSION, CanvasSchemaVersionError, DocumentsRuleError, PlanConflictError } from './documents'
 import { exportProjectArchive, importProjectArchive } from './documentArchive'
@@ -1330,6 +1332,47 @@ export function createStudioServer(paths: StudioServerPaths) {
     request.on('close', () => { clearInterval(heartbeat); clearTimeout(retry); socket?.close() })
   }
 
+  /** (R-30/R-31, audits C F8/F9) The honest external-mode status: the managed
+   *  runtime's vocabulary (state/log-tail/pid) is a non-concept for an
+   *  instance the studio did not launch. What the engine itself can answer —
+   *  reachability + latency (/system_stats), version, device, queue depth
+   *  (/queue) — is the readout the external health card renders. TTL-cached
+   *  so the card's poll never hammers the instance. */
+  let externalStatusCache: { at: number; value: ExternalEngineStatus } | null = null
+  const EXTERNAL_STATUS_TTL_MS = 4_000
+  async function externalEngineStatus(current: AppSettings): Promise<ExternalEngineStatus> {
+    // Cache keyed by url: a settings change never serves the previous
+    // instance's cached answer (the TTL bounds staleness within one url).
+    if (externalStatusCache && externalStatusCache.value.external.url === current.comfyUrl && Date.now() - externalStatusCache.at < EXTERNAL_STATUS_TTL_MS) return externalStatusCache.value
+    const url = current.comfyUrl
+    const started = Date.now()
+    let value: ExternalEngineStatus
+    try {
+      const stats = await comfyFetch(url, '/system_stats') as { system?: { comfyui_version?: string; python_version?: string; os?: string }; devices?: Array<{ name?: string }> }
+      let queueDepth: number | undefined
+      try {
+        const queue = await comfyFetch(url, '/queue') as { queue_running?: unknown[]; queue_pending?: unknown[] }
+        queueDepth = (queue.queue_running?.length ?? 0) + (queue.queue_pending?.length ?? 0)
+      } catch (queueFailure: unknown) { logFailure('engine/status-queue', queueFailure, undefined, 'debug') }
+      value = {
+        mode: 'external',
+        external: {
+          url,
+          connected: true,
+          latencyMs: Date.now() - started,
+          ...(typeof stats.system?.comfyui_version === 'string' ? { version: stats.system.comfyui_version } : {}),
+          ...(typeof stats.system?.python_version === 'string' ? { pythonVersion: stats.system.python_version } : {}),
+          ...(typeof stats.devices?.[0]?.name === 'string' ? { device: stats.devices[0]!.name } : {}),
+          ...(queueDepth !== undefined ? { queueDepth } : {}),
+        },
+      }
+    } catch (error: unknown) {
+      value = { mode: 'external', external: { url, connected: false, latencyMs: Date.now() - started, error: error instanceof Error ? error.message : String(error) } }
+    }
+    externalStatusCache = { at: Date.now(), value }
+    return value
+  }
+
   /** Setup doctor: verifies the local toolchain (ffmpeg, openssl), probes
    *  ComfyUI for device/python/attention-node availability, and returns exact
    *  recommendations. Read-only. */
@@ -1371,6 +1414,15 @@ export function createStudioServer(paths: StudioServerPaths) {
       checks.push(attentionNodes.length
         ? { id: 'attention', label: 'Attention backends', status: 'ok', detail: `Detected nodes: ${attentionNodes.slice(0, 6).join(', ')}${attentionNodes.length > 6 ? ` (+${attentionNodes.length - 6} more)` : ''}.` }
         : { id: 'attention', label: 'Attention backends', status: 'warn', detail: 'No SageAttention/Triton/Flash-related nodes detected in ComfyUI.', recommendation: 'Optional speed-up: installing SageAttention (~2× on supported GPUs) or the Sol-Attn nodes (15–20%) shortens H3 renders. Not required for correctness.' })
+      // (R-29, audit C F7) Core render classes: file-based checks pass on an
+      // instance a version behind and the failure only surfaces at render.
+      // object_info is already fetched above — diff the studio's core node
+      // classes against it (an empty snapshot keeps the check silent: the
+      // engine row above already owns the unreachable case).
+      const missingCore = missingCoreNodeClasses(info)
+      checks.push(missingCore.length
+        ? { id: 'core-nodes', label: 'Core render nodes', status: 'fail', detail: `The engine does not serve ${missingCore.length} of the studio's core node classes: ${missingCore.map((item) => item.className).join(', ')}.`, recommendation: preflightRefusal(missingCore) ?? undefined }
+        : { id: 'core-nodes', label: 'Core render nodes', status: 'ok', detail: `All ${CORE_RENDER_CLASSES.length} core render classes served (H3 video natives, the sampler ladder, the music3 audio natives).` })
     } catch (error) {
       checks.push({ id: 'comfy', label: 'ComfyUI engine', status: 'fail', detail: error instanceof Error ? error.message : String(error), recommendation: 'Start ComfyUI and confirm the server URL in Settings; engine-dependent checks were skipped.' })
     }
@@ -2952,11 +3004,15 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
         // idempotent (a start while starting/running reports already: true
         // and NEVER double-spawns — the port is probed before any spawn).
         if (url.pathname === '/api/lan/engine/status' && request.method === 'GET') {
-          // Security hardening 1: the log tail is scrubbed AT THIS BOUNDARY —
-          // the manager's ring (and the on-disk log) keep full diagnostic
-          // text for the LOCAL user, while what crosses the LAN answers the
-          // PII-scrub doctrine (failure path/reason, never prompt semantics;
-          // engine tracebacks can echo input values).
+          // (R-30, audit C F8) Per-mode shapes: managed answers the runtime
+          // snapshot (log tail scrubbed at this boundary — the LAN answer
+          // follows the PII-scrub doctrine); external answers the honest
+          // external readout — `state:'stopped'` and a log tail are
+          // managed-runtime concepts that never existed for a foreign
+          // instance, and the shape must not say otherwise.
+          if (settings.engine.mode !== 'managed') {
+            return sendJson(response, 200, await externalEngineStatus(settings))
+          }
           const status = await runtime.status()
           return sendJson(response, 200, { ...status, logTail: status.logTail.map(sanitizeEngineLogLine) })
         }

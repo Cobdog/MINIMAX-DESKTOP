@@ -47,6 +47,10 @@ const assert = require('node:assert/strict')
 const { createHash } = require('node:crypto')
 const Database = require('better-sqlite3')
 const { makePortAllocator } = require('./lib/ports.cjs')
+// Scratch-home ledger (Wave 4 test hygiene): every mkdtemp registers;
+// afterAll tears them all down — per-run homes never leak again.
+const { makeScratchDir, removeAllScratchDirs } = require('./lib/scratch.cjs')
+afterAll(() => { void removeAllScratchDirs() })
 
 const { migrations, migrateDatabase } = require(path.join(REPO, 'dist-server/server/db.js'))
 const { packZip, unpackZip, MAX_ZIP_ENTRIES, MAX_ZIP_ENTRY_BYTES } = require(path.join(REPO, 'dist-server/server/documentArchive.js'))
@@ -57,7 +61,7 @@ const sha256 = (data) => createHash('sha256').update(data).digest('hex')
 const sha256File = (file) => sha256(fs.readFileSync(file))
 
 function makeHome(label) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `minimax-documents-${label}-`))
+  return makeScratchDir(path.join(os.tmpdir(), `minimax-documents-${label}-`))
 }
 
 /** Every server booted this run — the SUCCESS path and every FAILURE path

@@ -3,7 +3,7 @@
  *  state `useStudioSession` held as React state. The hook keeps its boot-load
  *  and telemetry effects; only where the values live changed. */
 import { create } from 'zustand'
-import type { AppSettings, ComfyStatus, GpuTelemetry, LlmModelsResult, ManagedEngineStatus, ModelFile, OllamaModel } from '../types'
+import type { AppSettings, ComfyStatus, ExternalEngineFacts, GpuTelemetry, LlmModelsResult, ManagedEngineStatus, ModelFile, OllamaModel } from '../types'
 import type { ObjectInfo } from '../lib/comfyInfo'
 
 export type SessionState = {
@@ -21,6 +21,10 @@ export type SessionState = {
   /** Self-managed engine runtime snapshot — null unless managed mode is
    *  active (external mode never polls, so it stays null there). */
   engineRuntime: ManagedEngineStatus | null
+  /** (R-31, audit C F9) The honest external readout (R-30's per-mode status
+   *  route): latency, version, queue depth from the engine itself — polled
+   *  only while external mode is active; null otherwise. */
+  externalEngine: ExternalEngineFacts | null
   /** (Wave 1 R-01) The engine-watch bookkeeping the re-check loop writes:
    *  lostAt/recoveredAt timestamp the connectivity TRANSITIONS (consumers
    *  toast + fail active jobs honestly), infoEpoch counts successful
@@ -36,6 +40,7 @@ export type SessionState = {
   setOllamaModels(ollamaModels: OllamaModel[]): void
   setLlm(llm: LlmModelsResult | null): void
   setEngineRuntime(engineRuntime: ManagedEngineStatus | null): void
+  setExternalEngine(externalEngine: ExternalEngineFacts | null): void
   markEngineLost(at: number): void
   markEngineRecovered(at: number): void
   bumpInfoEpoch(): void
@@ -52,6 +57,7 @@ export const useSessionStore = create<SessionState>()((set) => ({
   ollamaModels: [],
   llm: null,
   engineRuntime: null,
+  externalEngine: null,
   engineWatch: { lostAt: null, recoveredAt: null, infoEpoch: 0 },
   setSettings: (settings) => set({ settings }),
   setModels: (models) => set({ models }),
@@ -63,6 +69,7 @@ export const useSessionStore = create<SessionState>()((set) => ({
   setOllamaModels: (ollamaModels) => set({ ollamaModels }),
   setLlm: (llm) => set({ llm }),
   setEngineRuntime: (engineRuntime) => set({ engineRuntime }),
+  setExternalEngine: (externalEngine) => set({ externalEngine }),
   markEngineLost: (at) => set((state) => ({ engineWatch: { ...state.engineWatch, lostAt: at, recoveredAt: null } })),
   markEngineRecovered: (at) => set((state) => ({ engineWatch: { ...state.engineWatch, lostAt: null, recoveredAt: at } })),
   bumpInfoEpoch: () => set((state) => ({ engineWatch: { ...state.engineWatch, infoEpoch: state.engineWatch.infoEpoch + 1 } })),

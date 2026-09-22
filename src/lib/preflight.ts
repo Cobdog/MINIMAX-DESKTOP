@@ -49,6 +49,43 @@ export const STOCK_GRAPH_CLASSES: readonly string[] = [
 
 const STOCK_SET: ReadonlySet<string> = new Set(STOCK_GRAPH_CLASSES)
 
+/** The studio's CORE render classes (R-29, audit C F7) — the compact set a
+ * healthy engine must serve for the canonical render paths to work AT ALL:
+ * the H3 video natives (stock since ComfyUI's H3 release), the advanced
+ * sampler ladder they run on, and the music3 audio natives. An instance
+ * missing these is older than the studio's graphs — it passes file-based
+ * checks and fails only at render. Loaders and ancient stock are deliberately
+ * NOT here: the check stays a tight signal, not a stock-class census. The
+ * family tag scopes the check (the doctor asks for everything; the H3 stack
+ * report asks only for the h3-video family — music3 readiness is not the H3
+ * stack's verdict). */
+export const CORE_RENDER_CLASSES: readonly { className: string; family: 'h3-video' | 'audio' }[] = [
+  { className: 'MiniMaxH3ImageToVideo', family: 'h3-video' },
+  { className: 'MiniMaxH3ReferenceToVideo', family: 'h3-video' },
+  { className: 'KSamplerSelect', family: 'h3-video' },
+  { className: 'SamplerCustomAdvanced', family: 'h3-video' },
+  { className: 'EmptyMiniMaxMusic3LatentAudio', family: 'audio' },
+  { className: 'MiniMaxMusic3TextEncode', family: 'audio' },
+]
+
+/** Which core render classes one object_info snapshot does not serve, in the
+ * same action-mapped shape as the submit-time preflight (stock classes get
+ * the update-ComfyUI advice through preflightRefusal). Pass a family to
+ * scope the check; undefined asks for every core class. An ABSENT or EMPTY
+ * snapshot means "no registry data" — the check stays silent (the connection
+ * rung owns that refusal), exactly like preflightGraph. */
+export function missingCoreNodeClasses(info: ObjectInfo | Record<string, unknown> | undefined, family?: 'h3-video' | 'audio'): MissingNodeClass[] {
+  if (!info || typeof info !== 'object' || Object.keys(info).length === 0) return []
+  const missing: MissingNodeClass[] = []
+  for (const entry of CORE_RENDER_CLASSES) {
+    if (family && entry.family !== family) continue
+    if (info[entry.className] !== undefined) continue
+    const packId = CLASS_TO_PACK.get(entry.className)
+    missing.push({ className: entry.className, ...(packId ? { packId } : {}), stock: STOCK_SET.has(entry.className) })
+  }
+  return missing
+}
+
 /** Class → pack row (any-match is the pack board's own detection rule). */
 const CLASS_TO_PACK: ReadonlyMap<string, string> = (() => {
   const map = new Map<string, string>()

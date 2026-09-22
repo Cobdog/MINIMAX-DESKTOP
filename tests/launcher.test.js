@@ -37,7 +37,7 @@
 // and on this shared box (foreign listener squatting 5173) the suite failed
 // environmentally. This aligns those sections with the suite's own stated
 // "never assume 4178/5173 are free" discipline; no assertion changed.
-import { test, beforeAll } from 'vitest'
+import { test, beforeAll, afterAll } from 'vitest'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
@@ -52,6 +52,10 @@ const os = require('node:os')
 const path = require('node:path')
 const assert = require('node:assert/strict')
 const { makePortAllocator } = require('./lib/ports.cjs')
+// Scratch-home ledger (Wave 4 test hygiene): every mkdtemp registers;
+// afterAll tears them all down — per-run homes never leak again.
+const { makeScratchDir, removeAllScratchDirs } = require('./lib/scratch.cjs')
+afterAll(() => { void removeAllScratchDirs() })
 
 const REPO = path.resolve(__dirname, '..')
 const START_SH = path.join(REPO, 'start.sh')
@@ -100,7 +104,7 @@ function run(args, options = {}) {
 }
 
 function scratch() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-launcher-'))
+  return makeScratchDir(path.join(os.tmpdir(), 'minimax-launcher-'))
 }
 
 const hasBuild = fs.existsSync(path.join(REPO, 'dist', 'index.html')) && fs.existsSync(path.join(REPO, 'dist-server', 'server', 'index.js'))

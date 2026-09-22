@@ -35,20 +35,32 @@ like runtime's NODE_TLS_REJECT_UNAUTHORIZED stay contained). `vitest.config.ts`
 pins the shape: forks pool, maxForks 8 (the shared dev box is polite; CI
 runners use their natural core count), 20-minute test ceiling.
 
-## Local-only e2e flakes from shared-home accumulation (learned 2026-09-18, fh94g76)
+## Local-only e2e flakes from shared-home accumulation (learned 2026-09-18, fh94g76; FIXED Wave 4, n3s86li)
 
-The e2e datasets tests are NOT idempotent against their own accumulation in
-the shared `test-home`: every run of the caption-editor test seeds another
-`e2e-clip` layer set on the same master, and once an OLD 4:3-aspect layer
-becomes the list's `.first()`, the 4:3 chip is already-active (disabled)
-and the click times out. Reproduces on `main`; passes on CI (fresh homes). If
-`datasets.spec.ts` fails locally on an aspect-chip click, clean the
-synthetic fixtures through the app's own API — boot a scratch server on
-`test-home`, `POST /api/lan/datasets/sources/trash` for each `e2e-clip` /
-`vision-clip` source, then `POST /api/lan/datasets/trash/empty` — and
-re-run. Never delete files by hand (the deletion policy). The same class of
-problem applies to ANY e2e test that matches `.first()` over accumulating
-state: suspect the shared home before the diff.
+The e2e datasets tests were NOT idempotent against their own accumulation in
+the shared `test-home`: the seed clips are byte-DETERMINISTIC (ffmpeg
+testsrc2), so every run's ingest deduped onto the SAME source row and its
+layers accumulated on one master, until an OLD 4:3-aspect layer became the
+list's `.first()` — the 4:3 chip read already-active (disabled) and the
+click timed out. Reproduced on `main`; CI stayed green (fresh homes).
+**Wave 4 fix:** `datasets.spec.ts` now runs a file-level `beforeAll` that
+cleans the seeded `e2e-clip`/`e2e-still` sources through the app's OWN API
+(`POST /api/lan/datasets/sources/trash` per source, then
+`POST /api/lan/datasets/trash/empty`) before any test — every run starts
+from a clean dataset slate, never a hand deletion. The same class of problem
+applies to ANY e2e test that matches `.first()` over accumulating state:
+suspect the shared home before the diff, and give the spec its own API-clean
+`beforeAll` the same way.
+
+## Scratch homes tear down (Wave 4, n3s86li — the 1,201-home leak)
+
+Per-run scratch dirs (`tests/lib/scratch.cjs` ledger + each suite's
+`afterAll(removeAllScratchDirs)`) never accumulate again: the fetcher suite
+alone leaked ~280 GB of real-sized fetch buffers across 1,201
+`minimax-fetch-home-*` dirs because per-run homes were never removed. Any
+new suite or e2e spec that creates temp dirs uses `makeScratchDir(...)` from
+`tests/lib/scratch.cjs` and registers the same teardown — a clean-slate run
+(TMPDIR=/home/agent/tmp-gpu) must leave ZERO `minimax-`/`mm-` strays.
 
 ## The gate
 

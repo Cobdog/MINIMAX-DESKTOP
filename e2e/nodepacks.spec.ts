@@ -4,6 +4,11 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+// Scratch-dir ledger (Wave 4 test hygiene): every per-run dir registers and
+// the file-level afterAll tears them down — per-run scratch never accumulates.
+import { makeScratchDir, removeAllScratchDirs } from '../tests/lib/scratch.cjs'
+
+test.afterAll(() => { void removeAllScratchDirs() })
 
 // Node-pack status board (mjhlt3k): the version-aware badge matrix, the
 // managed-instance notices, the Refresh button, and the AC-1 path-prompt
@@ -62,7 +67,7 @@ function craftGitPackFixture(dir: string): string {
 test('node-pack status board — badges, versions, managed notices, refresh, no path prompts', async ({ page }) => {
   const problems = await trackErrors(page)
   const original = await originalSettings(page)
-  const externalDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-nodepacks-'))
+  const externalDir = makeScratchDir(path.join(os.tmpdir(), 'mm-nodepacks-'))
   const engine = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://engine.local')
     if (url.pathname === '/system_stats') {

@@ -26,6 +26,14 @@ export const NO_OUTPUT_POLL_CAP = 30
  *  tick. Guards against a dead ComfyUI leaving jobs "running" forever. */
 export const RUNNING_DEADLINE_MS = 60 * 60 * 1000
 
+/** (R-26, audit B P2-2) Consecutive poll failures (the history fetch itself
+ *  cannot reach the engine) that fail a job honestly "engine unreachable" —
+ *  seconds-to-minutes at the 1 s poll cadence, far inside the wall-clock
+ *  deadline above, which stays as the independent backstop. A single
+ *  successful observation resets the streak, so transient blips during a
+ *  healthy render never fail live work. */
+export const POLL_FAILURE_STREAK_LIMIT = 15
+
 const TERMINAL_STATUSES: ReadonlySet<GenerationJob['status']> = new Set(['completed', 'failed', 'cancelled'])
 
 export function isTerminalStatus(status: GenerationJob['status']): boolean {
@@ -87,28 +95,49 @@ export function reduceJobPoll(job: GenerationJob, observation: PollObservation, 
   switch (observation.kind) {
     case 'executionError':
       return {
-        job: { ...job, status: 'failed', error: executionErrorMessage(observation) },
+        job: { ...job, status: 'failed', error: executionErrorMessage(observation), pollFailureStreak: undefined },
         transitionedTo: 'failed',
       }
     case 'completed':
       return {
-        job: { ...job, status: 'completed', progress: 100, outputUrl: observation.outputUrl, localOutputPath: observation.localOutputPath ?? job.localOutputPath },
+        job: { ...job, status: 'completed', progress: 100, outputUrl: observation.outputUrl, localOutputPath: observation.localOutputPath ?? job.localOutputPath, pollFailureStreak: undefined },
         transitionedTo: 'completed',
       }
     case 'completedNoLocalOutput': {
       const noOutputPolls = (job.noOutputPolls ?? 0) + 1
       if (noOutputPolls >= NO_OUTPUT_POLL_CAP) {
         return {
-          job: { ...job, status: 'failed', error: 'The render finished, but its output file never appeared in the output directory.' },
+          job: { ...job, status: 'failed', error: 'The render finished, but its output file never appeared in the output directory.', pollFailureStreak: undefined },
           transitionedTo: 'failed',
         }
       }
-      return { job: { ...job, status: 'running', progress: 98, noOutputPolls } }
+      return { job: { ...job, status: 'running', progress: 98, noOutputPolls, pollFailureStreak: undefined } }
     }
-    case 'incomplete':
-      // Same reference when nothing changes, so idle poll ticks do not churn state.
-      return job.status === 'running' ? { job } : { job: { ...job, status: 'running' } }
-    case 'pollFailed':
-      return { job }
+    case 'incomplete': {
+      // Same reference when nothing changes, so idle poll ticks do not churn
+      // state — including when a poll-failure streak had accumulated: this
+      // successful observation is the reset.
+      if (job.status === 'running') return job.pollFailureStreak ? { job: { ...job, pollFailureStreak: undefined } } : { job }
+      return { job: { ...job, status: 'running', pollFailureStreak: undefined } }
+    }
+    case 'pollFailed': {
+      // (R-26) A poll that cannot even reach the engine is an observation:
+      // the streak accumulates on the job and, at the limit, fails it
+      // honestly long before the wall-clock deadline — never a 60-minute
+      // "running" spin against a dead engine.
+      const pollFailureStreak = (job.pollFailureStreak ?? 0) + 1
+      if (pollFailureStreak >= POLL_FAILURE_STREAK_LIMIT) {
+        return {
+          job: {
+            ...job,
+            status: 'failed',
+            error: `The generation engine has been unreachable for ${pollFailureStreak} consecutive checks (~${pollFailureStreak} s at the 1 s poll cadence) — the render did not complete. Verify ComfyUI is running, then re-run this chain when the engine is back.`,
+            pollFailureStreak: undefined,
+          },
+          transitionedTo: 'failed',
+        }
+      }
+      return { job: { ...job, pollFailureStreak } }
+    }
   }
 }
