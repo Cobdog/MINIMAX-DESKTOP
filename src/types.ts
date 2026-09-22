@@ -230,7 +230,42 @@ export type NodePackStatus = NodePackDefinition & {
    *  user-fetch pack today) — the row's install affordance is then Fetch…,
    *  and the local-source input never renders (decorated at the route). */
   hasNetworkSource?: boolean
+  /** (0pktw5h) Manager-first routing, decorated at the nodes route: true
+   *  when the honest-absent probe found ComfyUI-Manager ACTIVE and this
+   *  pack is eligible (user-fetch + network entry + a GitHub identity) —
+   *  the row's Install button then queues through Manager first. */
+  managerInstallable?: boolean
+  /** (0pktw5h) Whether the fetch consent for this pack is recorded (the
+   *  library flow) — a Manager install performs the same network fetch and
+   *  requires it; the button's refusal names the library when absent. */
+  fetchConsented?: boolean
   note?: string
+}
+
+/** (0pktw5h, directive ffcff765) ComfyUI-Manager availability on the
+ *  connected engine — the honest-absent probe's answer for the pack board.
+ *  Presence is the feature flag the pip Manager ADDS
+ *  (extension.manager.supports_csrf_post, ≥4.2.1) — never the bare
+ *  extension.manager key, which core ComfyUI sets unconditionally. */
+export type ManagerAvailability = {
+  present: boolean
+  /** GET /v2/manager/version's plain-text answer, when present. */
+  version: string | null
+  /** Always set: the reason the verdict is what it is (the flag is absent,
+   *  or the engine could not be asked). */
+  reason: string
+  /** Pack names the Manager itself reports installed, when present — a
+   *  verify-side cross-check; detection of record stays object_info. */
+  installedPacks?: string[]
+}
+
+/** (0pktw5h) One install/uninstall action's answer: which path served it
+ *  ('manager' = ComfyUI-Manager's v2 task queue; 'studio' = the vendored/
+ *  checkout/fetcher path) — never a silent fallback. */
+export type NodePackActionResult = {
+  pack: NodePackStatus
+  via?: 'manager' | 'studio'
+  notes?: string[]
 }
 
 // ---- Local-first fetcher (task hgjbea2) --------------------------------------
@@ -802,9 +837,9 @@ export type DesktopApi = {
   getEngineStatus(): Promise<ManagedEngineStatus | ExternalEngineStatus>
   startManagedEngine(): Promise<ManagedEngineStatus & { already?: boolean }>
   stopManagedEngine(): Promise<ManagedEngineStatus>
-  listEngineNodePacks(options?: { refresh?: boolean }): Promise<{ packs: NodePackStatus[] }>
-  installEngineNodePack(id: string, sourceDirectory?: string): Promise<NodePackStatus>
-  uninstallEngineNodePack(id: string): Promise<NodePackStatus>
+  listEngineNodePacks(options?: { refresh?: boolean }): Promise<{ packs: NodePackStatus[]; manager: ManagerAvailability }>
+  installEngineNodePack(id: string, sourceDirectory?: string): Promise<NodePackActionResult>
+  uninstallEngineNodePack(id: string): Promise<NodePackActionResult>
   revertEnginePatch(id: string): Promise<{ reverted: boolean; patch: string }>
   listFetchCatalog(): Promise<{ entries: FetchEntryStatus[] }>
   setFetchConsent(id: string, consented: boolean): Promise<{ entries: FetchEntryStatus[] }>

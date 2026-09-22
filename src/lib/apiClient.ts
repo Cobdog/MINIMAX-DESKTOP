@@ -1,4 +1,4 @@
-import type { AppSettings, DesktopApi, ExternalEngineStatus, FetchEntryStatus, LlmModelsResult, ManagedEngineStatus, MediaKind, ModelFile, NodePackStatus, PromptLibraryItem } from '../types'
+import type { AppSettings, DesktopApi, ExternalEngineStatus, FetchEntryStatus, LlmModelsResult, ManagedEngineStatus, ManagerAvailability, MediaKind, ModelFile, NodePackActionResult, NodePackStatus, PromptLibraryItem } from '../types'
 
 /**
  * HTTP implementation of the DesktopApi bridge, used when the renderer runs in
@@ -273,15 +273,17 @@ export function createWebApiClient(): DesktopApi {
       return postJson<ManagedEngineStatus>('/api/lan/engine/stop', {})
     },
     async listEngineNodePacks(options?: { refresh?: boolean }) {
-      return apiFetch<{ packs: NodePackStatus[] }>(options?.refresh ? '/api/lan/engine/nodes?refresh=1' : '/api/lan/engine/nodes')
+      return apiFetch<{ packs: NodePackStatus[]; manager: ManagerAvailability }>(options?.refresh ? '/api/lan/engine/nodes?refresh=1' : '/api/lan/engine/nodes')
     },
     async installEngineNodePack(id: string, sourceDirectory?: string) {
-      const body = await postJson<{ pack: NodePackStatus; notes?: string[] }>('/api/lan/engine/nodes/install', { id, sourceDirectory })
-      return body.pack
+      // (0pktw5h) The full action answer rides back — `via` names the path
+      // that served the install (Manager-first vs the studio fallback) so
+      // the board can state it; dropping it here was the silent-fallback
+      // shape this task exists to remove.
+      return postJson<NodePackActionResult>('/api/lan/engine/nodes/install', { id, sourceDirectory })
     },
     async uninstallEngineNodePack(id: string) {
-      const body = await postJson<{ pack: NodePackStatus }>('/api/lan/engine/nodes/uninstall', { id })
-      return body.pack
+      return postJson<NodePackActionResult>('/api/lan/engine/nodes/uninstall', { id })
     },
     async revertEnginePatch(id: string) {
       return postJson<{ reverted: boolean; patch: string }>('/api/lan/engine/patch/revert', { id })

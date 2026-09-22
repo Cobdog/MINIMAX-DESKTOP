@@ -4,8 +4,9 @@
 import { useEffect, useState } from 'react'
 import { GitBranch, Wand2 } from 'lucide-react'
 import { Activity, AlertCircle, Check, ChevronDown, Cpu, Eye, Folder, FolderOpen, Gauge, HardDrive, Info, Layers, LoaderCircle, Power, RefreshCw, Scale, ServerCog, SlidersHorizontal, Sparkles, Stethoscope, Unplug } from 'lucide-react'
-import type { AppSettings, ComfyStatus, LlmModelsResult, ModelFile, ModelKind, NodePackStatus, OllamaModel, UpscaleMode } from '../types'
+import type { AppSettings, ComfyStatus, LlmModelsResult, ManagerAvailability, ModelFile, ModelKind, NodePackActionResult, NodePackStatus, OllamaModel, UpscaleMode } from '../types'
 import { choices, type ObjectInfo } from '../lib/comfyInfo'
+import { subscribe } from '../lib/useRealtime'
 import { inferredOverrideSlotFile, MODEL_FAMILIES, overridePickOutcome, SLOT_LABELS, type ModelOverrideSlotName } from '../lib/modelOverrides'
 import { detectKrea2EditFamilies, detectOptimizations, KREA2_RECIPE_PINS } from '../lib/graph'
 import type { h3StackReport } from '../lib/h3Stack'
@@ -174,12 +175,18 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
   const activePatchHooks = (activeProfile?.hooks ?? []).filter((hook) => hook.kind === 'patch')
   const patchConsent = (patchId: string, consented: boolean) => updateEngine({ patches: { ...settings.engine.patches, [patchId]: { consented, at: consented ? Date.now() : undefined } } })
   const [nodePacks, setNodePacks] = useState<NodePackStatus[] | null>(null)
+  const [managerAvailability, setManagerAvailability] = useState<ManagerAvailability | null>(null)
   const [nodePackBusy, setNodePackBusy] = useState<string | null>(null)
   const [nodePackError, setNodePackError] = useState<string | null>(null)
+  const [nodePackActionNote, setNodePackActionNote] = useState<string | null>(null)
   const [nodePackRefreshing, setNodePackRefreshing] = useState(false)
   const [nodePackSource, setNodePackSource] = useState<Record<string, string>>({})
   const refreshNodePacks = async (options?: { refresh?: boolean }) => {
-    try { setNodePacks((await window.minimax.listEngineNodePacks(options)).packs) } catch { /* listed on next action; errors surface there */ }
+    try {
+      const listed = await window.minimax.listEngineNodePacks(options)
+      setNodePacks(listed.packs)
+      setManagerAvailability(listed.manager)
+    } catch { /* listed on next action; errors surface there */ }
   }
   /** The board's manual Refresh (task mjhlt3k, AC-2): the pack rows re-GET
    *  with the probe cache dropped (fresh targeted object_info asks — Wave 2
@@ -216,11 +223,35 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
     window.addEventListener(PACKS_CHANGED_EVENT, refresh)
     return () => window.removeEventListener(PACKS_CHANGED_EVENT, refresh)
   }, [])
-  const runNodePackAction = async (id: string, action: () => Promise<NodePackStatus>) => {
+  // (0pktw5h) Manager queue events ride the fabric's system channel
+  // ({type:'cm-queue'} — cm-queue-status / cm-task-started / cm-task-completed
+  // from the engine's socket). A completed task or a drained queue means the
+  // board's folder/instance chips may have changed: re-resolve (debounced —
+  // the Manager sends both per-task and broadcast events around one drain).
+  useEffect(() => {
+    let timer: number | null = null
+    const unsubscribe = subscribe('system', (envelope) => {
+      if (envelope.type !== 'cm-queue') return
+      if (timer !== null) window.clearTimeout(timer)
+      timer = window.setTimeout(() => { timer = null; void refreshNodePacks() }, 400)
+    })
+    return () => {
+      if (timer !== null) window.clearTimeout(timer)
+      unsubscribe()
+    }
+  }, [])
+  const runNodePackAction = async (id: string, action: () => Promise<NodePackActionResult>) => {
     setNodePackBusy(id)
     setNodePackError(null)
+    setNodePackActionNote(null)
     try {
-      await action()
+      const result = await action()
+      // The action's answer NAMES the path that served it (via + notes) —
+      // the board states it instead of silently moving on.
+      if (result?.notes?.length) {
+        const via = result.via === 'manager' ? 'via ComfyUI-Manager' : result.via === 'studio' ? 'via the studio path' : ''
+        setNodePackActionNote(`${via ? `${via}: ` : ''}${result.notes.join(' ')}`)
+      }
       await refreshNodePacks()
     } catch (error) {
       setNodePackError(error instanceof Error ? error.message : String(error))
@@ -340,6 +371,15 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
         <div><GitBranch size={19} /><span><strong>Node packs</strong><small>Custom nodes the studio can place on this engine — grouped by the feature they serve, with each row's install state and version verdict beside it. How installs work is one click below.</small></span></div>
         <button type="button" className="secondary-button" data-node-pack-refresh onClick={() => void refreshPackBoard()} disabled={nodePackRefreshing || scanning} title="Re-pull the instance's model inventory and node list, re-scan the custom-nodes folder, and re-resolve every row">{nodePackRefreshing || scanning ? <LoaderCircle size={16} className="spin" /> : <RefreshCw size={16} />}Refresh</button>
       </div>
+      {/* (0pktw5h) The honest-absent probe's answer, stated on the board:
+           Manager-present rows install through Manager FIRST; when it is
+           absent the reason is shown and the studio's own paths serve —
+           never a silent fallback. */}
+      {managerAvailability && <p className="settings-note managed-engine-note" role="status" data-manager-status={managerAvailability.present ? 'present' : 'absent'}>
+        {managerAvailability.present
+          ? <><Check size={13} /> ComfyUI-Manager{managerAvailability.version ? ` ${managerAvailability.version}` : ''} is active on the connected engine — eligible rows install through it first, at the repository's current HEAD (the consent-gated Fetch… stays the pin-exact path; the version chip verifies what landed after a restart).</>
+          : <><AlertCircle size={13} /> ComfyUI-Manager is not serving this engine — {managerAvailability.reason} Installs use the studio's own paths: the vendored payload, a consented Fetch…, or a local copy.</>}
+      </p>}
       <div className="node-pack-list">
         {groupNodePacks(nodePacks ?? []).map((group) => (
           <div className="node-pack-group" key={group.label} data-node-pack-group={group.label}>
@@ -350,8 +390,9 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
           // pack with no network/payload source (no fetch-catalog entry —
           // empty in today's registry) that has a usable target and no
           // folder yet. Everything else installs without a path: payload
-          // rows place directly, network rows go through Fetch… — the
-          // VDN/turbo precedent.
+          // rows place directly, network rows go through Fetch… (pin-exact)
+          // or — when the Manager probe answers present — Install via
+          // ComfyUI-Manager (HEAD, consented) — the VDN/turbo precedent.
           const needsLocalSource = pack.installMode === 'user-fetch' && !pack.hasNetworkSource && pack.targetKind !== 'none' && pack.folderState === 'missing' && !pack.installed
           const versionText = nodePackVersionText(pack)
           return (
@@ -365,8 +406,17 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
             <div className="node-pack-actions">
               {needsLocalSource && <input className="node-pack-source" placeholder="local repo directory (absolute)" value={nodePackSource[pack.id] ?? ''} onChange={(event) => setNodePackSource({ ...nodePackSource, [pack.id]: event.target.value })} aria-label={`Local source directory for ${pack.name}`} />}
               {pack.installMode === 'user-fetch' && pack.hasNetworkSource && pack.targetKind !== 'none' && pack.folderState !== 'foreign' && <button type="button" className="secondary-button" title={pack.versionRelation === 'differs' ? `Refetch the pinned revision of ${pack.name} (consent-gated) — the installed copy differs from the pin` : `Fetch the pinned revision of ${pack.name} (consent-gated)`} onClick={() => onOpenLibrary([`pack:${pack.id}`])} data-node-pack-fetch={pack.id}>Fetch…</button>}
-              {(pack.installMode !== 'user-fetch' || needsLocalSource) && <button type="button" className="secondary-button" title={pack.folderState === 'foreign' ? 'Already present — placed outside the studio; the studio never replaces or deletes it' : undefined} disabled={nodePackBusy === pack.id || pack.availability === 'unavailable' || pack.folderState === 'foreign' || (needsLocalSource && !nodePackSource[pack.id]?.trim())} onClick={() => void runNodePackAction(pack.id, () => window.minimax.installEngineNodePack(pack.id, nodePackSource[pack.id]?.trim() || undefined))}>{nodePackBusy === pack.id ? <LoaderCircle size={14} className="spin" /> : null}Install</button>}
-              <button type="button" className="secondary-button" disabled={!pack.installed || nodePackBusy === pack.id} onClick={() => void runNodePackAction(pack.id, () => window.minimax.uninstallEngineNodePack(pack.id))}>Uninstall</button>
+              {(pack.installMode !== 'user-fetch' || needsLocalSource || pack.managerInstallable) && <button type="button" className="secondary-button" data-node-pack-install={pack.managerInstallable ? 'manager' : 'studio'} title={pack.managerInstallable
+                ? (pack.fetchConsented
+                  ? `Install through the engine's ComfyUI-Manager (first-choice): the repository's current HEAD — Manager's v2 API cannot target the studio's pinned revision. Fetch… stays the pin-exact path.`
+                  : `Install through ComfyUI-Manager needs the fetch consent first — open Fetch… to review the ${pack.licenseSpdx} terms and consent, then this button installs via Manager.`)
+                : pack.folderState === 'foreign' ? 'Already present — placed outside the studio; the studio never replaces or deletes it' : undefined} disabled={nodePackBusy === pack.id || pack.availability === 'unavailable' || pack.folderState === 'foreign' || (needsLocalSource && !nodePackSource[pack.id]?.trim())} onClick={() => void runNodePackAction(pack.id, () => window.minimax.installEngineNodePack(pack.id, nodePackSource[pack.id]?.trim() || undefined))}>{nodePackBusy === pack.id ? <LoaderCircle size={14} className="spin" /> : null}Install</button>}
+              {/* Uninstall: a studio marker install is deleted by the studio;
+                  a FOREIGN folder (Manager- or hand-placed) is only ever
+                  uninstalled by asking the Manager — the button appears when
+                  the probe says Manager is active, and the studio's own
+                  never-delete-what-you-did-not-place rule holds either way. */}
+              <button type="button" className="secondary-button" disabled={(!pack.installed && !(pack.folderState === 'foreign' && managerAvailability?.present)) || nodePackBusy === pack.id} title={pack.installed ? undefined : pack.folderState === 'foreign' && managerAvailability?.present ? 'Ask the engine\'s ComfyUI-Manager to uninstall its own pack (the studio never deletes a folder it did not place)' : undefined} onClick={() => void runNodePackAction(pack.id, () => window.minimax.uninstallEngineNodePack(pack.id))}>Uninstall</button>
             </div>
           </div>
           )
@@ -376,14 +426,15 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
         {nodePacks === null && <p className="settings-note">Loading node-pack registry…</p>}
       </div>
       {nodePackError && <div className="llm-test-result fail" role="status"><AlertCircle size={14} /><span>{nodePackError}</span></div>}
+      {nodePackActionNote && !nodePackError && <div className="llm-test-result ok" role="status" data-node-pack-action-note><Check size={14} /><span>{nodePackActionNote}</span></div>}
       {/* (R-33, audit A-m1) The install policy lives behind one collapsed
           summary instead of two walls of small print in the scroll — the
           plan's "how installs work" popover, on the section's own
           details-subsection idiom. */}
       <details className="settings-subsection" data-node-pack-policy>
         <summary><strong>How node-pack installs work</strong><small>targets, pins, licenses, what uninstall touches</small></summary>
-        <p className="settings-note">Installs land in the engine's custom-node folder — the managed checkout's custom_nodes/, or the external custom nodes folder above (the target is detected from the mode; nothing asks you to point at one). Packs arrive vendored at a pinned revision (license-verified), fetched with your consent, or installed from the studio's own payload. Weights are linked, never copied. The status badge is version-aware and LIVE: it reads the folder's own markers (studio marker, git checkout, Comfy-Registry pyproject) plus the connected instance's node list.</p>
-        <p className="settings-note">Uninstall deletes only folders the studio placed (a marker install) — never a pack that was already there: pre-existing folders in the target are reported as "present — not studio-managed" (or "managed by ComfyUI" when the folder carries a git checkout or a Comfy-Registry pyproject), refused for install-over, and never deleted. A revision bump refetches at the pin. "Restart to activate" means the files are in place but the running instance has not loaded them yet. Packs without a license are never vendored — they install only through the consent-gated fetcher in the library.</p>
+        <p className="settings-note">Installs land in the engine's custom-node folder — the managed checkout's custom_nodes/, or the external custom nodes folder above (the target is detected from the mode; nothing asks you to point at one) — or, for eligible rows, through the engine's own <strong>ComfyUI-Manager</strong> when its probe answers present: Manager-first is the preferred path (directive ffcff765), it performs the install inside the engine at the repository's current HEAD, and it needs the same fetch consent the library records. Manager cannot honor the studio's pinned revision through its v2 API — the pin-exact install is the consent-gated Fetch…, and the version chip verifies whatever actually landed. Packs otherwise arrive vendored at a pinned revision (license-verified), fetched with your consent, or installed from the studio's own payload. Weights are linked, never copied. The status badge is version-aware and LIVE: it reads the folder's own markers (studio marker, git checkout, Comfy-Registry pyproject) plus the connected instance's node list.</p>
+        <p className="settings-note">Uninstall deletes only folders the studio placed (a marker install) — never a pack that was already there: pre-existing folders in the target are reported as "present — not studio-managed" (or "managed by ComfyUI" when the folder carries a git checkout or a Comfy-Registry pyproject), refused for install-over, and never deleted by the studio. When ComfyUI-Manager is active, its Uninstall asks <em>the Manager</em> to remove its own pack instead — the studio's hands stay off either way. A revision bump refetches at the pin. "Restart to activate" means the files are in place but the running instance has not loaded them yet. Packs without a license are never vendored — they install only through the consent-gated fetcher in the library.</p>
       </details>
     </section>
     {/* R-15 (M2's fix): the fetchable-items STORE has its own surface now —

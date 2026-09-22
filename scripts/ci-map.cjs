@@ -69,6 +69,7 @@ const SUITES = {
   instance: { build: 'full', windows: true, python: false, ffmpeg: false },
   launcher: { build: 'full', windows: false, python: false, ffmpeg: false },
   llm: { build: 'server', windows: false, python: false, ffmpeg: false },
+  'manager-install': { build: 'full', windows: false, python: false, ffmpeg: false },
   poserig: { build: null, windows: false, python: false, ffmpeg: false },
   realtime: { build: 'server', windows: false, python: false, ffmpeg: false },
   registry: { build: null, windows: false, python: false, ffmpeg: false },
@@ -79,10 +80,10 @@ const SUITES = {
 
 /** Every suite that boots dist-server/server/index.js directly (route-level
  *  integration): the honest fan-out for the server seams. */
-const BOOTING = ['datasets', 'documents', 'fetcher', 'filmstrip', 'instance', 'llm', 'realtime', 'runtime', 'storage']
+const BOOTING = ['datasets', 'documents', 'fetcher', 'filmstrip', 'instance', 'llm', 'manager-install', 'realtime', 'runtime', 'storage']
 
 /** Every suite drawing scratch ports through tests/lib/ports.cjs. */
-const PORT_USERS = ['datasets', 'documents', 'engine-process', 'fetcher', 'filmstrip', 'instance', 'launcher', 'llm', 'realtime', 'runtime', 'storage']
+const PORT_USERS = ['datasets', 'documents', 'engine-process', 'fetcher', 'filmstrip', 'instance', 'launcher', 'llm', 'manager-install', 'realtime', 'runtime', 'storage']
 
 /** The suites that load client TS through the VM harness (scripts/lib/ts-vm.cjs). */
 const VM_SUITES = ['camera', 'canvas', 'engine-families', 'enginewatch', 'h3img', 'poserig', 'registry', 'workflows']
@@ -221,7 +222,7 @@ const RULES = [
   },
   { match: ['server/db.ts'], suites: ['datasets', 'documents', 'storage'], reason: 'the sqlite layer: migrations (documents), dataset tables (datasets), jobs/library (storage).' },
   { match: ['server/documents.ts', 'server/documentArchive.ts'], suites: ['documents'], reason: 'document store + zip archive.' },
-  { match: ['server/realtime.ts'], suites: ['realtime'], reason: 'WS realtime framing/delivery.' },
+  { match: ['server/realtime.ts'], suites: ['realtime', 'manager-install'], reason: 'WS realtime framing/delivery; the Manager cm-queue event normalizer (0pktw5h) is exercised by the manager-install suite too.' },
   { match: ['server/llm/**'], suites: ['llm'], reason: 'LLM family registry + providers.' },
   { match: ['server/datasets/**'], suites: ['datasets'], reason: 'dataset manager domain.' },
   { match: ['server/engineProcess.ts'], suites: ['engine-process', 'runtime'], reason: 'process supervision — its own suite + the runtime manager.' },
@@ -232,6 +233,7 @@ const RULES = [
   { match: ['server/fetcher.ts'], suites: ['fetcher'], reason: 'fetch transport + tar extraction.' },
   { match: ['server/instanceInventory.ts', 'server/packVersioning.ts'], suites: ['instance'], reason: 'external-instance inventory + pack versioning.' },
   { match: ['server/objectInfoProbe.ts'], suites: ['fetcher', 'instance'], reason: 'the targeted object_info presence probe (Wave 2 A-8): executes on the engine/nodes + bootstrap routes the instance suite drives; fetcher exercises the pack-board flows that consume it.' },
+  { match: ['server/managerClient.ts'], suites: ['instance', 'manager-install'], reason: 'the ComfyUI-Manager client (0pktw5h): the manager-install suite owns its arms; instance exercises the pack-board routes that consume the probe.' },
   { match: ['server/runtime.ts'], suites: ['runtime'], reason: 'managed ComfyUI runtime.' },
   {
     match: ['server/**'],

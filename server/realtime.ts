@@ -185,6 +185,67 @@ export function normalizeComfyEvent(message: unknown, activePromptId = ''): Norm
   }
 }
 
+/** Pure normalizer for ComfyUI-Manager's WS events (task 0pktw5h — the
+ *  Manager-first install path). Manager 4.x pushes its queue progress
+ *  through the engine's own socket (verified at tag 4.2.2; unchanged by the
+ *  4.3 diff — docs/devdocs/comfyui-manager-api/index.md §1):
+ *
+ *    cm-queue-status   broadcast; `{status: "all-done"}` when the queue drains
+ *    cm-task-started   per-task, targeted to the task's client_id
+ *    cm-task-completed per-task, targeted to the task's client_id
+ *
+ *  The first three become system-channel `{type:'cm-queue'}` envelopes
+ *  (the fetch-progress precedent) so the pack board can re-resolve its rows
+ *  as Manager installs land. `cm-api-try-install-customnode` — a REMOTE
+ *  install prompt (a foreign sender asking the UI to install something) —
+ *  NEVER becomes an envelope: the studio never auto-accepts remote install
+ *  requests (the capture's consent rule); it is logged for the audit trail
+ *  and answered by nothing. */
+export type NormalizedManagerEvent = {
+  systemType: 'cm-queue'
+  payload: Record<string, unknown>
+} | {
+  /** A remote install prompt: dropped for the UI, logged by the hub. */
+  remoteInstallPrompt: true
+  detail: string
+}
+
+export function normalizeManagerEvent(message: unknown): NormalizedManagerEvent | null {
+  if (!message || typeof message !== 'object') return null
+  const raw = message as { type?: unknown; data?: Record<string, unknown> }
+  const type = typeof raw.type === 'string' ? raw.type : ''
+  const data = raw.data && typeof raw.data === 'object' ? raw.data : {}
+  const uiId = typeof data.ui_id === 'string' ? data.ui_id : ''
+  switch (type) {
+    case 'cm-queue-status':
+      return { systemType: 'cm-queue', payload: { phase: 'queue-status', status: typeof data.status === 'string' ? data.status : '' } }
+    case 'cm-task-started':
+      return { systemType: 'cm-queue', payload: { phase: 'started', ui_id: uiId, kind: typeof data.kind === 'string' ? data.kind : '' } }
+    case 'cm-task-completed': {
+      const status = data.status && typeof data.status === 'object' ? data.status as Record<string, unknown> : {}
+      const messages = Array.isArray(status.messages) ? status.messages.filter((entry): entry is string => typeof entry === 'string') : []
+      return {
+        systemType: 'cm-queue',
+        payload: {
+          phase: 'completed',
+          ui_id: uiId,
+          kind: typeof data.kind === 'string' ? data.kind : '',
+          status_str: typeof status.status_str === 'string' ? status.status_str : '',
+          completed: status.completed === true,
+          messages,
+        },
+      }
+    }
+    case 'cm-api-try-install-customnode': {
+      // Log-only: never surfaced as an install affordance (consent rule).
+      const hint = typeof data.id === 'string' ? data.id : typeof data.name === 'string' ? data.name : ''
+      return { remoteInstallPrompt: true, detail: hint }
+    }
+    default:
+      return null
+  }
+}
+
 /** Bounded, backpressure-aware outbound queue for one client. Pure (testable):
  *  the sink is anything with send() + bufferedAmount — a ws socket or an SSE
  *  response wrapper. Policies:
@@ -404,6 +465,19 @@ export function createRealtimeHub(options: RealtimeHubOptions) {
     }
     const frame = normalized.previewFrame
     if (frame) pushPreviewFrame(hashJobKey(frame.promptId), frame.mime, Buffer.from(frame.base64, 'base64'))
+    // Manager queue events (0pktw5h): system-channel envelopes for the pack
+    // board's live re-resolve; remote install prompts are logged and NEVER
+    // surfaced (the consent rule — nothing install-shaped is auto-accepted).
+    if (normalized.events.length === 0) {
+      const managerEvent = normalizeManagerEvent(message)
+      if (managerEvent) {
+        if ('remoteInstallPrompt' in managerEvent) {
+          logEvent({ kind: 'manager.remote-install-prompt-refused', detail: managerEvent.detail })
+          return
+        }
+        pushChannel('system', managerEvent.systemType, managerEvent.payload)
+      }
+    }
   }
 
   function handleUpstreamBinary(buffer: Buffer) {
@@ -417,7 +491,10 @@ export function createRealtimeHub(options: RealtimeHubOptions) {
   function refreshUpstreamInterest() {
     let wanted = false
     for (const client of clients) {
-      if (client.subs.has('job') || client.subs.has('preview')) { wanted = true; break }
+      // 'system' counts since 0pktw5h: the system channel now carries
+      // upstream-derived Manager queue events (cm-queue envelopes), so a
+      // Settings-only session still needs the engine socket to hear them.
+      if (client.subs.has('job') || client.subs.has('preview') || client.subs.has('system')) { wanted = true; break }
     }
     upstream.wanted = wanted
     if (wanted) {

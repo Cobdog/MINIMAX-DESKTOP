@@ -35,9 +35,10 @@ import { EngineProcess } from './engineProcess'
 import { RuntimeManager, RuntimeConfigError } from './runtime'
 import { ENGINE_PATCH_IDS, revertEnginePatch, ENGINE_PATCHES } from './enginePatch'
 import { mergeEngineProfiles } from './engineProfiles'
-import { checkAllNodePacks, ENGINE_NODE_PACKS, findNodePack, installNodePack, isUsableCheckout, resolveNodePackTarget, resolveVendorRoot, uninstallNodePack } from './engineNodes'
+import { checkAllNodePacks, checkNodePack, ENGINE_NODE_PACKS, findNodePack, installNodePack, isUsableCheckout, nodePackFolderPresence, resolveNodePackTarget, resolveVendorRoot, uninstallNodePack } from './engineNodes'
 import { INVENTORY_MODEL_KINDS, instanceNamesForKind, inventoryFromObjectInfo, parseModelsEndpointList, registryInventoryFiles } from './instanceInventory'
 import { createObjectInfoProbe, probeClassPresence } from './objectInfoProbe'
+import { createManagerClient, managerInstallParams, managerUninstallParams, waitForManagerTask } from './managerClient'
 import { FETCH_ENTRY_IDS, findFetchEntry, networkFetchPackIds } from './fetchCatalog'
 import { FetchManager, transportForEnvironment } from './fetcher'
 import { createLlmService, type LlmService } from './llm'
@@ -195,6 +196,11 @@ async function comfyFetch(url: string, path: string, init?: RequestInit) {
  *  /object_info/{node} asks with a TTL cache, riding the comfyFetch funnel
  *  so the SSRF guard and timeouts apply to every ask. */
 const objectInfoProbe = createObjectInfoProbe((url, path) => comfyFetch(url, path))
+
+/** (0pktw5h, directive ffcff765) The ComfyUI-Manager client — the
+ *  honest-absent presence probe plus the v2 task-queue install surface,
+ *  on the same comfyFetch funnel (SSRF guard + timeouts by construction). */
+const managerClient = createManagerClient((url, path, init) => comfyFetch(url, path, init))
 
 function comfyChoices(info: Record<string, unknown>, node: string, field: string) {
   const definition = info[node] as { input?: { required?: Record<string, unknown[]> } } | undefined
@@ -3034,7 +3040,7 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
         if (url.pathname === '/api/lan/engine/stop' && request.method === 'POST') {
           return sendJson(response, 200, await runtime.stop())
         }
-        // ---- Vendored node packs (increment 2, AC zzdfklo slice) ------------
+        // ---- Node packs (increment 2 + Manager-first, 0pktw5h) ----------------
         // custom_nodes/ is ComfyUI's sanctioned extension seam: list is
         // read-only for everyone; install/uninstall act on the MODE's target
         // (the managed checkout's custom_nodes/, or the external instance's
@@ -3043,6 +3049,18 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
         // object_info node classes say whether the connected engine (managed
         // or external) actually loaded each pack — a pack copied in but not
         // yet restarted-into reports honestly instead of claiming active.
+        //
+        // MANAGER-FIRST (directive ffcff765): when the honest-absent probe
+        // says ComfyUI-Manager is ACTIVE on the connected engine, eligible
+        // packs (user-fetch + a network fetch entry + a GitHub identity)
+        // install/uninstall through Manager's v2 task queue first; the
+        // studio's own paths remain the fallback when Manager is ABSENT —
+        // never a silent fallback, every answer names the path that served
+        // it. A Manager FAILURE (probe present, queue/task or the task
+        // itself failed) is NOT fallen back from: it is reported with the
+        // Manager's own messages and the studio alternative is named — the
+        // user re-routes deliberately (the ACE-Step lesson: refused
+        // honestly, never silently rerouted).
         const { target: nodePackTarget } = resolveNodePackTarget(settings.engine)
         const noTargetError = settings.engine.mode === 'managed'
           ? 'Set a valid ComfyUI checkout (with main.py) in the managed engine settings first.'
@@ -3056,23 +3074,93 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
           // network fetch entry never needs the local-source input — Fetch…
           // is the install affordance when the folder is missing.
           const networkPacks = networkFetchPackIds()
+          if (url.searchParams.get('refresh') === '1') managerClient.refresh(settings.comfyUrl)
+          const manager = await managerClient.probe(settings.comfyUrl)
+          const managerInstalled = manager.present ? await managerClient.installedPacks(settings.comfyUrl) : []
           const packs = await checkAllNodePacks(nodePackTarget, resolveVendorRoot(), instanceStates)
-          return sendJson(response, 200, { packs: packs.map((pack) => ({ ...pack, hasNetworkSource: networkPacks.has(pack.id) })) })
+          return sendJson(response, 200, {
+            packs: packs.map((pack) => ({
+              ...pack,
+              hasNetworkSource: networkPacks.has(pack.id),
+              // (0pktw5h) Route eligibility for the UI's affordances: a
+              // Manager install needs the probe present, a network fetch
+              // entry, and a GitHub identity; the consent verdict rides
+              // along so the button's refusal names the library flow.
+              managerInstallable: manager.present && pack.installMode === 'user-fetch' && networkPacks.has(pack.id) && managerInstallParams(pack) !== null,
+              fetchConsented: settings.fetch.consents[`pack:${pack.id}`]?.consented === true,
+            })),
+            manager: { ...manager, ...(manager.present ? { installedPacks: managerInstalled } : {}) },
+          })
         }
         if (url.pathname === '/api/lan/engine/nodes/install' && request.method === 'POST') {
           const body = await readJson(request, 10_000)
           const pack = findNodePack(typeof body.id === 'string' ? body.id : '')
           if (!pack) return sendJson(response, 400, { error: 'Unknown node pack id.' })
+          const networkPacks = networkFetchPackIds()
+          const managerEligible = pack.installMode === 'user-fetch' && networkPacks.has(pack.id)
+          const manager = await managerClient.probe(settings.comfyUrl)
+          // Manager-first: only when the probe says PRESENT (the absent
+          // verdict falls back below, with the reason recorded). The
+          // Manager path needs no local install target — Manager writes
+          // into the ENGINE's own custom_nodes.
+          if (manager.present && managerEligible && managerInstallParams(pack)) {
+            // The same consent gate the fetcher enforces: a Manager install
+            // fetches the repository over the network on the user's behalf,
+            // so the license terms must have been surfaced and consented in
+            // the library first — one consent record per pack, whichever
+            // transport installs it.
+            if (settings.fetch.consents[`pack:${pack.id}`]?.consented !== true) {
+              return sendJson(response, 403, { error: `${pack.name} is installed through ComfyUI-Manager from its repository — the fetch consent comes first. Open Fetch… (the library), review the ${pack.licenseSpdx} terms, and consent; the studio never fetches a pack without it.`, pack: await checkNodePack(pack, nodePackTarget, resolveVendorRoot()) })
+            }
+            const uiId = randomUUID()
+            const clientId = realtimeHub.clientId()
+            try {
+              await managerClient.queueTask(settings.comfyUrl, { kind: 'install', uiId, clientId, params: managerInstallParams(pack)! })
+            } catch (queueFailure) {
+              const detail = queueFailure instanceof Error ? queueFailure.message : String(queueFailure)
+              logEvent({ kind: 'engine.node-pack-manager-install-failed', pack: pack.id, error: detail.slice(0, 300) })
+              return sendJson(response, 502, { error: `ComfyUI-Manager is present but queueing the install failed: ${detail} — the studio path was NOT used behind the failure. Retry, or install deliberately through Fetch… / a local copy.`, pack: await checkNodePack(pack, nodePackTarget, resolveVendorRoot()) })
+            }
+            const verdict = await waitForManagerTask(managerClient, settings.comfyUrl, { uiId, clientId })
+            logEvent({ kind: 'engine.node-pack-manager-install', pack: pack.id, uiId, state: verdict.state })
+            if (verdict.state === 'failed' || verdict.state === 'error' || verdict.state === 'skipped') {
+              return sendJson(response, 400, { error: `ComfyUI-Manager reported the install as ${verdict.state}${verdict.messages.length ? `: ${verdict.messages.join(' ')}` : ''} — nothing was installed through the studio path either; retry, or use Fetch… / a local copy deliberately.`, pack: await checkNodePack(pack, nodePackTarget, resolveVendorRoot()) })
+            }
+            const notes = [
+              `queued through ComfyUI-Manager (task ${uiId}).`,
+              // The pinned-revision caveat every Manager install carries:
+              // the v2 API installs GitHub packs at the repository's current
+              // HEAD — the exact SHA pin is not expressible (verified at
+              // Manager 4.2.2).
+              `Manager installs the repository's current HEAD — the studio pin ${pack.pinnedRevision.slice(0, 12)} cannot be honored through Manager's v2 API; the board's version chip verifies the landed revision after the engine restarts, and the consent-gated Fetch… path stays the pin-exact install.`,
+              verdict.state === 'running' || verdict.state === 'unknown'
+                ? 'the Manager task is still running — the cm-queue events and the board Refresh pick up the landed folder; restart the engine to activate it.'
+                : 'installed by the Manager — restart the engine to activate it; the board\'s live chip flips when object_info serves the classes.',
+            ]
+            if (verdict.messages.length) notes.push(verdict.messages.join(' '))
+            return sendJson(response, 200, { via: 'manager', pack: await checkNodePack(pack, nodePackTarget, resolveVendorRoot()), notes })
+          }
+          // Studio path — Manager absent (or the pack is not
+          // Manager-eligible, e.g. vendored/first-party payloads Manager
+          // cannot serve at the studio's pin). The answer NAMES the reason
+          // Manager did not serve the install: never a silent fallback.
+          const sourceDirectory = typeof body.sourceDirectory === 'string' ? body.sourceDirectory : undefined
           if (!nodePackTarget) {
             return sendJson(response, 400, { error: noTargetError })
           }
-          const sourceDirectory = typeof body.sourceDirectory === 'string' ? body.sourceDirectory : undefined
           const result = await installNodePack(pack, { target: nodePackTarget, sourceDirectory })
           if (!result.installed && !result.alreadyInstalled) {
             return sendJson(response, 400, { error: result.notes.join(' ') || 'The pack could not be installed.', pack: result.status })
           }
+          const fallbackNote = !managerEligible
+            ? 'installed through the studio path (this pack\'s payload is studio-managed; Manager is not its installer).'
+            : manager.present
+              // Eligible but the identity check failed: a user-fetch pack
+              // with no GitHub owner/repo has no Manager install target.
+              ? 'installed through the studio path — the pack has no Manager-installable identity (not a GitHub owner/repo Manager can install).'
+              : `installed through the studio path — ${manager.reason}`
           logEvent({ kind: 'engine.node-pack-installed', pack: pack.id, revision: pack.pinnedRevision, target: nodePackTarget.kind })
-          return sendJson(response, 200, { pack: result.status, notes: result.notes })
+          return sendJson(response, 200, { via: 'studio', pack: result.status, notes: [fallbackNote, ...result.notes] })
         }
         if (url.pathname === '/api/lan/engine/nodes/uninstall' && request.method === 'POST') {
           const body = await readJson(request, 10_000)
@@ -3081,10 +3169,45 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
           if (!nodePackTarget) {
             return sendJson(response, 400, { error: noTargetError })
           }
+          // Marker installs are the studio's own — the existing delete
+          // discipline. A FOREIGN folder (no marker: placed by
+          // ComfyUI-Manager or by hand) is never deleted by the studio —
+          // when Manager is present it is ASKED to uninstall its pack
+          // instead (the user's explicit click, Manager's own bookkeeping);
+          // when absent the honest remove-it-yourself refusal stands.
+          const presence = await nodePackFolderPresence(pack, nodePackTarget)
+          if (presence === 'foreign') {
+            const manager = await managerClient.probe(settings.comfyUrl)
+            if (manager.present) {
+              const uiId = randomUUID()
+              const clientId = realtimeHub.clientId()
+              try {
+                await managerClient.queueTask(settings.comfyUrl, { kind: 'uninstall', uiId, clientId, params: managerUninstallParams(pack) })
+              } catch (queueFailure) {
+                const detail = queueFailure instanceof Error ? queueFailure.message : String(queueFailure)
+                logEvent({ kind: 'engine.node-pack-manager-uninstall-failed', pack: pack.id, error: detail.slice(0, 300) })
+                return sendJson(response, 502, { error: `ComfyUI-Manager is present but queueing the uninstall failed: ${detail} — nothing was deleted.`, pack: await checkNodePack(pack, nodePackTarget, resolveVendorRoot()) })
+              }
+              const verdict = await waitForManagerTask(managerClient, settings.comfyUrl, { uiId, clientId })
+              logEvent({ kind: 'engine.node-pack-manager-uninstall', pack: pack.id, uiId, state: verdict.state })
+              if (verdict.state === 'failed' || verdict.state === 'error' || verdict.state === 'skipped') {
+                return sendJson(response, 400, { error: `ComfyUI-Manager reported the uninstall as ${verdict.state}${verdict.messages.length ? `: ${verdict.messages.join(' ')}` : ''} — nothing was deleted.`, pack: await checkNodePack(pack, nodePackTarget, resolveVendorRoot()) })
+              }
+              const notes = [
+                `uninstall queued through ComfyUI-Manager (task ${uiId}) — the studio never deletes a folder it did not place.`,
+                verdict.state === 'running' || verdict.state === 'unknown'
+                  ? 'the Manager task is still running; the board Refresh shows the folder\'s fate, and an engine restart unloads it from the instance.'
+                  : 'removed by the Manager — restart the engine so the instance unloads it.',
+              ]
+              return sendJson(response, 200, { via: 'manager', pack: await checkNodePack(pack, nodePackTarget, resolveVendorRoot()), notes })
+            }
+            const removed = await uninstallNodePack(pack, nodePackTarget)
+            return sendJson(response, 404, { error: `${removed.reason ?? 'The pack is not installed.'} (ComfyUI-Manager is not available — ${manager.reason})` })
+          }
           const removed = await uninstallNodePack(pack, nodePackTarget)
           if (!removed.removed) return sendJson(response, 404, { error: removed.reason ?? 'The pack is not installed.' })
           logEvent({ kind: 'engine.node-pack-uninstalled', pack: pack.id, target: nodePackTarget.kind })
-          return sendJson(response, 200, { pack: await checkAllNodePacks(nodePackTarget, resolveVendorRoot()).then((packs) => packs.find((entry) => entry.id === pack.id)) })
+          return sendJson(response, 200, { via: 'studio', pack: await checkAllNodePacks(nodePackTarget, resolveVendorRoot()).then((packs) => packs.find((entry) => entry.id === pack.id)) })
         }
         // ---- Local-first fetcher (task hgjbea2) --------------------------------
         // The only network-touching routes in the app. catalog is pure

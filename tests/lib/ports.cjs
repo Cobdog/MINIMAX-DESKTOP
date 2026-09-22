@@ -30,6 +30,7 @@ const RANGES = {
   datasets: [4400, 40],
   runtime: [4440, 40],
   fetcher: [4480, 40],
+  'manager-install': [4520, 40],
   'engine-process': [4560, 40],
   instance: [6520, 40],
   launcher: [7000, 100],

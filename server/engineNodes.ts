@@ -293,6 +293,18 @@ export async function nodePackInstalledRevision(pack: NodePackDefinition, target
   return (await readInstallMarker(installDir))?.revision ?? null
 }
 
+/** Marker/folder tri-state for the uninstall-routing decision (0pktw5h):
+ *  'installed' = the studio's own marker install (studio uninstall applies),
+ *  'foreign' = present WITHOUT our marker (a ComfyUI-Manager / hand-placed
+ *  copy — a Manager-uninstall candidate when Manager is present, never a
+ *  studio deletion), 'missing' = nothing there. */
+export async function nodePackFolderPresence(pack: NodePackDefinition, target: NodePackTarget | null): Promise<'installed' | 'foreign' | 'missing'> {
+  if (!target) return 'missing'
+  const installDir = nodePackInstallDir(pack, target)
+  if (!existsSync(installDir)) return 'missing'
+  return (await readInstallMarker(installDir)) ? 'installed' : 'foreign'
+}
+
 /** Live-instance verdict from the CONNECTED engine's object_info keys
  *  (task 9om4bi9): 'active' when any registered class id is served (the
  *  pack is installed AND the instance loaded it), 'absent' when the instance
