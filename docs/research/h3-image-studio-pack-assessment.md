@@ -101,3 +101,16 @@ The three claims: **"complete graphs" TRUE** (12 workflows × three formats, tes
 | **Verdict** | **CORRECT + ADOPT** — corrects our "T=1 works" assumption (stock floor, #15644); adopt as the engine-side T=1/economy machinery (pack row or first-party port), not as our image path |
 
 **Corrections/decisions this feeds:** gate-or-fix the `h3img.generate.t1` family now; re-price packet tiers 9/13 (both = 22 frames on stock nodes); unblock E-ED3 T=1 arms; candidate follow-up research pin — the 17k+5 vs exact-stride latent ladder cost table.
+
+---
+
+## ADDENDUM — 2026-09-22: ADOPTED (task afvlbk4; the maintainer's ruling "adopt the pack for now, and then port later")
+
+The verdict's adoption path landed, exactly per §6's migration sketch minus the port question (deferred by the ruling):
+
+- **The builder routes through the 4 load-bearing classes** (`src/lib/graph/h3image.ts`): when the engine serves any Prepare class, the T=1 and fast-sharp profiles are pack-conditioned (never stock), packet tiers 5/9/13 ride the pack's EXACT latent ladder (t=2/3/4; 39 stays stock — a native grid point with no pack preset), and the decode is `H3ImageDecode` (temporal for packets/T=1; `single_latent_slice` for fast-sharp). The pack's sampler/resolution/selector nodes are still never called; the model chain, recipe pins, contracts, audits, and scorer stay ours. `optimize_for_still=false` on every Prepare — our generated ownership contract is the prompt discipline.
+- **The engine-truth gate flipped to capability**: pack present → T=1/fast-sharp render (detection admits); pack absent → the honest fetch-affordance refusal, and the BUILDER THROWS — the stock length:1 emission is dead everywhere (the `h3img.t1-length-1` engine-contract divergence RETIRED; the negative proof stays: a planted length:1 still fails against the real stock schema).
+- **New profile — fast-sharp** (`h3img.generate.sharp`): the same 8-step hybrid recipe samples a 5/9/13-frame context, then ONE latent slice decodes through the Mamad8 image VAE — §3's "genuine middle operating point," now a family. The T1-VAE factory guard refined to its true invariant: the VAE may decode exactly one temporal unit (frame or slice), never a multi-frame batch.
+- **Contract truth extended to the pack form**: the fixture gained the 5 classes' REAL served schemas (captured from the shared install with the pack cloned at 47dea30, --cpu boot, provenance-recorded); the whole builder corpus now validates CLEAN against the real schemas in both directions (pack-served and the pack-absent stock fallback — whose 9/13 snap stays ledgered as `h3img.packet-tier-9-13`, honestly labeled at the choice points).
+- **Execution truth, once**: the 8189 probe (runbook-disciplined) built the T=1 graph through the new path, contract-validated it, submitted → the engine ACCEPTED (node_errors {}), and history carried EXACTLY ONE 1344x768 output frame (~63 s incl. cold loads). The thing the stock floor made impossible is now measured, not asserted.
+- **Port-later note**: the maintainer's ruling keeps the first-party ~150-line port (§6's named alternative) as the eventual destination; until then the modularity contract holds — removal = drop the registry row + the builder branches + the fixture entries, nothing welded.
