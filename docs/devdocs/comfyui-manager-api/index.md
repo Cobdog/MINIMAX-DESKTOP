@@ -82,3 +82,63 @@ On boot (background thread, `default_cache_update`): fetches and locally caches 
 ## 6. Source-of-truth check
 
 Triggers listed in the header. Priority diffs on re-check: `glob/manager_server.py` route table vs this list, the `QueueTaskItem` model in `data_models/generated_models.py`, the presence probe (`extension.manager` feature flag), and the middleware remote-ban policy. Record dated addenda, never silent replacement.
+
+---
+
+## 7. Dated addendum — 2026-09-21 (the Manager-first build, task 0pktw5h)
+
+Re-verified before/during the Wave 2 Manager-first build (tag reads of 4.2.2
+via raw.githubusercontent + the compare range; local cross-checks against
+`/home/agent/comfyui` at v0.34.0 / `a87667f`). Three findings, one of them
+a correction to §5.1's shorthand:
+
+1. **PRESENCE PROBE — §5.1's shorthand is corrected (§0's precise form
+   stands).** Core ComfyUI 0.34.0 itself unconditionally answers
+   `features.extension.manager.supports_v4 = true`
+   (`comfy_api/feature_flags.py:105`, read from the shared install) — so
+   "extension.manager present ⇒ Manager active" is FALSE at this pairing.
+   The Manager-added key is the signal: 4.2.2's `__init__.py` does
+   `_core_feature_flags.SERVER_FEATURE_FLAGS.setdefault('extension', {}).setdefault('manager', {})['supports_csrf_post'] = True`
+   (an ImportError on older cores is swallowed). **The probe this repo
+   builds with: `features.extension.manager.supports_csrf_post === true`.**
+   The shared install serves only `supports_v4` (the pip Manager is absent
+   from its venv) — the honest-absent test case is the DEFAULT state here.
+
+2. **PIN LIMITATION — a git SHA is not expressible through the v2 queue for
+   GitHub packs.** `glob/manager_core.py` `install_by_id` at 4.2.2: only
+   `selected_version` `nightly`/`unknown` takes the git path — a clone of
+   the default-branch HEAD, NO commit checkout (commit pinning exists only
+   in the legacy `gitclone_install` `url@sha` form). Any other spec routes
+   to the CNR branches: `'latest'` for a non-CNR pack is refused
+   ("is not a CNR node"), and a 40-hex SHA cannot resolve. Consequence for
+   the studio: Manager installs of our GitHub-hosted packs land at the
+   repository's CURRENT HEAD — the studio's pinned SHA is honored only by
+   the consent-gated fetcher. The Manager-first path states this caveat on
+   every install (the pack board's version ladder attributes the landed
+   folder "managed by ComfyUI" and relates its HEAD to the pin).
+
+3. **The 4.3 diff (tag 2026-09-18, 4 commits) — no contract-surface
+   changes.** Verified per commit: `69bc3ef` (flagged-CNR installs
+   restricted to loopback-only listeners or the new
+   `allow_flagged_nodepack_install` opt-in — inside the install executor,
+   no route/model/event changes; our engines are loopback by the SSRF
+   guard, so unaffected); `4ad94b2` (legacy-UI XSS hardening + a
+   merged-config writer — `glob/manager_server.py` sees only a +4/−2
+   import refactor, `data_models` and the probe flag untouched);
+   `a0d89e9` (uv conflict attribution); `f764cc0` (version bump). Building
+   against 4.2.2 semantics remains valid for 4.3.
+
+Also verified while building (all at 4.2.2): the exact WS event-name
+values (`ManagerMessageName`: `cm-task-started`, `cm-task-completed`,
+`cm-queue-status` — targeted per-task events carry `ui_id` + the
+`TaskExecutionStatus` verdict; `cm-queue-status` broadcasts
+`{status:"all-done"}` on drain); `TaskHistoryItem` = `{ui_id, client_id,
+kind, timestamp, result, status?: {status_str, completed, messages[]}}`;
+`OperationResult` ∈ success|failed|skipped|error|skip; `ManagerChannel`
+∈ default|recent|legacy|forked|dev|tutorial and `ManagerDatabaseSource` ∈
+remote|local|cache (str-Enums); and the official UI itself posts to
+`/v2/manager/queue/batch` with row data + `selected_version`/`channel`/
+`mode`/`ui_id`/`skip_post_install` — the per-task `/queue/task` verb this
+repo uses is the same QueueTaskItem model (route table confirmed at the
+tag). `cm-api-try-install-customnode` remains remote-prompt-only: the
+studio logs it and never surfaces an install affordance.
