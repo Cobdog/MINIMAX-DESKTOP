@@ -782,7 +782,10 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
     licenseUrl: 'https://huggingface.co/Kijai/MiniMax-H3-TAE/blob/main/README.md',
     source: { kind: 'hf', repo: 'Kijai/MiniMax-H3-TAE', revision: { kind: 'sha', value: 'a213ac8bf2f148b4f32372279a7f207846978900' } },
     destination: { kind: 'model-root', root: 'vae_approx' },
-    files: [{ path: 'vae_approx/taeh3.safetensors', sizeBytes: 9_791_388, sha256: 'f0f60fa072089997f817402098c2fd90777cb2660dd79cf5df42fc1e3e08e527' }],
+    // Delivered as taeh3_decoder.safetensors (maintainer ruling 2026-09-22:
+    // the engine-side convention their instance loads; the taeh3* prefix
+    // match makes either name work — the _decoder name is the one we ship).
+    files: [{ path: 'vae_approx/taeh3_decoder.safetensors', sizeBytes: 9_791_388, sha256: 'f0f60fa072089997f817402098c2fd90777cb2660dd79cf5df42fc1e3e08e527' }],
     detectGlob: 'taeh3*',
     sizeBytes: 9_791_388,
     sizeClass: 'small',
