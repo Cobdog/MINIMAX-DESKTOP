@@ -244,7 +244,6 @@ function buildCorpus() {
  *  violation (semantic-class entries manifest in section (d) instead). */
 const SIGNATURES = {
   'h3img.t1-length-1': (v) => v.type === 'value_smaller_than_min' && /^MiniMaxH3(Image|Reference)ToVideo$/.test(v.classType) && v.inputName === 'length',
-  'hybrid.form-adapter-low-vram': (v) => v.type === 'required_input_missing' && v.classType === 'MiniMaxH3LoraFormLoader' && v.inputName === 'low_vram',
   'acestep.timesignature-format': (v) => v.type === 'value_not_in_list' && v.classType === 'TextEncodeAceStepAudio1.5' && v.inputName === 'timesignature',
   'acestep.keyscale-format': (v) => v.type === 'value_not_in_list' && v.classType === 'TextEncodeAceStepAudio1.5' && v.inputName === 'keyscale',
   'klein.cfg-guider-input-names': (v) => v.type === 'required_input_missing' && v.classType === 'CFGGuider' && (v.inputName === 'positive' || v.inputName === 'negative'),

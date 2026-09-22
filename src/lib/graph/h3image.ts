@@ -881,7 +881,10 @@ function buildH3StillPipeline(
   loras.slice(0, H3IMG_RECIPE_PINS.lora.slots).forEach((lora, index) => {
     const id = index === 0 ? H3IMG.lora1 : H3IMG.lora2
     if (index === 0 && formAdapterAvailable) {
-      graph[id] = { class_type: FORM_ADAPTER_NODE, inputs: { model: modelLink, lora_name: lora.name, strength: lora.strength, mode: 'projected (default)', egrid_path: '' } }
+      // low_vram is REQUIRED (BOOLEAN, default false — the same widget the
+      // sibling larryvrh TurboLoRA loader emits); omitting it is refused at
+      // prompt validation. Retired hybrid.form-adapter-low-vram.
+      graph[id] = { class_type: FORM_ADAPTER_NODE, inputs: { model: modelLink, lora_name: lora.name, strength: lora.strength, mode: 'projected (default)', egrid_path: '', low_vram: false } }
     } else {
       graph[id] = { class_type: 'LoraLoaderModelOnly', inputs: { model: modelLink, lora_name: lora.name, strength_model: lora.strength } }
     }

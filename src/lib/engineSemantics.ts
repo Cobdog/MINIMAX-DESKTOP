@@ -135,16 +135,6 @@ export const KNOWN_DIVERGENCES: readonly KnownDivergence[] = [
     owner: 'the image-workbench tier ladder rework (retire or re-base tiers onto grid points; rides the T=1 remediation lane)',
   },
   {
-    id: 'hybrid.form-adapter-low-vram',
-    surface: 'MiniMaxH3LoraFormLoader emission (h3image.ts lora slot 1 + workflow.ts loraStack slot 0 when the pack is active)',
-    emission: 'inputs omit low_vram (a REQUIRED widget — BOOLEAN, default false)',
-    engineBehavior: 'REFUSED at prompt validation — required_input_missing. Found by this contract layer on its first audit pass (2026-09-21); the sibling larryvrh loader (MiniMaxH3TurboLoRA) DOES emit low_vram: false — the omission is an inconsistency, not a convention.',
-    violationType: 'schema-refused',
-    opened: '2026-09-21',
-    owner: 'one-line builder fix (emit low_vram: false) + golden regeneration — a reviewed contract change, deliberately not folded into the test-layer build',
-    note: 'Never executed live: the pack is not installed on the shared testbed, so no run has reached this refusal yet.',
-  },
-  {
     id: 'acestep.timesignature-format',
     surface: 'AceStep 1.5 core (buildAceStepWorkflow → TextEncodeAceStepAudio1.5)',
     emission: "timesignature: '4/4' (the UI's timeSignature field passed through)",
