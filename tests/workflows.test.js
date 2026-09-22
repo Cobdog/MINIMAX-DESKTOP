@@ -634,7 +634,9 @@ test('the workflow-population audit (epdvxd4, AC-3): every family × every slot 
   }
 
   // (The acestep audit arm was removed with the family, 2026-09-21 —
-  // nn5ld47; git history is the archive.)
+  // nn5ld47; git history is the archive. PR #44's enum-mapping assertions
+  // rode this arm and went moot with the lane — the builder they tested is
+  // deleted.)
 
   // --- THE AUDIT'S COMPLETENESS CONTRACT: every slot every family EXPOSES
   //     appears above; every slot NOT exposed refuses (nothing silently
@@ -1299,6 +1301,11 @@ test('MiniMax Music 3: official graph, seconds passthrough, tiled decode, captio
   assert.equal(g['8'].inputs.tile_size, 1536)
   assert.equal(g['9'].class_type, 'SaveAudioAdvanced')
   assert.equal(g['9'].inputs.format, 'mp3')
+  // The mp3 key's REAL sub-input (retired music3.bitrate-unknown-input):
+  // the old bitrate key was never declared and the engine dropped it
+  // silently — quality is what actually reaches the encoder.
+  assert.equal(g['9'].inputs.quality, 'V0')
+  assert.equal('bitrate' in g['9'].inputs, false)
   const full = m3.buildMusic3Workflow({ caption: 'x', lyrics: '', duration: 60, seed: 1, tiledDecode: false, filenamePrefix: 'a' }, models3)
   assert.equal(full['8'].class_type, 'VAEDecodeAudio', 'tiled decode is optional')
   // Duration clamped to the 5-minute ceiling; caption sections omitted when blank.

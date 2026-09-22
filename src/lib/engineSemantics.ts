@@ -134,50 +134,11 @@ export const KNOWN_DIVERGENCES: readonly KnownDivergence[] = [
     opened: '2026-09-21',
     owner: 'the image-workbench tier ladder rework (retire or re-base tiers onto grid points; rides the T=1 remediation lane)',
   },
-  {
-    id: 'hybrid.form-adapter-low-vram',
-    surface: 'MiniMaxH3LoraFormLoader emission (h3image.ts lora slot 1 + workflow.ts loraStack slot 0 when the pack is active)',
-    emission: 'inputs omit low_vram (a REQUIRED widget — BOOLEAN, default false)',
-    engineBehavior: 'REFUSED at prompt validation — required_input_missing. Found by this contract layer on its first audit pass (2026-09-21); the sibling larryvrh loader (MiniMaxH3TurboLoRA) DOES emit low_vram: false — the omission is an inconsistency, not a convention.',
-    violationType: 'schema-refused',
-    opened: '2026-09-21',
-    owner: 'one-line builder fix (emit low_vram: false) + golden regeneration — a reviewed contract change, deliberately not folded into the test-layer build',
-    note: 'Never executed live: the pack is not installed on the shared testbed, so no run has reached this refusal yet.',
-  },
-  // (The two acestep.* entries — timesignature/keyscale enum formats — were
-  // removed with the ACE-Step lane itself, 2026-09-21, nn5ld47: the builder
-  // they ledgered is gone, so the entries self-retire with it. If the
-  // contract-ledger builder-fix work re-adds an acestep lane, its entries
-  // return with it.)
-  {
-    id: 'klein.cfg-guider-input-names',
-    surface: 'klein refine (buildKleinRefineGraph → CFGGuider)',
-    emission: "conditioning / conditioning_1 (the official template's old widget names)",
-    engineBehavior: "REFUSED at prompt validation — required_input_missing x2: CFGGuider's inputs are positive / negative at a87667f; the misnamed keys are silently ignored as unknown inputs. Found by this contract layer's first corpus pass.",
-    violationType: 'schema-refused',
-    opened: '2026-09-21',
-    owner: 'the klein lane fix (rename to positive/negative + golden regeneration)',
-    note: 'Never executed live: the klein trio has not been staged on the testbed, so no run has reached this refusal yet.',
-  },
-  {
-    id: 'klein.istp-resolution-steps',
-    surface: 'klein refine (buildKleinRefineGraph → ImageScaleToTotalPixels)',
-    emission: 'divisible_by: 1 (and no resolution_steps)',
-    engineBehavior: "REFUSED at prompt validation — required_input_missing: this revision's ImageScaleToTotalPixels requires resolution_steps (INT, default 1); divisible_by is no longer a field and is silently dropped. Schema drift since the official-template port (2026-09-18). Found by this contract layer's first corpus pass.",
-    violationType: 'schema-refused',
-    opened: '2026-09-21',
-    owner: 'the klein lane fix (emit resolution_steps; drop the dead key; golden regeneration)',
-    note: 'Never executed live — same staging note as klein.cfg-guider-input-names.',
-  },
-  {
-    id: 'music3.bitrate-unknown-input',
-    surface: 'Music 3 core (buildMusic3Workflow → SaveAudioAdvanced)',
-    emission: "bitrate: 'V0' alongside format: 'mp3'",
-    engineBehavior: "SILENTLY DROPPED: SaveAudioAdvanced declares no 'bitrate' input (the mp3 sub-input is 'quality'); validation ignores unknown keys, so the value never reaches the encoder. The mp3 default quality is V0 — the intent lands by luck today, not by contract. Found by this contract layer's first audit pass.",
-    violationType: 'silently-dropped',
-    opened: '2026-09-21',
-    owner: 'the music3 lane fix (emit the real sub-input or drop the dead key)',
-  },
+  // (PR #44 retired the five 2026-09-21 first-pass divergences as builder
+  // fixes — form-adapter low_vram, klein ×2, music3 bitrate, and the acestep
+  // enum formats. The acestep fix then went moot with the lane itself the
+  // same day: the engine was cut — nn5ld47, docs/audit/removals-acestep.md —
+  // so no acestep entry returns unless a lane does.)
 ] as const
 
 /** Divergence ids as a plain set — the exact-match signature for tests. */

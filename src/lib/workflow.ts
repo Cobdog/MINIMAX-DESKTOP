@@ -148,7 +148,10 @@ export function buildMiniMaxWorkflow(
     const id = index === 0 ? H3.loraStack1 : H3.loraStack2
     const strength = Math.min(2, Math.max(0, Number.isFinite(entry.strength) ? entry.strength : 1))
     if (index === 0 && info && (info as Record<string, unknown>)[FORM_ADAPTER_NODE] !== undefined) {
-      ctx.wrapModel('loraStack1', id, { class_type: FORM_ADAPTER_NODE, inputs: { lora_name: entry.name, strength, mode: 'projected (default)', egrid_path: '' } })
+      // low_vram is the adapter's REQUIRED second boolean (default false,
+      // same widget family as the larryvrh TurboLoRA loader) — omitting it
+      // is refused at prompt validation. Retired hybrid.form-adapter-low-vram.
+      ctx.wrapModel('loraStack1', id, { class_type: FORM_ADAPTER_NODE, inputs: { lora_name: entry.name, strength, mode: 'projected (default)', egrid_path: '', low_vram: false } })
     } else {
       ctx.wrapModel(index === 0 ? 'loraStack1' : 'loraStack2', id, { class_type: 'LoraLoaderModelOnly', inputs: { lora_name: entry.name, strength_model: strength } })
     }
