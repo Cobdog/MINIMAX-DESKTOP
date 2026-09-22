@@ -1014,7 +1014,10 @@ export function buildKleinRefineGraph(request: H3ImgRequest, selection: H3ImgMod
     [k.clip]: { class_type: 'CLIPLoader', inputs: { clip_name: klein.textEncoder, type: 'flux2', device: 'default' } },
     [k.vae]: { class_type: 'VAELoader', inputs: { vae_name: klein.vae } },
     [k.sourceLoader]: { class_type: 'LoadImage', inputs: { image: request.source } },
-    [k.scale]: { class_type: 'ImageScaleToTotalPixels', inputs: { upscale_method: H3IMG_RECIPE_PINS.klein.upscaleMethod, megapixels: H3IMG_RECIPE_PINS.klein.megapixels, divisible_by: 1, image: [k.sourceLoader, 0] } },
+    // Schema drift since the 2026-09-18 template port: this revision's
+    // ImageScaleToTotalPixels requires resolution_steps (INT, default 1) and
+    // no longer serves divisible_by. Retired klein.istp-resolution-steps.
+    [k.scale]: { class_type: 'ImageScaleToTotalPixels', inputs: { upscale_method: H3IMG_RECIPE_PINS.klein.upscaleMethod, megapixels: H3IMG_RECIPE_PINS.klein.megapixels, resolution_steps: 1, image: [k.sourceLoader, 0] } },
     [k.size]: { class_type: 'GetImageSize', inputs: { image: [k.scale, 0] } },
     [k.positive]: { class_type: 'CLIPTextEncode', inputs: { clip: [k.clip, 0], text: request.refineInstruction ?? request.prompt } },
     [k.negative]: { class_type: 'ConditioningZeroOut', inputs: { conditioning: [k.positive, 0] } },
@@ -1023,7 +1026,11 @@ export function buildKleinRefineGraph(request: H3ImgRequest, selection: H3ImgMod
     [k.refLatentNegative]: { class_type: 'ReferenceLatent', inputs: { conditioning: [k.negative, 0], latent: [k.encode, 0] } },
     [k.latent]: { class_type: 'EmptyFlux2LatentImage', inputs: { width: [k.size, 0], height: [k.size, 1], batch_size: 1 } },
     [k.noise]: { class_type: 'RandomNoise', inputs: { noise_seed: request.seed } },
-    [k.guider]: { class_type: 'CFGGuider', inputs: { model: [k.unet, 0], conditioning: [k.refLatentPositive, 0], conditioning_1: [k.refLatentNegative, 0], cfg: H3IMG_RECIPE_PINS.klein.cfg } },
+    // CFGGuider's conditioning sockets are positive/negative at a87667f —
+    // the official template's conditioning/conditioning_1 names are stale
+    // there (silently ignored as unknown inputs, leaving both required
+    // sockets unfilled). Retired klein.cfg-guider-input-names.
+    [k.guider]: { class_type: 'CFGGuider', inputs: { model: [k.unet, 0], positive: [k.refLatentPositive, 0], negative: [k.refLatentNegative, 0], cfg: H3IMG_RECIPE_PINS.klein.cfg } },
     [k.samplerSelect]: { class_type: 'KSamplerSelect', inputs: { sampler_name: H3IMG_RECIPE_PINS.klein.sampler } },
     [k.scheduler]: { class_type: 'Flux2Scheduler', inputs: { steps: H3IMG_RECIPE_PINS.klein.steps, width: [k.size, 0], height: [k.size, 1] } },
     [k.sampler]: { class_type: 'SamplerCustomAdvanced', inputs: { noise: [k.noise, 0], guider: [k.guider, 0], sampler: [k.samplerSelect, 0], sigmas: [k.scheduler, 0], latent_image: [k.latent, 0] } },
