@@ -785,6 +785,13 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
     // Delivered as taeh3_decoder.safetensors (maintainer ruling 2026-09-22:
     // the engine-side convention their instance loads; the taeh3* prefix
     // match makes either name work — the _decoder name is the one we ship).
+    // DATED CORRECTION (2026-09-22, hashed): the simsim9-stack
+    // MiniMaxH3-PreviewOverride pack's taeh3_decoder.safetensors is a
+    // DIFFERENT artifact — 39,458,084 bytes, sha 200b17f1… vs this row's
+    // Kijai file at 9,791,388 / f0f60fa0… — NOT the same weight re-uploaded.
+    // This row stays the pack-absent fallback; the pack's decoder is the
+    // maintainer-validated preview quality and rides the pack (curation
+    // sweep to assess the pack itself + this file's licensing).
     files: [{ path: 'vae_approx/taeh3_decoder.safetensors', sizeBytes: 9_791_388, sha256: 'f0f60fa072089997f817402098c2fd90777cb2660dd79cf5df42fc1e3e08e527' }],
     detectGlob: 'taeh3*',
     sizeBytes: 9_791_388,
