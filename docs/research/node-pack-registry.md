@@ -24,7 +24,7 @@ Every registry row carries the epistemology shape (directive `426ab190`). **No r
 
 ## 1. THE REGISTRY — per family
 
-The current code truth: 11 pack rows in `ENGINE_NODE_PACKS` (GAP-1/GAP-2 closed 2026-09-21, task 06jr4eh — see §1.1), 4 model families in `MODEL_FAMILIES` (`minimax`, `h3image`, `music3`, `acestep`), plus lanes that live in graph builders without a family row yet (Krea 2 edits, Klein refine, chains). **[DOC]**
+The current code truth: 11 pack rows in `ENGINE_NODE_PACKS` (GAP-1/GAP-2 closed 2026-09-21, task 06jr4eh — see §1.1), 3 model families in `MODEL_FAMILIES` (`minimax`, `h3image`, `music3` — `acestep` removed 2026-09-21, nn5ld47), plus lanes that live in graph builders without a family row yet (Krea 2 edits, Klein refine, chains). **[DOC]**
 
 ### 1.1 H3 video (`minimax`) — the focus family
 
@@ -77,7 +77,7 @@ Klein = **Flux.2 Klein image-edit** (4b/9b distilled; `flux-2-klein-9b-fp8` trio
 
 ### 1.6 Audio (`music3`, `acestep`) — the clean one
 
-**Stock core only** **[DOC]**: `MiniMaxMusic3TextEncode`, `EmptyMiniMaxMusic3LatentAudio`, `TextEncodeAceStepAudio1.5`, `EmptyAceStep1.5LatentAudio`, `ModelSamplingAuraFlow`, `VAEDecodeAudio(Tiled)`, `SaveAudioAdvanced`, stock loaders. Zero custom packs — and that is the correct shape: both engines are first-class core citizens. The one registry row, **comfyui-minimax-h3-audio-T8** (GPL-3.0, user-fetch, `MiniMaxH3AudioConditioningT8`), is H3-*video* audio editing (the sidecar), not these families — it stays with §1.1's orbit, node names in-flux upstream (registry comment already says so). STATUS: PROPOSED-PENDING-TEST for T8 (pattern-adopted ideas, fetchable-flagged posture unchanged).
+**Stock core only** **[DOC]**: `MiniMaxMusic3TextEncode`, `EmptyMiniMaxMusic3LatentAudio`, `ModelSamplingAuraFlow`, `VAEDecodeAudio(Tiled)`, `SaveAudioAdvanced`, stock loaders. Zero custom packs — and that is the correct shape: the engine is a first-class core citizen. **ACE-Step was REMOVED 2026-09-21 (nn5ld47, the audio-lane ruling — nearly a year old; music3 stays for MiniMax family cohesion; restore map at docs/audit/removals-acestep.md); its classes left preflight's stock list and contract scope with the lane.** The one registry row, **comfyui-minimax-h3-audio-T8** (GPL-3.0, user-fetch, `MiniMaxH3AudioConditioningT8`), is H3-*video* audio editing (the sidecar), not these families — it stays with §1.1's orbit, node names in-flux upstream (registry comment already says so). STATUS: PROPOSED-PENDING-TEST for T8 (pattern-adopted ideas, fetchable-flagged posture unchanged).
 
 ### 1.7 Cross-family utilities
 
