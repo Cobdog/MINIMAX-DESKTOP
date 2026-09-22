@@ -661,7 +661,11 @@ run_configure() { # $1 show_dev (0/1)
   # home. Resolve the JUST-SAVED data dir here instead.
   ENGINE_HOME=$W_DATA_DIR
   [ -z "$ENGINE_HOME" ] && ENGINE_HOME=$(node -e 'console.log(require("os").homedir())')/.minimax-studio
-  [ -n "$MINIMAX_STUDIO_HOME" ] && ENGINE_HOME=$MINIMAX_STUDIO_HOME
+  # set -u guard (maintainer hit 2026-09-22: "MINIMAX_STUDIO_HOME: unbound
+  # variable" at this line when the env var is simply unset — the defensive
+  # :- expansion everywhere else in this script is the pattern; this one
+  # slipped through).
+  [ -n "${MINIMAX_STUDIO_HOME:-}" ] && ENGINE_HOME="${MINIMAX_STUDIO_HOME}"
   ENGINE_WRITTEN=$(node -e "$LAUNCHER_JS" engine "$ENGINE_HOME" "$W_ENGINE_URL") || die "could not update the engine URL"
   [ -n "$ENGINE_WRITTEN" ] && echo "launcher: engine URL written to $ENGINE_WRITTEN"
 }

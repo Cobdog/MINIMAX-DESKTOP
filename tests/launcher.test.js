@@ -288,13 +288,37 @@ maybe('(h) missing dependencies: honest pnpm-install report (print + interactive
   fs.copyFileSync(START_SH, copied)
   const config = path.join(dir, 'config.json')
   const env = { MINIMAX_START_CONFIG: config, MINIMAX_START_TUI: 'prompts' }
+  const repoConfig = path.join(REPO, '.start-config.json')
+  const repoConfigBefore = fs.existsSync(repoConfig) ? fs.readFileSync(repoConfig, 'utf8') : null
   // Running the COPY from a cwd outside the repo also proves the script is
   // self-locating (and that the repo path's space is handled).
   const printed = run(['--print'], { cwd: dir, env, script: copied })
   ok(printed.code !== 0 && printed.out.includes('pnpm install'), `print without node_modules reports pnpm install\n${printed.out}`)
   const bare = run([], { cwd: dir, env, script: copied })
   ok(bare.code !== 0 && bare.out.includes('pnpm install'), 'bare run without node_modules (offer declined by EOF) reports pnpm install')
-  ok(!fs.existsSync(path.join(REPO, '.start-config.json')), 'no run ever writes the repo-root config without an explicit override')
+  // Environment-safe (2026-09-22): the repo-root config legitimately exists on
+  // a dev box (first-run seeding; gitignored) — CI never has one. Assert OUR
+  // runs did not CREATE or MODIFY it, not that it doesn't exist.
+  const after = fs.existsSync(repoConfig) ? fs.readFileSync(repoConfig, 'utf8') : null
+  ok(after === repoConfigBefore, 'no run ever writes or changes the repo-root config without an explicit override')
+})
+
+maybe('(h2) configure-to-save with no studio env vars set reaches the engine write without set -u blows (the 2026-09-22 unbound-variable regression)', () => {
+  console.log('launcher: configure success path without env vars')
+  const dir = scratch()
+  const copied = path.join(dir, 'start.sh')
+  fs.copyFileSync(START_SH, copied)
+  const config = path.join(dir, 'config.json')
+  const env = { MINIMAX_START_CONFIG: config, MINIMAX_START_TUI: 'prompts' }
+  // All-EOF answers keep every default, save, run the engine write (where the
+  // bug fired), then hit the missing-node_modules guard — which is the honest
+  // terminal state for a scratch dir. The OLD code died at the engine write
+  // with "MINIMAX_STUDIO_HOME: unbound variable" before any deps report.
+  const ran = run(['--configure', '--dev'], { cwd: dir, env, script: copied, input: '\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n' })
+  ok(ran.code !== 0, 'terminates (nonzero) at the honest guard, not a crash loop')
+  ok(!ran.out.includes('unbound variable'), `no set -u blow on unset MINIMAX_STUDIO_HOME\n${ran.out}`)
+  ok(ran.out.includes('pnpm install'), 'reached the missing-dependencies report after the engine write')
+  ok(fs.existsSync(config), 'the scratch config was saved')
 })
 
 maybe('(i) dev-vs-prod boot plan selection + the source-map flag toggle', async () => {
