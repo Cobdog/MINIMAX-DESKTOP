@@ -653,6 +653,14 @@ test('the workflow-population audit (epdvxd4, AC-3): every family × every slot 
     const aceGraph = aceModule.buildAceStepWorkflow({ model, tags: 'audit', lyrics: '', instrumental: true, duration: 30, bpm: 120, timeSignature: '4/4', language: 'en', keyScale: 'C', seed: 7, generateAudioCodes: false, filenamePrefix: 't' }, aceAudit.selection)
     assertAt(`acestep checkpoint (${model})`, aceGraph, 1, 'unet_name', 'acestep-community-xl.safetensors')
     assertAt(`acestep audioVae (${model})`, aceGraph, 3, 'vae_name', 'ace-community-audio-vae.safetensors')
+    // The 1.5 enum vocabulary, mapped at the builder (retired
+    // acestep.timesignature-format / acestep.keyscale-format): UI shapes
+    // '4/4' and bare 'C' land on the served enum values, never a
+    // value_not_in_list after submission.
+    assert.equal(aceGraph['4'].inputs.timesignature, '4', `acestep ${model}: '4/4' maps onto the bare-numerator enum`)
+    assert.equal(aceGraph['4'].inputs.keyscale, 'C major', `acestep ${model}: bare 'C' maps onto the '<root> major' vocabulary`)
+    assert.throws(() => aceModule.buildAceStepWorkflow({ model, tags: 'x', lyrics: '', instrumental: true, duration: 30, bpm: 120, timeSignature: '12/8', language: 'en', keyScale: 'C', seed: 1, generateAudioCodes: false, filenamePrefix: 't' }, aceAudit.selection), /time signatures/, 'an unmappable time signature refuses at build time, not engine-side')
+    assert.throws(() => aceModule.buildAceStepWorkflow({ model, tags: 'x', lyrics: '', instrumental: true, duration: 30, bpm: 120, timeSignature: '4/4', language: 'en', keyScale: 'H Phantom', seed: 1, generateAudioCodes: false, filenamePrefix: 't' }, aceAudit.selection), /serves keys/, 'an unmappable key refuses at build time, not engine-side')
   }
 
   // --- THE AUDIT'S COMPLETENESS CONTRACT: every slot every family EXPOSES
