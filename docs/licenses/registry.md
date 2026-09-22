@@ -102,6 +102,8 @@ network is touched); we never redistribute them.
 | `krea2-anypaint` | alexw5702-afk @ `675be5a9…` | MIT `[API-2026-09-14]` (NOTICE credits Rebels + ostris) | fetch-consent | clean | trivial |
 | `autocontext` | supElement @ `f1062d34…` | Apache-2.0 `[API-2026-09-16]` | fetch-consent (vendor candidate — 14 files, no weights) | clean | trivial |
 | `h3-image-studio` | astropuzzo @ `47dea30…` (v23.0.0) | Unlicense `[code-read 2026-09-21 — pack assessment]` | fetch-consent (vendor-eligible: public-domain-equivalent; user-fetch matches the current posture) | clean | trivial — the T=1-legality gate's pack (task d4er4ati) |
+| `h3-motion-context` | NikoDemon80 @ `5335715a…` (v0.6.2) | **GPL-3.0-only** — plain v3 LICENSE (no or-later grant), read from the canonical shared install's copy at this rev `[LOCAL 2026-09-21]` | fetch-consent, flagged; never vendored (the T8mars posture) | none triggered (never redistributed); the chain lane's engine side (GAP-1 closed, task 06jr4eh) | trivial |
+| `lbh-latent-upscaler` | LBH-123-AI @ `40316cf0…` | MIT `[API + code-read 2026-09-21 — LICENSE added upstream at exactly this commit, 2026-09-17]` | fetch-consent (vendor candidate) | clean; the upscaler WEIGHTS are separate engine-side downloads | trivial — the LBH 2D/3D hires-fix lane (GAP-2 closed, task 06jr4eh) |
 
 Fetch-catalog packs not in `ENGINE_NODE_PACKS` (fetched into the user's
 instance; same fetch-consent discipline):
