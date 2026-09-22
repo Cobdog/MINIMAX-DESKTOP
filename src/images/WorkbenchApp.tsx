@@ -37,7 +37,7 @@ import { createStageExecutor } from '../lib/h3imageStaging'
 import { H3IMG_OP_TONE_LOCK, canonicalFrameIndex, frameUrl, isWorkbenchChain, readSessionSettings, sessionContract, takeFrames, takeProvenance } from './session'
 import type { SessionRefSlot, WorkbenchSessionSettings } from './session'
 import { BEYOND_NINE_GUIDANCE, keepDialHint } from '../lib/h3imageContract'
-import { H3IMG_RECIPE_PINS, STOCK_SAMPLED_FRAMES, TRANSPORT_FOR_ROLE, findH3ImgFamily, packetTierLabel } from '../lib/graph/h3image'
+import { H3IMG_RECIPE_PINS, STOCK_SAMPLED_FRAMES, TRANSPORT_FOR_ROLE, findH3ImgFamily, h3ImageStudioPackPresent, packetTierLabel } from '../lib/graph/h3image'
 import type { H3ImgRefRole } from '../lib/graph/h3image'
 import { mediaForOutput, buildOutputIndex } from '../canvas/generation'
 import { chainSettingsDefaults } from '../canvas/generation'
@@ -93,7 +93,7 @@ function WorkbenchEngineHost({ children }: { children: ReactNode }) {
 }
 
 const MODE_GROUPS: Array<{ mode: string; label: string; families: string[] }> = [
-  { mode: 'generate', label: 'Generate', families: ['h3img.generate.packet', 'h3img.generate.packet.directed', 'h3img.generate.t1'] },
+  { mode: 'generate', label: 'Generate', families: ['h3img.generate.packet', 'h3img.generate.packet.directed', 'h3img.generate.t1', 'h3img.generate.sharp'] },
   { mode: 'compose', label: 'Compose', families: ['h3img.compose.refs'] },
   { mode: 'edit', label: 'Edit', families: ['h3img.edit.identity', 'h3img.edit.background', 'h3img.edit.outfit', 'h3img.edit.lighting', 'h3img.edit.pose', 'h3img.edit.freeform'] },
   { mode: 'refine', label: 'Refine', families: ['h3img.refine.krea2', 'h3img.refine.klein'] },
@@ -170,6 +170,10 @@ function WorkbenchSurface() {
   const settings = useMemo(() => readSessionSettings(sessionChain?.settings), [sessionChain])
   const availability = useMemo(() => (sessionState.models.length || sessionState.status.connected ? workbenchAvailability({ info: sessionState.info, models: sessionState.models }) : []), [sessionState.models, sessionState.info, sessionState.status.connected])
   const detectionOf = useCallback((familyId: string) => availability.find((entry) => entry.family.id === familyId)?.detection ?? null, [availability])
+  // The pack-present branch (afvlbk4): with the H3 Image Studio pack served,
+  // packet tiers ride its EXACT latent ladder (the labels drop the honest
+  // "samples 22 on stock nodes" cost note) and T=1/fast-sharp render.
+  const studioPackOnEngine = useMemo(() => h3ImageStudioPackPresent(sessionState.info), [sessionState.info])
 
   const patchSettings = useCallback(async (patch: Partial<WorkbenchSessionSettings>) => {
     if (!sessionChain) return
@@ -798,11 +802,17 @@ function WorkbenchSurface() {
           </div>
 
           <div className="iw-row">
-            {family?.profile === 'packet' && family.kind !== 'generate-directed' && (
+            {(family?.profile === 'packet' || family?.profile === 'sharp') && family.kind !== 'generate-directed' && (
               <label className="iw-tier" data-iw-tier>
-                <span>Packet tier</span>
-                <select value={settings.tier} title={STOCK_SAMPLED_FRAMES[settings.tier] !== undefined && STOCK_SAMPLED_FRAMES[settings.tier] !== settings.tier ? `Stock nodes snap this tier to a ${STOCK_SAMPLED_FRAMES[settings.tier]}-frame sample (17n+5 grid) — only 5 and 39 are native grid points. Exact 9/13 needs the H3 Image Studio pack's latent ladder.` : undefined} onChange={(event) => void patchSettings({ tier: Number(event.target.value) as 5 | 9 | 13 | 39 })}>
-                  {[5, 9, 13].map((tier) => <option key={tier} value={tier}>{packetTierLabel(tier)}</option>)}
+                <span>{family?.profile === 'sharp' ? 'Context tier' : 'Packet tier'}</span>
+                <select value={settings.tier} title={family?.profile === 'sharp'
+                  ? 'The fast-sharp profile samples this many frames for temporal context, then decodes ONE latent slice through the T=1 image VAE.'
+                  : (STOCK_SAMPLED_FRAMES[settings.tier] !== undefined && STOCK_SAMPLED_FRAMES[settings.tier] !== settings.tier
+                    ? (studioPackOnEngine
+                      ? `The H3 Image Studio pack's latent ladder samples this tier exactly.`
+                      : `Stock nodes snap this tier to a ${STOCK_SAMPLED_FRAMES[settings.tier]}-frame sample (17n+5 grid) — only 5 and 39 are native grid points. Exact 9/13 needs the H3 Image Studio pack's latent ladder.`)
+                    : undefined)} onChange={(event) => void patchSettings({ tier: Number(event.target.value) as 5 | 9 | 13 | 39 })}>
+                  {[5, 9, 13].map((tier) => <option key={tier} value={tier}>{packetTierLabel(tier, studioPackOnEngine)}</option>)}
                 </select>
               </label>
             )}
@@ -832,7 +842,7 @@ function WorkbenchSurface() {
             onClick={() => void generate()}
           >
             {busy ? <LoaderCircle className="spin" size={13} /> : <Sparkles size={13} />}
-            Generate {family?.profile === 't1' ? '(T=1 fast — structurally soft)' : `(${family?.kind === 'generate-directed' ? '39-frame packet' : packetTierLabel(settings.tier)})`}
+            Generate {family?.profile === 't1' ? '(T=1 fast — structurally soft)' : family?.profile === 'sharp' ? `(fast-sharp — ${settings.tier}-frame context, one slice)` : `(${family?.kind === 'generate-directed' ? '39-frame packet' : packetTierLabel(settings.tier, studioPackOnEngine)})`}
           </button>
           <p className="iw-staging-note" data-iw-staging>Staging: Generate → free → Refine/Burst → free → Exit (24 GB discipline — stages never run concurrently).</p>
 

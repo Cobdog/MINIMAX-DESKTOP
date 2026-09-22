@@ -78,6 +78,12 @@ const PACK_CLASSES = [
   'MiniMaxH3LoraFormLoader',                   // first-party form adapter (source-derived entry below)
   'Krea2EditModelPatch', 'Krea2EditGroundedEncode',
   'Krea2AnyPaintPrepare', 'Krea2AnyPaintEncode', 'Krea2AnyPaintModelPatch',
+  // astropuzzo H3 Image Studio (task afvlbk4 — the T=1/packet adoption):
+  // the five load-bearing classes this repo's builders emit. Captured REAL
+  // from the shared install with the pack cloned at 47dea30 (2026-09-22);
+  // the pack's other seven classes duplicate app-side capability and stay
+  // out of contract scope.
+  'H3ImagePrepare', 'H3TextToImagePrepare', 'H3ImageToImagePrepare', 'H3ReferenceEditPrepare', 'H3ImageDecode',
   // (The four AceStep classes were removed with the engine, 2026-09-21 —
   // nn5ld47; no builder emits them, so they left contract scope. The
   // committed fixture keeps its captured entries until the next
@@ -160,8 +166,9 @@ function normalizeInputs(classType, section) {
 function main() {
   const argv = process.argv.slice(2).filter((a) => !a.startsWith('--'))
   const formAdapterSource = (process.argv.find((a) => a.startsWith('--form-adapter-source=')) ?? '').split('=')[1] || 'uncommitted working tree'
+  const captureDate = (process.argv.find((a) => a.startsWith('--capture-date=')) ?? '').split('=')[1] || new Date().toISOString().slice(0, 10)
   if (argv.length !== 1) {
-    console.error('usage: node scripts/capture-engine-schemas.cjs <raw-object-info.json> [--form-adapter-source <repo-commit>]')
+    console.error('usage: node scripts/capture-engine-schemas.cjs <raw-object-info.json> [--form-adapter-source <repo-commit>] [--capture-date YYYY-MM-DD]')
     process.exit(2)
   }
   const rawPath = path.resolve(argv[0])
@@ -191,10 +198,11 @@ function main() {
       capturedFrom: 'GET /object_info, canonical shared install (/home/agent/comfyui) on 127.0.0.1:8189, schema-only --cpu boot, zero prompt submissions, teardown verified',
       comfyuiRevision: 'a87667f72f5fad094b74b10dc9c9f82faea728ef',
       comfyuiVersion: '0.34.0',
-      captureDate: '2026-09-21',
+      captureDate,
       rawClassCount: Object.keys(raw).length,
       keptClassCount: Object.keys(nodes).length,
       formAdapterSource,
+      ...(nodes.H3ImageDecode !== undefined ? { h3ImageStudioPackCapture: 'astropuzzo/ComfyUI-MiniMax-H3-Image-Studio @ 47dea30d0bf07e7340ef0cc97e8174a15edf55b9 (v23.0.0) cloned into the shared install custom_nodes before this capture (task afvlbk4) — its 5 load-bearing classes (Prepare set + H3ImageDecode) captured REAL from /object_info; the pack\'s own test suite passed on the venv first (26/26)' } : {}),
       normalizations: [
         'trimmed to STOCK_GRAPH_CLASSES (src/lib/preflight.ts, lockstep-checked by tests) + the pack/family classes builders can emit',
         'file-listing combos (model folders, input dirs) EMPTIED: options are this box\'s filesystem, not engine truth — the contract validator treats empty options as environment-enumerated and skips membership; non-file enums keep their real captured options',

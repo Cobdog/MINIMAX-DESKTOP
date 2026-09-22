@@ -115,24 +115,25 @@ export type KnownDivergence = {
  * these signatures — nothing more (a new divergence fails CI), nothing less
  * (a fix must also retire its entry here, visibly). */
 export const KNOWN_DIVERGENCES: readonly KnownDivergence[] = [
-  {
-    id: 'h3img.t1-length-1',
-    surface: 'h3img.generate.t1 (T=1 Fast profile → MiniMaxH3ReferenceToVideo / MiniMaxH3ImageToVideo)',
-    emission: 'length: 1',
-    engineBehavior: 'REFUSED at prompt validation — value_smaller_than_min (min 5). The T=1 family is broken-as-shipped on stock nodes; its verification to date was graph-shape only.',
-    violationType: 'schema-refused',
-    opened: '2026-09-21',
-    owner: 'the T=1 remediation (first-party latent-construction node, ~150 lines per the devdocs addendum; upstream Comfy-Org/ComfyUI#15644 tracks the stock-node limit)',
-    note: 'THE NAMESAKE LESSON of the engine-contract layer: no fake-engine wiring test can catch this — only real schemas do.',
-  },
+  // (RETIRED 2026-09-22, afvlbk4 — h3img.t1-length-1, THE NAMESAKE of this
+  // layer: the T=1 Fast family submitted length:1 into the stock
+  // MiniMaxH3(Image|Reference)ToVideo conditioning and stock engines refused
+  // it at prompt validation (value_smaller_than_min, #15644). The adoption
+  // routed the family through the H3 Image Studio pack's Prepare classes —
+  // legal latent_t=1 — and KILLED the stock length:1 emission outright: no
+  // code path submits it anymore, the builder throws honestly when the pack
+  // is absent, and the contract corpus proves the signature never fires. The
+  // negative proof stays in tests/engine-contract.test.js (b): a planted
+  // length:1 still fails against the real schema, so the seam can never
+  // silently reopen.)
   {
     id: 'h3img.packet-tier-9-13',
-    surface: 'h3img packet tiers 9 and 13 (generate/compose/edit families on the packet profile)',
+    surface: 'h3img packet tiers 9 and 13 — the PACK-ABSENT stock fallback only (generate/compose/edit families when the H3 Image Studio pack is not served)',
     emission: 'length: 9 / length: 13',
-    engineBehavior: "Schema-VALID but silently reinterpreted: both snap to the 22-frame grid point (7 temporal slices) — the tier menu's cost ladder is wrong above 5 on the stock path. 5 and 39 are native grid points.",
+    engineBehavior: "Schema-VALID but silently reinterpreted: both snap to the 22-frame grid point (7 temporal slices) — honest on the fallback (the tier labels carry the true cost); EXACT through the pack's latent ladder since afvlbk4 (t=3/t=4 hit 9/13 with no snap), which is the path every pack-served engine takes. 5 and 39 are native grid points on both paths.",
     violationType: 'silently-reinterpreted',
     opened: '2026-09-21',
-    owner: 'the image-workbench tier ladder rework (retire or re-base tiers onto grid points; rides the T=1 remediation lane)',
+    owner: "the stock fallback's tier labels (packetTierLabel); the primary path was fixed by the pack adoption (afvlbk4) — this entry retires fully when the pack becomes a hard requirement for the image families",
   },
   // (PR #44 retired the five 2026-09-21 first-pass divergences as builder
   // fixes — form-adapter low_vram, klein ×2, music3 bitrate, and the acestep

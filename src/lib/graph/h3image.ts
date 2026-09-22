@@ -27,10 +27,26 @@
  * installed with ComfyUI 0.34-era — template-faithful port), and the
  * scottmudge MiniMaxH3HybridLoader node read from the canonical shared
  * install (block_range_adaln 25..49 = the b25-49 hybrid).
+ *
+ * THE PACK ADOPTION (task afvlbk4, maintainer ruling 2026-09-22 "adopt the
+ * pack for now, port later"): when the H3 Image Studio pack's Prepare
+ * classes are served, this builder routes its conditioning + decode through
+ * the pack's four load-bearing classes — legal latent_t=1 (the T=1 Fast
+ * lane's whole existence), the EXACT 9/13 packet ladder (no 22-frame snap),
+ * and the single-latent-slice decode (the fast-sharp profile: image-VAE
+ * sharpness over multi-frame sampling context). The model chain, recipe
+ * pins, prompt contracts, audits, and the scorer stay OURS — the pack's
+ * sampler/resolution/selector nodes duplicate capability this app already
+ * owns and are never emitted (assessment §4). Pack absent → packets keep
+ * the stock path (5/39 native; 9/13 honestly labeled as the 22-frame snap)
+ * while T=1/fast-sharp REFUSE (the stock length:1 path is dead — no code
+ * path submits it anymore; the engine-contract divergence h3img.t1-length-1
+ * retired with it).
  */
 import type { ObjectInfo } from '../comfyInfo'
 import type { ModelFile } from '../../types'
 import { findRegistryModel } from '../modelSelection'
+import { dbg } from '../dbg'
 import type { Krea2ModelSelection } from './krea2edit'
 import { buildKrea2Graph, findKrea2EditFamily } from './krea2edit'
 
@@ -52,6 +68,11 @@ export const H3IMG = {
   lora2: '6',
   sigmaShift: '7',
   formAdapter: '8',
+  /** The fast-sharp slice-decode VAE loader (the T=1 image VAE rides here
+   * when the graph samples multi-frame context but decodes ONE slice —
+   * distinct from node 3, which then carries the video VAE the pack's
+   * Prepare encodes references through). */
+  t1SliceVae: '9',
   conditioning: '10',
   noise: '11',
   guider: '12',
@@ -103,18 +124,46 @@ export const FORM_ADAPTER_NODE = 'MiniMaxH3LoraFormLoader' as const
 /** The H3 Image Studio pack's Prepare classes (astropuzzo
  * ComfyUI-MiniMax-H3-Image-Studio, Unlicense, registry row 'h3-image-studio'
  * — docs/research/h3-image-studio-pack-assessment.md). THE ENGINE-TRUTH GATE
- * (task d4er4ati, Wave 3 rung 0): the stock conditioning nodes this family's
- * graph emits (MiniMaxH3ImageToVideo / MiniMaxH3ReferenceToVideo) enforce a
- * length floor of 5 SERVER-SIDE — prompt validation rejects length:1 before
- * execution (execution.py value_smaller_than_min) and even past validation
+ * (task d4er4ati, Wave 3 rung 0; CAPABILITY since afvlbk4): the stock
+ * conditioning nodes this family's graph would otherwise emit
+ * (MiniMaxH3ImageToVideo / MiniMaxH3ReferenceToVideo) enforce a length floor
+ * of 5 SERVER-SIDE — prompt validation rejects length:1 before execution
+ * (execution.py value_smaller_than_min) and even past validation
  * temporal_shape() promotes max(5, length) onto the 17n+5 grid (ComfyUI issue
  * #15644, open). The pack's own conditioning implementation is the legal T=1
- * path; until the studio-side pack-conditioned graph lands, this family
- * refuses HONESTLY in both directions (pack absent → fetch/install guidance;
- * pack present → the pending-studio-support reason) — never a
- * submit-then-server-400. Detection is any-match over the Prepare set,
- * mirroring the pack board's own rule. */
+ * path AND this builder's T=1 path since afvlbk4: pack present → the family
+ * renders through the Prepare classes; pack absent → the honest refusal
+ * naming the fetch affordance. The stock length:1 submission is DEAD — no
+ * code path emits it (the engine-contract divergence h3img.t1-length-1
+ * retired with it). Detection is any-match over the Prepare set, mirroring
+ * the pack board's own rule. */
 export const H3_IMAGE_STUDIO_PREPARE_NODES = ['H3ImagePrepare', 'H3TextToImagePrepare', 'H3ImageToImagePrepare', 'H3ReferenceEditPrepare'] as const
+
+/** The pack's exact/slice frame decode — the one Decode class this builder
+ *  emits (per-node it is the second half of the load-bearing four; the
+ *  sampler/resolution/selector nodes duplicate app-side capability and are
+ *  never called). */
+export const H3_IMAGE_STUDIO_DECODE_NODE = 'H3ImageDecode' as const
+
+/** The pack's frame_preset strings for the tiers this builder uses, read
+ *  verbatim from nodes.py FRAME_PRESETS @ 47dea30 (v23.0.0). The pack's
+ *  latent ladder (_latent_t_for_frame_count) hits these EXACTLY — t=1/2/3/4
+ *  decode 1/5/9/13 frames with no 17n+5 snap. Tier 39 has NO pack preset
+ *  (the pack's menu tops out at 20): the directed family stays on the stock
+ *  path, where 39 is a native grid point the engine honors as requested. */
+export const H3_IMAGE_STUDIO_FRAME_PRESETS: Readonly<Record<number, string>> = {
+  1: 'single image | 1 frame (image VAE)',
+  5: 'recommended | 5 frames',
+  9: 'extended quality | 9 frames',
+  13: 'high quality | 13 frames',
+}
+
+/** True when the engine serves any of the pack's Prepare classes — the
+ *  pack-present branch every studio-conditioned path keys on (the same
+ *  any-match the detection layer uses). */
+export function h3ImageStudioPackPresent(info: ObjectInfo | undefined): boolean {
+  return H3_IMAGE_STUDIO_PREPARE_NODES.some((nodeClass) => infoHas(info, nodeClass))
+}
 
 // ---------------------------------------------------------------------------
 // Research-pinned recipe constants (the single source — tests enforce these)
@@ -143,6 +192,18 @@ export const H3IMG_RECIPE_PINS = {
     detailAdapterStrength: 0.5,
     shiftVideo: 12,
     shiftAudio: 3,
+  },
+  /** Fast-sharp recipe (the pack's single_latent_slice decode — the middle
+   * operating point between the packet's video-VAE softness ceiling and the
+   * T=1 lane's context-free latent): the SAME sampler recipe as T=1 rides a
+   * multi-frame sampling context, then ONE temporal latent slice decodes
+   * through the Mamad8 image VAE. Context tiers are the pack's exact
+   * 5/9/13 presets; the slice index is pinned to 0 (the settled head). */
+  sharp: {
+    contextTiers: [5, 9, 13] as const,
+    defaultContextTier: 5,
+    latentIndex: 0,
+    spatialDecode: 'native',
   },
   /** Packet default operating point on the hybrid profile: the official
    * sampler pair, full steps (turbo is the T=1 lane's acceleration). */
@@ -173,23 +234,25 @@ export const H3IMG_RECIPE_PINS = {
 } as const
 
 /** The TRUE sampled frame count per packet tier on STOCK nodes (task
- *  d4er4ati, the packet-economy half): the stock conditioning's
- *  align_frame_count snaps the requested length onto the 17n+5 grid — only 5
- *  and 39 are native grid points, so the 9 and 13 tiers both sample a
- *  7-slice latent and decode 22 frames (the app publishes the first 9/13 via
- *  ImageFromBatch; the extra decoded frames are discarded, and 9 vs 13 cost
- *  the same 22-frame sample). The H3 Image Studio pack's own latent ladder
- *  hits 9 and 13 exactly — until that graph path lands, the choice-point
- *  labels carry these true costs. [DOC: ComfyUI nodes_minimax_h3.py,
- *  verified against the shared install 0.34.0 + upstream master 2026-09-21] */
+ *  d4er4ati, the packet-economy half; the stock-fallback story since
+ *  afvlbk4): the stock conditioning's align_frame_count snaps the requested
+ *  length onto the 17n+5 grid — only 5 and 39 are native grid points, so the
+ *  9 and 13 tiers both sample a 7-slice latent and decode 22 frames (the app
+ *  publishes the first 9/13 via ImageFromBatch; the extra decoded frames are
+ *  discarded, and 9 vs 13 cost the same 22-frame sample). When the H3 Image
+ *  Studio pack is served this builder takes its latent ladder instead —
+ *  t=2/3/4 hit 5/9/13 EXACTLY — and these costs apply only to the
+ *  pack-absent fallback. [DOC: ComfyUI nodes_minimax_h3.py, verified against
+ *  the shared install 0.34.0 + upstream master 2026-09-21] */
 export const STOCK_SAMPLED_FRAMES: Readonly<Record<number, number>> = { 5: 5, 9: 22, 13: 22, 39: 39 }
 
 /** The honest choice-point label for one packet tier: the requested frames,
- *  plus the true sampled count when the stock grid inflates it. */
-export function packetTierLabel(tier: number): string {
+ *  plus the true sampled count when the serving path inflates it (the stock
+ *  grid on the fallback; exact through the pack's ladder when served). */
+export function packetTierLabel(tier: number, studioPack = false): string {
   const sampled = STOCK_SAMPLED_FRAMES[tier]
   if (sampled === undefined || sampled === tier) return `${tier} frames`
-  return `${tier} frames · samples ${sampled} on stock nodes`
+  return studioPack ? `${tier} frames · exact through the Image Studio ladder` : `${tier} frames · samples ${sampled} on stock nodes`
 }
 
 /** The Mamad8 T=1 image VAE filename pattern — the never-in-video-graphs
@@ -197,12 +260,15 @@ export function packetTierLabel(tier: number): string {
 export const T1_IMAGE_VAE_PATTERN = /^minimax_h3_t1_image_vae/i
 
 /**
- * THE FACTORY GUARD (spec AC8): throws when a video-frame-count graph would
- * decode through the T=1 image VAE. The Mamad8 decoder "materially regresses
+ * THE FACTORY GUARD (spec AC8): throws when a multi-frame DECODE would run
+ * through the T=1 image VAE. The Mamad8 decoder "materially regresses
  * multi-frame video decode (patch-grid ghosting, cross-frame mixing)" —
  * substituting it into any packet or video render ships corruption that
  * still renders plausibly, so this is a hard build error, not a warning.
- * frames <= 1 (the T=1 Fast profile itself) is the only legal use. */
+ * `frames` is the number of frames THE VAE DECODES, not the graph's sampling
+ * context: frames <= 1 is legal — the T=1 profile's single frame, and the
+ * fast-sharp profile's ONE latent slice (its multi-frame context is decoded
+ * by nobody; only the picked slice ever reaches the image VAE). */
 export function assertNoT1ImageVaeInVideoGraph(vaeName: string, frames: number): void {
   if (frames > 1 && T1_IMAGE_VAE_PATTERN.test(vaeName)) {
     throw new Error(
@@ -253,12 +319,13 @@ export type H3ImgRefSlot = {
   note?: string
 }
 
-export type H3ImgPathProfile = 'packet' | 't1'
+export type H3ImgPathProfile = 'packet' | 't1' | 'sharp'
 
 export type H3ImgFamilyKind =
   | 'generate-packet'
   | 'generate-directed'
   | 'generate-t1'
+  | 'generate-sharp'
   | 'compose'
   | 'edit'
   | 'refine'
@@ -402,22 +469,19 @@ function baseDetect(info: ObjectInfo | undefined, files: ModelFile[], needs: { r
   const missingNodes: string[] = []
   const missingModels: string[] = []
   const notes: string[] = []
-  // THE ENGINE-TRUTH GATE (d4er4ati): the stock-graph T=1 path submits
-  // length:1 into the stock conditioning node, which stock ComfyUI refuses
-  // at prompt validation (issue #15644) — the family must therefore refuse
-  // BEFORE submission whether or not the pack is installed, with the reason
-  // matched to the engine's actual state. See H3_IMAGE_STUDIO_PREPARE_NODES.
+  // THE ENGINE-TRUTH GATE, FLIPPED TO CAPABILITY (d4er4ati → afvlbk4): the
+  // pack's Prepare classes are now this builder's T=1/fast-sharp
+  // conditioning. Pack present → the family RENDERS (no gate, a note);
+  // pack absent → the honest refusal naming the fetch affordance — the
+  // stock length:1 path is dead and never submitted. See
+  // H3_IMAGE_STUDIO_PREPARE_NODES.
   if (needs.t1StudioPack) {
-    const studioPackPresent = H3_IMAGE_STUDIO_PREPARE_NODES.some((nodeClass) => infoHas(info, nodeClass))
-    if (!studioPackPresent) {
+    if (!h3ImageStudioPackPresent(info)) {
       missingNodes.push(
         `${H3_IMAGE_STUDIO_PREPARE_NODES[0]} — the MiniMax H3 Image Studio pack (user-fetch: Settings → Node packs → ComfyUI-MiniMax-H3-Image-Studio, Fetch…). Stock engines refuse this profile's single-frame latent at validation (ComfyUI issue #15644: the stock conditioning node enforces length ≥ 5 server-side), so without the pack's conditioning the render would fail on the engine — never a silent submit.`,
       )
     } else {
-      missingNodes.push(
-        `the studio-side pack-conditioned T=1 graph — the H3 Image Studio pack is installed and detected, but this studio does not emit its conditioning nodes yet (a pinned follow-up); the stock length=1 path it would otherwise submit is refused by stock engines (issue #15644). The family stays gated until the pack-side graph lands.`,
-      )
-      notes.push('H3 Image Studio pack detected on the engine — the T=1 Fast profile unlocks when the pack-conditioned graph path lands (tracked increment).')
+      notes.push('H3 Image Studio pack detected on the engine — this profile renders through its conditioning nodes (legal single-frame latents; the exact 9/13 packet ladder).')
     }
   }
   const hybrid = infoHas(info, HYBRID_LOADER_NODE) && Boolean(selection.fl2va && selection.ref2va)
@@ -496,10 +560,25 @@ export const H3IMG_FAMILIES: H3ImgFamily[] = [
     dials: ['seed', 'resolution'],
     detect: (info, files) => baseDetect(info, files, { ref2va: true, t1: true, turbo: true, t1StudioPack: true }),
     ui: {
-      description: 'The Fast profile: one latent frame through the Mamad8 T=1 image VAE on the hybrid b25-49 checkpoint, FL2VA turbo 8-step @0.75 + detail adapter @0.5, er_sde/sgm_uniform, shifts 12/3. Seconds-class drafts; auto-labeled "fast, structurally soft". GATED on the H3 Image Studio pack: stock conditioning nodes refuse single-frame latents server-side (issue #15644) — the pack\'s parallel conditioning is the legal path.',
+      description: 'The Fast profile: one latent frame through the Mamad8 T=1 image VAE on the hybrid b25-49 checkpoint, FL2VA turbo 8-step @0.75 + detail adapter @0.5, er_sde/sgm_uniform, shifts 12/3. Seconds-class drafts; auto-labeled "fast, structurally soft". Renders through the H3 Image Studio pack\'s conditioning (legal single-frame latents — stock nodes refuse them server-side, issue #15644).',
       warning: 'The T=1 VAE reconstructs from a single temporal latent — outputs can stay soft and lose fine text, thin contours, hair, foliage. It is pinned to this profile and can never appear in a video graph (factory-enforced). Refine is always opt-in: a one-tap affordance follows every T=1 output.',
       installHint: 'Needs the MiniMax H3 Image Studio pack (user-fetch from Settings → Node packs — its conditioning makes single-frame latents legal; stock engines refuse length<5 at validation), the Mamad8 T=1 image VAE (minimax_h3_t1_image_vae_step1597.safetensors), an FL2VA turbo LoRA, and ideally the hybrid loader.',
       promptGuidance: 'Scene-style prompt, as Generate. With a source image the T=1 path auto-switches to Picture-1 reference conditioning (a frame-0 keyframe would fill the only output slot).',
+    },
+  },
+  {
+    id: 'h3img.generate.sharp',
+    label: 'Generate (fast-sharp slice)',
+    kind: 'generate-sharp',
+    profile: 'sharp',
+    roles: GENERATE_ROLES,
+    dials: ['tier', 'seed', 'resolution'],
+    detect: (info, files) => baseDetect(info, files, { ref2va: true, t1: true, turbo: true, t1StudioPack: true }),
+    ui: {
+      description: 'The fast-sharp middle point: the SAME 8-step hybrid recipe samples a multi-frame packet (5/9/13 context — the pack\'s exact ladder) but ONE temporal latent slice decodes through the Mamad8 image VAE — image-VAE sharpness WITH multi-frame sampling context, between the packet\'s video-VAE softness ceiling and T=1\'s context-free latent.',
+      warning: 'The output is one still from a packet the sampler treated temporally — motion-adjacent prompts can bleed context into the slice. The T=1 VAE only ever decodes this ONE slice (factory-guarded: it can never decode a multi-frame batch); if the still needs more context, move to the packet profile and let the scorer pick.',
+      installHint: 'Needs the H3 Image Studio pack (its Prepare builds the context latent and its single_latent_slice decode is the point of this profile), the Mamad8 T=1 image VAE, an FL2VA turbo LoRA, and ideally the hybrid loader.',
+      promptGuidance: 'Scene-style prompt, as Generate: the slice is decoded from the packet\'s settled head, so describe the finished still, not a sequence.',
     },
   },
   {
@@ -774,10 +853,16 @@ function validateRequest(family: H3ImgFamily, request: H3ImgRequest): number {
   const tier: number = family.tier ?? request.tier ?? 5
   // Tier rules apply to the H3 pipeline families; refine/burst/exit are not
   // packet generations (refine emits one frame through its own engine).
-  const tierBound = family.kind === 'generate-packet' || family.kind === 'generate-directed' || family.kind === 'generate-t1' || family.kind === 'compose' || family.kind === 'edit'
+  const tierBound = family.kind === 'generate-packet' || family.kind === 'generate-directed' || family.kind === 'generate-t1' || family.kind === 'generate-sharp' || family.kind === 'compose' || family.kind === 'edit'
   if (tierBound) {
     if (family.profile === 't1') {
       if (tier !== H3IMG_RECIPE_PINS.t1.frames) throw new Error('The T=1 Fast profile generates exactly one frame.')
+    } else if (family.profile === 'sharp') {
+      // The sharp profile's tier is the sampling CONTEXT — the pack's exact
+      // presets only (39 has no preset; that lane is the directed packet's).
+      if (!H3IMG_RECIPE_PINS.sharp.contextTiers.includes(tier as 5 | 9 | 13)) {
+        throw new Error(`The fast-sharp profile's context tier must be one of ${H3IMG_RECIPE_PINS.sharp.contextTiers.join('/')} (got ${tier}).`)
+      }
     } else if (!H3IMG_RECIPE_PINS.packetTiers.includes(tier as 5 | 9 | 13 | 39)) {
       throw new Error(`Packet tier must be one of ${H3IMG_RECIPE_PINS.packetTiers.join('/')} (got ${tier}).`)
     }
@@ -826,8 +911,32 @@ function buildH3StillPipeline(
 ): Record<string, { class_type: string; inputs: Inputs }> {
   const graph: Record<string, { class_type: string; inputs: Inputs }> = {}
   const isT1 = family.profile === 't1'
+  const isSharp = family.profile === 'sharp'
   const useRefs = request.refs.length > 0 || family.kind === 'compose' || (isT1 && Boolean(request.source))
   const hybridAvailable = Boolean(info && (info as Record<string, unknown>)[HYBRID_LOADER_NODE] !== undefined) && Boolean(selection.fl2va && selection.ref2va)
+
+  // --- the pack branch (afvlbk4): WHICH conditioning path this graph takes --
+  // The T=1 and fast-sharp profiles are studio-conditioned, full stop — the
+  // stock length:1 submission is dead (issue #15644 refuses it at validation;
+  // no code path emits it). Packet tiers take the pack's exact latent ladder
+  // when served (5/9/13 hit t=2/3/4 exactly — no 22-frame snap); tier 39 and
+  // the pack-absent fallback stay on stock nodes, where 5/39 are native grid
+  // points and 9/13 are honestly labeled as the snap.
+  const studioPack = h3ImageStudioPackPresent(info)
+  if ((isT1 || isSharp) && !studioPack) {
+    throw new Error(
+      `${family.label} renders through the H3 Image Studio pack's conditioning — its Prepare classes (${H3_IMAGE_STUDIO_PREPARE_NODES[0]}…) are not served by this engine. Stock nodes refuse this profile's single-frame latent at validation (ComfyUI issue #15644), so without the pack there is no legal graph: fetch ComfyUI-MiniMax-H3-Image-Studio from Settings → Node packs, then reconnect. Never a submit-then-server-400.`,
+    )
+  }
+  const studioPackets = family.profile === 'packet' && studioPack && H3_IMAGE_STUDIO_FRAME_PRESETS[tier] !== undefined
+  const studioPath = isT1 || isSharp || studioPackets
+  dbg('family', {
+    verdict: 'conditioning-path',
+    family: family.id,
+    path: studioPath ? 'image-studio-pack' : 'stock',
+    because: { studioPack, profile: family.profile, tier, note: studioPackets ? 'exact pack ladder' : (!studioPath ? 'stock fallback / native grid' : 'pack-conditioned lane') },
+    ...(studioPath ? { framePreset: H3_IMAGE_STUDIO_FRAME_PRESETS[tier] } : {}),
+  })
 
   // --- model chain ---------------------------------------------------------
   // The merged override pick (task rq0lsax, dated decision 2026-09-20): the
@@ -864,14 +973,26 @@ function buildH3StillPipeline(
   }
   graph[H3IMG.clip] = { class_type: 'CLIPLoader', inputs: { clip_name: selection.textEncoder, type: 'minimax', device: 'default' } }
   graph[H3IMG.videoVae] = { class_type: 'VAELoader', inputs: { vae_name: selection.videoVae } }
-  graph[H3IMG.audioVae] = { class_type: 'VAELoader', inputs: { vae_name: selection.audioVae } }
+  // The stock AV conditioning decodes its latent's zero audio rows through
+  // the audio VAE; the pack's Prepare builds the same packed latent with the
+  // DiT denoising the zeros anyway — its graphs never load the audio VAE
+  // (node id 4 only exists on the stock path since afvlbk4). The sharp
+  // profile additionally decodes ONE slice through the T=1 image VAE while
+  // node 3 keeps the video VAE its Prepare encodes references through.
+  if (!studioPath) graph[H3IMG.audioVae] = { class_type: 'VAELoader', inputs: { vae_name: selection.audioVae } }
+  if (isSharp) {
+    if (!selection.t1ImageVae) {
+      throw new Error('The fast-sharp profile needs the Mamad8 T=1 image VAE (minimax_h3_t1_image_vae_step1597.safetensors) for its single-slice decode — it was not found in the model scan.')
+    }
+    graph[H3IMG.t1SliceVae] = { class_type: 'VAELoader', inputs: { vae_name: selection.t1ImageVae } }
+  }
 
   // The T=1 Fast recipe pins its two LoRAs (turbo @0.75 + detail @0.5);
   // packet families expose the two slots as dials. Slot 1 rides the
   // first-party form adapter when its pack is installed — always first,
   // cross-form safety (a mismatched-form LoRA through the stock loader is a
   // shape error).
-  const loras: H3ImgLoraSlot[] = isT1
+  const loras: H3ImgLoraSlot[] = isT1 || isSharp
     ? [
         ...(selection.turboLora ? [{ name: selection.turboLora, strength: H3IMG_RECIPE_PINS.t1.turboStrength }] : []),
         ...(selection.detailAdapterLora ? [{ name: selection.detailAdapterLora, strength: H3IMG_RECIPE_PINS.t1.detailAdapterStrength }] : []),
@@ -890,14 +1011,14 @@ function buildH3StillPipeline(
     }
     modelLink = [id, 0]
   })
-  if (isT1 && !selection.turboLora) {
+  if ((isT1 || isSharp) && !selection.turboLora) {
     throw new Error('The T=1 Fast profile pins an FL2VA turbo LoRA at 0.75 — none was found in the model scan.')
   }
 
   // Sigma shifts: the T=1 recipe pins 12/3. The turbo 8-step operating point
   // carries the same shifts (astropuzzo's stack); non-turbo packets run the
   // official unshifted path, matching the video factory's base behavior.
-  if (isT1 || (loras.length > 0 && loras.some((lora) => lora.name === selection.turboLora && lora.strength === H3IMG_RECIPE_PINS.t1.turboStrength))) {
+  if (isT1 || isSharp || (loras.length > 0 && loras.some((lora) => lora.name === selection.turboLora && lora.strength === H3IMG_RECIPE_PINS.t1.turboStrength))) {
     graph[H3IMG.sigmaShift] = {
       class_type: 'MiniMaxH3SigmaShift',
       inputs: { model: modelLink, shift_video: H3IMG_RECIPE_PINS.t1.shiftVideo, shift_audio: H3IMG_RECIPE_PINS.t1.shiftAudio },
@@ -906,53 +1027,57 @@ function buildH3StillPipeline(
   }
 
   // --- conditioning --------------------------------------------------------
-  const conditioningInputs: Inputs = {
-    clip: [H3IMG.clip, 0],
-    vae: [H3IMG.videoVae, 0],
-    prompt: request.prompt,
-    width: request.width,
-    height: request.height,
-    length: tier,
+  // Ordered refs = <Picture N> by wiring order (spec §3); the SOURCE is
+  // always Picture 1 (edits/directed anchor it; T=1 I2I auto-switches to
+  // Picture-1 reference conditioning — a frame-0 keyframe would fill the
+  // only output slot). The pack path reuses the same wiring through the
+  // Prepare classes' source_image / reference_image_2..9 sockets.
+  const pictureNames: string[] = []
+  if (request.source) pictureNames.push(request.source)
+  for (const slot of request.refs) {
+    if (slot.name) pictureNames.push(slot.name)
+    else if (slot.refmod) throw new Error('RefMod file slots read the community format but cannot render in v1 — the factory (H8) wires them into the conditioning; use a raw image or a poserig render for this slot.')
   }
-  if (useRefs) {
-    // Ordered refs = <Picture N> by wiring order (spec §3). All slots ride
-    // the native ref_images path on stock; per-ref semantic transport is a
-    // recorded fact + contract shaper (see TRANSPORT_FOR_ROLE).
-    conditioningInputs.audio_vae = [H3IMG.audioVae, 0]
-    conditioningInputs.ref_image_size = 'max'
-    const refNames: string[] = []
-    // On the R2V path the SOURCE is always Picture 1 (edits/directed anchor
-    // it; T=1 I2I auto-switches to Picture-1 reference conditioning — a
-    // frame-0 keyframe would fill the only output slot).
-    if (request.source) refNames.push(request.source)
-    for (const slot of request.refs) {
-      if (slot.name) refNames.push(slot.name)
-      else if (slot.refmod) throw new Error('RefMod file slots read the community format but cannot render in v1 — the factory (H8) wires them into the conditioning; use a raw image or a poserig render for this slot.')
-    }
-    refNames.slice(0, H3IMG_RECIPE_PINS.refs.max).forEach((name, index) => {
-      const loaderId = `${H3IMG.refImageLoaderPrefix}${index}`
-      graph[loaderId] = { class_type: 'LoadImage', inputs: { image: name } }
-      conditioningInputs[`ref_images.ref_image_${index}`] = [loaderId, 0]
-    })
-    if (refNames.length === 0) throw new Error('Reference conditioning needs at least one picture slot.')
-    graph[H3IMG.conditioning] = { class_type: 'MiniMaxH3ReferenceToVideo', inputs: conditioningInputs }
+  const loadPicture = (name: string, id: string): [string, number] => {
+    graph[id] = { class_type: 'LoadImage', inputs: { image: name } }
+    return [id, 0]
+  }
+  if (studioPath) {
+    buildStudioPrepare(graph, request, tier, pictureNames, loadPicture)
   } else {
-    if (request.source) {
-      graph[H3IMG.firstFrameLoader] = { class_type: 'LoadImage', inputs: { image: request.source } }
-      conditioningInputs.first_frame = [H3IMG.firstFrameLoader, 0]
+    const conditioningInputs: Inputs = {
+      clip: [H3IMG.clip, 0],
+      vae: [H3IMG.videoVae, 0],
+      prompt: request.prompt,
+      width: request.width,
+      height: request.height,
+      length: tier,
     }
-    graph[H3IMG.conditioning] = { class_type: 'MiniMaxH3ImageToVideo', inputs: conditioningInputs }
+    if (useRefs) {
+      // All slots ride the native ref_images path on stock; per-ref semantic
+      // transport is a recorded fact + contract shaper (TRANSPORT_FOR_ROLE).
+      conditioningInputs.audio_vae = [H3IMG.audioVae, 0]
+      conditioningInputs.ref_image_size = 'max'
+      pictureNames.slice(0, H3IMG_RECIPE_PINS.refs.max).forEach((name, index) => {
+        conditioningInputs[`ref_images.ref_image_${index}`] = loadPicture(name, `${H3IMG.refImageLoaderPrefix}${index}`)
+      })
+      if (pictureNames.length === 0) throw new Error('Reference conditioning needs at least one picture slot.')
+      graph[H3IMG.conditioning] = { class_type: 'MiniMaxH3ReferenceToVideo', inputs: conditioningInputs }
+    } else {
+      if (request.source) conditioningInputs.first_frame = loadPicture(request.source, H3IMG.firstFrameLoader)
+      graph[H3IMG.conditioning] = { class_type: 'MiniMaxH3ImageToVideo', inputs: conditioningInputs }
+    }
   }
 
   // --- sampler -------------------------------------------------------------
   graph[H3IMG.noise] = { class_type: 'RandomNoise', inputs: { noise_seed: request.seed } }
   graph[H3IMG.guider] = { class_type: 'BasicGuider', inputs: { model: modelLink, conditioning: [H3IMG.conditioning, 0] } }
-  const sampler = isT1 ? H3IMG_RECIPE_PINS.t1.sampler : H3IMG_RECIPE_PINS.packet.sampler
-  const scheduler = isT1 ? H3IMG_RECIPE_PINS.t1.scheduler : H3IMG_RECIPE_PINS.packet.scheduler
+  const sampler = isT1 || isSharp ? H3IMG_RECIPE_PINS.t1.sampler : H3IMG_RECIPE_PINS.packet.sampler
+  const scheduler = isT1 || isSharp ? H3IMG_RECIPE_PINS.t1.scheduler : H3IMG_RECIPE_PINS.packet.scheduler
   graph[H3IMG.samplerSelect] = { class_type: 'KSamplerSelect', inputs: { sampler_name: sampler } }
   graph[H3IMG.scheduler] = {
     class_type: 'BasicScheduler',
-    inputs: { model: modelLink, scheduler, steps: isT1 ? H3IMG_RECIPE_PINS.t1.steps : (request.steps ?? H3IMG_RECIPE_PINS.packet.steps), denoise: 1 },
+    inputs: { model: modelLink, scheduler, steps: isT1 || isSharp ? H3IMG_RECIPE_PINS.t1.steps : (request.steps ?? H3IMG_RECIPE_PINS.packet.steps), denoise: 1 },
   }
   graph[H3IMG.sampler] = {
     class_type: 'SamplerCustomAdvanced',
@@ -960,24 +1085,130 @@ function buildH3StillPipeline(
   }
 
   // --- decode + per-frame publish ------------------------------------------
-  // THE FACTORY GUARD: the T=1 VAE is legal ONLY here (single frame); the
-  // video VAE decodes every packet tier. The decode choice goes through the
-  // same assert the video factory uses — a multi-frame graph can never pick
-  // the T1 decoder, and the T1 loader node is only emitted on this path.
+  // THE FACTORY GUARD: the T=1 VAE is legal ONLY where it decodes exactly
+  // ONE temporal unit — the T=1 profile's single frame, or ONE latent slice
+  // of the sharp profile (the sampling CONTEXT is multi-frame; the VAE never
+  // sees more than the one slice). The video VAE decodes every packet tier.
+  // The decode choice goes through the same assert the video factory uses —
+  // a multi-frame DECODE can never pick the T1 decoder, and the T1 loader
+  // nodes are only emitted on these paths.
+  const publishFrames = isT1 || isSharp ? 1 : tier
   if (isT1) {
     if (!selection.t1ImageVae) {
       throw new Error('The T=1 Fast profile needs the Mamad8 T=1 image VAE (minimax_h3_t1_image_vae_step1597.safetensors) — it was not found in the model scan.')
     }
-    assertNoT1ImageVaeInVideoGraph(selection.t1ImageVae, tier)
+    assertNoT1ImageVaeInVideoGraph(selection.t1ImageVae, 1)
     graph[H3IMG.videoVae] = { class_type: 'VAELoader', inputs: { vae_name: selection.t1ImageVae } }
   }
-  graph[H3IMG.decode] = { class_type: 'VAEDecode', inputs: { samples: [H3IMG.sampler, 0], vae: [H3IMG.videoVae, 0] } }
-  for (const { select, save } of framePublishIds(tier)) {
+  if (isSharp) assertNoT1ImageVaeInVideoGraph(selection.t1ImageVae, 1)
+  if (studioPath) {
+    // The pack's exact/slice decode. Temporal mode (the default in the
+    // pack's own API graphs) decodes the requested frame profile — the
+    // exact 9/13 the stock grid snaps to 22, and the single frame of T=1.
+    // The sharp profile switches H3ImageDecode to single_latent_slice: one
+    // slice through the image VAE with the multi-frame context behind it.
+    const decodeInputs: Inputs = { samples: [H3IMG.sampler, 0], vae: [isSharp ? H3IMG.t1SliceVae : H3IMG.videoVae, 0] }
+    if (isSharp) {
+      decodeInputs.decode_mode = 'single_latent_slice'
+      decodeInputs.latent_index = H3IMG_RECIPE_PINS.sharp.latentIndex
+      decodeInputs.spatial_decode = H3IMG_RECIPE_PINS.sharp.spatialDecode
+    }
+    graph[H3IMG.decode] = { class_type: H3_IMAGE_STUDIO_DECODE_NODE, inputs: decodeInputs }
+    dbg('family', { verdict: 'decode-choice', family: family.id, mode: isSharp ? 'single_latent_slice' : 'temporal', vae: isSharp ? selection.t1ImageVae : (isT1 ? selection.t1ImageVae : selection.videoVae), publishes: publishFrames })
+  } else {
+    graph[H3IMG.decode] = { class_type: 'VAEDecode', inputs: { samples: [H3IMG.sampler, 0], vae: [H3IMG.videoVae, 0] } }
+  }
+  for (const { select, save } of framePublishIds(publishFrames)) {
     const index = Number(save.slice(H3IMG.frameSavePrefix.length))
     graph[select] = { class_type: 'ImageFromBatch', inputs: { image: [H3IMG.decode, 0], batch_index: index, length: 1 } }
     graph[save] = { class_type: 'SaveImage', inputs: { images: [select, 0], filename_prefix: request.filenamePrefix } }
   }
   return graph
+}
+
+/** Builds the pack's Prepare conditioning node (the afvlbk4 adoption). Mode
+ *  selection mirrors the pack's own shipped graphs exactly:
+ *   - no pictures → H3TextToImagePrepare (T2I FL2VA)
+ *   - a source ONLY (multi-frame packet or sharp context) → H3ImageToImagePrepare
+ *     (the FL2VA frame-0 anchor; at the one-frame preset the node itself
+ *     auto-switches to Picture-1 reference conditioning — their I2I_SINGLE
+ *     wiring, so the only output frame stays editable)
+ *   - additional references → H3ReferenceEditPrepare (ordered REF2VA
+ *     pictures, source first — their REFERENCE_EDIT / REFERENCE_SINGLE
+ *     wiring), native transport (per-ref semantic stays a recorded fact +
+ *     contract shaper, exactly as on stock)
+ *  optimize_for_still is FALSE on every path: our generated ownership
+ *  contract IS the prompt discipline (the pack's optimizer would double-wrap
+ *  it), so its preserve-strength dials are inert and carry the pack's own
+ *  defaults. Source fitting stays OURS (prepareImage fits uploads to the
+ *  canvas before submit) — the node's source_fit is a no-op on an
+ *  already-fitted image; crop_center is the least surprising default. */
+function buildStudioPrepare(
+  graph: Record<string, { class_type: string; inputs: Inputs }>,
+  request: H3ImgRequest,
+  tier: number,
+  pictureNames: string[],
+  loadPicture: (name: string, id: string) => [string, number],
+): void {
+  const preset = H3_IMAGE_STUDIO_FRAME_PRESETS[tier]
+  if (preset === undefined) throw new Error(`No H3 Image Studio frame preset for a ${tier}-frame request — the pack's ladder serves 1/5/9/13; 39 stays on the stock grid-native path.`)
+  const pictures = pictureNames.slice(0, H3IMG_RECIPE_PINS.refs.max)
+  // The vae link is by node id: at the one-frame tiers the decode section
+  // reassigns node 3 to the T=1 image VAE (their I2I_SINGLE / REFERENCE_
+  // SINGLE wiring — one loader serves both the Prepare's reference encode
+  // and the decode); multi-frame packets and the sharp context keep the
+  // video VAE there (the sharp profile's slice decode rides node 9).
+  const vaeLink: [string, number] = [H3IMG.videoVae, 0]
+  if (!pictures.length) {
+    graph[H3IMG.conditioning] = {
+      class_type: 'H3TextToImagePrepare',
+      inputs: {
+        clip: [H3IMG.clip, 0],
+        prompt: request.prompt,
+        width: request.width,
+        height: request.height,
+        quality_profile: preset,
+        optimize_for_still: false,
+      },
+    }
+    return
+  }
+  if (pictures.length === 1 && request.refs.length === 0) {
+    graph[H3IMG.conditioning] = {
+      class_type: 'H3ImageToImagePrepare',
+      inputs: {
+        clip: [H3IMG.clip, 0],
+        vae: vaeLink,
+        source_image: loadPicture(pictures[0], request.source ? H3IMG.firstFrameLoader : `${H3IMG.refImageLoaderPrefix}0`),
+        edit_instruction: request.prompt,
+        width: request.width,
+        height: request.height,
+        quality_profile: preset,
+        source_fidelity: 0.75,
+        source_fit: 'crop_center',
+        optimize_for_still: false,
+      },
+    }
+    return
+  }
+  const prepareInputs: Inputs = {
+    clip: [H3IMG.clip, 0],
+    vae: vaeLink,
+    source_image: loadPicture(pictures[0], request.source ? H3IMG.firstFrameLoader : `${H3IMG.refImageLoaderPrefix}0`),
+    edit_instruction: request.prompt,
+    width: request.width,
+    height: request.height,
+    quality_profile: preset,
+    source_fidelity: 0.6,
+    source_fit: 'crop_center',
+    reference_detail: 'max_identity_2048',
+    optimize_for_still: false,
+    reference_transport: 'native',
+  }
+  pictures.slice(1).forEach((name, index) => {
+    prepareInputs[`reference_image_${index + 2}`] = loadPicture(name, `${H3IMG.refImageLoaderPrefix}${index + 1}`)
+  })
+  graph[H3IMG.conditioning] = { class_type: 'H3ReferenceEditPrepare', inputs: prepareInputs }
 }
 
 /** Krea 2 refine: the picked frame + a defect-naming instruction through the
@@ -1105,6 +1336,7 @@ export const STAGE_ENGINE_OF_FAMILY: Record<string, StageEngine> = {
   'h3img.generate.packet': 'h3',
   'h3img.generate.packet.directed': 'h3',
   'h3img.generate.t1': 'h3',
+  'h3img.generate.sharp': 'h3',
   'h3img.compose.refs': 'h3',
   'h3img.edit.identity': 'h3',
   'h3img.edit.background': 'h3',

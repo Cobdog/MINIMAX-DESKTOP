@@ -1051,16 +1051,16 @@ test('H3-1F as the image op: the stills intent routes the T=1 family; image+cont
   const controlOutput = document.chains.find((chain) => chain.kind === 'media')!.outputs[0]!.id
 
   const plan = page.evaluate.bind(page)
-  const plain = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; validation: string | null; graph: { sampler: string; scheduler: string; steps: number; saveImageCount: number; loadImageCount: number; t1Vae: string | null; hybrid: boolean } } }).__canvasSubmitPlan(spec), { mediaType: 'image' })
+  const plain = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; validation: string | null; graph: { sampler: string; scheduler: string; steps: number; saveImageCount: number; loadImageCount: number; t1Vae: string | null; hybrid: boolean } | null } }).__canvasSubmitPlan(spec), { mediaType: 'image' })
   expect(plain.mode).toBe('h3-1f')
-  expect(plain.validation).toContain('not available') // offline: the family gate's install guidance names the stack
-  expect(plain.graph.sampler).toBe('er_sde') // the pinned T=1 recipe (H3IMG_RECIPE_PINS.t1)
-  expect(plain.graph.scheduler).toBe('sgm_uniform')
-  expect(plain.graph.steps).toBe(8)
-  expect(plain.graph.saveImageCount).toBe(1) // ONE frame published — the single-latent-frame profile
-  expect(plain.graph.loadImageCount).toBe(0) // text→still wires no image loader
-  expect(plain.graph.t1Vae).toContain('t1_image_vae') // the Mamad8 decoder, never the video VAE here
-  expect(plain.graph.hybrid).toBe(false) // offline object-info: the stock profile builds
+  // (afvlbk4) Offline there is NO legal T=1 graph anymore — the stock
+  // length:1 emission is dead, so the plan refuses at the build with the
+  // pack's fetch affordance and carries graph: null. The graph-shape facts
+  // (er_sde/sgm_uniform/8 steps/one frame/Mamad8 decoder) are asserted on
+  // the REAL submitted graph in the pack-present test below.
+  expect(plain.validation).toContain('H3 Image Studio')
+  expect(plain.validation).toContain('#15644')
+  expect(plain.graph).toBeNull()
 
   const control = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; validation: string | null; handoff: { surface: string; family: string; sourceAnchored: boolean }; graph: unknown } }).__canvasSubmitPlan(spec), { mediaType: 'image', firstFrameOutputId: controlOutput })
   expect(control.mode).toBe('h3-1f-edit-handoff')
@@ -1081,19 +1081,19 @@ test('H3-1F as the image op: the stills intent routes the T=1 family; image+cont
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
-test('the H3-1F stills intent gates honestly at the render attempt — both pack states (d4er4ati)', async ({ page, request }) => {
+test('the H3-1F stills intent: honest refusal pack-absent, the pack-form submit pack-present (d4er4ati → afvlbk4)', async ({ page, request }) => {
   const problems = await trackErrors(page)
   const http = await import('node:http')
 
-  // The engine-truth gate (Wave 3 rung 0): the stock conditioning nodes this
-  // family's graph emits refuse length:1 at SERVER-SIDE validation (ComfyUI
-  // issue #15644 — execution.py schema-min, then temporal_shape promotes
-  // max(5,·) even past it). This test used to drive a fake-engine submit and
-  // assert a landed T=1 take — that was graph-shape truth standing in for
-  // execution truth, exactly the false capability claim the gate retires
-  // (docs/research/h3-image-studio-pack-assessment.md §2). The submit→poll→
-  // packet-aware-landing mechanics it used to cover are the SHARED core the
-  // packet-family flow in images.spec.ts still exercises end to end.
+  // The engine-truth gate (Wave 3 rung 0, flipped to capability by afvlbk4):
+  // the stock conditioning nodes refuse length:1 at SERVER-SIDE validation
+  // (ComfyUI issue #15644 — execution.py schema-min, then temporal_shape
+  // promotes max(5,·) even past it), so pack-ABSENT the render refuses at
+  // the studio with the fetch affordance (never a submit). Pack-PRESENT the
+  // family SUBMITS the pack-form graph — the legal single-frame latent
+  // through the pack's Prepare + H3ImageDecode, asserted on the captured
+  // submission (execution truth itself is the 8189 probe recorded in the
+  // task evidence; this e2e proves the app-side wiring end to end).
   //
   // (Wave 2 R-12) No local model files: the engine's own /models listing is
   // the whole inventory — the T=1 family's availability resolves from the
@@ -1104,8 +1104,9 @@ test('the H3-1F stills intent gates honestly at the render attempt — both pack
     loras: [...H3_REGISTRY_LISTINGS.loras, 'MaxiMin-HHH-R2V-ThisIsFine.safetensors'],
   }
 
-  // The pack's Prepare class rides the object_info ONLY in the second half
-  // of the test (the pack-present refusal direction).
+  // The pack's classes ride the object_info ONLY in the second half of the
+  // test (the pack-present CAPABILITY direction — all five load-bearing
+  // classes, since the builder emits the T2I wrapper + the decode).
   let servePack = false
   const submitted: Array<Record<string, { class_type: string; inputs: Record<string, unknown> }>> = []
   const engine = http.createServer((req, res) => {
@@ -1115,7 +1116,7 @@ test('the H3-1F stills intent gates honestly at the render attempt — both pack
       res.end(JSON.stringify({ system: {}, devices: [] }))
       return
     }
-    if (serveObjectInfo(url, stockObjectInfo({ ...(servePack ? { H3ImagePrepare: {} } : {}), MiniMaxH3HybridLoader: {} }), res)) return
+    if (serveObjectInfo(url, stockObjectInfo({ ...(servePack ? { H3ImagePrepare: {}, H3TextToImagePrepare: {}, H3ImageToImagePrepare: {}, H3ReferenceEditPrepare: {}, H3ImageDecode: {} } : {}), MiniMaxH3HybridLoader: {} }), res)) return
     if (serveModelRegistry(url, registryListings, res)) return
     if (url.pathname === '/upload/image') {
       res.writeHead(200, { 'content-type': 'application/json' })
@@ -1167,9 +1168,11 @@ test('the H3-1F stills intent gates honestly at the render attempt — both pack
     expect(document.chains[0]!.settings.mediaType).toBe('image')
     expect(document.chains[0]!.settings.imageEngine).toBe('h3-1f')
 
-    // ---- Pack PRESENT: still gated — the studio-side pack-conditioned
-    // graph has not landed, and the stock length=1 path is illegal
-    // regardless. A DIFFERENT honest reason, never a doomed submit. ----
+    // ---- Pack PRESENT: THE GATE FLIPS TO CAPABILITY (afvlbk4) — the T=1
+    // Fast profile SUBMITS a pack-form graph: the pack's Prepare builds the
+    // legal single-frame latent (no stock conditioning node anywhere, no
+    // length:1), the decode rides H3ImageDecode through the Mamad8 VAE, and
+    // exactly one frame publishes. ----
     servePack = true
     // Reset the session first: the launcher (and its image chip) renders on
     // the EMPTY canvas — the first half's chain would hide it after reload.
@@ -1180,13 +1183,27 @@ test('the H3-1F stills intent gates honestly at the render attempt — both pack
     await page.locator('[data-canvas-prompt]').fill('a lighthouse over a black sea, still')
     await page.locator('[data-canvas-submit]').click()
     await expect(page.locator('[data-canvas-tile]').first()).toBeVisible({ timeout: 10_000 })
-    // Toasts render oldest-first — read the NEWEST (the first half's refusal may still be on screen).
-    const pendingRefusal = page.locator('[data-canvas-toast="error"]').last()
-    await expect(pendingRefusal).toContainText('T=1')
-    await expect(pendingRefusal).toContainText('pack-conditioned')
-    await expect(pendingRefusal).toContainText('H3 Image Studio')
-    await expect.poll(() => submitted.length, { timeout: 2_000 }).toBe(0)
-    await expect(page.locator('[data-canvas-radar]')).toHaveAttribute('data-queued', '0')
+    // The submission is REAL now: exactly one prompt reached the engine.
+    await expect.poll(() => submitted.length, { timeout: 10_000 }).toBe(1)
+    const graph = submitted[0]!
+    const classes = Object.values(graph).map((node) => node.class_type)
+    expect(classes).toContain('H3TextToImagePrepare')
+    expect(classes).toContain('H3ImageDecode')
+    expect(classes).not.toContain('MiniMaxH3ImageToVideo')
+    expect(classes).not.toContain('MiniMaxH3ReferenceToVideo')
+    // The legal single-frame latent: the one-frame preset on the Prepare,
+    // the Mamad8 VAE behind the decode, one published frame — and no
+    // length:1 emission anywhere (the dead stock path stays dead).
+    const prepare = Object.values(graph).find((node) => node.class_type === 'H3TextToImagePrepare')!
+    expect(prepare.inputs.quality_profile).toBe('single image | 1 frame (image VAE)')
+    const vaeLoaders = Object.values(graph).filter((node) => node.class_type === 'VAELoader')
+    expect(vaeLoaders.map((node) => (node.inputs as { vae_name: string }).vae_name)).toEqual(['minimax_h3_t1_image_vae_step1597.safetensors'])
+    expect(classes.filter((className) => className === 'SaveImage')).toHaveLength(1)
+    for (const node of Object.values(graph)) {
+      if (node.class_type === 'MiniMaxH3ImageToVideo' || node.class_type === 'MiniMaxH3ReferenceToVideo') {
+        expect((node.inputs as { length?: number }).length ?? 5).toBeGreaterThanOrEqual(5)
+      }
+    }
     expect(problems.filter((entry) => !environmental(entry))).toEqual([])
   } finally {
     await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)

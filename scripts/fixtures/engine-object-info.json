@@ -4,10 +4,11 @@
     "capturedFrom": "GET /object_info, canonical shared install (/home/agent/comfyui) on 127.0.0.1:8189, schema-only --cpu boot, zero prompt submissions, teardown verified",
     "comfyuiRevision": "a87667f72f5fad094b74b10dc9c9f82faea728ef",
     "comfyuiVersion": "0.34.0",
-    "captureDate": "2026-09-21",
-    "rawClassCount": 1718,
-    "keptClassCount": 69,
+    "captureDate": "2026-09-22",
+    "rawClassCount": 1730,
+    "keptClassCount": 70,
     "formAdapterSource": "726d5f80f57c8aec9ce2d2f88edbfac6c2745194",
+    "h3ImageStudioPackCapture": "astropuzzo/ComfyUI-MiniMax-H3-Image-Studio @ 47dea30d0bf07e7340ef0cc97e8174a15edf55b9 (v23.0.0) cloned into the shared install custom_nodes before this capture (task afvlbk4) — its 5 load-bearing classes (Prepare set + H3ImageDecode) captured REAL from /object_info; the pack's own test suite passed on the venv first (26/26)",
     "normalizations": [
       "trimmed to STOCK_GRAPH_CLASSES (src/lib/preflight.ts, lockstep-checked by tests) + the pack/family classes builders can emit",
       "file-listing combos (model folders, input dirs) EMPTIED: options are this box's filesystem, not engine truth — the contract validator treats empty options as environment-enumerated and skips membership; non-file enums keep their real captured options",
@@ -5021,349 +5022,165 @@
       "has_intermediate_output": false,
       "search_aliases": []
     },
-    "TextEncodeAceStepAudio": {
+    "H3ImagePrepare": {
       "input": {
         "required": {
           "clip": [
             "CLIP",
-            {}
+            {
+              "tooltip": "MiniMax H3 Qwen text/vision encoder."
+            }
           ],
-          "tags": [
+          "mode": [
+            [
+              "text_to_image (FL2VA)",
+              "image_to_image (FL2VA)",
+              "reference_edit (REF2VA)"
+            ],
+            {
+              "tooltip": "Select the H3 conditioning path. T2I and I2I use FL2VA; Reference Edit uses REF2VA."
+            }
+          ],
+          "prompt": [
             "STRING",
             {
               "multiline": true,
-              "dynamicPrompts": true
+              "dynamicPrompts": true,
+              "default": "",
+              "tooltip": "Final still description or edit instruction."
             }
           ],
-          "lyrics": [
-            "STRING",
-            {
-              "multiline": true,
-              "dynamicPrompts": true
-            }
-          ],
-          "lyrics_strength": [
-            "FLOAT",
-            {
-              "default": 1,
-              "min": 0,
-              "max": 10,
-              "step": 0.01
-            }
-          ]
-        }
-      },
-      "input_order": {
-        "required": [
-          "clip",
-          "tags",
-          "lyrics",
-          "lyrics_strength"
-        ]
-      },
-      "is_input_list": false,
-      "output": [
-        "CONDITIONING"
-      ],
-      "output_is_list": [
-        false
-      ],
-      "output_name": [
-        "CONDITIONING"
-      ],
-      "output_tooltips": [
-        null
-      ],
-      "output_matchtypes": null,
-      "name": "TextEncodeAceStepAudio",
-      "display_name": null,
-      "description": "",
-      "python_module": "comfy_extras.nodes_ace",
-      "category": "model/conditioning/ace",
-      "output_node": false,
-      "deprecated": false,
-      "experimental": false,
-      "dev_only": false,
-      "api_node": false,
-      "price_badge": null,
-      "search_aliases": null,
-      "essentials_category": null,
-      "has_intermediate_output": false
-    },
-    "EmptyAceStepLatentAudio": {
-      "input": {
-        "required": {
-          "seconds": [
-            "FLOAT",
-            {
-              "default": 120,
-              "min": 1,
-              "max": 1000,
-              "step": 0.1
-            }
-          ],
-          "batch_size": [
+          "width": [
             "INT",
             {
-              "tooltip": "The number of latent images in the batch.",
-              "default": 1,
-              "min": 1,
-              "max": 4096
-            }
-          ]
-        }
-      },
-      "input_order": {
-        "required": [
-          "seconds",
-          "batch_size"
-        ]
-      },
-      "is_input_list": false,
-      "output": [
-        "LATENT"
-      ],
-      "output_is_list": [
-        false
-      ],
-      "output_name": [
-        "LATENT"
-      ],
-      "output_tooltips": [
-        null
-      ],
-      "output_matchtypes": null,
-      "name": "EmptyAceStepLatentAudio",
-      "display_name": "Empty Ace Step 1.0 Latent Audio",
-      "description": "",
-      "python_module": "comfy_extras.nodes_ace",
-      "category": "model/latent/ace",
-      "output_node": false,
-      "deprecated": false,
-      "experimental": false,
-      "dev_only": false,
-      "api_node": false,
-      "price_badge": null,
-      "search_aliases": null,
-      "essentials_category": null,
-      "has_intermediate_output": false
-    },
-    "TextEncodeAceStepAudio1.5": {
-      "input": {
-        "required": {
-          "clip": [
-            "CLIP",
-            {}
-          ],
-          "tags": [
-            "STRING",
-            {
-              "multiline": true,
-              "dynamicPrompts": true
+              "default": 1344,
+              "min": 32,
+              "max": 16384,
+              "step": 32,
+              "tooltip": "Output canvas width."
             }
           ],
-          "lyrics": [
-            "STRING",
-            {
-              "multiline": true,
-              "dynamicPrompts": true
-            }
-          ],
-          "seed": [
+          "height": [
             "INT",
             {
-              "default": 0,
-              "min": 0,
-              "max": 18446744073709552000,
-              "control_after_generate": true
+              "default": 768,
+              "min": 32,
+              "max": 16384,
+              "step": 32,
+              "tooltip": "Output canvas height."
             }
           ],
-          "bpm": [
-            "INT",
+          "frame_preset": [
+            [
+              "single image | 1 frame (image VAE)",
+              "recommended | 5 frames",
+              "extended quality | 9 frames",
+              "high quality | 13 frames",
+              "maximum quality | 20 frames (slow)"
+            ],
             {
-              "default": 120,
-              "min": 10,
-              "max": 300
+              "default": "recommended | 5 frames",
+              "tooltip": "H3 jointly denoises the entire temporal packet. The one-frame profile is intended for REF2VA and the experimental H3 image VAE. Multi-frame profiles remain available for the standard video VAE."
             }
           ],
-          "duration": [
-            "FLOAT",
-            {
-              "default": 120,
-              "min": 0,
-              "max": 2000,
-              "step": 0.1
-            }
-          ],
-          "timesignature": [
-            "COMBO",
-            {
-              "multiselect": false,
-              "options": [
-                "2",
-                "3",
-                "4",
-                "6"
-              ]
-            }
-          ],
-          "language": [
-            "COMBO",
-            {
-              "default": "en",
-              "multiselect": false,
-              "options": [
-                "ar",
-                "az",
-                "bg",
-                "bn",
-                "ca",
-                "cs",
-                "da",
-                "de",
-                "el",
-                "en",
-                "es",
-                "fa",
-                "fi",
-                "fr",
-                "he",
-                "hi",
-                "hr",
-                "ht",
-                "hu",
-                "id",
-                "is",
-                "it",
-                "ja",
-                "ko",
-                "la",
-                "lt",
-                "ms",
-                "ne",
-                "nl",
-                "no",
-                "pa",
-                "pl",
-                "pt",
-                "ro",
-                "ru",
-                "sa",
-                "sk",
-                "sr",
-                "sv",
-                "sw",
-                "ta",
-                "te",
-                "th",
-                "tl",
-                "tr",
-                "uk",
-                "ur",
-                "vi",
-                "yue",
-                "zh",
-                "unknown"
-              ]
-            }
-          ],
-          "keyscale": [
-            "COMBO",
-            {
-              "multiselect": false,
-              "options": [
-                "C major",
-                "C# major",
-                "Db major",
-                "D major",
-                "D# major",
-                "Eb major",
-                "E major",
-                "F major",
-                "F# major",
-                "Gb major",
-                "G major",
-                "G# major",
-                "Ab major",
-                "A major",
-                "A# major",
-                "Bb major",
-                "B major",
-                "C minor",
-                "C# minor",
-                "Db minor",
-                "D minor",
-                "D# minor",
-                "Eb minor",
-                "E minor",
-                "F minor",
-                "F# minor",
-                "Gb minor",
-                "G minor",
-                "G# minor",
-                "Ab minor",
-                "A minor",
-                "A# minor",
-                "Bb minor",
-                "B minor"
-              ]
-            }
-          ],
-          "generate_audio_codes": [
+          "optimize_prompt": [
             "BOOLEAN",
             {
-              "tooltip": "Enable the LLM that generates audio codes. This can be slow but will increase the quality of the generated audio. Turn this off if you are giving the model an audio reference.",
-              "advanced": true,
-              "default": true
+              "default": true,
+              "tooltip": "Adds still-image wording and, for edit modes, source-preservation instructions."
             }
           ],
-          "cfg_scale": [
+          "preserve_strength": [
             "FLOAT",
             {
-              "advanced": true,
-              "default": 2,
-              "min": 0,
-              "max": 100,
-              "step": 0.1
-            }
-          ],
-          "temperature": [
-            "FLOAT",
-            {
-              "advanced": true,
-              "default": 0.85,
-              "min": 0,
-              "max": 2,
-              "step": 0.01
-            }
-          ],
-          "top_p": [
-            "FLOAT",
-            {
-              "advanced": true,
-              "default": 0.9,
-              "min": 0,
-              "max": 2000,
-              "step": 0.01
-            }
-          ],
-          "top_k": [
-            "INT",
-            {
-              "advanced": true,
-              "default": 0,
-              "min": 0,
-              "max": 100
-            }
-          ],
-          "min_p": [
-            "FLOAT",
-            {
-              "advanced": true,
-              "default": 0,
+              "default": 0.6,
               "min": 0,
               "max": 1,
-              "step": 0.001
+              "step": 0.05,
+              "tooltip": "Prompt-language preservation strength for I2I/REF2VA. This is NOT diffusion denoise strength and does not change the sampler schedule."
+            }
+          ],
+          "source_fit": [
+            [
+              "crop_center",
+              "contain_pad",
+              "stretch"
+            ],
+            {
+              "default": "crop_center",
+              "tooltip": "How source/reference content is fitted to the generation canvas."
+            }
+          ],
+          "reference_size": [
+            [
+              "match_generation_area",
+              "max_identity_2048"
+            ],
+            {
+              "default": "max_identity_2048",
+              "tooltip": "REF2VA reference encoding size. max_identity_2048 keeps more source resolution when available and can cost more memory."
+            }
+          ]
+        },
+        "optional": {
+          "vae": [
+            "VAE",
+            {
+              "tooltip": "Required for Image to Image and Reference Edit because source/reference images must be encoded. Text to Image does not use it."
+            }
+          ],
+          "source_image": [
+            "IMAGE",
+            {
+              "tooltip": "Required for I2I and REF2VA. If connected in T2I it is ignored and run_info reports that fact."
+            }
+          ],
+          "reference_image_2": [
+            "IMAGE",
+            {
+              "tooltip": "Optional REF2VA <Picture 2>; ignored outside Reference Edit."
+            }
+          ],
+          "reference_image_3": [
+            "IMAGE",
+            {
+              "tooltip": "Optional REF2VA <Picture 3>; ignored outside Reference Edit."
+            }
+          ],
+          "reference_image_4": [
+            "IMAGE",
+            {
+              "tooltip": "Optional REF2VA <Picture 4>; ignored outside Reference Edit."
+            }
+          ],
+          "reference_image_5": [
+            "IMAGE",
+            {
+              "tooltip": "Optional REF2VA <Picture 5>; ignored outside Reference Edit."
+            }
+          ],
+          "reference_image_6": [
+            "IMAGE",
+            {
+              "tooltip": "Optional REF2VA <Picture 6>; ignored outside Reference Edit."
+            }
+          ],
+          "reference_image_7": [
+            "IMAGE",
+            {
+              "tooltip": "Optional REF2VA <Picture 7>; ignored outside Reference Edit."
+            }
+          ],
+          "reference_image_8": [
+            "IMAGE",
+            {
+              "tooltip": "Optional REF2VA <Picture 8>; ignored outside Reference Edit."
+            }
+          ],
+          "reference_image_9": [
+            "IMAGE",
+            {
+              "tooltip": "Optional REF2VA <Picture 9>; ignored outside Reference Edit."
             }
           ]
         }
@@ -5371,108 +5188,651 @@
       "input_order": {
         "required": [
           "clip",
-          "tags",
-          "lyrics",
-          "seed",
-          "bpm",
-          "duration",
-          "timesignature",
-          "language",
-          "keyscale",
-          "generate_audio_codes",
-          "cfg_scale",
-          "temperature",
-          "top_p",
-          "top_k",
-          "min_p"
+          "mode",
+          "prompt",
+          "width",
+          "height",
+          "frame_preset",
+          "optimize_prompt",
+          "preserve_strength",
+          "source_fit",
+          "reference_size"
+        ],
+        "optional": [
+          "vae",
+          "source_image",
+          "reference_image_2",
+          "reference_image_3",
+          "reference_image_4",
+          "reference_image_5",
+          "reference_image_6",
+          "reference_image_7",
+          "reference_image_8",
+          "reference_image_9"
         ]
       },
       "is_input_list": false,
       "output": [
-        "CONDITIONING"
+        "CONDITIONING",
+        "LATENT",
+        "IMAGE",
+        "INT",
+        "STRING",
+        "STRING"
       ],
       "output_is_list": [
+        false,
+        false,
+        false,
+        false,
+        false,
         false
       ],
       "output_name": [
-        "CONDITIONING"
+        "positive",
+        "h3_latent",
+        "fitted_source",
+        "requested_frames",
+        "optimized_prompt",
+        "run_info"
       ],
-      "output_tooltips": [
-        null
-      ],
-      "output_matchtypes": null,
-      "name": "TextEncodeAceStepAudio1.5",
-      "display_name": null,
-      "description": "",
-      "python_module": "comfy_extras.nodes_ace",
-      "category": "model/conditioning/ace",
+      "name": "H3ImagePrepare",
+      "display_name": "MiniMax H3 Image • Advanced Combined Prepare",
+      "description": "Prepares T2I, I2I, or REF2VA conditioning. I2I and REF2VA require a VAE and source image.",
+      "python_module": "custom_nodes.ComfyUI-MiniMax-H3-Image-Studio",
+      "category": "MiniMax H3/Image Studio",
       "output_node": false,
-      "deprecated": false,
-      "experimental": false,
-      "dev_only": false,
-      "api_node": false,
-      "price_badge": null,
-      "search_aliases": null,
-      "essentials_category": null,
-      "has_intermediate_output": false
+      "has_intermediate_output": false,
+      "output_tooltips": [
+        "Positive H3 FL2VA or REF2VA conditioning for the sampler's positive input.",
+        "Packed H3 audio/video latent containing the requested temporal image packet.",
+        "Source image fitted to the generation canvas; useful for preview and comparison in edit modes.",
+        "Number of image frames that Exact Frame Decode should preserve and decode.",
+        "Final prompt after optional still-image and source-preservation optimization.",
+        "Mode, temporal packet, canvas, checkpoint expectations and recommended selection strategy."
+      ],
+      "search_aliases": []
     },
-    "EmptyAceStep1.5LatentAudio": {
+    "H3TextToImagePrepare": {
       "input": {
         "required": {
-          "seconds": [
-            "FLOAT",
+          "clip": [
+            "CLIP",
             {
-              "default": 120,
-              "min": 1,
-              "max": 1000,
-              "step": 0.01
+              "tooltip": "MiniMax H3 Qwen text/vision encoder."
             }
           ],
-          "batch_size": [
+          "prompt": [
+            "STRING",
+            {
+              "multiline": true,
+              "dynamicPrompts": true,
+              "default": "",
+              "tooltip": "Describe the final still image, including subject, composition, lighting and style."
+            }
+          ],
+          "width": [
             "INT",
             {
-              "tooltip": "The number of latent images in the batch.",
-              "default": 1,
-              "min": 1,
-              "max": 4096
+              "default": 1344,
+              "min": 32,
+              "max": 16384,
+              "step": 32,
+              "tooltip": "Output canvas width. Connect an H3 Image Resolution node for safer presets."
+            }
+          ],
+          "height": [
+            "INT",
+            {
+              "default": 768,
+              "min": 32,
+              "max": 16384,
+              "step": 32,
+              "tooltip": "Output canvas height. Connect an H3 Image Resolution node for safer presets."
+            }
+          ],
+          "quality_profile": [
+            [
+              "single image | 1 frame (image VAE)",
+              "recommended | 5 frames",
+              "extended quality | 9 frames",
+              "high quality | 13 frames",
+              "maximum quality | 20 frames (slow)"
+            ],
+            {
+              "default": "recommended | 5 frames",
+              "tooltip": "5 frames is the normal FL2VA profile. The one-frame profile needs the experimental H3 image VAE; 20 frames adds temporal context at much higher cost."
+            }
+          ],
+          "optimize_for_still": [
+            "BOOLEAN",
+            {
+              "default": true,
+              "tooltip": "Adds a locked-camera still-image prompt wrapper. It does not change frames, resolution, steps, sampler, or model weights."
             }
           ]
         }
       },
       "input_order": {
         "required": [
-          "seconds",
-          "batch_size"
+          "clip",
+          "prompt",
+          "width",
+          "height",
+          "quality_profile",
+          "optimize_for_still"
         ]
       },
       "is_input_list": false,
       "output": [
-        "LATENT"
+        "CONDITIONING",
+        "LATENT",
+        "INT",
+        "STRING",
+        "STRING"
       ],
       "output_is_list": [
+        false,
+        false,
+        false,
+        false,
         false
       ],
       "output_name": [
-        "LATENT"
+        "positive",
+        "h3_latent",
+        "requested_frames",
+        "image_prompt",
+        "run_info"
       ],
-      "output_tooltips": [
-        null
-      ],
-      "output_matchtypes": null,
-      "name": "EmptyAceStep1.5LatentAudio",
-      "display_name": "Empty Ace Step 1.5 Latent Audio",
-      "description": "",
-      "python_module": "comfy_extras.nodes_ace",
-      "category": "model/latent/ace",
+      "name": "H3TextToImagePrepare",
+      "display_name": "MiniMax H3 Image • Text to Image",
+      "description": "Prepares FL2VA text conditioning and an H3 latent. One-frame output supports the experimental H3 image VAE.",
+      "python_module": "custom_nodes.ComfyUI-MiniMax-H3-Image-Studio",
+      "category": "MiniMax H3/Image Studio",
       "output_node": false,
-      "deprecated": false,
-      "experimental": false,
-      "dev_only": false,
-      "api_node": false,
-      "price_badge": null,
-      "search_aliases": null,
-      "essentials_category": null,
-      "has_intermediate_output": false
+      "has_intermediate_output": false,
+      "output_tooltips": [
+        "Positive FL2VA text-to-image conditioning for the sampler's positive input.",
+        "Packed H3 audio/video latent containing the requested temporal image packet.",
+        "Number of image frames that Exact Frame Decode should preserve and decode.",
+        "Final still-image prompt after optional optimization.",
+        "Temporal packet, canvas, checkpoint expectations and recommended output strategy."
+      ],
+      "search_aliases": []
+    },
+    "H3ImageToImagePrepare": {
+      "input": {
+        "required": {
+          "clip": [
+            "CLIP",
+            {
+              "tooltip": "MiniMax H3 Qwen text/vision encoder."
+            }
+          ],
+          "vae": [
+            "VAE",
+            {
+              "tooltip": "H3 video VAE for multi-frame editing, or the experimental H3 image VAE for one frame."
+            }
+          ],
+          "source_image": [
+            "IMAGE",
+            {
+              "tooltip": "Source image used as an FL2VA frame-0 anchor or a one-frame REF2VA reference."
+            }
+          ],
+          "edit_instruction": [
+            "STRING",
+            {
+              "multiline": true,
+              "dynamicPrompts": true,
+              "default": "",
+              "tooltip": "Describe the desired final image and the changes to apply to the source."
+            }
+          ],
+          "width": [
+            "INT",
+            {
+              "default": 1344,
+              "min": 32,
+              "max": 16384,
+              "step": 32,
+              "tooltip": "Generation canvas width; the source is fitted to this canvas before encoding."
+            }
+          ],
+          "height": [
+            "INT",
+            {
+              "default": 768,
+              "min": 32,
+              "max": 16384,
+              "step": 32,
+              "tooltip": "Generation canvas height; the source is fitted to this canvas before encoding."
+            }
+          ],
+          "quality_profile": [
+            [
+              "single image | 1 frame (image VAE)",
+              "recommended | 5 frames",
+              "extended quality | 9 frames",
+              "high quality | 13 frames",
+              "maximum quality | 20 frames (slow)"
+            ],
+            {
+              "default": "recommended | 5 frames",
+              "tooltip": "Multi-frame profiles use the FL2VA frame-0 anchor. One frame switches to REF2VA-style source conditioning and therefore requires a hybrid or REF2VA checkpoint plus the H3 image VAE."
+            }
+          ],
+          "source_fidelity": [
+            "FLOAT",
+            {
+              "default": 0.75,
+              "min": 0,
+              "max": 1,
+              "step": 0.05,
+              "tooltip": "Controls how strongly the still prompt asks H3 to preserve identity, pose, composition and geometry. This is NOT diffusion denoise strength and does not alter the sigma schedule."
+            }
+          ],
+          "source_fit": [
+            [
+              "crop_center",
+              "contain_pad",
+              "stretch"
+            ],
+            {
+              "default": "crop_center",
+              "tooltip": "How the source is fitted to the generation canvas before VAE encoding."
+            }
+          ],
+          "optimize_for_still": [
+            "BOOLEAN",
+            {
+              "default": true,
+              "tooltip": "Adds a locked-camera still-image prompt wrapper and source-preservation language. Sampling settings are unchanged."
+            }
+          ]
+        }
+      },
+      "input_order": {
+        "required": [
+          "clip",
+          "vae",
+          "source_image",
+          "edit_instruction",
+          "width",
+          "height",
+          "quality_profile",
+          "source_fidelity",
+          "source_fit",
+          "optimize_for_still"
+        ]
+      },
+      "is_input_list": false,
+      "output": [
+        "CONDITIONING",
+        "LATENT",
+        "IMAGE",
+        "INT",
+        "STRING",
+        "STRING"
+      ],
+      "output_is_list": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "output_name": [
+        "positive",
+        "h3_latent",
+        "fitted_source",
+        "requested_frames",
+        "image_prompt",
+        "run_info"
+      ],
+      "name": "H3ImageToImagePrepare",
+      "display_name": "MiniMax H3 Image • Image to Image",
+      "description": "Uses an FL2VA frame-0 anchor for multi-frame editing and REF2VA source conditioning for editable one-frame output.",
+      "python_module": "custom_nodes.ComfyUI-MiniMax-H3-Image-Studio",
+      "category": "MiniMax H3/Image Studio",
+      "output_node": false,
+      "has_intermediate_output": false,
+      "output_tooltips": [
+        "Positive FL2VA or one-frame REF2VA image-to-image conditioning for the sampler's positive input.",
+        "Packed H3 audio/video latent; multi-frame mode also anchors the fitted source at frame 0.",
+        "Source image after the selected crop, pad or stretch operation.",
+        "Number of image frames that Exact Frame Decode should preserve and decode.",
+        "Final edit prompt after optional still-image and source-preservation optimization.",
+        "Temporal packet, source-fit, checkpoint expectations and recommended selection strategy."
+      ],
+      "search_aliases": []
+    },
+    "H3ReferenceEditPrepare": {
+      "input": {
+        "required": {
+          "clip": [
+            "CLIP",
+            {
+              "tooltip": "MiniMax H3 Qwen text/vision encoder."
+            }
+          ],
+          "vae": [
+            "VAE",
+            {
+              "tooltip": "MiniMax H3 video VAE, or the experimental H3 image VAE for the one-frame profile."
+            }
+          ],
+          "source_image": [
+            "IMAGE",
+            {
+              "tooltip": "Primary REF2VA reference, addressed as <Picture 1> in the prompt."
+            }
+          ],
+          "edit_instruction": [
+            "STRING",
+            {
+              "multiline": true,
+              "dynamicPrompts": true,
+              "default": "",
+              "tooltip": "Describe the final image and refer to inputs explicitly as <Picture 1>, <Picture 2>, and so on."
+            }
+          ],
+          "width": [
+            "INT",
+            {
+              "default": 1344,
+              "min": 32,
+              "max": 16384,
+              "step": 32,
+              "tooltip": "Generation canvas width; references retain their own aspect ratio before encoding."
+            }
+          ],
+          "height": [
+            "INT",
+            {
+              "default": 768,
+              "min": 32,
+              "max": 16384,
+              "step": 32,
+              "tooltip": "Generation canvas height; references retain their own aspect ratio before encoding."
+            }
+          ],
+          "quality_profile": [
+            [
+              "single image | 1 frame (image VAE)",
+              "recommended | 5 frames",
+              "extended quality | 9 frames",
+              "high quality | 13 frames",
+              "maximum quality | 20 frames (slow)"
+            ],
+            {
+              "default": "recommended | 5 frames",
+              "tooltip": "Start with 5 frames and the standard H3 video VAE. One frame with the experimental image VAE is faster but may reduce image quality and edit adherence."
+            }
+          ],
+          "source_fidelity": [
+            "FLOAT",
+            {
+              "default": 0.6,
+              "min": 0,
+              "max": 1,
+              "step": 0.05,
+              "tooltip": "Controls preservation wording for unmentioned Picture 1 traits. Explicit target instructions always take priority. This is NOT diffusion denoise strength and does not alter the sigma schedule."
+            }
+          ],
+          "source_fit": [
+            [
+              "crop_center",
+              "contain_pad",
+              "stretch"
+            ],
+            {
+              "default": "crop_center",
+              "tooltip": "How the primary source preview is fitted to the generation canvas."
+            }
+          ],
+          "reference_detail": [
+            [
+              "match_generation_area",
+              "max_identity_2048"
+            ],
+            {
+              "default": "match_generation_area",
+              "tooltip": "How much source resolution each REF2VA reference keeps before VAE encoding. max_identity_2048 may preserve more identity detail at higher memory cost."
+            }
+          ],
+          "optimize_for_still": [
+            "BOOLEAN",
+            {
+              "default": true,
+              "tooltip": "Adds a locked-camera still-image prompt wrapper and reference-preservation language. Sampling settings are unchanged."
+            }
+          ]
+        },
+        "optional": {
+          "reference_image_2": [
+            "IMAGE",
+            {
+              "tooltip": "Optional <Picture 2> reference. Different dimensions are supported."
+            }
+          ],
+          "reference_image_3": [
+            "IMAGE",
+            {
+              "tooltip": "Optional <Picture 3> reference."
+            }
+          ],
+          "reference_image_4": [
+            "IMAGE",
+            {
+              "tooltip": "Optional <Picture 4> reference."
+            }
+          ],
+          "reference_image_5": [
+            "IMAGE",
+            {
+              "tooltip": "Optional <Picture 5> reference."
+            }
+          ],
+          "reference_image_6": [
+            "IMAGE",
+            {
+              "tooltip": "Optional <Picture 6> reference."
+            }
+          ],
+          "reference_image_7": [
+            "IMAGE",
+            {
+              "tooltip": "Optional <Picture 7> reference."
+            }
+          ],
+          "reference_image_8": [
+            "IMAGE",
+            {
+              "tooltip": "Optional <Picture 8> reference."
+            }
+          ],
+          "reference_image_9": [
+            "IMAGE",
+            {
+              "tooltip": "Optional <Picture 9> reference."
+            }
+          ],
+          "reference_transport": [
+            [
+              "native",
+              "semantic (experimental)"
+            ],
+            {
+              "default": "native",
+              "tooltip": "Native uses vision and VAE references. Semantic uses vision only: fewer reference tokens, but weaker identity and fine-detail preservation."
+            }
+          ]
+        }
+      },
+      "input_order": {
+        "required": [
+          "clip",
+          "vae",
+          "source_image",
+          "edit_instruction",
+          "width",
+          "height",
+          "quality_profile",
+          "source_fidelity",
+          "source_fit",
+          "reference_detail",
+          "optimize_for_still"
+        ],
+        "optional": [
+          "reference_image_2",
+          "reference_image_3",
+          "reference_image_4",
+          "reference_image_5",
+          "reference_image_6",
+          "reference_image_7",
+          "reference_image_8",
+          "reference_image_9",
+          "reference_transport"
+        ]
+      },
+      "is_input_list": false,
+      "output": [
+        "CONDITIONING",
+        "LATENT",
+        "IMAGE",
+        "INT",
+        "STRING",
+        "STRING"
+      ],
+      "output_is_list": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "output_name": [
+        "positive",
+        "h3_latent",
+        "fitted_source",
+        "requested_frames",
+        "image_prompt",
+        "run_info"
+      ],
+      "name": "H3ReferenceEditPrepare",
+      "display_name": "MiniMax H3 Image • Reference Edit",
+      "description": "Prepares REF2VA editing with up to nine ordered references. Source Fidelity changes prompt text, not denoise.",
+      "python_module": "custom_nodes.ComfyUI-MiniMax-H3-Image-Studio",
+      "category": "MiniMax H3/Image Studio",
+      "output_node": false,
+      "has_intermediate_output": false,
+      "output_tooltips": [
+        "Positive REF2VA reference-edit conditioning for the sampler's positive input.",
+        "Packed H3 audio/video latent prepared for reference-guided regeneration.",
+        "Primary source fitted to the output canvas for preview and comparison.",
+        "Number of image frames that Exact Frame Decode should preserve and decode.",
+        "Final ordered-reference prompt after optional preservation optimization.",
+        "Reference count, temporal packet, checkpoint expectations and recommended selection strategy."
+      ],
+      "search_aliases": []
+    },
+    "H3ImageDecode": {
+      "input": {
+        "required": {
+          "samples": [
+            "LATENT",
+            {
+              "tooltip": "Sampled H3 latent. Image Studio metadata specifies whether each batch item keeps a 1-, 5-, 9-, 13-, or 20-frame temporal profile."
+            }
+          ],
+          "vae": [
+            "VAE",
+            {
+              "tooltip": "Use the H3 video VAE for temporal decoding, or a compatible H3 image VAE for single_latent_slice."
+            }
+          ]
+        },
+        "optional": {
+          "decode_mode": [
+            [
+              "temporal",
+              "single_latent_slice"
+            ],
+            {
+              "default": "temporal",
+              "tooltip": "Temporal uses the video VAE. Single latent slice independently decodes one slice with an H3 image VAE, retaining multi-frame sampling context."
+            }
+          ],
+          "latent_index": [
+            "INT",
+            {
+              "default": 0,
+              "min": 0,
+              "max": 4096,
+              "tooltip": "Used only for single_latent_slice. A five-frame H3 packet contains two latent slices: 0 and 1. This is not a decoded video-frame index."
+            }
+          ],
+          "spatial_decode": [
+            [
+              "native",
+              "full_image (experimental)"
+            ],
+            {
+              "default": "native",
+              "tooltip": "Single-slice mode only. Native retains the VAE's normal tiling. Full image disables internal H3 tiling on a configuration copy; it needs more VRAM and can produce patch artifacts on generated latents."
+            }
+          ]
+        }
+      },
+      "input_order": {
+        "required": [
+          "samples",
+          "vae"
+        ],
+        "optional": [
+          "decode_mode",
+          "latent_index",
+          "spatial_decode"
+        ]
+      },
+      "is_input_list": false,
+      "output": [
+        "IMAGE",
+        "INT",
+        "STRING",
+        "INT"
+      ],
+      "output_is_list": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "output_name": [
+        "frames",
+        "decoded_frames",
+        "decode_info",
+        "recommended_index"
+      ],
+      "name": "H3ImageDecode",
+      "display_name": "MiniMax H3 Image • Exact Frame Decode",
+      "description": "Decodes a temporal frame profile or one independent latent slice and returns the recommended still index.",
+      "python_module": "custom_nodes.ComfyUI-MiniMax-H3-Image-Studio",
+      "category": "MiniMax H3/Image Studio",
+      "output_node": false,
+      "has_intermediate_output": false,
+      "output_tooltips": [
+        "Complete decoded profile(s), flattened batch-major for standard ComfyUI IMAGE output.",
+        "Total number of emitted images across all batch items.",
+        "Natural packet size, kept profile size and preferred-frame diagnostic information per batch item.",
+        "Preferred zero-based still index for the first batch item. Connect it to Single Image Output."
+      ],
+      "search_aliases": []
     }
   },
   "absent": [

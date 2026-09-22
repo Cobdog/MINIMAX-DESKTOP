@@ -80,12 +80,28 @@ matrix.push({ name: 'generate-packet-5-hybrid', request: base({ source: 'source-
 matrix.push({ name: 'generate-packet-9-hybrid', request: base({ tier: 9, source: 'source-anchored.png' }), models: H3IMG_MODELS, info: 'hybrid' })
 matrix.push({ name: 'generate-packet-13-hybrid', request: base({ tier: 13, source: 'source-anchored.png' }), models: H3IMG_MODELS, info: 'hybrid' })
 
+// 2s-3s. The SAME tiers with the H3 Image Studio pack served (afvlbk4): the
+// conditioning + decode route through the pack's Prepare/H3ImageDecode —
+// the EXACT 9/13 latent ladder (t=3/t=4), no stock length on any node, no
+// audio-VAE loader (the pack latent carries zero audio rows).
+matrix.push({ name: 'generate-packet-9-studio', request: base({ tier: 9, source: 'source-anchored.png' }), models: H3IMG_MODELS, info: 'studio' })
+matrix.push({ name: 'generate-packet-13-studio', request: base({ tier: 13, source: 'source-anchored.png' }), models: H3IMG_MODELS, info: 'studio' })
+
 // 4. Directed 39 — reference conditioning with the source as Picture 1.
 matrix.push({ name: 'generate-directed-39', request: base({ family: 'h3img.generate.packet.directed', tier: 39, source: 'source-anchored.png', refs: [{ name: 'donor.png', role: 'subject', transport: 'native' }] }), models: H3IMG_MODELS, info: 'hybrid' })
 
 // 5. T=1 Fast — the pinned recipe (turbo @0.75 + detail @0.5, er_sde/
-//    sgm_uniform 8 steps, shifts 12/3, the Mamad8 VAE — single frame).
-matrix.push({ name: 'generate-t1', request: base({ family: 'h3img.generate.t1', tier: 1, source: 'source-anchored.png' }), models: H3IMG_MODELS, info: 'hybrid' })
+//    sgm_uniform 8 steps, shifts 12/3, the Mamad8 VAE — single frame),
+//    STUDIO-conditioned since afvlbk4: the pack's Prepare builds the legal
+//    t=1 latent (their I2I_SINGLE wiring — the one-frame preset switches
+//    I2I to Picture-1 reference conditioning inside the node) and
+//    H3ImageDecode decodes the single frame through the Mamad8 VAE.
+matrix.push({ name: 'generate-t1', request: base({ family: 'h3img.generate.t1', tier: 1, source: 'source-anchored.png' }), models: H3IMG_MODELS, info: 'studio' })
+
+// 5s. Fast-sharp — the pack's single_latent_slice decode: a 5-frame sampling
+//    context (the video VAE encodes the Prepare's references) with ONE
+//    latent slice decoded through the Mamad8 image VAE; one published frame.
+matrix.push({ name: 'generate-sharp-5', request: base({ family: 'h3img.generate.sharp', tier: 5, source: 'source-anchored.png' }), models: H3IMG_MODELS, info: 'studio' })
 
 // 6. Compose — 3 ordered refs with roles (the merge).
 matrix.push({ name: 'compose-refs-3', request: base({ family: 'h3img.compose.refs', refs: [
@@ -96,6 +112,11 @@ matrix.push({ name: 'compose-refs-3', request: base({ family: 'h3img.compose.ref
 
 // 7. Edit identity — source anchored as Picture 1 + donor ref (native).
 matrix.push({ name: 'edit-identity', request: base({ family: 'h3img.edit.identity', source: 'source-anchored.png', refs: [{ name: 'donor.png', role: 'subject', transport: 'native' }] }), models: H3IMG_MODELS, info: 'hybrid' })
+
+// 7s. The SAME edit with the pack served — H3ReferenceEditPrepare wiring
+//     (source → source_image = Picture 1, donor → reference_image_2,
+//     native transport, max-identity reference detail).
+matrix.push({ name: 'edit-identity-studio', request: base({ family: 'h3img.edit.identity', source: 'source-anchored.png', refs: [{ name: 'donor.png', role: 'subject', transport: 'native' }] }), models: H3IMG_MODELS, info: 'studio' })
 
 // 8. Edit pose — poserig-render class ref (semantic transport).
 matrix.push({ name: 'edit-pose', request: base({ family: 'h3img.edit.pose', source: 'source-anchored.png', refs: [{ name: 'poserig-pose-896x1600.png', role: 'pose', transport: 'semantic' }] }), models: H3IMG_MODELS, info: 'hybrid' })
@@ -129,6 +150,10 @@ const CANVAS_T1_CONTRACT = [
   '',
   'Change nothing else.',
 ].join('\n')
-matrix.push({ name: 'canvas-t1-inline', request: { family: 'h3img.generate.t1', prompt: CANVAS_T1_CONTRACT, width: 1344, height: 768, seed: 4242, tier: 1, refs: [], loras: [], filenamePrefix: 'images/H3IMG_plan' }, models: CANVAS_T1_MODELS, info: 'stock' })
+// Since afvlbk4 the T=1 lane is pack-conditioned: the plan-probe arm builds
+// against a pack-served engine (the live engine the canvas probe targets
+// has the pack; a pack-absent engine makes the lane REFUSE, which the
+// suite's detection section asserts separately).
+matrix.push({ name: 'canvas-t1-inline', request: { family: 'h3img.generate.t1', prompt: CANVAS_T1_CONTRACT, width: 1344, height: 768, seed: 4242, tier: 1, refs: [], loras: [], filenamePrefix: 'images/H3IMG_plan' }, models: CANVAS_T1_MODELS, info: 'studio' })
 
 module.exports = { H3IMG_MATRIX: matrix, H3IMG_MODELS, H3IMG_CONTRACT: CONTRACT }

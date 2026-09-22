@@ -103,6 +103,17 @@ const HYBRID_INFO = {
   MiniMaxH3HybridLoader: node({}),
   MiniMaxH3LoraFormLoader: node({}),
 }
+// The H3 Image Studio pack served (afvlbk4): hybrid + the five load-bearing
+// classes — the studio-conditioned lanes (T=1, fast-sharp, exact 9/13
+// packets) key on this.
+const STUDIO_INFO = {
+  ...HYBRID_INFO,
+  H3ImagePrepare: node({}),
+  H3TextToImagePrepare: node({}),
+  H3ImageToImagePrepare: node({}),
+  H3ReferenceEditPrepare: node({}),
+  H3ImageDecode: node({}),
+}
 const KLEIN_INFO = {
   ...STOCK_INFO,
   EmptyFlux2LatentImage: node({}),
@@ -112,7 +123,7 @@ const KLEIN_INFO = {
   ImageScaleToTotalPixels: node({}),
   ConditioningZeroOut: node({}),
 }
-const INFO_FOR = { stock: STOCK_INFO, hybrid: HYBRID_INFO, klein: KLEIN_INFO }
+const INFO_FOR = { stock: STOCK_INFO, hybrid: HYBRID_INFO, studio: STUDIO_INFO, klein: KLEIN_INFO }
 
 const model = (name, kind) => ({ name, kind, bytes: 1000 })
 const MODEL_FILES = [
@@ -166,6 +177,18 @@ maybe('(b) recipe pins — the pinned-defaults table', () => {
   eq(h3image.packetTierLabel(9), '9 frames · samples 22 on stock nodes', 'tier 9 label carries the true sampled count')
   eq(h3image.packetTierLabel(13), '13 frames · samples 22 on stock nodes', 'tier 13 label carries the true sampled count')
   eq(h3image.packetTierLabel(39), '39 frames', 'tier 39 label: native grid point, no qualifier')
+  // The pack-aware labels (afvlbk4): with the Image Studio pack served the
+  // tiers ride its EXACT latent ladder — the honest cost note becomes the
+  // exactness note.
+  eq(h3image.packetTierLabel(9, true), '9 frames · exact through the Image Studio ladder', 'tier 9 label, pack served: exact')
+  eq(h3image.packetTierLabel(13, true), '13 frames · exact through the Image Studio ladder', 'tier 13 label, pack served: exact')
+  eq(h3image.packetTierLabel(5, true), '5 frames', 'tier 5 label, pack served: native on both paths')
+  // The pack's frame presets — verbatim members of the served enum (the
+  // engine-contract fixture carries the real captured options).
+  eq(h3image.H3_IMAGE_STUDIO_FRAME_PRESETS, { 1: 'single image | 1 frame (image VAE)', 5: 'recommended | 5 frames', 9: 'extended quality | 9 frames', 13: 'high quality | 13 frames' }, 'the pack frame presets, verbatim (1/5/9/13; 39 has no preset — directed stays stock)')
+  eq(h3image.H3IMG_RECIPE_PINS.sharp.contextTiers, [5, 9, 13], 'fast-sharp context tiers 5/9/13')
+  eq(h3image.H3IMG_RECIPE_PINS.sharp.latentIndex, 0, 'fast-sharp pinned head slice')
+  eq(h3image.H3IMG_RECIPE_PINS.sharp.spatialDecode, 'native', 'fast-sharp native spatial decode')
   eq(h3image.H3IMG_RECIPE_PINS.directedTail, { first: 34, last: 38 }, 'directed tail frames 34-38')
   eq(h3image.H3IMG_RECIPE_PINS.t1.steps, 8, 'T=1 steps 8')
   eq(h3image.H3IMG_RECIPE_PINS.t1.sampler, 'er_sde', 'T=1 sampler er_sde')
@@ -246,22 +269,44 @@ maybe('(c) the Mamad8 factory guard (AC8) — enforced, not documented', () => {
     ok(violations.some((line) => line.includes('T=1 image VAE')), 'audit flags the T=1 VAE in a 2-frame graph')
   }
   // c.4 Every PACKET golden decodes through the STOCK video VAE — no VAELoader
-  // anywhere in a multi-frame graph names the T=1 file.
+  // anywhere in a multi-frame-pUBLISH graph names the T=1 file. The T=1 and
+  // fast-sharp lanes are the legal carriers (they publish exactly one frame:
+  // the T=1 latent, or ONE decoded slice of the sharp context); klein is a
+  // different engine entirely.
   for (const entry of H3IMG_MATRIX) {
-    if (entry.name === 'generate-t1' || entry.name === 'refine-klein') continue
+    if (entry.name === 'generate-t1' || entry.name === 'generate-sharp-5' || entry.name === 'refine-klein') continue
     const graph = buildFor(entry)
     const loaders = Object.entries(graph).filter(([, value]) => value.class_type === 'VAELoader').map(([, value]) => value.inputs.vae_name)
     ok(loaders.every((name) => !h3image.T1_IMAGE_VAE_PATTERN.test(name)), `no T=1 VAE in ${entry.name} (video VAE only)`)
   }
   // c.5 The T=1 build IS the carrier: exactly one VAELoader, naming the T=1
-  // VAE, publishing exactly ONE frame.
+  // VAE (the pack path never loads the audio VAE — its latent carries zero
+  // audio rows), publishing exactly ONE frame through H3ImageDecode.
   {
     const graph = buildFor(H3IMG_MATRIX.find((entry) => entry.name === 'generate-t1'))
     const loaders = Object.values(graph).filter((value) => value.class_type === 'VAELoader')
     eq(loaders.filter((loader) => h3image.T1_IMAGE_VAE_PATTERN.test(String(loader.inputs.vae_name))).length, 1, 'T=1 graph: exactly one loader names the Mamad8 VAE')
-    ok(loaders.every((loader) => loader.inputs.vae_name === H3IMG_MODELS.t1ImageVae || loader.inputs.vae_name === H3IMG_MODELS.audioVae), 'T=1 graph: only the T1 decoder + the R2V-required audio VAE load')
+    eq(loaders.length, 1, 'T=1 graph: the T1 decoder is the ONLY VAE loader (no audio VAE on the pack path)')
     const saves = Object.values(graph).filter((value) => value.class_type === 'SaveImage')
     eq(saves.length, 1, 'T=1 graph: exactly one frame published')
+    const decode = Object.values(graph).find((value) => value.class_type === 'H3ImageDecode')
+    ok(decode !== undefined && decode.inputs.decode_mode === undefined, 'T=1 graph: the pack decode in temporal mode (one frame, no slice switch)')
+  }
+  // c.6 The fast-sharp build: the T=1 VAE decodes exactly ONE slice — two
+  // loaders total (video VAE encodes the Prepare's references, T1 VAE decodes
+  // the slice), one published frame, decode_mode single_latent_slice.
+  {
+    const graph = buildFor(H3IMG_MATRIX.find((entry) => entry.name === 'generate-sharp-5'))
+    const loaders = Object.values(graph).filter((value) => value.class_type === 'VAELoader')
+    eq(loaders.length, 2, 'fast-sharp graph: exactly two VAE loaders (video encode + T1 slice decode)')
+    eq(loaders.filter((loader) => h3image.T1_IMAGE_VAE_PATTERN.test(String(loader.inputs.vae_name))).length, 1, 'fast-sharp graph: exactly one loader names the Mamad8 VAE')
+    const decode = Object.values(graph).find((value) => value.class_type === 'H3ImageDecode')
+    eq(decode.inputs.decode_mode, 'single_latent_slice', 'fast-sharp graph: single_latent_slice decode mode')
+    eq(decode.inputs.latent_index, 0, 'fast-sharp graph: the pinned head slice')
+    eq(decode.inputs.spatial_decode, 'native', 'fast-sharp graph: native spatial decode')
+    eq(Object.values(graph).filter((value) => value.class_type === 'SaveImage').length, 1, 'fast-sharp graph: exactly one frame published')
+    const violations = h3image.h3imgGraphAudit(graph)
+    eq(violations, [], 'fast-sharp graph: audit clean (the T1 VAE decodes one slice — the publish count is 1)')
   }
 })
 
@@ -463,24 +508,31 @@ maybe('(i) validation + detection', () => {
     const detections = h3image.detectH3ImgFamilies(HYBRID_INFO, MODEL_FILES)
     const packet = detections.find((entry) => entry.family.id === 'h3img.generate.packet')
     ok(packet.detection.available && packet.detection.hybrid, 'packet: available + hybrid on the full stack')
-    // THE ENGINE-TRUTH GATE (d4er4ati, Wave 3 rung 0): this assertion used to
-    // read "T=1: available when the VAE + turbo resolve" — the false
-    // capability claim. Stock engines REFUSE length:1 at prompt validation
-    // (execution.py schema-min, issue #15644) and promote max(5,·) past it, so
-    // graph-shape availability was never execution truth. The family now
-    // gates honestly in BOTH directions (pack absent → fetch guidance; pack
-    // present → the pending pack-side-graph reason) — never a
-    // submit-then-server-400.
+    // THE ENGINE-TRUTH GATE, FLIPPED TO CAPABILITY (d4er4ati → afvlbk4):
+    // pack ABSENT → the honest refusal (pack class + row + #15644 + the
+    // fetch affordance) and the BUILDER ITSELF throws — the stock length:1
+    // submission is dead, never emitted; pack PRESENT → the family is
+    // AVAILABLE and renders through the pack's conditioning.
     const t1 = detections.find((entry) => entry.family.id === 'h3img.generate.t1')
-    ok(!t1.detection.available, 'T=1: gated on stock-only engines (the old availability assertion was the false claim)')
+    ok(!t1.detection.available, 'T=1: gated on stock-only engines (the pack is the legal path, issue #15644)')
     const t1Missing = t1.detection.missingNodes.join('\n')
     ok(t1Missing.includes('H3ImagePrepare') && t1Missing.includes('MiniMax H3 Image Studio') && t1Missing.includes('#15644'), 'T=1 refusal names the pack class, the pack row, and the stock-floor reason')
     ok(t1Missing.includes('Fetch') || t1Missing.includes('Node packs'), 'T=1 refusal carries the fetch/install affordance')
-    const STUDIO_INFO = { ...HYBRID_INFO, H3ImagePrepare: node({}) }
+    // The stock length:1 path is DEAD: building T=1 against a pack-absent
+    // engine refuses at build — no code path submits the illegal graph.
+    assert.throws(() => h3image.buildH3ImageGraph({ family: 'h3img.generate.t1', prompt: 'x', width: 1344, height: 768, seed: 1, tier: 1, refs: [], loras: [], filenamePrefix: 'x' }, H3IMG_MODELS, HYBRID_INFO), /H3 Image Studio pack's conditioning|#15644/, 'T=1 build refuses without the pack — the stock length:1 emission is dead')
+    passed += 1
+    console.log('  ok - T=1 build refuses without the pack — the stock length:1 emission is dead')
+    assert.throws(() => h3image.buildH3ImageGraph({ family: 'h3img.generate.sharp', prompt: 'x', width: 1344, height: 768, seed: 1, tier: 5, refs: [], loras: [], filenamePrefix: 'x' }, H3IMG_MODELS, HYBRID_INFO), /H3 Image Studio pack's conditioning|#15644/, 'fast-sharp build refuses without the pack too')
+    passed += 1
+    console.log('  ok - fast-sharp build refuses without the pack too')
     const t1WithPack = h3image.detectH3ImgFamilies(STUDIO_INFO, MODEL_FILES).find((entry) => entry.family.id === 'h3img.generate.t1')
-    ok(!t1WithPack.detection.available, 'T=1 with the pack installed: still gated (the studio-side pack graph has not landed — the stock length=1 path is illegal regardless)')
-    ok(t1WithPack.detection.missingNodes.join('\n').includes('pack-conditioned'), 'T=1 pack-present refusal names the pending pack-side graph, not a missing install')
-    ok(t1WithPack.detection.notes.some((note) => note.includes('H3 Image Studio pack detected')), 'T=1 pack-present detection carries the explanatory note')
+    ok(t1WithPack.detection.available, 'T=1 with the pack served: AVAILABLE (afvlbk4 — the gate flipped to capability)')
+    ok(t1WithPack.detection.notes.some((note) => note.includes('H3 Image Studio pack detected')), 'T=1 pack-present detection carries the renders-through-its-conditioning note')
+    const sharpWithPack = h3image.detectH3ImgFamilies(STUDIO_INFO, MODEL_FILES).find((entry) => entry.family.id === 'h3img.generate.sharp')
+    ok(sharpWithPack.detection.available, 'fast-sharp with the pack served: available (same needs as T=1)')
+    const sharpNoPack = h3image.detectH3ImgFamilies(HYBRID_INFO, MODEL_FILES).find((entry) => entry.family.id === 'h3img.generate.sharp')
+    ok(!sharpNoPack.detection.available && sharpNoPack.detection.missingNodes.join('\n').includes('H3ImagePrepare'), 'fast-sharp without the pack: the honest pack refusal')
     const klein = detections.find((entry) => entry.family.id === 'h3img.refine.klein')
     ok(!klein.detection.available, 'klein on the H3-only info: Flux2 nodes absent → unavailable with guidance')
     const kleinFull = h3image.detectH3ImgFamilies(KLEIN_INFO, MODEL_FILES).find((entry) => entry.family.id === 'h3img.refine.klein')
@@ -491,8 +543,9 @@ maybe('(i) validation + detection', () => {
     ok(stockPacket.detection.available, 'stock: the packet still runs (stock fallback) — availability is not hybrid-gated')
     const noT1 = h3image.detectH3ImgFamilies(HYBRID_INFO, MODEL_FILES.filter((file) => !file.name.includes('t1_image_vae')))
     ok(!noT1.find((entry) => entry.family.id === 'h3img.generate.t1').detection.available, 'T=1 unavailable without the Mamad8 VAE (honest gating)')
-    // T=1 build refuses without the VAE.
-    assert.throws(() => h3image.buildH3ImageGraph({ family: 'h3img.generate.t1', prompt: 'x', width: 1344, height: 768, seed: 1, tier: 1, refs: [], loras: [], filenamePrefix: 'x' }, { ...H3IMG_MODELS, t1ImageVae: '' }, HYBRID_INFO), /T=1 image VAE/, 'T=1 build refuses without the Mamad8 VAE')
+    // T=1 build refuses without the VAE (with the pack present, so the VAE
+    // refusal is the one that fires — the pack refusal is proven above).
+    assert.throws(() => h3image.buildH3ImageGraph({ family: 'h3img.generate.t1', prompt: 'x', width: 1344, height: 768, seed: 1, tier: 1, refs: [], loras: [], filenamePrefix: 'x' }, { ...H3IMG_MODELS, t1ImageVae: '' }, STUDIO_INFO), /T=1 image VAE/, 'T=1 build refuses without the Mamad8 VAE')
     passed += 1
     console.log('  ok - T=1 build refuses without the Mamad8 VAE')
     // Krea 2 refine resolves through the shared family machinery.

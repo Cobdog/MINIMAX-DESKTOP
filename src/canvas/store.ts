@@ -2513,17 +2513,33 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
         const validation = !facts.settings
           ? 'Studio settings are still loading.'
           : validateWorkbenchRequest(request, { settings: facts.settings, connected: facts.connected, models: facts.models, info: facts.info })
-        const graph = buildH3ImageGraph({
-          family: request.settings.family,
-          prompt: sessionContract(request.settings, { sourceAnchored: false }),
-          width: Number(settings.resolution.split('x')[0]) || 1344,
-          height: Number(settings.resolution.split('x')[1]) || 768,
-          seed: settings.seed,
-          tier: H3IMG_RECIPE_PINS.t1.frames,
-          refs: [],
-          loras: [],
-          filenamePrefix: 'images/H3IMG_plan',
-        }, CANVAS_T1_TEST_SELECTION, facts.info)
+        // (afvlbk4) The T=1 lane is studio-conditioned: a pack-absent engine
+        // makes the BUILDER refuse (the stock length:1 emission is dead) —
+        // the plan surfaces that refusal with graph: null, exactly like the
+        // real submit ladder, never a throw across the probe boundary.
+        let graph: ReturnType<typeof buildH3ImageGraph> | null = null
+        let buildRefusal: string | null = null
+        try {
+          graph = buildH3ImageGraph({
+            family: request.settings.family,
+            prompt: sessionContract(request.settings, { sourceAnchored: false }),
+            width: Number(settings.resolution.split('x')[0]) || 1344,
+            height: Number(settings.resolution.split('x')[1]) || 768,
+            seed: settings.seed,
+            tier: H3IMG_RECIPE_PINS.t1.frames,
+            refs: [],
+            loras: [],
+            filenamePrefix: 'images/H3IMG_plan',
+          }, CANVAS_T1_TEST_SELECTION, facts.info)
+        } catch (error) {
+          buildRefusal = error instanceof Error ? error.message : String(error)
+          dbg('family', { verdict: 'plan-build-refused', family: request.settings.family, reason: 'pack-absent' })
+        }
+        if (!graph) {
+          // The build refusal outranks the availability wording when both
+          // fire: no legal graph is the harder fact (the pack is the lane).
+          return { mode: 'h3-1f', validation: buildRefusal ?? validation, graph: null }
+        }
         const nodes = Object.values(graph)
         return {
           mode: 'h3-1f',
