@@ -1476,16 +1476,13 @@ test('engines-as-ops complete: the audio docks (probe seams + honest gating)', a
   await page.waitForTimeout(600)
 
   // (The LTX-2.5 typed-hole row + plan seam were removed with LTX — Phase
-  // 0, 2026-09-20; the audio engine-ops below remain the plan seams.)
+  // 0, 2026-09-20; the ACE-Step plan arm went with its engine — 2026-09-21.
+  // Music 3 remains the audio plan seam.)
   const plan = page.evaluate.bind(page)
   const music3 = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; validation: string | null; graph: { textEncode: boolean; saveAudio: boolean } } }).__canvasSubmitPlan(spec), { mediaType: 'audio', audioEngine: 'music3' })
   expect(music3.mode).toBe('music3')
   expect(music3.graph.textEncode).toBe(true)
   expect(music3.graph.saveAudio).toBe(true)
-  const ace = await plan((spec: unknown) => (window as unknown as { __canvasSubmitPlan(spec: unknown): { mode: string; graph: { textEncode: boolean; saveAudio: boolean } } }).__canvasSubmitPlan(spec), { mediaType: 'audio', audioEngine: 'acestep' })
-  expect(ace.mode).toBe('acestep')
-  expect(ace.graph.textEncode).toBe(true)
-  expect(ace.graph.saveAudio).toBe(true)
 
   // The audio dock: (R-20) the engine's ONE canonical home is the typed-hole
   // produce menu — the bar's chips are retired. Open the first object's

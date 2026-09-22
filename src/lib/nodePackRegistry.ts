@@ -40,7 +40,17 @@ import type { NodePackDefinition } from '../types'
  *    (LICENSE file + SPDX header in nodes.py, read at 47dea30 during the
  *    2026-09-21 pack assessment) — public-domain-equivalent; vendor-eligible
  *    in principle, user-fetch until wanted (same posture as the other
- *    permissive unfetched packs). */
+ *    permissive unfetched packs).
+ *  - ComfyUI-H3-Motion-Context (NikoDemon80, task 06jr4eh — GAP-1): GPL-3.0
+ *    (LICENSE file + pyproject classifier, read from the canonical shared
+ *    install's copy at 5335715 / v0.6.2, 2026-09-21; plain v3 text with NO
+ *    or-later grant → GPL-3.0-only). The T8mars posture: never vendored,
+ *    fetch-consent only.
+ *  - Comfyui_Minimax_h3_latent_Upscaler (LBH-123-AI, task 06jr4eh — GAP-2):
+ *    MIT (LICENSE file added upstream at exactly the pinned revision —
+ *    commit 40316cf "Add MIT License", 2026-09-17; GitHub API license record
+ *    MIT, verified 2026-09-21). Vendor-eligible; user-fetch until a
+ *    vendoring increment is wanted (the Larryvrh posture). */
 export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
   {
     id: 'vdn-h3',
@@ -214,6 +224,54 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     // Three-node pack per docs/research/autocontext-deepread.md §module map
     // (code-read 2026-09-16).
     instanceNodeClasses: ['Minimax_H3_AutoContext_parameter', 'Minimax_H3_AutoContext_Sampler', 'Minimax_H3_Seam_Correction'],
+  },
+  // -- GAP-1 closed (task 06jr4eh; found by the 2026-09-21 registry-curation
+  // pass, docs/research/node-pack-registry.md §1.1): the chain lane's builder
+  // emitted classes no registry row covered — invisible to object_info
+  // detection, preflight remediation, and pinning. STATUS
+  // PROPOSED-PENDING-TEST · ALT: ComfyUI_MinimaxH3_AutoContext segmented
+  // inference (the overlap — a TS test decides the default long-form lane).
+  {
+    id: 'h3-motion-context',
+    name: 'ComfyUI-H3-Motion-Context',
+    featureGroup: 'H3 video',
+    description: 'NikoDemon80\'s clip-chaining pack for MiniMax H3: pins the tail of the previous clip — picture and sound — so the next clip genuinely continues it (the picture is sliced out of the previous latent with no VAE round trip; the pinned audio window ends at the join so the soundtrack continues rather than restarts). The engine side of canvas latent continuation: chain renders save their sampler latents and latents forks continue from the source clip through these nodes.',
+    repoUrl: 'https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context',
+    pinnedRevision: '5335715abe54c1a9bfbe3494da29aae3e8635ce3',
+    licenseSpdx: 'GPL-3.0-only',
+    licenseNote: 'GPL-3.0 (LICENSE file + pyproject classifier, read from the canonical shared install\'s copy at 5335715 / v0.6.2, 2026-09-21; plain v3 text, no or-later grant). Same posture as T8mars: never vendored — fetch-consent for your own instance, the studio redistributes nothing.',
+    installMode: 'user-fetch',
+    homepage: 'https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context',
+    // NODE_CLASS_MAPPINGS read from the shared install's nodes.py:1189-1193
+    // (2026-09-21). The four listed are exactly what src/lib/workflow.ts
+    // emits for chain continuation (MOTION_CONTEXT_NODES,
+    // canvas/generation.ts); the pack also ships a …Chain node and a
+    // seam-probe node this app never calls. Detection is any-match.
+    instanceNodeClasses: ['MiniMaxH3MotionContext', 'MiniMaxH3MotionContextTrim', 'MiniMaxH3MotionContextSaveLatent', 'MiniMaxH3MotionContextLoadLatent'],
+  },
+  // -- GAP-2 closed (task 06jr4eh): the LBH hires-fix entries
+  // (upscale.lbh2d/lbh3d) emitted two upscaler classes with no row, no pin,
+  // and no install guidance beyond a hint string. STATUS
+  // PROPOSED-PENDING-TEST · ALT: upscale.rtx (stock pixel 2× — loses the
+  // audio path; the only stock fallback).
+  {
+    id: 'lbh-latent-upscaler',
+    name: 'Comfyui_Minimax_h3_latent_Upscaler',
+    featureGroup: 'H3 video',
+    description: 'LBH-123-AI\'s learned latent upscaler for MiniMax H3 (24ch): 2× in latent space, bypassing the 5B-param VAE decode/encode round trip. Powers the upscale registry\'s LBH latent 2D/3D 2× hires-fix entries — latent-space scaling keeps the audio path intact where the RTX pixel path drops it. The upscaler weights are a separate download into the engine\'s upscale models root (the engine\'s own model list is the honest availability signal).',
+    repoUrl: 'https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler',
+    pinnedRevision: '40316cf008b2fd8663263270669eb4da23f89d2c',
+    licenseSpdx: 'MIT',
+    licenseNote: 'MIT (LICENSE file added upstream at exactly this pinned revision — commit 40316cf "Add MIT License", 2026-09-17; GitHub API license record MIT, verified 2026-09-21). Vendor-eligible; user-fetch until a vendoring increment is wanted (the Larryvrh posture).',
+    installMode: 'user-fetch',
+    homepage: 'https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler',
+    // Class ids verified verbatim against the pinned revision's own files
+    // (nodes/minimax_h3_latent_upscaler_2d.py and _3d.py, NODE_CLASS_MAPPINGS,
+    // 2026-09-21) — exactly the two classes src/lib/graph/upscale.ts emits
+    // for upscale.lbh2d/lbh3d. The repo also ships an MMH3 split node this
+    // app never calls. Not installed on the canonical shared install — the
+    // engine-contract fixture records both classes honestly absent.
+    instanceNodeClasses: ['MinimaxH3LatentUpscalerNode2D', 'MinimaxH3LatentUpscaler3D'],
   },
 ]
 

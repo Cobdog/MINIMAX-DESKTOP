@@ -527,29 +527,6 @@ export type ModelSelection = {
   ref2vLora: string
 }
 
-export type AceStepModelSelection = {
-  base: string
-  sft: string
-  textEncoderSmall: string
-  textEncoderLarge: string
-  vae: string
-}
-
-export type AceStepGenerationOptions = {
-  model: 'sft' | 'base'
-  tags: string
-  lyrics: string
-  instrumental: boolean
-  duration: number
-  bpm: number
-  timeSignature: string
-  language: string
-  keyScale: string
-  seed: number
-  generateAudioCodes: boolean
-  filenamePrefix: string
-}
-
 export type GenerationOptions = {
   mode: GenerationMode
   prompt: string
@@ -763,9 +740,10 @@ export type GenerationJob = {
   height: number
   duration: number
   /** Historical jobs may carry removed providers ('ltx25', 'ltx23', 'zimage'
-   *  — deleted 2026-09-20, Phase 0; git history is the archive) — they render
-   *  as their raw string, never crash. */
-  provider?: 'minimax' | 'acestep' | 'music3' | (string & {})
+   *  — deleted 2026-09-20, Phase 0; 'acestep' — deleted 2026-09-21, the
+   *  audio-lane ruling; git history is the archive) — they render as their
+   *  raw string, never crash. */
+  provider?: 'minimax' | 'music3' | (string & {})
   /** Reproducibility record attached at submit time (persisted). */
   manifest?: Record<string, unknown>
   /** Submit-side graph for in-memory auto-retry only — stripped before

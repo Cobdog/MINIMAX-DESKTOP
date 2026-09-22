@@ -148,14 +148,10 @@ const STOCK_ENTRIES: EngineFamilyEntry[] = [
     modelFamilyId: 'music3',
     panel: AUDIO_PANEL,
   },
-  {
-    id: 'audio.acestep',
-    label: 'ACE-Step XL 1.5',
-    mediaType: 'audio',
-    engineKey: 'acestep',
-    modelFamilyId: 'acestep',
-    panel: AUDIO_PANEL,
-  },
+  // audio.acestep was removed with the ACE-Step cut (2026-09-21, the
+  // audio-lane ruling — nn5ld47; restore map: docs/audit/removals-acestep.md).
+  // The modularity contract's proof: the family died as THIS entry plus its
+  // lane modules — no selector or panel changes needed.
 ]
 
 for (const entry of STOCK_ENTRIES) register(entry)

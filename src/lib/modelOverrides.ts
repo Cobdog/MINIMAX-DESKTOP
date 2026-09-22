@@ -57,7 +57,7 @@
  * The graphs load DISTINCT decoders — the H3 video/workbench graphs carry a
  * video VAELoader (node 3) AND an audio VAELoader (node 4), the T=1 Fast
  * profile decodes through its own image VAE, and the audio-only engines'
- * (music3/acestep) one VAE is audio-class — so a single 'vae' entry could
+ * (music3) one VAE is audio-class — so a single 'vae' entry could
  * reach only ever one of them.
  * Slot legality is per family (IMAGE_VAE_FAMILIES): the imageVae pick
  * exists only where a single-frame graph can legally consume it; the video
@@ -68,7 +68,6 @@
 import type { ModelFile, ModelOverrideSlots } from '../types'
 import { dbg } from './dbg'
 import { inferH3ImgSelection, T1_IMAGE_VAE_PATTERN } from './graph/h3image'
-import { inferAceStepSelections } from './aceStepWorkflow'
 import { inferSelections } from './modelSelection'
 import { inferMusic3Selection } from './music3Workflow'
 
@@ -82,15 +81,18 @@ export type ModelOverrideSlotName = 'checkpoint' | 'fl2va' | 'ref2va' | 'merged'
  *  (the same trick that keeps a legacy 'checkpoint' alive for the H3 lanes). */
 export const OVERRIDE_SLOTS: readonly ModelOverrideSlotName[] = ['checkpoint', 'fl2va', 'ref2va', 'merged', 'textEncoder', 'vae', 'videoVae', 'audioVae', 'imageVae']
 
-export type ModelFamilyId = 'minimax' | 'h3image' | 'music3' | 'acestep'
+// 'acestep' was removed with the ACE-Step cut (2026-09-21, nn5ld47) —
+// stored override picks under that key drop with the family (the LTX precedent).
+export type ModelFamilyId = 'minimax' | 'h3image' | 'music3'
 
 export type ModelFamilyInfo = {
   id: ModelFamilyId
   label: string
   note: string
   /** The slots this family exposes. Omitted slots resolve engine-side or are
-   *  genuinely plural (acestep's two DISTINCT text encoders — one pick for
-   *  both would be dishonest). */
+   *  genuinely plural (two DISTINCT files where one pick for both would be
+   *  dishonest — the removed acestep family was the case; music3's text
+   *  encoder stays a single pick). */
   slots: readonly ModelOverrideSlotName[]
   /** The registry kind each exposed slot picks from. */
   slotKinds: Partial<Record<ModelOverrideSlotName, ModelFile['kind']>>
@@ -129,13 +131,6 @@ export const MODEL_FAMILIES: readonly ModelFamilyInfo[] = [
     slots: ['checkpoint', 'textEncoder', 'audioVae'],
     slotKinds: { checkpoint: 'diffusion_models', textEncoder: 'text_encoders', audioVae: 'vae' }
   },
-  {
-    id: 'acestep',
-    label: 'ACE-Step XL 1.5',
-    note: 'The checkpoint pick drives both the base and SFT cuts (the model choice decides which loads). The audio VAE is the family\'s one decoder (audio-class). The dual Qwen text encoders stay inferred — they are two distinct files.',
-    slots: ['checkpoint', 'audioVae'],
-    slotKinds: { checkpoint: 'diffusion_models', audioVae: 'vae' }
-  },
 ]
 
 export function modelFamilyInfo(id: string): ModelFamilyInfo | null {
@@ -156,8 +151,8 @@ export const SLOT_LABELS: Record<ModelOverrideSlotName, string> = {
 }
 
 /** How each generic slot lands in the family's concrete selection record.
- *  Multiple fields mean the pick drives every one of them (acestep's
- *  base/sft pair: the model choice decides which loads). The H3 families'
+ *  Multiple fields mean the pick drives every one of them (the removed
+ *  acestep family's base/sft pair was the case). The H3 families'
  *  per-lane slots each drive their OWN field — the render mode picks the
  *  lane downstream (the video factory's UNETLoader and the workbench's
  *  stock branches) — and the merged slot additionally fills both lanes in
@@ -171,7 +166,6 @@ const SLOT_FIELDS: Record<ModelFamilyId, Partial<Record<ModelOverrideSlotName, s
   minimax: { fl2va: ['fl2va'], ref2va: ['ref2va'], merged: ['merged'], textEncoder: ['textEncoder'], videoVae: ['videoVae'], audioVae: ['audioVae'] },
   h3image: { fl2va: ['fl2va'], ref2va: ['ref2va'], merged: ['merged'], textEncoder: ['textEncoder'], videoVae: ['videoVae'], audioVae: ['audioVae'], imageVae: ['t1ImageVae'] },
   music3: { checkpoint: ['diffusion'], textEncoder: ['textEncoder'], audioVae: ['vae'] },
-  acestep: { checkpoint: ['base', 'sft'], audioVae: ['vae'] },
 }
 
 /** The families whose checkpoint slot split into the per-lane trio (rq0lsax). */
@@ -185,10 +179,11 @@ const H3_LANE_FAMILIES: ReadonlySet<string> = new Set(['minimax', 'h3image'])
 const VIDEO_VAE_FAMILIES: ReadonlySet<string> = new Set(['minimax', 'h3image'])
 
 /** The families whose legacy single 'vae' pick meant the AUDIO decoder
- *  (epdvxd4) — their one decoder is audio-class (music3's DAV, ACE-Step's
- *  audio VAE), so landing the legacy pick anywhere else would refuse-and-
- *  drop the user's working pick. */
-const AUDIO_VAE_FAMILIES: ReadonlySet<string> = new Set(['music3', 'acestep'])
+ *  (epdvxd4) — their one decoder is audio-class (music3's DAV), so landing
+ *  the legacy pick anywhere else would refuse-and-drop the user's working
+ *  pick. (The removed acestep family also belonged here; a stored pick
+ *  under that key drops with the family — Phase-0 LTX precedent.) */
+const AUDIO_VAE_FAMILIES: ReadonlySet<string> = new Set(['music3'])
 
 /** Legacy migration (rq0lsax, dated decision 2026-09-20): the pre-split
  *  single 'checkpoint' pick on an H3 family drove BOTH lanes (fl2va and
@@ -203,7 +198,7 @@ const AUDIO_VAE_FAMILIES: ReadonlySet<string> = new Set(['music3', 'acestep'])
  *  'vae' pick migrates onto the slot that PRESERVES its meaning per family —
  *  videoVae where the old slot drove the video decoder (the H3/LTX video
  *  families), audioVae where the family's one decoder is audio-class
- *  (music3/acestep). Fill-if-unset; the consumed key never re-refuses as
+ *  (music3). Fill-if-unset; the consumed key never re-refuses as
  *  an unexposed slot; an empty/absent pick is a no-op.
  *
  *  DECODER-CLASS ROUTING (tmz8vh7, dated decision 2026-09-20): the pre-split
@@ -325,8 +320,9 @@ type SlotRefusal = { check: 'slot' | 'kind' | 'vae'; reason: string }
  *  follows the NAME — /video/i marks the video decoders
  *  (minimax_h3_video_vae*), /audio|dav/i marks the audio decoders
  *  (…audio_vae*, music3's DAV), and T1_IMAGE_VAE_PATTERN is the Mamad8
- *  image class. A file matching NO marker (ACE-Step's ace_1.5_vae, a
- *  community rename) cannot be classified by name: it applies — the engine
+ *  image class. A file matching NO marker (a community rename like
+ *  ace_1.5_vae — a legacy file from the removed ACE-Step lane) cannot be
+ *  classified by name: it applies — the engine
  *  stays the final arbiter. No known audio decoder name contains 'video'
  *  and no known video decoder name contains 'audio'/'dav'; the markers
  *  refuse the cross-class picks that would ship a doomed graph. */
@@ -518,7 +514,6 @@ export function inferredOverrideSlotFile(familyId: ModelFamilyId, slot: ModelOve
   if (familyId === 'minimax') record = inferSelections(files, 'off')
   else if (familyId === 'h3image') record = inferH3ImgSelection(files)
   else if (familyId === 'music3') record = inferMusic3Selection(files)
-  else if (familyId === 'acestep') record = inferAceStepSelections(files)
   const value = record ? record[primary] : undefined
   return typeof value === 'string' ? value : ''
 }

@@ -63,8 +63,9 @@ const STOCK_TABLE = [
     panel: { tier: false, turboFamily: false, models: false, duration: false, resolution: true, seed: true, loraTimeline: false, audioDock: false } },
   { id: 'audio.music3', label: 'MiniMax Music 3', mediaType: 'audio', engineKey: 'music3', modelFamilyId: 'music3', note: null, queuedRefusal: null,
     panel: { tier: false, turboFamily: false, models: true, duration: false, resolution: false, seed: false, loraTimeline: false, audioDock: true } },
-  { id: 'audio.acestep', label: 'ACE-Step XL 1.5', mediaType: 'audio', engineKey: 'acestep', modelFamilyId: 'acestep', note: null, queuedRefusal: null,
-    panel: { tier: false, turboFamily: false, models: true, duration: false, resolution: false, seed: false, loraTimeline: false, audioDock: true } },
+  // (audio.acestep was removed with the engine, 2026-09-21 — nn5ld47; the
+  // selector arm below now proves a stored acestep chain selects NOTHING,
+  // same honest shape as the removed ltx.)
 ]
 
 /** The selector matrix every inertness direction re-runs: one settings
@@ -78,7 +79,7 @@ const SETTINGS_MATRIX = () => ([
   { settings: { mediaType: 'audio' }, expected: 'audio.music3' },
   { settings: { mediaType: 'audio', audio: {} }, expected: 'audio.music3' },
   { settings: { mediaType: 'audio', audio: { engine: 'music3' } }, expected: 'audio.music3' },
-  { settings: { mediaType: 'audio', audio: { engine: 'acestep' } }, expected: 'audio.acestep' },
+  { settings: { mediaType: 'audio', audio: { engine: 'acestep' } }, expected: null }, // removed 2026-09-21 — the honest undefined, like ltx
   { settings: { mediaType: 'video', engine: 'ltx' }, expected: null },
   { settings: { mediaType: 'image', imageEngine: 'zzz' }, expected: null },
   { settings: null, expected: null },

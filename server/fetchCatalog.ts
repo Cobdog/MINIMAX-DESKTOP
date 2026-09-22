@@ -148,6 +148,14 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   // ENGINE_NODE_PACKS. This entry is the fetch affordance the T=1 Fast
   // family's honest refusal names.
   nodePackEntry('h3-image-studio'),
+  // The GAP-1/GAP-2 rows (task 06jr4eh — load-bearing classes the builders
+  // already emitted with no registry row): the chain lane's engine side
+  // (GPL-3.0-only, fetch-consent) and the LBH latent upscaler behind the
+  // upscale.lbh2d/lbh3d entries (MIT). The preflight remediation surface
+  // and the pack board name these entries when a chain render or an upscale
+  // pick finds the classes absent from the live instance.
+  nodePackEntry('h3-motion-context'),
+  nodePackEntry('lbh-latent-upscaler'),
   // First-party pack (task k271ykk): installs from the studio's own
   // custom-nodes/ payload — the fetch engine short-circuits to a local
   // install and never touches the transport. License + repo stay

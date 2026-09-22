@@ -268,6 +268,20 @@ maybe('(c) live pack detection from object_info', () => {
     ok(nodePackInstanceState(hybrid, null) === 'unknown', 'no object_info = unknown, never a false absent')
     ok(ENGINE_NODE_PACKS.every((entry) => Array.isArray(entry.instanceNodeClasses) && entry.instanceNodeClasses.length > 0), 'every registry row carries at least one detection class')
     ok(nodePackInstanceState({ ...hybrid, instanceNodeClasses: [] }, ['X']) === 'unknown', 'a row with no detection classes answers unknown instead of guessing')
+
+    // GAP-1/GAP-2 rows (06jr4eh): the two load-bearing lanes the 2026-09-21
+    // curation pass found emitting classes no row covered — facts pinned
+    // where the classes verifiably come from (the shared install's copy at
+    // 5335715 for Motion-Context; the upstream repo at the MIT-adding commit
+    // for LBH).
+    const motionContext = ENGINE_NODE_PACKS.find((entry) => entry.id === 'h3-motion-context')
+    ok(Boolean(motionContext) && motionContext.licenseSpdx === 'GPL-3.0-only' && motionContext.installMode === 'user-fetch', 'GAP-1: the Motion-Context row records GPL-3.0-only at user-fetch (the T8mars posture — never vendored)')
+    ok(motionContext.pinnedRevision === '5335715abe54c1a9bfbe3494da29aae3e8635ce3', 'GAP-1: pinned at the exact revision installed on the canonical shared install (v0.6.2)')
+    ok(nodePackInstanceState(motionContext, ['MiniMaxH3MotionContext']) === 'active' && nodePackInstanceState(motionContext, ['KSamplerSelect']) === 'absent', 'GAP-1: the row detects its own classes on the instance')
+    const lbh = ENGINE_NODE_PACKS.find((entry) => entry.id === 'lbh-latent-upscaler')
+    ok(Boolean(lbh) && lbh.licenseSpdx === 'MIT' && lbh.installMode === 'user-fetch', 'GAP-2: the LBH upscaler row records MIT at user-fetch')
+    ok(lbh.pinnedRevision === '40316cf008b2fd8663263270669eb4da23f89d2c', 'GAP-2: pinned at the revision whose commit added the upstream MIT LICENSE (2026-09-17)')
+    ok(JSON.stringify(lbh.instanceNodeClasses) === JSON.stringify(['MinimaxH3LatentUpscalerNode2D', 'MinimaxH3LatentUpscaler3D']), 'GAP-2: the row carries exactly the two classes upscale.ts emits')
   }
 })
 
@@ -518,7 +532,7 @@ routesMaybe('(d) app-relative io defaults through the real settings pipeline + (
       // fill-if-unset — never silently dropped. The generic families keep
       // 'checkpoint'. The VAE split (epdvxd4, 2026-09-20): a legacy 'vae'
       // pick migrates onto videoVae (the video families — its old meaning
-      // there) or audioVae (music3/acestep, whose one decoder IS
+      // there) or audioVae (music3, whose one decoder IS
       // audio-class), fill-if-unset, consumed key. Failing-without-it: the
       // pre-split normalizer kept only the six old slot keys —
       // videoVae/audioVae/imageVae posted as auto (dropped at save) and the
@@ -527,6 +541,8 @@ routesMaybe('(d) app-relative io defaults through the real settings pipeline + (
         minimax: { checkpoint: 'legacy-merge.safetensors', fl2va: 'explicit-fl2va.safetensors', vae: '  ' },
         h3image: { checkpoint: 'legacy-image.safetensors', vae: 'legacy-h3-video-vae.safetensors', videoVae: 'explicit-workbench-video-vae.safetensors' },
         music3: { vae: 'legacy-dav.safetensors' },
+        // A REMOVED family's stored picks (acestep cut 2026-09-21, nn5ld47):
+        // shape-guarded but never migrated — the pick drops with the family.
         acestep: { vae: 'legacy-ace-audio-vae.safetensors', imageVae: 'not-a-real-pick.safetensors' },
       } } }) })
       const normalized = legacyOverrides.body.settings.modelOverrides ?? {}
@@ -538,8 +554,8 @@ routesMaybe('(d) app-relative io defaults through the real settings pipeline + (
       ok(normalized.h3image?.videoVae === 'explicit-workbench-video-vae.safetensors', 'h3image: an explicit videoVae pick wins over the legacy vae value')
       ok(!('vae' in (normalized.h3image ?? {})), 'h3image: the consumed legacy vae key never persists')
       ok(normalized.music3?.audioVae === 'legacy-dav.safetensors', 'music3: the legacy vae pick lands on audioVae (the family one decoder is audio-class)')
-      ok(normalized.acestep?.audioVae === 'legacy-ace-audio-vae.safetensors', 'acestep: the legacy vae pick lands on audioVae')
-      ok(normalized.acestep?.imageVae === 'not-a-real-pick.safetensors', 'acestep: an imageVae pick persists shape-wise — the family gate lives renderer-side (refused as unexposed at consult)')
+      ok(normalized.acestep?.audioVae === undefined, 'acestep (removed 2026-09-21): a dead family\'s legacy vae pick DROPS — it never migrates to audioVae')
+      ok(normalized.acestep?.imageVae === 'not-a-real-pick.safetensors', 'acestep (removed): an imageVae pick persists shape-wise — never a crash, and the renderer registry refuses it as an unknown family at consult')
       const reread = (await api('/api/lan/settings')).body.settings.modelOverrides ?? {}
       ok(reread.minimax?.ref2va === 'legacy-merge.safetensors' && !('checkpoint' in (reread.minimax ?? {})), 'the migrated shape is what persists on disk')
       await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: fresh }) })

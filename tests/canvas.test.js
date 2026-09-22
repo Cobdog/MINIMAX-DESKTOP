@@ -351,6 +351,16 @@ test('(l) L4 — selection decides the surface (effectiveMode)', () => {
   eq(read.resolution, '768x1344', 'settings: known resolution kept')
   eq(read.referenceOutputIds, ['a', 'b'], 'settings: non-string reference ids dropped, never a crash')
   eq(generation.readChainSettings({}).mode || 'text', 'text', 'settings: absent settings fall back cleanly')
+  // A stored ACE-Step chain (the engine was cut 2026-09-21, nn5ld47): the
+  // read PRESERVES the discriminator so the store's submit/validate can
+  // refuse honestly — never a silent Music 3 render from its tags — and the
+  // engine-only fields (instrumental/model/bpm) drop as unread.
+  const aceRead = generation.readChainSettings({ mediaType: 'audio', audio: { engine: 'acestep', caption: 'synthwave tags', instrumental: true, model: 'sft', bpm: 140, lyrics: 'v', duration: 90, seed: 5 } })
+  eq(aceRead.audio.engine, 'acestep', 'settings: a stored acestep engine is preserved (the tolerance that powers the submit-time refusal)')
+  eq(aceRead.audio.caption, 'synthwave tags', 'settings: the stored caption survives the read')
+  ok(!('instrumental' in aceRead.audio) && !('bpm' in aceRead.audio) && !('model' in aceRead.audio), 'settings: the acestep-only fields drop as unread')
+  const music3Read = generation.readChainSettings({ mediaType: 'audio', audio: { engine: 'music3', caption: 'jazz', lyrics: '', duration: 60, seed: 5 } })
+  eq(music3Read.audio.engine, 'music3', 'settings: a music3 chain reads unchanged')
   // Model overrides (euxwdva): tolerant read — string slots survive, junk
   // drops to auto; absent key = the empty (auto) slots, never undefined.
   const overridesRead = generation.readChainSettings({ modelOverrides: { checkpoint: 'merge.safetensors', textEncoder: 7, vae: '  ', lora: 'x.safetensors' } })
@@ -433,7 +443,7 @@ test('(m) fork substrates → input refs (§2 outputRef)', () => {
 })
 
 test('(n) typed-hole option menus (§3 filtering + hints)', () => {
-  const ready = { connected: true, h3Ready: true, motionContextReady: true, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] } }
+  const ready = { connected: true, h3Ready: true, motionContextReady: true, music3: { available: true, missing: [] } }
   const produce = options.endpointOptions('produce', ['image'], ready)
   const produceIds = produce.map((row) => row.id)
   ok(produceIds.includes('produce:i2v'), 'produce(image): i2v offered')
@@ -452,10 +462,10 @@ test('(n) typed-hole option menus (§3 filtering + hints)', () => {
   const produceVideo = options.endpointOptions('produce', ['video'], ready)
   ok(!produceVideo.some((row) => row.id === 'produce:i2v'), 'produce(video): i2v filtered out — image-only route')
   ok(produceVideo.find((row) => row.id === 'produce:fork-frame').available, 'produce(video): frame extraction offered')
-  const offline = options.endpointOptions('produce', ['image'], { connected: false, h3Ready: false, motionContextReady: true, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] } })
+  const offline = options.endpointOptions('produce', ['image'], { connected: false, h3Ready: false, motionContextReady: true, music3: { available: true, missing: [] } })
   ok(offline.find((row) => row.id === 'produce:i2v').available, 'produce(offline): chain creation still offered — the refusal surfaces at submit')
   ok(offline.find((row) => row.id === 'produce:fork-decoded').available, 'produce(offline): forking still offered — no engine needed')
-  const offlineConsume = options.endpointOptions('consume', ['image'], { connected: false, h3Ready: false, motionContextReady: true, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] } })
+  const offlineConsume = options.endpointOptions('consume', ['image'], { connected: false, h3Ready: false, motionContextReady: true, music3: { available: true, missing: [] } })
   ok(offlineConsume.find((row) => row.id === 'consume:first-frame').available, 'consume(offline): input roles are pure document edits — always available')
 
   const consume = options.endpointOptions('consume', ['image'], ready)
@@ -644,7 +654,7 @@ test('(r) op-stack model — kinds, tolerant settings, live-preview composition'
 })
 
 test('(s) typed-hole surface — the pose rig row (§5.2)', () => {
-  const facts = { connected: false, h3Ready: false, motionContextReady: true, music3: { available: true, missing: [] }, acestep: { available: true, missing: [] } }
+  const facts = { connected: false, h3Ready: false, motionContextReady: true, music3: { available: true, missing: [] } }
   const consume = options.endpointOptions('consume', [], facts)
   const poseRig = consume.find((row) => row.id === 'consume:pose-rig')
   ok(poseRig && poseRig.available, 'options: the pose rig row is offered on the consume side (engine-free)')
@@ -830,10 +840,8 @@ test('(w) the extracted engine cores — ladders stay verbatim (one code path, b
   eq(music3.validateMusic3({ caption: '', lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'a' }, { connected: true, selection: {} }), 'Write at least one caption section before generating.', 'music3 ladder: empty caption refuses')
   eq(music3.validateMusic3({ caption: 'warm jazz', lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'a' }, { connected: true, selection: { diffusion: '', textEncoder: '', vae: '' } }), 'The Music 3 diffusion model, text encoder, and DAV VAE are required. Install them, then rescan in Settings.', 'music3 ladder: missing models refuse with the install hint')
 
-  const ace = loadTs('src/lib/aceStepSubmit.ts')
-  const aceOption = { model: 'base', tags: 'synthwave', lyrics: '', instrumental: false, duration: 60, seed: 1, bpm: 120, filenamePrefix: 'a' }
-  eq(ace.validateAceStep(aceOption, { connected: true, info: { 'TextEncodeAceStepAudio1.5': 1, UNETLoader: 1, DualCLIPLoader: 1, VAELoader: 1, 'EmptyAceStep1.5LatentAudio': 1, ConditioningZeroOut: 1, ModelSamplingAuraFlow: 1, KSampler: 1, VAEDecodeAudio: 1, SaveAudioAdvanced: 1 }, selection: { base: 'ace.safetensors', sft: '', vae: 'v.safetensors', textEncoderSmall: 's.safetensors', textEncoderLarge: 'l.safetensors' } }), null, 'acestep ladder: a ready engine passes clean')
-  eq(ace.validateAceStep(aceOption, { connected: true, info: {}, selection: { base: '', sft: '', vae: '', textEncoderSmall: '', textEncoderLarge: '' } }), 'The ACE-Step BASE model, audio VAE, and both Qwen ACE text encoders are required.', 'acestep ladder: missing models refuse naming the variant')
+  // (The acestep ladder arms were removed with the engine, 2026-09-21 —
+  // nn5ld47; lib/aceStepSubmit.ts deleted, git history is the archive.)
 })
 
 // (x) the contact-sheet core test was removed with the Studios (Phase 0,

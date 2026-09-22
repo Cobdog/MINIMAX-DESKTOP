@@ -102,6 +102,8 @@ network is touched); we never redistribute them.
 | `krea2-anypaint` | alexw5702-afk @ `675be5a9…` | MIT `[API-2026-09-14]` (NOTICE credits Rebels + ostris) | fetch-consent | clean | trivial |
 | `autocontext` | supElement @ `f1062d34…` | Apache-2.0 `[API-2026-09-16]` | fetch-consent (vendor candidate — 14 files, no weights) | clean | trivial |
 | `h3-image-studio` | astropuzzo @ `47dea30…` (v23.0.0) | Unlicense `[code-read 2026-09-21 — pack assessment]` | fetch-consent (vendor-eligible: public-domain-equivalent; user-fetch matches the current posture) | clean | trivial — the T=1-legality gate's pack (task d4er4ati) |
+| `h3-motion-context` | NikoDemon80 @ `5335715a…` (v0.6.2) | **GPL-3.0-only** — plain v3 LICENSE (no or-later grant), read from the canonical shared install's copy at this rev `[LOCAL 2026-09-21]` | fetch-consent, flagged; never vendored (the T8mars posture) | none triggered (never redistributed); the chain lane's engine side (GAP-1 closed, task 06jr4eh) | trivial |
+| `lbh-latent-upscaler` | LBH-123-AI @ `40316cf0…` | MIT `[API + code-read 2026-09-21 — LICENSE added upstream at exactly this commit, 2026-09-17]` | fetch-consent (vendor candidate) | clean; the upscaler WEIGHTS are separate engine-side downloads | trivial — the LBH 2D/3D hires-fix lane (GAP-2 closed, task 06jr4eh) |
 
 Fetch-catalog packs not in `ENGINE_NODE_PACKS` (fetched into the user's
 instance; same fetch-consent discipline):
@@ -197,7 +199,7 @@ the research grant.
 
 | Asset | License as stated | Mode |
 | --- | --- | --- |
-| YuE2-3B (m-a-p) | **CC-BY-NC 4.0 on the weights** — ungated public download; attribution required; non-commercial, and in CC-BY-NC practice the terms attach to outputs/adaptations. Lineage break: every YuE 1.x repo was Apache-2.0 (v1 preserved on the `YuE-v1` branch); code components MIT (stable-audio-tools, SnakeBeta). Every derivative quant/LoRA inherits NC `[DOC 2026-09-21]` | fetch-consent when adopted; never vendored; forecloses selling YuE2-generated music — the ladder keeps commercial-safe rungs (music3, acestep) |
+| YuE2-3B (m-a-p) | **CC-BY-NC 4.0 on the weights** — ungated public download; attribution required; non-commercial, and in CC-BY-NC practice the terms attach to outputs/adaptations. Lineage break: every YuE 1.x repo was Apache-2.0 (v1 preserved on the `YuE-v1` branch); code components MIT (stable-audio-tools, SnakeBeta). Every derivative quant/LoRA inherits NC `[DOC 2026-09-21]` | fetch-consent when adopted; never vendored; forecloses selling YuE2-generated music — music3 stays the commercial-safe rung (acestep removed 2026-09-21, nn5ld47) |
 | MiniMax Music 3 (MiniMaxAI/MiniMax-Music3) | **MiniMax Community License — open weights, ungated** (corrected 2026-09-21 from "provider API terms"; the paid music API closed to new users 2026-08-20). Commercial use free under the revenue threshold (~$20M/yr) with attribution `[DOC]` | fetch-consent when the music3 dock goes first-class; same consent surfacing as §5a |
 | ACE-Step (1.5) | Apache-2.0 per the research capture `[DOC]` — **re-verify at any adoption commit** (LICENSES.md §5 keeps this row open) | fetch-consent when first-classed |
 | LTX-2.5, Z-Image | per their HF cards — **verify at first-classing time** `[UNK]` | open |

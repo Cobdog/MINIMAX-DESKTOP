@@ -798,7 +798,7 @@ export function createStudioServer(paths: StudioServerPaths) {
       // by decoder class (task epdvxd4, 2026-09-20): a legacy 'vae' pick
       // migrates onto videoVae where the old slot meant the video decoder
       // (the H3 video families) and onto audioVae where the family's
-      // one decoder is audio-class (music3/acestep) — same
+      // one decoder is audio-class (music3) — same
       // meaning-preserving rule (mirrors
       // migrateLegacyModelOverrideSlots in src/lib/modelOverrides.ts,
       // reimplemented because the server never imports the renderer
@@ -819,9 +819,12 @@ export function createStudioServer(paths: StudioServerPaths) {
         const slots = ['checkpoint', 'fl2va', 'ref2va', 'merged', 'textEncoder', 'vae', 'videoVae', 'audioVae', 'imageVae'] as const
         const laneFamilies = new Set(['minimax', 'h3image'])
         const imageVaeFamilies = new Set(['h3image'])
-        // (ltx25/ltx23 dropped from this set with LTX — Phase 0, 2026-09-20.)
+        // (ltx25/ltx23 dropped from this set with LTX — Phase 0, 2026-09-20;
+        // acestep dropped with the ACE-Step cut — 2026-09-21, nn5ld47. A
+        // stored acestep family's picks stay inert: the renderer registry no
+        // longer knows the family, and an unknown key never reaches a graph.)
         const videoVaeFamilies = new Set(['minimax', 'h3image'])
-        const audioVaeFamilies = new Set(['music3', 'acestep'])
+        const audioVaeFamilies = new Set(['music3'])
         const t1Marker = /^minimax_h3_t1_image_vae/i
         const audioMarker = /audio|dav/i
         const videoMarker = /video/i

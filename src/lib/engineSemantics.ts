@@ -134,6 +134,11 @@ export const KNOWN_DIVERGENCES: readonly KnownDivergence[] = [
     opened: '2026-09-21',
     owner: 'the image-workbench tier ladder rework (retire or re-base tiers onto grid points; rides the T=1 remediation lane)',
   },
+  // (PR #44 retired the five 2026-09-21 first-pass divergences as builder
+  // fixes — form-adapter low_vram, klein ×2, music3 bitrate, and the acestep
+  // enum formats. The acestep fix then went moot with the lane itself the
+  // same day: the engine was cut — nn5ld47, docs/audit/removals-acestep.md —
+  // so no acestep entry returns unless a lane does.)
 ] as const
 
 /** Divergence ids as a plain set — the exact-match signature for tests. */

@@ -140,6 +140,21 @@ test('(d) preflight — the graph-vs-object_info diff and the pack-row refusal (
   eq(turbo.stock, false, 'a pack class is not stock')
   eq(missing.find((item) => item.className === 'MiniMaxH3SamplerStandalone').stock, false, 'an unknown class is not stock (generic advice)')
 
+  // GAP-1/GAP-2 closed (06jr4eh): the chain lane's and the LBH upscale
+  // lane's classes — load-bearing builder emissions that previously fell to
+  // the generic no-registry-row advice — now map to their pack rows.
+  const chainGraph = {
+    '24': { class_type: 'MiniMaxH3MotionContextLoadLatent', inputs: {} },
+    '25': { class_type: 'MiniMaxH3MotionContext', inputs: {} },
+    '28': { class_type: 'MiniMaxH3MotionContextSaveLatent', inputs: {} },
+    '26': { class_type: 'MiniMaxH3MotionContextTrim', inputs: {} },
+    '44': { class_type: 'MinimaxH3LatentUpscaler3D', inputs: {} },
+  }
+  const gapMissing = preflight.preflightGraph(chainGraph, { UNETLoader: {} })
+  eq(gapMissing.filter((item) => item.packId === 'h3-motion-context').length, 4, 'all four Motion-Context chain classes map to the h3-motion-context row')
+  eq(gapMissing.find((item) => item.className === 'MinimaxH3LatentUpscaler3D').packId, 'lbh-latent-upscaler', 'the LBH 3D upscaler maps to the lbh-latent-upscaler row')
+  ok(preflight.preflightRefusal(gapMissing).includes('ComfyUI-H3-Motion-Context'), 'the refusal names the Motion-Context pack row')
+
   // The refusal: readable, action-mapped, names the class AND the pack.
   const refusal = preflight.preflightRefusal(missing)
   ok(refusal.includes('MiniMaxH3SamplerStandalone'), 'the refusal names the class')
@@ -165,14 +180,22 @@ test('(d) preflight — the graph-vs-object_info diff and the pack-row refusal (
     { className: 'ApplyVDNH3', packId: 'vdn-h3', stock: false },
     { className: 'MiniMaxH3LoraFormLoader', packId: 'lora-form-adapter', stock: false },
     { className: 'H3ImagePrepare', packId: 'h3-image-studio', stock: false },
+    { className: 'MiniMaxH3MotionContext', packId: 'h3-motion-context', stock: false },
+    { className: 'MinimaxH3LatentUpscaler3D', packId: 'lbh-latent-upscaler', stock: false },
     { className: 'CreateVideo', stock: true },
     { className: 'MysteryNode', stock: false },
   ]
   const rows = remediation.remediationRows(missingMix)
-  eq(rows.length, 6, 'one row per missing class')
+  eq(rows.length, 8, 'one row per missing class')
   const byClass = Object.fromEntries(rows.map((row) => [row.className, row]))
   ok(byClass.MiniMaxH3HybridLoader.action.kind === 'fetch' && byClass.MiniMaxH3HybridLoader.action.licenseSpdx === 'MIT', 'user-fetch pack row → fetch action carrying the license verdict')
   ok(byClass.MiniMaxH3HybridLoader.action.catalogEntryId === 'pack:h3-hybrid-loader', 'the fetch action targets the catalog entry (the Library deep-link)')
+  // GAP-1/GAP-2 (06jr4eh): the chain lane's and the LBH upscale lane's
+  // classes now map to registry rows — a missing Motion-Context or LBH
+  // class refuses with a FETCH action, not the unknown dead end.
+  ok(byClass.MiniMaxH3MotionContext.action.kind === 'fetch' && byClass.MiniMaxH3MotionContext.action.packId === 'h3-motion-context' && byClass.MiniMaxH3MotionContext.action.licenseSpdx === 'GPL-3.0-only', 'a missing Motion-Context class maps to its fetch row with the GPL verdict stated')
+  ok(byClass.MiniMaxH3MotionContext.action.catalogEntryId === 'pack:h3-motion-context', 'the Motion-Context fetch action deep-links its catalog entry')
+  ok(byClass.MinimaxH3LatentUpscaler3D.action.kind === 'fetch' && byClass.MinimaxH3LatentUpscaler3D.action.packId === 'lbh-latent-upscaler' && byClass.MinimaxH3LatentUpscaler3D.action.licenseSpdx === 'MIT', 'a missing LBH upscaler class maps to its fetch row with the MIT verdict stated')
   ok(byClass.H3ImagePrepare.action.kind === 'fetch' && byClass.H3ImagePrepare.action.licenseSpdx === 'Unlicense', 'the h3-image-studio gate pack rows as a fetch with its Unlicense verdict')
   ok(byClass.ApplyVDNH3.action.kind === 'install' && byClass.ApplyVDNH3.action.packId === 'vdn-h3', 'vendored pack row → install action (no network)')
   ok(byClass.MiniMaxH3LoraFormLoader.action.kind === 'install' && byClass.MiniMaxH3LoraFormLoader.label.includes('no network'), 'first-party pack row → install action stating no network')

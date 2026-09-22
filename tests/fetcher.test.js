@@ -267,9 +267,16 @@ maybe('(a) catalog integrity: schema, licenses, destinations, single-sourcing, p
       }
     }
     // The seed commitments (mission + licensing pass) are all present.
-    for (const expected of ['pack:minimax-h3-turbo', 'pack:krea2-controlnet', 'pack:h3-audio-t8', 'fun-control-union', 'vdn-stage-dmd-250', 'vdn-stage-b-2000', 'smhfacct-hybrid-b25-49', 'dwpose-onnx', 'dwpose-torchscript', 'da3-base', 'hed-annotator', 'mlsd-annotator', 'engine-comfyui', 'fasth3-vae-w4a8', 'matlowai-fused-turbo-int8', 'pack:autocontext']) {
+    for (const expected of ['pack:minimax-h3-turbo', 'pack:krea2-controlnet', 'pack:h3-audio-t8', 'fun-control-union', 'vdn-stage-dmd-250', 'vdn-stage-b-2000', 'smhfacct-hybrid-b25-49', 'dwpose-onnx', 'dwpose-torchscript', 'da3-base', 'hed-annotator', 'mlsd-annotator', 'engine-comfyui', 'fasth3-vae-w4a8', 'matlowai-fused-turbo-int8', 'pack:autocontext', 'pack:h3-motion-context', 'pack:lbh-latent-upscaler']) {
       ok(ids.has(expected), `seed entry present: ${expected}`)
     }
+    // The GAP-1/GAP-2 rows (06jr4eh) carry the fetch affordance their lanes'
+    // preflight refusals name: Motion-Context fetch-consent at a sha pin
+    // (GPL-3.0-only), the LBH upscaler at the MIT-adding sha.
+    const motionContext = findFetchEntry('pack:h3-motion-context')
+    ok(motionContext.licenseSpdx === 'GPL-3.0-only' && motionContext.source.revision.kind === 'sha' && motionContext.source.revision.value === '5335715abe54c1a9bfbe3494da29aae3e8635ce3', 'Motion-Context is GPL-3.0-only fetch-consent at the installed sha pin')
+    const lbh = findFetchEntry('pack:lbh-latent-upscaler')
+    ok(lbh.licenseSpdx === 'MIT' && lbh.source.revision.kind === 'sha' && lbh.source.revision.value === '40316cf008b2fd8663263270669eb4da23f89d2c', 'LBH upscaler is MIT at the MIT-adding sha pin (immutable)')
     const facok = findFetchEntry('pack:krea2-controlnet')
     ok(facok.licenseSpdx === 'NO-LICENSE' && facok.source.revision.kind === 'branch', 'facok is NO-LICENSE with a moving branch pin (the stamping case)')
     const t8 = findFetchEntry('pack:h3-audio-t8')
