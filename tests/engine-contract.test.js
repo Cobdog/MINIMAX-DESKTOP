@@ -329,11 +329,15 @@ test('(d) semantic rules: the grid, the promotion, the slice window, emitted len
   passed += 1
   console.log('  ok - emitted off-grid lengths are EXACTLY the ledgered set')
 
-  // The silent-drop proof: music3 emits a key the engine does not declare.
+  // The silent-drop proof, retired (music3.bitrate-unknown-input): music3
+  // once emitted bitrate: 'V0' — a key SaveAudioAdvanced never declared, so
+  // the engine dropped it silently and the mp3 default landed by luck. The
+  // builder now emits the mp3 key's REAL sub-input; the dead key must never
+  // return.
   const music3Graph = music3.buildMusic3Workflow({ caption: 'x', lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'a' }, { diffusion: 'm3.safetensors', textEncoder: 'm3-te.safetensors', vae: 'm3-dav.safetensors' })
-  ok('bitrate' in music3Graph['9'].inputs, 'music3 emits bitrate on SaveAudioAdvanced (the silent-drop subject)')
+  ok(!('bitrate' in music3Graph['9'].inputs) && music3Graph['9'].inputs.quality === 'V0', 'music3 emits the mp3 key\'s real sub-input quality (the dead bitrate key is retired)')
   ok(!('bitrate' in REAL_INFO.SaveAudioAdvanced.input.required) && !('bitrate' in (REAL_INFO.SaveAudioAdvanced.input.optional ?? {})),
-    'SaveAudioAdvanced declares no bitrate input — the engine drops the value silently (ledgered)')
+    'SaveAudioAdvanced declares no bitrate input — the engine fact that made the old key a silent drop')
 
   // The chain machinery's context lengths are the served enum exactly.
   const contextEnum = REAL_INFO.MiniMaxH3MotionContext.input.required.context_length[0]

@@ -1333,6 +1333,11 @@ test('MiniMax Music 3: official graph, seconds passthrough, tiled decode, captio
   assert.equal(g['8'].inputs.tile_size, 1536)
   assert.equal(g['9'].class_type, 'SaveAudioAdvanced')
   assert.equal(g['9'].inputs.format, 'mp3')
+  // The mp3 key's REAL sub-input (retired music3.bitrate-unknown-input):
+  // the old bitrate key was never declared and the engine dropped it
+  // silently — quality is what actually reaches the encoder.
+  assert.equal(g['9'].inputs.quality, 'V0')
+  assert.equal('bitrate' in g['9'].inputs, false)
   const full = m3.buildMusic3Workflow({ caption: 'x', lyrics: '', duration: 60, seed: 1, tiledDecode: false, filenamePrefix: 'a' }, models3)
   assert.equal(full['8'].class_type, 'VAEDecodeAudio', 'tiled decode is optional')
   // Duration clamped to the 5-minute ceiling; caption sections omitted when blank.

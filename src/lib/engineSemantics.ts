@@ -134,15 +134,6 @@ export const KNOWN_DIVERGENCES: readonly KnownDivergence[] = [
     opened: '2026-09-21',
     owner: 'the image-workbench tier ladder rework (retire or re-base tiers onto grid points; rides the T=1 remediation lane)',
   },
-  {
-    id: 'music3.bitrate-unknown-input',
-    surface: 'Music 3 core (buildMusic3Workflow → SaveAudioAdvanced)',
-    emission: "bitrate: 'V0' alongside format: 'mp3'",
-    engineBehavior: "SILENTLY DROPPED: SaveAudioAdvanced declares no 'bitrate' input (the mp3 sub-input is 'quality'); validation ignores unknown keys, so the value never reaches the encoder. The mp3 default quality is V0 — the intent lands by luck today, not by contract. Found by this contract layer's first audit pass.",
-    violationType: 'silently-dropped',
-    opened: '2026-09-21',
-    owner: 'the music3 lane fix (emit the real sub-input or drop the dead key)',
-  },
 ] as const
 
 /** Divergence ids as a plain set — the exact-match signature for tests. */
