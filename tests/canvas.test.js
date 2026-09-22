@@ -734,8 +734,12 @@ test('(u) H3-1F as the image op — the two-slot seam, the T=1 request, the Edit
   // the packet family — the one that can be available.
   const gated = submitCore.validateWorkbenchRequest(request, { settings: { comfyUrl: 'http://x' }, connected: true, models: fullStack, info: {} })
   ok(typeof gated === 'string' && gated.includes('H3ImagePrepare') && gated.includes('MiniMax H3 Image Studio') && gated.includes('#15644'), 'ladder: the full T=1 stack on a stock-only engine still refuses at the pack gate (never a doomed submit)')
-  const pending = submitCore.validateWorkbenchRequest(request, { settings: { comfyUrl: 'http://x' }, connected: true, models: fullStack, info: { H3ImagePrepare: {} } })
-  ok(typeof pending === 'string' && pending.includes('pack-conditioned') && pending.includes('H3 Image Studio'), 'ladder: pack installed → the pending-studio-graph refusal (the stock length=1 path is illegal regardless)')
+  // THE FLIP (afvlbk4): pack served + the full stack → the family VALIDATES
+  // CLEAN — the pack's conditioning is the legal path and the builder emits
+  // it. (The old arm here asserted the pending-studio-graph refusal; the
+  // pack-conditioned graph has landed.)
+  const withPack = submitCore.validateWorkbenchRequest(request, { settings: { comfyUrl: 'http://x' }, connected: true, models: fullStack, info: { H3ImagePrepare: {} } })
+  eq(withPack, null, 'ladder: pack served → the T=1 family validates clean (the afvlbk4 capability flip)')
   const packetRequest = { ...request, settings: { ...request.settings, family: 'h3img.generate.packet', tier: 5 } }
   eq(submitCore.validateWorkbenchRequest(packetRequest, { settings: { comfyUrl: 'http://x' }, connected: false, models: fullStack, info: {} }),
     'Start ComfyUI and verify the server connection in Settings.',
@@ -1556,10 +1560,34 @@ test('(u-run) H3-1F submission — the engine-truth gate at the submit core; the
   ok(!gated.ok && gated.message.includes('MiniMax H3 Image Studio') && gated.message.includes('#15644'), 'gate: a stock-only engine refuses at the core with the pack + stock-floor reason')
   eq(t1SubmittedGraphs.length, 0, 'gate: nothing submitted to the engine (the refusal precedes the graph)')
   ok(jobState.length === 0, 'gate: no job parked for the refused render')
-  const pending = await stillSubmitCore.submitWorkbenchGeneration(request, facts({ H3ImagePrepare: {} }), io)
-  ok(!pending.ok && pending.message.includes('pack-conditioned'), 'gate: pack installed → the pending-studio-graph refusal (the stock length=1 path is illegal regardless)')
-  eq(t1SubmittedGraphs.length, 0, 'gate: still nothing submitted in the pack-present state')
-  ok(jobState.length === 0, 'gate: still no job parked in the pack-present state')
+  // THE FLIP (afvlbk4): pack served → the T=1 run SUBMITS a pack-form graph
+  // — the legal single-frame latent through the pack's Prepare (no stock
+  // conditioning node, no length:1), the decode through H3ImageDecode +
+  // the Mamad8 VAE, one published frame. This is the leg the old gate
+  // parked as "pending studio-side graph"; it is the capability now. The
+  // stub serves the pack classes PLUS every stock class the graph emits —
+  // the submit-time preflight diffs them all (a non-empty info is a
+  // registry the render must clear).
+  const STUDIO_INFO_STUB = {
+    H3ImagePrepare: {}, H3TextToImagePrepare: {}, H3ImageToImagePrepare: {}, H3ReferenceEditPrepare: {}, H3ImageDecode: {},
+    MiniMaxH3LoraFormLoader: {},
+    UNETLoader: {}, CLIPLoader: {}, VAELoader: {}, LoraLoaderModelOnly: {}, MiniMaxH3SigmaShift: {},
+    RandomNoise: {}, BasicGuider: {}, KSamplerSelect: {}, BasicScheduler: {}, SamplerCustomAdvanced: {},
+    ImageFromBatch: {}, SaveImage: {},
+  }
+  const withPack = await stillSubmitCore.submitWorkbenchGeneration(request, facts(STUDIO_INFO_STUB), io)
+  eq(withPack.ok, true, 'flip: pack served → the T=1 run submits clean through the shared core')
+  eq(t1SubmittedGraphs.length, 1, 'flip: exactly one engine prompt submitted (the text intent uploads nothing)')
+  const t1Graph = t1SubmittedGraphs[0].graph
+  const t1Classes = Object.values(t1Graph).map((node) => node.class_type)
+  ok(t1Classes.includes('H3TextToImagePrepare') && t1Classes.includes('H3ImageDecode'), 'flip: the graph is pack-form (Prepare + exact/slice decode)')
+  ok(!t1Classes.includes('MiniMaxH3ImageToVideo') && !t1Classes.includes('MiniMaxH3ReferenceToVideo'), 'flip: no stock conditioning node — the length:1 path is dead')
+  eq(Object.values(t1Graph).find((node) => node.class_type === 'H3TextToImagePrepare').inputs.quality_profile, 'single image | 1 frame (image VAE)', 'flip: the one-frame preset (the legal T=1 latent)')
+  eq(Object.values(t1Graph).filter((node) => node.class_type === 'VAELoader').map((node) => node.inputs.vae_name), ['minimax_h3_t1_image_vae_step1597.safetensors'], 'flip: the Mamad8 VAE is the only decoder (no audio VAE on the pack path)')
+  ok(t1Classes.filter((cls) => cls === 'SaveImage').length === 1, 'flip: exactly one frame published')
+  ok(jobState.length === 1 && jobState[0].status === 'running', 'flip: the T=1 job parks running after the engine accepts')
+  ok(jobState[0].manifest.h3img.frames === 1, 'flip: the provenance records the single frame')
+  eq(h3imageGraph.h3imgGraphAudit(t1Graph), [], 'flip: the T=1 pack-form graph audits clean')
   // The shared-core submit machinery the old T=1 leg exercised (job parking,
   // the canvas link at creation, the manifest provenance, the success
   // notice) is proven through the PACKET family — the available one. The
@@ -1570,11 +1598,11 @@ test('(u-run) H3-1F submission — the engine-truth gate at the submit core; the
   const packetRequest = { ...request, settings: { ...request.settings, family: 'h3img.generate.packet', tier: 5 } }
   const result = await stillSubmitCore.submitWorkbenchGeneration(packetRequest, facts({}), io)
   eq(result.ok, true, 'submit: the packet run submits clean through the shared core')
-  ok(jobState.length === 1 && jobState[0].status === 'running', 'submit: the job parks running after the engine accepts')
+  ok(jobState.length === 2 && jobState[0].status === 'running', 'submit: the packet job parks running after the engine accepts (jobs prepend)')
   ok(linkedJobId === jobState[0].id, 'submit: onJobCreated fires the moment the job record exists (the canvas-link discipline added with 34afx79)')
   ok(jobState[0].mediaType === 'image', 'submit: the job is an image job (the queue poll completes it with the image kind)')
-  eq(t1SubmittedGraphs.length, 1, 'submit: exactly one engine prompt submitted (no upload touched — the text intent uploads nothing)')
-  const graph = t1SubmittedGraphs[0].graph
+  eq(t1SubmittedGraphs.length, 2, 'submit: the packet prompt is the second engine submission (the T=1 flip leg was the first)')
+  const graph = t1SubmittedGraphs[1].graph
   const nodes = Object.values(graph)
   const classes = nodes.map((node) => node.class_type)
   ok(classes.filter((cls) => cls === 'SaveImage').length === 5, 'submit: five per-frame publishes — the packet tier rides the request through the profile-pin seam')

@@ -403,6 +403,11 @@ test('model overrides take 2 (rq0lsax, R-12): subpathed registry rows resolve ev
 const h3imageGraphModule = load('src/lib/graph/h3image.ts')
 const music3Module = load('src/lib/music3Workflow.ts')
 const OVERRIDE_SLOT_KEYS = overridesModule.OVERRIDE_SLOTS
+// The H3 Image Studio pack served (afvlbk4): the T=1 family is
+// studio-conditioned — these walk/audit arms pass the pack-present stub so
+// the graph builds (a pack-absent engine refuses T=1 at build; the refusal
+// itself is covered in tests/h3img.test.js (i) and tests/canvas.test.js).
+const STUDIO_PACK_INFO = { H3ImagePrepare: {} }
 const t1Alt = 'minimax_h3_t1_image_vae_step2048.safetensors'
 const vaeSplitScan = overrideScan.concat([
   // A newer-step Mamad8 decoder: matches the T1 pattern (the image class)
@@ -448,7 +453,7 @@ test('model overrides take 3 (epdvxd4): the decoder-split VAE trio — resolutio
   const packetGraph = h3imageGraphModule.buildH3ImageGraph({ family: 'h3img.generate.packet', prompt: 'audit', width: 768, height: 768, seed: 1, tier: 5, refs: [], loras: [], filenamePrefix: 't' }, h3imgResolved.selection)
   assert.equal(packetGraph['3'].inputs.vae_name, 'minimax_h3_video_vae_fp16.safetensors', 'the packet profile decodes through the video VAE node')
   assert.equal(packetGraph['4'].inputs.vae_name, 'minimax_h3_audio_vae_fp32.safetensors', 'the audio VAE pick reaches node 4')
-  const t1Graph = h3imageGraphModule.buildH3ImageGraph({ family: 'h3img.generate.t1', prompt: 'audit', width: 768, height: 768, seed: 1, tier: 1, refs: [], loras: [], filenamePrefix: 't' }, h3imgResolved.selection)
+  const t1Graph = h3imageGraphModule.buildH3ImageGraph({ family: 'h3img.generate.t1', prompt: 'audit', width: 768, height: 768, seed: 1, tier: 1, refs: [], loras: [], filenamePrefix: 't' }, h3imgResolved.selection, STUDIO_PACK_INFO)
   assert.equal(t1Graph['3'].inputs.vae_name, t1Alt, 'the T=1 profile decodes through the PICKED image VAE at node 3')
   assert.equal(h3imageGraphModule.h3imgGraphAudit(t1Graph, { frames: 1 }).length, 0, 'the picked T=1 decoder stays legal in its single-frame graph')
 
@@ -613,7 +618,7 @@ test('the workflow-population audit (epdvxd4, AC-3): every family × every slot 
   assertAt('h3image textEncoder', workbenchPacket, 2, 'clip_name', auditPicks.textEncoder)
   assertAt('h3image videoVae', workbenchPacket, 3, 'vae_name', auditPicks.videoVae)
   assertAt('h3image audioVae', workbenchPacket, 4, 'vae_name', auditPicks.audioVae)
-  const workbenchT1 = h3imageGraphModule.buildH3ImageGraph({ family: 'h3img.generate.t1', prompt: 'audit', width: 768, height: 768, seed: 1, tier: 1, refs: [], loras: [], filenamePrefix: 't' }, h3imgAudit.selection)
+  const workbenchT1 = h3imageGraphModule.buildH3ImageGraph({ family: 'h3img.generate.t1', prompt: 'audit', width: 768, height: 768, seed: 1, tier: 1, refs: [], loras: [], filenamePrefix: 't' }, h3imgAudit.selection, STUDIO_PACK_INFO)
   assertAt('h3image imageVae (T=1 profile)', workbenchT1, 3, 'vae_name', auditPicks.imageVae)
 
   // (The ltx25/ltx23 audit arms were removed with LTX — Phase 0, 2026-09-20.)
@@ -786,7 +791,7 @@ test('THE R-12 INVARIANT: no graph ever references a model absent from the insta
   // --- h3image (the workbench): both profile families through the seam.
   const h3imgSelection = resolveModels('h3image', h3imageGraphModule.inferH3ImgSelection(INVARIANT_REGISTRY), INVARIANT_REGISTRY, { textEncoder: 'TE/qwen3vl_community_repack.safetensors' }).selection
   for (const [family, tier] of [['h3img.generate.packet', 5], ['h3img.generate.t1', 1]]) {
-    const graph = h3imageGraphModule.buildH3ImageGraph({ family, prompt: 'invariant', width: 768, height: 768, seed: 1, tier, refs: [], loras: [], filenamePrefix: 't' }, h3imgSelection)
+    const graph = h3imageGraphModule.buildH3ImageGraph({ family, prompt: 'invariant', width: 768, height: 768, seed: 1, tier, refs: [], loras: [], filenamePrefix: 't' }, h3imgSelection, STUDIO_PACK_INFO)
     walkGraphModelInputs(`h3image ${family}`, graph)
   }
 

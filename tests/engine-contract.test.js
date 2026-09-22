@@ -121,6 +121,84 @@ test('(a) fixture integrity: provenance, coverage lockstep, honest absences', ()
   const samplerOptions = REAL_INFO.KSamplerSelect.input.required.sampler_name[1].options
   ok(samplerOptions.includes('res_multistep') && samplerOptions.includes('er_sde') && samplerOptions.includes('euler'),
     'real enums survive normalization (KSamplerSelect serves res_multistep/er_sde/euler)')
+
+  // The H3 Image Studio pack's captured schemas (afvlbk4): the five
+  // load-bearing classes, served REAL from the shared install with the pack
+  // cloned at 47dea30 — provenance-recorded in the fixture. The frame-preset
+  // enum and decode modes are the pack's own truth, and the T=1 legality is
+  // visible in the schema: no length-style min floor exists on the Prepare
+  // classes at all (the stock floor is what made length:1 illegal).
+  ok(Array.isArray(FIXTURE_DATA.__provenance.h3ImageStudioPackCapture) === false && typeof FIXTURE_DATA.__provenance.h3ImageStudioPackCapture === 'string' && FIXTURE_DATA.__provenance.h3ImageStudioPackCapture.includes('47dea30'),
+    'provenance records the pack capture (repo @ 47dea30, cloned into the shared install)')
+  const presets = REAL_INFO.H3TextToImagePrepare.input.required.quality_profile[0]
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(presets)),
+    JSON.parse(JSON.stringify(['single image | 1 frame (image VAE)', 'recommended | 5 frames', 'extended quality | 9 frames', 'high quality | 13 frames', 'maximum quality | 20 frames (slow)'])),
+    'the pack\'s frame_preset enum is the real captured ladder (1/5/9/13/20 — no 17n+5 snap anywhere)',
+  )
+  passed += 1
+  console.log('  ok - the pack\'s frame_preset enum is the real captured ladder (1/5/9/13/20 — no 17n+5 snap anywhere)')
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(REAL_INFO.H3ImageDecode.input.optional.decode_mode[0])),
+    JSON.parse(JSON.stringify(['temporal', 'single_latent_slice'])),
+    'H3ImageDecode serves the real decode-mode enum (temporal + single_latent_slice)',
+  )
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(REAL_INFO.H3ImageToImagePrepare.output)),
+    JSON.parse(JSON.stringify(['CONDITIONING', 'LATENT', 'IMAGE', 'INT', 'STRING', 'STRING'])),
+    'the Prepare wrappers return (conditioning, latent) at slots 0/1 — the sampler wiring contract',
+  )
+  passed += 1
+  console.log('  ok - the Prepare wrappers return (conditioning, latent) at slots 0/1 — the sampler wiring contract')
+})
+
+test('(c-affvlbk4) the pack-conditioned lanes: real-capability proofs against the captured pack schemas', () => {
+  // THE FLIP: with the pack served, the T=1 family BUILDS — a pack-form
+  // graph that validates CLEAN against the real schemas (the thing the
+  // stock path could never do), carrying the legal single-frame preset.
+  const t1Graph = h3image.buildH3ImageGraph(
+    { family: 'h3img.generate.t1', prompt: 'a finished still', width: 1344, height: 768, seed: 1, tier: 1, refs: [], loras: [], filenamePrefix: 'contract/t1' },
+    { fl2va: 'fl2va.safetensors', ref2va: 'ref2va.safetensors', textEncoder: 'qwen.safetensors', videoVae: 'video-vae.safetensors', audioVae: 'audio-vae.safetensors', t1ImageVae: 't1-image-vae.safetensors', turboLora: 'turbo.safetensors', detailAdapterLora: 'detail.safetensors', krea2: null, klein: { unet: '', textEncoder: '', vae: '' } },
+    REAL_INFO,
+  )
+  ok(contract.validateGraphAgainstSchemas(t1Graph, REAL_INFO).length === 0, 'the T=1 pack-form graph validates CLEAN against the real schemas (execution-truth-shaped, not just graph-shaped)')
+  const t1Prepare = Object.values(t1Graph).find((node) => node.class_type === 'H3TextToImagePrepare')
+  ok(t1Prepare !== undefined && t1Prepare.inputs.quality_profile === 'single image | 1 frame (image VAE)', 'pure-text T=1 rides H3TextToImagePrepare at the one-frame preset')
+
+  // The fast-sharp slice decode against the real decode schema.
+  const sharpGraph = h3image.buildH3ImageGraph(
+    { family: 'h3img.generate.sharp', prompt: 'a finished still', width: 1344, height: 768, seed: 1, tier: 9, refs: [], loras: [], filenamePrefix: 'contract/sharp' },
+    { fl2va: 'fl2va.safetensors', ref2va: 'ref2va.safetensors', textEncoder: 'qwen.safetensors', videoVae: 'video-vae.safetensors', audioVae: 'audio-vae.safetensors', t1ImageVae: 't1-image-vae.safetensors', turboLora: 'turbo.safetensors', detailAdapterLora: 'detail.safetensors', krea2: null, klein: { unet: '', textEncoder: '', vae: '' } },
+    REAL_INFO,
+  )
+  ok(contract.validateGraphAgainstSchemas(sharpGraph, REAL_INFO).length === 0, 'the fast-sharp graph validates CLEAN (9-frame context, single_latent_slice decode through the T1 VAE)')
+  const sharpDecode = Object.values(sharpGraph).find((node) => node.class_type === 'H3ImageDecode')
+  ok(sharpDecode.inputs.decode_mode === 'single_latent_slice' && sharpDecode.inputs.latent_index === 0, 'fast-sharp: single_latent_slice at the pinned head slice')
+
+  // The exact 9/13 ladder: pack-form packets carry NO stock conditioning
+  // node at all — the tier economy is the pack's own latent construction.
+  const packet9 = h3image.buildH3ImageGraph(
+    { family: 'h3img.generate.packet', prompt: 'a finished still', width: 1344, height: 768, seed: 1, tier: 9, refs: [], loras: [], filenamePrefix: 'contract/p9' },
+    { fl2va: 'fl2va.safetensors', ref2va: 'ref2va.safetensors', textEncoder: 'qwen.safetensors', videoVae: 'video-vae.safetensors', audioVae: 'audio-vae.safetensors', t1ImageVae: '', turboLora: '', detailAdapterLora: '', krea2: null, klein: { unet: '', textEncoder: '', vae: '' } },
+    REAL_INFO,
+  )
+  ok(contract.validateGraphAgainstSchemas(packet9, REAL_INFO).length === 0, 'the exact-9 pack-form packet validates CLEAN')
+  ok(!Object.values(packet9).some((node) => node.class_type === 'MiniMaxH3ImageToVideo' || node.class_type === 'MiniMaxH3ReferenceToVideo'), 'pack-form packet 9: no stock conditioning node — the snap-to-22 path is not taken')
+  const packetPreset = Object.values(packet9).find((node) => node.class_type === 'H3TextToImagePrepare' || node.class_type === 'H3ImageToImagePrepare' || node.class_type === 'H3ReferenceEditPrepare')
+  ok(packetPreset !== undefined && packetPreset.inputs.quality_profile === 'extended quality | 9 frames', 'pack-form packet 9 rides the exact 9-frame preset (no pictures → the T2I wrapper)')
+
+  // Pack ABSENT: the studio-conditioned lanes refuse at BUILD — the stock
+  // length:1 submission is dead in both directions.
+  const STOCK_ONLY_INFO = { ...REAL_INFO }
+  for (const classType of ['H3ImagePrepare', 'H3TextToImagePrepare', 'H3ImageToImagePrepare', 'H3ReferenceEditPrepare', 'H3ImageDecode']) delete STOCK_ONLY_INFO[classType]
+  assert.throws(
+    () => h3image.buildH3ImageGraph({ family: 'h3img.generate.t1', prompt: 'x', width: 1344, height: 768, seed: 1, tier: 1, refs: [], loras: [], filenamePrefix: 'x' },
+      { fl2va: 'f', ref2va: 'r', textEncoder: 't', videoVae: 'v', audioVae: 'a', t1ImageVae: 't1', turboLora: 'tb', detailAdapterLora: '', krea2: null, klein: { unet: '', textEncoder: '', vae: '' } }, STOCK_ONLY_INFO),
+    /#15644|Image Studio/,
+    'T=1 without the pack: build refuses (never a stock length:1 submit)',
+  )
+  passed += 1
+  console.log('  ok - T=1 without the pack: build refuses (never a stock length:1 submit)')
 })
 
 // ---------------------------------------------------------------------------
@@ -210,9 +288,21 @@ test('(b) validator negative proofs: the engine\'s error vocabulary, on real sch
 function buildCorpus() {
   const corpus = []
   // H3 image workbench matrix — against the REAL fixture (full-availability
-  // engine: hybrid loader + form adapter + klein nodes all served).
+  // engine: hybrid loader + form adapter + klein nodes + the H3 Image
+  // Studio pack all served — the pack-conditioned lanes' native habitat).
   for (const entry of H3IMG_MATRIX) {
     corpus.push([`h3img:${entry.name}`, h3image.buildH3ImageGraph(entry.request, entry.models, REAL_INFO)])
+  }
+  // The PACK-ABSENT stock fallback (afvlbk4): the same matrix against the
+  // fixture MINUS the Image Studio classes — packets keep the stock
+  // conditioning (5/39 native, 9/13 the ledgered snap), and the T=1 /
+  // fast-sharp lanes THROW instead of building (asserted separately below —
+  // the stock length:1 emission is dead).
+  const STOCK_ONLY_INFO = { ...REAL_INFO }
+  for (const classType of ['H3ImagePrepare', 'H3TextToImagePrepare', 'H3ImageToImagePrepare', 'H3ReferenceEditPrepare', 'H3ImageDecode']) delete STOCK_ONLY_INFO[classType]
+  for (const entry of H3IMG_MATRIX) {
+    if (entry.request.family === 'h3img.generate.t1' || entry.request.family === 'h3img.generate.sharp') continue
+    corpus.push([`h3img-stock:${entry.name}`, h3image.buildH3ImageGraph(entry.request, entry.models, STOCK_ONLY_INFO)])
   }
   // Krea 2 edit matrix.
   const krea2 = loadTs('src/lib/graph/krea2edit.ts')
@@ -239,10 +329,13 @@ function buildCorpus() {
 }
 
 /** divergence-id signatures — how each ledger entry manifests as a validator
- *  violation (semantic-class entries manifest in section (d) instead). */
-const SIGNATURES = {
-  'h3img.t1-length-1': (v) => v.type === 'value_smaller_than_min' && /^MiniMaxH3(Image|Reference)ToVideo$/.test(v.classType) && v.inputName === 'length',
-}
+ *  violation (semantic-class entries manifest in section (d) instead).
+ *  EMPTY since afvlbk4: h3img.t1-length-1 — the ledger's namesake — RETIRED
+ *  when the T=1 Fast family stopped submitting stock length:1 (the pack's
+ *  conditioning is the only path; the builder throws when the pack is
+ *  absent). The whole corpus must now validate CLEAN against the real
+ *  schemas; any new violation is a new divergence to ledger or fix. */
+const SIGNATURES = {}
 
 test('(c) every builder validates: violations match the known-divergence ledger EXACTLY', () => {
   const corpus = buildCorpus()
@@ -260,6 +353,17 @@ test('(c) every builder validates: violations match the known-divergence ledger 
   }
   ok(unexplained.length === 0, `no UNKNOWN violations across the corpus (a new divergence must be ledgered or fixed):\n${unexplained.join('\n')}`)
 
+  // THE RETIREMENT PROOF (afvlbk4): no graph in the corpus carries a stock
+  // conditioning length the engine would refuse — the stock length:1 path
+  // is dead. The pack-conditioned lanes emit the pack's Prepare classes
+  // instead, and even the pack-absent fallback never builds them.
+  for (const [label, graph] of corpus) {
+    for (const node of Object.values(graph)) {
+      if (node.class_type !== 'MiniMaxH3ImageToVideo' && node.class_type !== 'MiniMaxH3ReferenceToVideo') continue
+      ok(node.inputs.length >= 5, `${label}: stock conditioning length ${node.inputs.length} ≥ 5 (the length:1 emission is dead)`)
+    }
+  }
+
   // Ledger freshness: every schema-class divergence the ledger records still
   // fires somewhere, and the signature table covers exactly the ledger's
   // schema-refused entries (plus the silent-drop entry proven in (d)).
@@ -267,10 +371,10 @@ test('(c) every builder validates: violations match the known-divergence ledger 
   assert.deepEqual(
     JSON.parse(JSON.stringify(Object.keys(SIGNATURES).sort())),
     JSON.parse(JSON.stringify(schemaClassLedger.sort())),
-    'the signature table and the ledger\'s schema-refused entries are the same set',
+    'the signature table and the ledger\'s schema-refused entries are the same set (both empty since the t1-length-1 retirement)',
   )
   passed += 1
-  console.log('  ok - the signature table and the ledger\'s schema-refused entries are the same set')
+  console.log('  ok - the signature table and the ledger\'s schema-refused entries are the same set (both empty since the t1-length-1 retirement)')
   for (const id of schemaClassLedger) {
     ok(fired.has(id), `ledger entry still fires (retire it when fixed): ${id}`)
   }
@@ -303,7 +407,10 @@ test('(d) semantic rules: the grid, the promotion, the slice window, emitted len
   }
 
   // Emitted H3 conditioning lengths across the corpus: honored, or exactly
-  // the ledgered semantic divergences (tiers 9/13, T=1).
+  // the ledgered semantic divergences — the PACK-ABSENT stock fallback's
+  // tiers 9/13 (they snap to 22 there; the pack-served corpus arms carry no
+  // stock length at all, and T=1 never submits stock nodes in either
+  // direction — it throws without the pack).
   const semanticDivergences = []
   for (const [label, graph] of buildCorpus()) {
     for (const node of Object.values(graph)) {
@@ -315,17 +422,17 @@ test('(d) semantic rules: the grid, the promotion, the slice window, emitted len
   }
   const expectedSemantic = []
   for (const entry of H3IMG_MATRIX) {
-    if (entry.request.tier === 9) expectedSemantic.push(`h3img:${entry.name}: length 9`)
-    if (entry.request.tier === 13) expectedSemantic.push(`h3img:${entry.name}: length 13`)
-    if (entry.request.tier === 1) expectedSemantic.push(`h3img:${entry.name}: length 1`)
+    if (entry.request.family === 'h3img.generate.t1' || entry.request.family === 'h3img.generate.sharp') continue
+    if (entry.request.tier === 9) expectedSemantic.push(`h3img-stock:${entry.name}: length 9`)
+    if (entry.request.tier === 13) expectedSemantic.push(`h3img-stock:${entry.name}: length 13`)
   }
   assert.deepEqual(
     JSON.parse(JSON.stringify(semanticDivergences.sort())),
     JSON.parse(JSON.stringify(expectedSemantic.sort())),
-    'emitted off-grid lengths are EXACTLY the ledgered set (tiers 9/13 snap to 22; T=1 is below the floor)',
+    'emitted off-grid lengths are EXACTLY the ledgered stock-fallback set (pack arms emit no stock length; 9/13 snap only on the fallback; T=1 never submits stock)',
   )
   passed += 1
-  console.log('  ok - emitted off-grid lengths are EXACTLY the ledgered set')
+  console.log('  ok - emitted off-grid lengths are EXACTLY the ledgered stock-fallback set')
 
   // The silent-drop proof, retired (music3.bitrate-unknown-input): music3
   // once emitted bitrate: 'V0' — a key SaveAudioAdvanced never declared, so

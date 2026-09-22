@@ -44,11 +44,12 @@ export type {
 // plus the Mamad8 never-in-video-graphs factory guard.
 export {
   FORM_ADAPTER_NODE, H3IMG, H3IMG_FAMILIES, H3IMG_FORBIDDEN_VIDEO_NODES, H3IMG_RECIPE_PINS,
-  H3_IMAGE_STUDIO_PREPARE_NODES, HYBRID_LOADER_NODE, STAGE_ENGINE_OF_FAMILY, STOCK_SAMPLED_FRAMES,
+  H3_IMAGE_STUDIO_DECODE_NODE, H3_IMAGE_STUDIO_FRAME_PRESETS, H3_IMAGE_STUDIO_PREPARE_NODES,
+  HYBRID_LOADER_NODE, STAGE_ENGINE_OF_FAMILY, STOCK_SAMPLED_FRAMES,
   T1_IMAGE_VAE_PATTERN, TRANSPORT_FOR_ROLE,
   assertNoT1ImageVaeInVideoGraph, buildH3ImageGraph, buildKleinRefineGraph, detectH3ImgFamilies,
-  findH3ImgFamily, framePublishIds, h3imgGraphAudit, inferH3ImgSelection, kleinResolved,
-  packetTierLabel, seedvr2BatchCount,
+  findH3ImgFamily, framePublishIds, h3ImageStudioPackPresent, h3imgGraphAudit, inferH3ImgSelection,
+  kleinResolved, packetTierLabel, seedvr2BatchCount,
 } from './h3image'
 export type {
   H3ImgDetection, H3ImgDial, H3ImgFamily, H3ImgFamilyKind, H3ImgLoraSlot, H3ImgModelSelection,
