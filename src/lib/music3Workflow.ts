@@ -70,7 +70,10 @@ export function buildMusic3Workflow(options: Music3GenerationOptions, models: Mu
     },
     '9': {
       class_type: 'SaveAudioAdvanced',
-      inputs: { audio: ['8', 0], filename_prefix: options.filenamePrefix, format: 'mp3', bitrate: 'V0' },
+      // format is a dynamic v3 combo: the mp3 key's real sub-input is
+      // quality (V0/128k/320k) — the old bitrate key was never declared and
+      // the engine silently dropped it. Retired music3.bitrate-unknown-input.
+      inputs: { audio: ['8', 0], filename_prefix: options.filenamePrefix, format: 'mp3', quality: 'V0' },
     },
   }
   // Tiled decode is the low-VRAM default (overlapping tiles cut memory at a
