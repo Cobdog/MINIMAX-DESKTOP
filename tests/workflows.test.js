@@ -242,10 +242,6 @@ test('model overrides take 1 (euxwdva): consulted picks, auto-unchanged, precede
   const music3Override = resolveModels('music3', music3FromScan, overrideScan, { checkpoint: 'music3_dit_int8.safetensors', vae: 'music3_dav.safetensors' })
   assert.equal(music3Override.selection.diffusion, 'music3_dit_int8.safetensors')
   assert.equal(music3Override.selection.vae, 'music3_dav.safetensors')
-  const aceModule = load('src/lib/aceStepWorkflow.ts')
-  const aceOverride = resolveModels('acestep', aceModule.inferAceStepSelections(overrideScan), overrideScan, { checkpoint: mergeName })
-  assert.equal(aceOverride.selection.base, mergeName, 'acestep checkpoint drives base')
-  assert.equal(aceOverride.selection.sft, mergeName, 'acestep checkpoint drives sft (the model choice decides which loads)')
 
   // 8. THE GRAPH carries the override (both render modes' checkpoint slot) and
   //    leaves the auto slots on inference; the manifest records the chosen
@@ -279,7 +275,8 @@ test('model overrides take 1 (euxwdva): consulted picks, auto-unchanged, precede
   assert.equal(overridePickOutcome('minimax', 'fl2va', 'gone.safetensors', overrideScan).state, 'degraded')
   assert.equal(inferredOverrideSlotFile('minimax', 'fl2va', overrideScan), 'minimax_h3_fl2va_pruned_int8_convrot.safetensors')
   assert.equal(inferredOverrideSlotFile('minimax', 'textEncoder', overrideScan), 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors')
-  assert.equal(MODEL_FAMILIES.length, 4)
+  // 4 → 3 with the ACE-Step family's removal, 2026-09-21 (nn5ld47).
+  assert.equal(MODEL_FAMILIES.length, 3)
 })
 
 // ---------------------------------------------------------------------------
@@ -405,7 +402,6 @@ test('model overrides take 2 (rq0lsax, R-12): subpathed registry rows resolve ev
 // ---------------------------------------------------------------------------
 const h3imageGraphModule = load('src/lib/graph/h3image.ts')
 const music3Module = load('src/lib/music3Workflow.ts')
-const aceModule = load('src/lib/aceStepWorkflow.ts')
 const OVERRIDE_SLOT_KEYS = overridesModule.OVERRIDE_SLOTS
 const t1Alt = 'minimax_h3_t1_image_vae_step2048.safetensors'
 const vaeSplitScan = overrideScan.concat([
@@ -485,7 +481,8 @@ test('model overrides take 3 (epdvxd4): the decoder-split VAE trio — resolutio
     assert.equal(migrated.videoVae, 'legacy-decoder.safetensors', `${family}: the legacy vae pick lands on videoVae (the old slot's meaning)`)
     assert.equal('vae' in migrated, false, `${family}: the consumed key never re-refuses`)
   }
-  for (const family of ['music3', 'acestep']) {
+  // (The acestep arm was removed with the family, 2026-09-21 — nn5ld47.)
+  for (const family of ['music3']) {
     const migrated = overridesModule.migrateLegacyModelOverrideSlots(family, { vae: 'legacy-dav.safetensors' })
     assert.equal(migrated.audioVae, 'legacy-dav.safetensors', `${family}: the legacy vae pick lands on audioVae — the family's one decoder IS audio-class`)
     assert.equal('vae' in migrated, false)
@@ -557,8 +554,6 @@ const auditScan = vaeSplitScan.concat([
   { kind: 'diffusion_models', name: 'community_noform_transformer.safetensors', bytes: 0 },
   { kind: 'text_encoders', name: 'gemma_3_12B_it.safetensors', bytes: 0 },
   { kind: 'loras', name: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', bytes: 0 },
-  { kind: 'diffusion_models', name: 'acestep_v1.5_xl_base_bf16.safetensors', bytes: 0 },
-  { kind: 'diffusion_models', name: 'acestep_v1.5_xl_sft_bf16.safetensors', bytes: 0 },
   // The audit's own picks — community-style files NO inference pattern
   // matches (registry-only: no form gate exists, the engine decides).
   { kind: 'diffusion_models', name: 'community-merge-audit.safetensors', bytes: 0 },
@@ -567,8 +562,6 @@ const auditScan = vaeSplitScan.concat([
   { kind: 'vae', name: 'h3-community-audio-decoder.safetensors' },
   { kind: 'diffusion_models', name: 'music3-community-dit.safetensors' },
   { kind: 'vae', name: 'music3-community-dav.safetensors' },
-  { kind: 'diffusion_models', name: 'acestep-community-xl.safetensors' },
-  { kind: 'vae', name: 'ace-community-audio-vae.safetensors' },
 ])
 // The audit's picks: community-style names the inference ladder is blind to.
 const auditPicks = {
@@ -640,29 +633,16 @@ test('the workflow-population audit (epdvxd4, AC-3): every family × every slot 
     assertAt(`music3 audioVae (tiled=${tiled})`, music3Graph, 3, 'vae_name', 'music3-community-dav.safetensors')
   }
 
-  // --- acestep: the checkpoint pick drives BOTH cuts (base and SFT — the
-  //     model choice decides which loads); the audioVae pick → 3.
-  const aceAudit = resolveModels('acestep', aceModule.inferAceStepSelections(auditScan), auditScan, {
-    checkpoint: 'acestep-community-xl.safetensors',
-    audioVae: 'ace-community-audio-vae.safetensors',
-  })
-  assert.equal(aceAudit.resolution.refusals.length, 0, 'acestep audit picks all apply')
-  assert.equal(aceAudit.selection.base, 'acestep-community-xl.safetensors', 'the checkpoint pick fills the base cut')
-  assert.equal(aceAudit.selection.sft, 'acestep-community-xl.safetensors', 'the checkpoint pick fills the SFT cut too')
-  for (const model of ['base', 'sft']) {
-    const aceGraph = aceModule.buildAceStepWorkflow({ model, tags: 'audit', lyrics: '', instrumental: true, duration: 30, bpm: 120, timeSignature: '4/4', language: 'en', keyScale: 'C', seed: 7, generateAudioCodes: false, filenamePrefix: 't' }, aceAudit.selection)
-    assertAt(`acestep checkpoint (${model})`, aceGraph, 1, 'unet_name', 'acestep-community-xl.safetensors')
-    assertAt(`acestep audioVae (${model})`, aceGraph, 3, 'vae_name', 'ace-community-audio-vae.safetensors')
-  }
+  // (The acestep audit arm was removed with the family, 2026-09-21 —
+  // nn5ld47; git history is the archive.)
 
   // --- THE AUDIT'S COMPLETENESS CONTRACT: every slot every family EXPOSES
   //     appears above; every slot NOT exposed refuses (nothing silently
-  //     no-ops). acestep's textEncoder stays the honest two-file omission.
+  //     no-ops).
   const expectedSlots = {
     minimax: ['fl2va', 'ref2va', 'merged', 'textEncoder', 'videoVae', 'audioVae'],
     h3image: ['fl2va', 'ref2va', 'merged', 'textEncoder', 'videoVae', 'audioVae', 'imageVae'],
     music3: ['checkpoint', 'textEncoder', 'audioVae'],
-    acestep: ['checkpoint', 'audioVae'],
   }
   for (const family of MODEL_FAMILIES) {
     assert.deepEqual([...family.slots].sort(), [...expectedSlots[family.id]].sort(), `${family.id}: the exposed slot set matches the audit table`)
@@ -679,7 +659,6 @@ test('the workflow-population audit (epdvxd4, AC-3): every family × every slot 
   // The audit picks that only some families consume still had to be scanned
   // files for their rows to be honest (scan-anchored picks, not strings).
   assert.ok(auditScan.some((file) => file.name === 'h3-community-video-decoder.safetensors' && file.kind === 'vae'))
-  assert.ok(auditScan.some((file) => file.name === 'acestep-community-xl.safetensors' && file.kind === 'diffusion_models'))
 })
 
 // ---------------------------------------------------------------------------
@@ -733,13 +712,9 @@ const INVARIANT_REGISTRY = [
   { kind: 'diffusion_models', name: 'H3/ssd/minimax_h3_ref2va_pruned_int8_convrot.safetensors', bytes: 0 },
   { kind: 'diffusion_models', name: 'community_merged_full.safetensors', bytes: 0 },
   { kind: 'diffusion_models', name: 'music3_dit_int8.safetensors', bytes: 0 },
-  { kind: 'diffusion_models', name: 'acestep_v1.5_xl_base_bf16.safetensors', bytes: 0 },
-  { kind: 'diffusion_models', name: 'acestep_v1.5_xl_sft_bf16.safetensors', bytes: 0 },
   { kind: 'text_encoders', name: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', bytes: 0 },
   { kind: 'text_encoders', name: 'TE/qwen3vl_community_repack.safetensors', bytes: 0 },
   { kind: 'text_encoders', name: 'music3_text_encoder_bf16.safetensors', bytes: 0 },
-  { kind: 'text_encoders', name: 'qwen_0.6b_ace15.safetensors', bytes: 0 },
-  { kind: 'text_encoders', name: 'qwen_4b_ace15.safetensors', bytes: 0 },
   { kind: 'vae', name: 'minimax_h3_video_vae_fp16.safetensors', bytes: 0 },
   { kind: 'vae', name: 'minimax_h3_audio_vae_fp32.safetensors', bytes: 0 },
   { kind: 'vae', name: 'minimax_h3_t1_image_vae_step1597.safetensors', bytes: 0 },
@@ -813,11 +788,10 @@ test('THE R-12 INVARIANT: no graph ever references a model absent from the insta
     walkGraphModelInputs(`h3image ${family}`, graph)
   }
 
-  // --- music3 + acestep (the audio engines), both decode arms / model cuts.
+  // --- music3 (the audio engine), both decode arms. (The acestep walk arm
+  //     was removed with the engine, 2026-09-21 — nn5ld47.)
   const music3Selection = resolveModels('music3', music3Module.inferMusic3Selection(INVARIANT_REGISTRY), INVARIANT_REGISTRY).selection
   for (const tiled of [true, false]) walkGraphModelInputs(`music3 tiled=${tiled}`, music3Module.buildMusic3Workflow({ caption: 'invariant', lyrics: '', duration: 30, seed: 7, tiledDecode: tiled, filenamePrefix: 't' }, music3Selection))
-  const aceSelection = resolveModels('acestep', aceModule.inferAceStepSelections(INVARIANT_REGISTRY), INVARIANT_REGISTRY).selection
-  for (const model of ['base', 'sft']) walkGraphModelInputs(`acestep ${model}`, aceModule.buildAceStepWorkflow({ model, tags: 'invariant', lyrics: '', instrumental: true, duration: 30, bpm: 120, timeSignature: '4/4', language: 'en', keyScale: 'C', seed: 7, generateAudioCodes: false, filenamePrefix: 't' }, aceSelection))
 
   // --- THE EMPTY REGISTRY (engine offline / serves nothing): inference
   //     yields no names at all — the population surface emits EMPTY model

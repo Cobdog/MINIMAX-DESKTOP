@@ -93,16 +93,14 @@ import { submitWorkbenchGeneration, validateWorkbenchRequest } from '../images/s
 import { canvasEditHandoff, canvasH3OneFrameRequest, queuedImageEngineRefusal, stashCanvasEditHandoff } from './stillIntent'
 import { buildH3ImageGraph, H3IMG_RECIPE_PINS } from '../lib/graph/h3image'
 import { submitMusic3, validateMusic3 } from '../lib/music3Submit'
-import { submitAceStep, validateAceStep } from '../lib/aceStepSubmit'
 import { buildMusic3Workflow, inferMusic3Selection, type Music3GenerationOptions } from '../lib/music3Workflow'
-import { buildAceStepWorkflow, inferAceStepSelections } from '../lib/aceStepWorkflow'
 import { characterReferences, loadCharacterProjects } from '../lib/characterLibrary'
 import { locationReferences, loadLocationProjects } from '../lib/locationLibrary'
 import { loadWardrobeProjects } from '../lib/wardrobeLibrary'
 import { useJobsStore } from '../state/jobsStore'
 import { useSessionStore } from '../state/sessionStore'
 import { dbg } from '../lib/dbg'
-import type { AceStepGenerationOptions, GenerationJob, MediaFile, ModelOverrideSlots, ModelSelection } from '../types'
+import type { GenerationJob, MediaFile, ModelOverrideSlots, ModelSelection } from '../types'
 
 /** The camera singleton for this route — attach in Substrate, never subscribe
  *  per-frame in React. */
@@ -177,15 +175,12 @@ function selectionFor(turbo: 'off' | '4' | '8', family: string, chainOverrides?:
   ).selection
 }
 
-/** Music 3 / ACE-Step selections with overrides through the same seam. */
+const ACESTEP_REMOVED = 'ACE-Step was removed on 2026-09-21 — this stored chain cannot render. Open the audio dock (Music 3) to re-create the track, or delete the chain.'
+
+/** Music 3 selections with overrides through the same seam. */
 function music3SelectionOf(chainOverrides?: ModelOverrideSlots) {
   const { models } = engineFacts()
   return resolveModels('music3', inferMusic3Selection(models), models, familyOverrides('music3', chainOverrides)).selection
-}
-
-function aceSelectionOf(chainOverrides?: ModelOverrideSlots) {
-  const { models } = engineFacts()
-  return resolveModels('acestep', inferAceStepSelections(models), models, familyOverrides('acestep', chainOverrides)).selection
 }
 
 /** The offline plan probe's fully-resolved H3 image selection (34afx79) —
@@ -284,8 +279,9 @@ type CanvasState = {
   /** Phase 5: the PII-scrubbed diagnostics surface docked (inventory row 10:
    *  "diagnostics ride the radar/engine chip"). */
   diagnosticsDock: boolean
-  /** Phase 4 (§5.4): the audio engine dock (Music 3 / ACE-Step as ops). */
-  audioDock: { engine: 'music3' | 'acestep'; chainId?: string } | null
+  /** Phase 4 (§5.4): the audio engine dock (Music 3 as ops; ACE-Step cut
+   *  2026-09-21 — nn5ld47). */
+  audioDock: { engine: 'music3'; chainId?: string } | null
   cameraCommands: CameraCommand[]
   cameraCommandSeq: number
   viewDirty: boolean
@@ -348,13 +344,13 @@ type CanvasActions = {
    *  being grabbed; returns the value to apply. */
   raiseDock(): number
   setDiagnosticsDock(open: boolean): void
-  setAudioDock(dock: { engine: 'music3' | 'acestep'; chainId?: string } | null): void
-  /** One audio chain submit (Music 3 / ACE-Step as ops): the dock creates
-   *  the chain + settings, submitChain carries it (rerun-stable). */
-  createAudioChain(engine: 'music3' | 'acestep', caption: string): Promise<string | null>
+  setAudioDock(dock: { engine: 'music3'; chainId?: string } | null): void
+  /** One audio chain submit (Music 3 as ops): the dock creates the chain
+   *  + settings, submitChain carries it (rerun-stable). */
+  createAudioChain(engine: 'music3', caption: string): Promise<string | null>
   /** The dock's pre-submit validation for a NOT-YET-CREATED audio chain —
    *  the same ladders submitChain runs (honest offline refusals inline). */
-  validateAudioDraft(engine: 'music3' | 'acestep', caption: string): string | null
+  validateAudioDraft(engine: 'music3', caption: string): string | null
   openProject(id: string, options?: { restoreCamera?: boolean }): Promise<void>
   /** Re-reads the ACTIVE project document + rederives (surfaces that
    *  write through documentsApi directly — the image workbench — refresh
@@ -1290,16 +1286,10 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
 
     validateAudioDraft: (engine, caption) => {
       const facts = engineFacts()
-      if (!caption.trim()) return engine === 'music3' ? 'Write at least one caption section before generating.' : 'Describe the track (tags) before generating.'
-      if (engine === 'music3') {
-        return validateMusic3(
-          { caption, lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'audio/plan' },
-          { connected: facts.connected, selection: music3SelectionOf() },
-        )
-      }
-      return validateAceStep(
-        { model: 'base', tags: caption, lyrics: '', instrumental: false, duration: 60, seed: 1, bpm: 120, timeSignature: '4', language: 'en', keyScale: 'C major', generateAudioCodes: false, filenamePrefix: 'audio/plan' },
-        { connected: facts.connected, info: facts.info, selection: aceSelectionOf() },
+      if (!caption.trim()) return 'Write at least one caption section before generating.'
+      return validateMusic3(
+        { caption, lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'audio/plan' },
+        { connected: facts.connected, selection: music3SelectionOf() },
       )
     },
 
@@ -1514,27 +1504,9 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
             recomputeTiles()
           },
         }
-        if (settings.audio.engine === 'acestep') {
-          const options: AceStepGenerationOptions = {
-            model: settings.audio.model,
-            tags: settings.audio.caption,
-            lyrics: settings.audio.lyrics,
-            instrumental: settings.audio.instrumental,
-            duration: Math.max(10, Math.min(360, settings.audio.duration)),
-            seed: settings.audio.seed,
-            bpm: settings.audio.bpm,
-            timeSignature: '4',
-            language: 'en',
-            keyScale: 'C major',
-            generateAudioCodes: false,
-            filenamePrefix: `audio/Canvas_ACEStep_${Date.now()}`,
-          }
-          // The canvas link rides the manifest (M1): without it a reload
-          // mid-render permanently orphans the landing (chainJobs relink
-          // reads manifest.canvas.chainId only).
-          const result = await submitAceStep(options, { settings: facts.settings, connected: facts.connected, info: facts.info, selection: aceSelectionOf(settings.modelOverrides), clientId: engineBridge.clientId }, io, { canvas: { chainId, projectId } })
-          return result.ok ? { ok: true } : { ok: false, message: result.message }
-        }
+        // A stored ACE-Step chain (the engine was cut 2026-09-21) refuses
+        // honestly here — never a silent Music 3 render from its tags.
+        if (settings.audio.engine !== 'music3') return { ok: false, message: ACESTEP_REMOVED }
         const options: Music3GenerationOptions = {
           caption: settings.audio.caption,
           lyrics: settings.audio.lyrics,
@@ -1652,12 +1624,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       const facts = engineFacts()
       // Audio engines (§5.4 Phase 4) validate through their own ladders.
       if (settings.mediaType === 'audio') {
-        if (settings.audio.engine === 'acestep') {
-          return validateAceStep(
-            { model: settings.audio.model, tags: settings.audio.caption, lyrics: settings.audio.lyrics, instrumental: settings.audio.instrumental, duration: settings.audio.duration, seed: settings.audio.seed, bpm: settings.audio.bpm, timeSignature: '4', language: 'en', keyScale: 'C major', generateAudioCodes: false, filenamePrefix: 'audio/plan' },
-            { connected: facts.connected, info: facts.info, selection: aceSelectionOf(settings.modelOverrides) },
-          )
-        }
+        if (settings.audio.engine !== 'music3') return ACESTEP_REMOVED
         return validateMusic3(
           { caption: settings.audio.caption, lyrics: settings.audio.lyrics, duration: settings.audio.duration, seed: settings.audio.seed, tiledDecode: true, filenamePrefix: 'audio/plan' },
           { connected: facts.connected, selection: music3SelectionOf(settings.modelOverrides) },
@@ -2223,7 +2190,6 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
       // The audio engines (§5.4 Phase 4): detection over the shared infer*,
       // with global overrides consulted (euxwdva).
       const music3Selection = music3SelectionOf()
-      const aceSelection = aceSelectionOf()
       return {
         connected: facts.connected,
         h3Ready: modelReadyFor(selection, 'off'),
@@ -2231,10 +2197,6 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         music3: {
           available: Boolean(facts.connected && music3Selection.diffusion && music3Selection.textEncoder && music3Selection.vae),
           missing: [music3Selection.diffusion ? '' : 'Music 3 diffusion model', music3Selection.textEncoder ? '' : 'Music 3 text encoder', music3Selection.vae ? '' : 'Music 3 DAV VAE'].filter(Boolean),
-        },
-        acestep: {
-          available: Boolean(facts.connected && (aceSelection.base || aceSelection.sft) && aceSelection.vae && aceSelection.textEncoderSmall && aceSelection.textEncoderLarge),
-          missing: [(aceSelection.base || aceSelection.sft) ? '' : 'ACE-Step XL model', aceSelection.vae ? '' : 'ACE audio VAE', (aceSelection.textEncoderSmall && aceSelection.textEncoderLarge) ? '' : 'Qwen ACE text encoders'].filter(Boolean),
         },
       }
     },
@@ -2464,7 +2426,7 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
       mediaType?: 'video' | 'image' | 'audio'
       engine?: 'h3'
       imageEngine?: 'h3-1f' | 'krea2'
-      audioEngine?: 'music3' | 'acestep'
+      audioEngine?: 'music3'
       firstFrameOutputId?: string | null
       lastFrameOutputId?: string | null
       referenceOutputIds?: string[]
@@ -2491,44 +2453,23 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
         duration: spec.duration ?? 6,
         resolution: spec.resolution ?? '1344x768',
       }
-      // Audio engines (§5.4 Phase 4): the dock's plan seam.
+      // Audio engines (§5.4 Phase 4): the dock's plan seam — Music 3 (the
+      // ACE-Step plan arm was removed with the engine, 2026-09-21).
       if (settings.mediaType === 'audio') {
         const facts = engineFacts()
-        const audioEngine = spec.audioEngine ?? 'music3'
-        if (audioEngine === 'music3') {
-          const validation = validateMusic3(
-            { caption: settings.prompt, lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'audio/plan' },
-            { connected: facts.connected, selection: music3SelectionOf() },
-          )
-          const graph = buildMusic3Workflow({ caption: settings.prompt, lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'audio/MUSIC3_plan' }, { diffusion: 'TEST-music3.safetensors', textEncoder: 'TEST-music3-te.safetensors', vae: 'TEST-music3-dav.safetensors' })
-          const nodes = Object.values(graph)
-          return {
-            mode: 'music3',
-            validation,
-            graph: {
-              nodeClasses: nodes.map((node) => node.class_type),
-              saveAudio: nodes.some((node) => node.class_type === 'SaveAudioAdvanced'),
-              textEncode: nodes.some((node) => node.class_type === 'MiniMaxMusic3TextEncode'),
-              total: nodes.length,
-            },
-          }
-        }
-        const validation = validateAceStep(
-          { model: 'base', tags: settings.prompt, lyrics: '', instrumental: false, duration: 60, seed: 1, bpm: 120, timeSignature: '4', language: 'en', keyScale: 'C major', generateAudioCodes: false, filenamePrefix: 'audio/plan' },
-          { connected: facts.connected, info: facts.info, selection: aceSelectionOf() },
+        const validation = validateMusic3(
+          { caption: settings.prompt, lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'audio/plan' },
+          { connected: facts.connected, selection: music3SelectionOf() },
         )
-        const graph = buildAceStepWorkflow(
-          { model: 'base', tags: settings.prompt, lyrics: '', instrumental: false, duration: 60, seed: 1, bpm: 120, timeSignature: '4', language: 'en', keyScale: 'C major', generateAudioCodes: false, filenamePrefix: 'audio/ACE_plan' },
-          { base: 'TEST-ace-base.safetensors', sft: 'TEST-ace-sft.safetensors', vae: 'TEST-ace-vae.safetensors', textEncoderSmall: 'TEST-qwen06b.safetensors', textEncoderLarge: 'TEST-qwen4b.safetensors' },
-        )
+        const graph = buildMusic3Workflow({ caption: settings.prompt, lyrics: '', duration: 60, seed: 1, tiledDecode: true, filenamePrefix: 'audio/MUSIC3_plan' }, { diffusion: 'TEST-music3.safetensors', textEncoder: 'TEST-music3-te.safetensors', vae: 'TEST-music3-dav.safetensors' })
         const nodes = Object.values(graph)
         return {
-          mode: 'acestep',
+          mode: 'music3',
           validation,
           graph: {
             nodeClasses: nodes.map((node) => node.class_type),
             saveAudio: nodes.some((node) => node.class_type === 'SaveAudioAdvanced'),
-            textEncode: nodes.some((node) => node.class_type === 'TextEncodeAceStepAudio1.5'),
+            textEncode: nodes.some((node) => node.class_type === 'MiniMaxMusic3TextEncode'),
             total: nodes.length,
           },
         }

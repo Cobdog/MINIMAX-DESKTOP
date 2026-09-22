@@ -22,9 +22,9 @@ export type OptionAvailability = {
   h3Ready: boolean
   /** Phase 4: the Motion-Context custom nodes (latent continuation). */
   motionContextReady: boolean
-  /** Phase 4: the audio engines (the dock's launcher rows read these). */
+  /** Phase 4: the audio engine (the dock's launcher row reads this; the
+   *  ACE-Step row went with the engine, 2026-09-21). */
   music3: { available: boolean; missing: string[] }
-  acestep: { available: boolean; missing: string[] }
 }
 
 export type EndpointOption = {
@@ -38,7 +38,7 @@ export type EndpointOption = {
     | { kind: 'generate'; mode: GenerationMode }
     /** (R-20) The audio engines' canonical home is the produce menu — the
      *  launcher chips retired (one home per engine). */
-    | { kind: 'audio-dock'; engine: 'music3' | 'acestep' }
+    | { kind: 'audio-dock'; engine: 'music3' }
     | { kind: 'set-first-frame' }
     | { kind: 'set-last-frame' }
     | { kind: 'add-reference' }
@@ -167,11 +167,6 @@ export function endpointOptions(direction: EndpointDirection, sourceKinds: Reado
     id: 'produce:music3', group: 'generate', label: 'Music 3 — a complete song', description: 'The audio dock opens on this chain — caption, lyrics, seconds; the track lands as its own object.',
     action: { kind: 'audio-dock', engine: 'music3' }, available: true,
     hint: availability.music3.available ? 'complete songs · own object' : `author now · render needs ${availability.music3.missing.join('; ')}`,
-  })
-  rows.push({
-    id: 'produce:acestep', group: 'generate', label: 'ACE-Step — a music track', description: 'The audio dock opens on this chain — tag prompt, instrumentation, BPM; the track lands as its own object.',
-    action: { kind: 'audio-dock', engine: 'acestep' }, available: true,
-    hint: availability.acestep.available ? 'tag-prompted tracks · own object' : `author now · render needs ${availability.acestep.missing.join('; ')}`,
   })
   return rows
 }

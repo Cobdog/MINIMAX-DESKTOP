@@ -29,8 +29,8 @@ import { readLoraTimelineDoc, type LoraTimelineDoc } from './loraTimeline'
 export type CanvasChainSettings = {
   prompt: string
   /** Recorded entry intent (§4 launcher chips). H3 renders video; the image
-   *  generator absorption (Z-Image) is the §5.4/Phase-4 seam. Audio engines
-   *  (Music 3 / ACE-Step) create mediaType 'audio' chains. */
+   *  generator absorption (Z-Image) is the §5.4/Phase-4 seam. The audio
+   *  engine (Music 3) creates mediaType 'audio' chains. */
   mediaType: 'video' | 'image' | 'audio'
   /** §5.4 engines-as-ops (Phase 4): which engine a video chain renders
    *  through — H3 (the only engine since LTX's removal, Phase 0 2026-09-20;
@@ -45,18 +45,20 @@ export type CanvasChainSettings = {
   /** Audio-engine facts (mediaType 'audio', Phase 4): which engine + its
    *  request options. The audio dock writes them; submitChain reads them —
    *  reruns are settings-stable (invariant 1) for audio too. Fields the
-   *  active engine ignores are simply not read. */
+   *  active engine ignores are simply not read.
+   *
+   *  'acestep' survives ONLY as stored-document tolerance (the engine was
+   *  cut 2026-09-21, nn5ld47 — git history is the archive): the read
+   *  preserves it so validate/submit REFUSE honestly instead of silently
+   *  rendering a Music 3 track from an ACE-Step chain's tags. The app
+   *  itself never writes it. */
   audio: {
     engine: 'music3' | 'acestep'
-    /** Music 3: the caption sections. ACE-Step: the tag prompt. */
+    /** Music 3: the caption sections. */
     caption: string
     lyrics: string
     duration: number
     seed: number
-    /** ACE-Step extras. */
-    instrumental: boolean
-    model: 'base' | 'sft'
-    bpm: number
   }
   duration: number
   resolution: string
@@ -131,7 +133,7 @@ export function chainSettingsDefaults(settings?: AppSettings | null): CanvasChai
     mediaType: 'video',
     engine: 'h3',
     imageEngine: 'h3-1f',
-    audio: { engine: 'music3', caption: '', lyrics: '', duration: 60, seed: Math.floor(Math.random() * 1_000_000_000), instrumental: false, model: 'base', bpm: 120 },
+    audio: { engine: 'music3', caption: '', lyrics: '', duration: 60, seed: Math.floor(Math.random() * 1_000_000_000) },
     duration: defaults?.duration ?? 6,
     resolution: defaults?.resolution && RESOLUTIONS.includes(defaults.resolution) ? defaults.resolution : '1344x768',
     turbo: defaults?.turbo ?? 'off',
@@ -171,14 +173,14 @@ export function readChainSettings(raw: Record<string, unknown>, settings?: AppSe
   const idList = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && Boolean(item)) : [])
   const audioRaw = (raw.audio && typeof raw.audio === 'object' ? raw.audio : {}) as Record<string, unknown>
   const audio = {
+    // A stored 'acestep' engine is PRESERVED (not coerced) so the submit
+    // seam can refuse honestly — rendering Music 3 from an ACE-Step
+    // chain's tags would be a silent wrong-output (the R-05 class).
     engine: audioRaw.engine === 'acestep' ? 'acestep' as const : 'music3' as const,
     caption: str(audioRaw.caption, ''),
     lyrics: str(audioRaw.lyrics, ''),
     duration: Math.max(5, Math.min(300, num(audioRaw.duration, 60))),
     seed: Math.max(0, Math.floor(num(audioRaw.seed, base.audio.seed))),
-    instrumental: bool(audioRaw.instrumental, false),
-    model: audioRaw.model === 'sft' ? 'sft' as const : 'base' as const,
-    bpm: Math.max(40, Math.min(240, num(audioRaw.bpm, 120))),
   }
   const guides = Array.isArray(raw.timelineGuides)
     ? raw.timelineGuides.filter((guide): guide is { file: MediaFile; seconds: number } => {

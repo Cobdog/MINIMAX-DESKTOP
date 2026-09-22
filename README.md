@@ -284,21 +284,12 @@ Durations convert to MiniMax H3's required `17k + 5` frame grid at 24 fps. Compl
 
 For the process model, API surface, and persistence tiers, see [docs/architecture.md](docs/architecture.md).
 
-## ACE-Step 1.5 setup
+## ACE-Step — removed
 
-The audio dock submits the native ComfyUI ACE-Step 1.5 graph; it does not call a hosted music service. Install the following files into the configured ComfyUI model folders, then use **Settings → Test connection** and rescan models:
-
-| ComfyUI folder | Required file |
-| --- | --- |
-| `models/diffusion_models` | `acestep_v1.5_xl_sft_bf16.safetensors` |
-| `models/diffusion_models` | `acestep_v1.5_xl_base_bf16.safetensors` |
-| `models/vae` | `ace_1.5_vae.safetensors` |
-| `models/text_encoders` | `qwen_0.6b_ace15.safetensors` |
-| `models/text_encoders` | `qwen_4b_ace15.safetensors` |
-
-The app detects either XL checkpoint independently, so an installation with only Base or only SFT remains usable. A current ComfyUI build must expose `TextEncodeAceStepAudio1.5`, `EmptyAceStep1.5LatentAudio`, `ModelSamplingAuraFlow`, `VAEDecodeAudio`, and `SaveAudioAdvanced` in its object info. The generated graph follows Comfy-Org's published ACE-Step 1.5 templates: 50 Euler/simple diffusion steps, AuraFlow shift 3, and the published per-checkpoint CFG defaults (SFT 7, Base 6).
-
-Reference downloads and node documentation are maintained by [Comfy-Org's ACE-Step 1.5 workflow templates](https://github.com/Comfy-Org/workflow_templates/tree/main/templates) and [the TextEncodeAceStepAudio1.5 embedded docs](https://github.com/Comfy-Org/embedded-docs/blob/main/comfyui_embedded_docs/docs/TextEncodeAceStepAudio1.5/en.md).
+The ACE-Step 1.5 audio lane was removed on 2026-09-21 (nearly a year old;
+MiniMax Music 3 stays as the audio engine — family cohesion). The removal
+record with the restore map lives at
+[docs/audit/removals-acestep.md](docs/audit/removals-acestep.md).
 
 ## Documentation
 

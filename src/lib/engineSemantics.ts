@@ -144,24 +144,11 @@ export const KNOWN_DIVERGENCES: readonly KnownDivergence[] = [
     owner: 'one-line builder fix (emit low_vram: false) + golden regeneration — a reviewed contract change, deliberately not folded into the test-layer build',
     note: 'Never executed live: the pack is not installed on the shared testbed, so no run has reached this refusal yet.',
   },
-  {
-    id: 'acestep.timesignature-format',
-    surface: 'AceStep 1.5 core (buildAceStepWorkflow → TextEncodeAceStepAudio1.5)',
-    emission: "timesignature: '4/4' (the UI's timeSignature field passed through)",
-    engineBehavior: "REFUSED at prompt validation — value_not_in_list: the 1.5 node's enum is exactly ['2','3','4','6'] (nodes_ace.py:44; no VALIDATE_INPUTS on the class). Found by this contract layer's first audit pass.",
-    violationType: 'schema-refused',
-    opened: '2026-09-21',
-    owner: 'the acestep lane fix (map the UI value onto the 1.5 enum numerator)',
-  },
-  {
-    id: 'acestep.keyscale-format',
-    surface: 'AceStep 1.5 core (buildAceStepWorkflow → TextEncodeAceStepAudio1.5)',
-    emission: "keyscale: 'C' (the UI's keyScale field passed through)",
-    engineBehavior: "REFUSED at prompt validation — value_not_in_list: the 1.5 node's enum is '<root> <major|minor>' (e.g. 'C major'; nodes_ace.py:46). Found by this contract layer's first audit pass.",
-    violationType: 'schema-refused',
-    opened: '2026-09-21',
-    owner: 'the acestep lane fix (map the UI value onto the 1.5 key-scale vocabulary)',
-  },
+  // (The two acestep.* entries — timesignature/keyscale enum formats — were
+  // removed with the ACE-Step lane itself, 2026-09-21, nn5ld47: the builder
+  // they ledgered is gone, so the entries self-retire with it. If the
+  // contract-ledger builder-fix work re-adds an acestep lane, its entries
+  // return with it.)
   {
     id: 'klein.cfg-guider-input-names',
     surface: 'klein refine (buildKleinRefineGraph → CFGGuider)',

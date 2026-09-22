@@ -17,7 +17,7 @@
  *      LESSON: `length: 1` FAILS here from now on (value_smaller_than_min).
  *  (c) EVERY BUILDER VALIDATES — the full builder corpus (h3img matrix,
  *      Krea 2 matrix, the video factory across modes/tiers/chain/stack, the
- *      music3 + acestep audio cores) validated against the real schemas:
+ *      music3 audio core) validated against the real schemas:
  *      violations must match the known-divergence ledger EXACTLY — no new
  *      divergence lands silently, and every ledger entry still fires (a fix
  *      must retire its entry, visibly).
@@ -53,7 +53,6 @@ const preflightModule = loadTs('src/lib/preflight.ts')
 const h3image = loadTs('src/lib/graph/h3image.ts')
 const workflow = loadTs('src/lib/workflow.ts')
 const music3 = loadTs('src/lib/music3Workflow.ts')
-const acestep = loadTs('src/lib/aceStepWorkflow.ts')
 
 const FIXTURE_DATA = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'))
 const REAL_INFO = FIXTURE_DATA.nodes
@@ -234,9 +233,8 @@ function buildCorpus() {
   const music3Models = { diffusion: 'm3.safetensors', textEncoder: 'm3-te.safetensors', vae: 'm3-dav.safetensors' }
   corpus.push(['music3:tiled', music3.buildMusic3Workflow({ caption: 'Global Metadata: lo-fi', lyrics: '', duration: 90, seed: 42, tiledDecode: true, filenamePrefix: 'a' }, music3Models)])
   corpus.push(['music3:full', music3.buildMusic3Workflow({ caption: 'x', lyrics: '', duration: 60, seed: 1, tiledDecode: false, filenamePrefix: 'a' }, music3Models)])
-  const aceModels = { base: 'ace.safetensors', sft: 'ace-sft.safetensors', textEncoderSmall: 'te-s.safetensors', textEncoderLarge: 'te-l.safetensors', vae: 'ace-vae.safetensors' }
-  corpus.push(['acestep:base', acestep.buildAceStepWorkflow({ model: 'base', tags: 'audit', lyrics: '', instrumental: true, duration: 30, bpm: 120, timeSignature: '4/4', language: 'en', keyScale: 'C', seed: 7, generateAudioCodes: false, filenamePrefix: 't' }, aceModels)])
-  corpus.push(['acestep:sft', acestep.buildAceStepWorkflow({ model: 'sft', tags: 'audit', lyrics: 'verse', instrumental: false, duration: 45, bpm: 90, timeSignature: '3/4', language: 'ja', keyScale: 'A minor', seed: 8, generateAudioCodes: true, filenamePrefix: 't' }, aceModels)])
+  // (The acestep corpus arms were removed with the engine, 2026-09-21 —
+  // nn5ld47; lib/aceStepWorkflow.ts deleted, git history is the archive.)
   return corpus
 }
 
@@ -245,8 +243,6 @@ function buildCorpus() {
 const SIGNATURES = {
   'h3img.t1-length-1': (v) => v.type === 'value_smaller_than_min' && /^MiniMaxH3(Image|Reference)ToVideo$/.test(v.classType) && v.inputName === 'length',
   'hybrid.form-adapter-low-vram': (v) => v.type === 'required_input_missing' && v.classType === 'MiniMaxH3LoraFormLoader' && v.inputName === 'low_vram',
-  'acestep.timesignature-format': (v) => v.type === 'value_not_in_list' && v.classType === 'TextEncodeAceStepAudio1.5' && v.inputName === 'timesignature',
-  'acestep.keyscale-format': (v) => v.type === 'value_not_in_list' && v.classType === 'TextEncodeAceStepAudio1.5' && v.inputName === 'keyscale',
   'klein.cfg-guider-input-names': (v) => v.type === 'required_input_missing' && v.classType === 'CFGGuider' && (v.inputName === 'positive' || v.inputName === 'negative'),
   'klein.istp-resolution-steps': (v) => v.type === 'required_input_missing' && v.classType === 'ImageScaleToTotalPixels' && v.inputName === 'resolution_steps',
 }

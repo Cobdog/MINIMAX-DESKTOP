@@ -78,8 +78,10 @@ const PACK_CLASSES = [
   'MiniMaxH3LoraFormLoader',                   // first-party form adapter (source-derived entry below)
   'Krea2EditModelPatch', 'Krea2EditGroundedEncode',
   'Krea2AnyPaintPrepare', 'Krea2AnyPaintEncode', 'Krea2AnyPaintModelPatch',
-  'TextEncodeAceStepAudio', 'EmptyAceStepLatentAudio',
-  'TextEncodeAceStepAudio1.5', 'EmptyAceStep1.5LatentAudio',
+  // (The four AceStep classes were removed with the engine, 2026-09-21 —
+  // nn5ld47; no builder emits them, so they left contract scope. The
+  // committed fixture keeps its captured entries until the next
+  // regeneration — extra classes are harmless, missing ones are not.)
   'SeedVR2VideoUpscaler', 'seedvr2_videoupscaler', // E-IW2 gated, never vendored yet
 ]
 

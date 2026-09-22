@@ -294,7 +294,8 @@ const RULES = [
     suites: ['workflows'],
     reason: 'structural prompt-error classification — extracted pure (Wave 1) so the workflows suite drives it; server/core re-imports it.',
   },
-  { match: ['src/lib/aceStepSubmit.ts', 'src/lib/cameraPath.ts', 'src/lib/h3Submit.ts', 'src/lib/music3Submit.ts', 'src/lib/structuredPrompt.ts'], suites: ['canvas'], reason: 'submit/structured-prompt modules the canvas suite loads.' },
+  // (src/lib/aceStepSubmit.ts left this list with the engine, 2026-09-21 — nn5ld47.)
+  { match: ['src/lib/cameraPath.ts', 'src/lib/h3Submit.ts', 'src/lib/music3Submit.ts', 'src/lib/structuredPrompt.ts'], suites: ['canvas'], reason: 'submit/structured-prompt modules the canvas suite loads.' },
   { match: ['src/images/submit.ts'], suites: ['canvas'], reason: 'image submit flow (canvas suite).' },
   { match: ['src/images/session.ts'], suites: ['h3img'], reason: 'image session model (h3img suite).' },
   {
@@ -305,7 +306,7 @@ const RULES = [
   {
     match: [
       'src/lib/imageCrop.ts', 'src/lib/promptPresets.ts', 'src/lib/modelOverrides.ts',
-      'src/lib/h3Stack.ts', 'src/lib/manifest.ts', 'src/lib/music3Workflow.ts', 'src/lib/aceStepWorkflow.ts',
+      'src/lib/h3Stack.ts', 'src/lib/manifest.ts', 'src/lib/music3Workflow.ts',
       'src/lib/jobReducer.ts', 'src/lib/logSanitize.ts', 'src/lib/libraryStorage.ts', 'src/lib/promptContracts.ts',
       'src/lib/promptComposer.ts', 'src/lib/promptPolicies.ts', 'src/lib/dialogPolicy.ts', 'src/lib/promptCorpus.ts',
       'src/lib/promptLibraryStorage.ts', 'src/lib/contactSheet.ts', 'src/lib/failureTaxonomy.ts',

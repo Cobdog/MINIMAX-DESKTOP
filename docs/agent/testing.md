@@ -186,8 +186,9 @@ grid). Graph-shape verification could not see any of it.
   CI, a fix must retire its entry visibly. The first pass found five beyond
   T=1: packet tiers 9/13 (snap to 22), the form adapter's missing required
   `low_vram`, the klein `CFGGuider` input names + `resolution_steps` schema
-  drift, acestep's `timesignature`/`keyscale` enum formats, music3's dead
-  `bitrate` key. None had ever executed against a real engine.
+  drift, music3's dead `bitrate` key (the acestep `timesignature`/`keyscale`
+  entries retired with the engine itself, 2026-09-21). None had ever
+  executed against a real engine.
 - **The fake engine graduated** (`e2e/fakeEngineInfo.ts`): stock classes are
   served with the REAL captured schemas (extras still win; pack classes stay
   extras-driven), so e2e inherits contract truth — a schema-refusing graph

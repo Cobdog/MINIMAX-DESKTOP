@@ -718,9 +718,9 @@ export function PropertiesPanel() {
             {engineFamily.note} The image intent renders one H3-1F still per take; image-with-reference hands off to the workbench's Edit surface.
           </p>
         )}
-        {engineFamily.panel.audioDock && (
+        {engineFamily.panel.audioDock && draft.audio.engine === 'music3' && (
           <div className="canvas-properties-row">
-            <button type="button" className="canvas-chip" data-canvas-open-audio-dock onClick={() => useCanvasStore.getState().setAudioDock({ engine: draft.audio.engine, chainId: chain.id })}>
+            <button type="button" className="canvas-chip" data-canvas-open-audio-dock onClick={() => useCanvasStore.getState().setAudioDock({ engine: 'music3', chainId: chain.id })}>
               edit in the audio dock…
             </button>
           </div>

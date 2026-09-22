@@ -532,7 +532,7 @@ routesMaybe('(d) app-relative io defaults through the real settings pipeline + (
       // fill-if-unset — never silently dropped. The generic families keep
       // 'checkpoint'. The VAE split (epdvxd4, 2026-09-20): a legacy 'vae'
       // pick migrates onto videoVae (the video families — its old meaning
-      // there) or audioVae (music3/acestep, whose one decoder IS
+      // there) or audioVae (music3, whose one decoder IS
       // audio-class), fill-if-unset, consumed key. Failing-without-it: the
       // pre-split normalizer kept only the six old slot keys —
       // videoVae/audioVae/imageVae posted as auto (dropped at save) and the
@@ -541,6 +541,8 @@ routesMaybe('(d) app-relative io defaults through the real settings pipeline + (
         minimax: { checkpoint: 'legacy-merge.safetensors', fl2va: 'explicit-fl2va.safetensors', vae: '  ' },
         h3image: { checkpoint: 'legacy-image.safetensors', vae: 'legacy-h3-video-vae.safetensors', videoVae: 'explicit-workbench-video-vae.safetensors' },
         music3: { vae: 'legacy-dav.safetensors' },
+        // A REMOVED family's stored picks (acestep cut 2026-09-21, nn5ld47):
+        // shape-guarded but never migrated — the pick drops with the family.
         acestep: { vae: 'legacy-ace-audio-vae.safetensors', imageVae: 'not-a-real-pick.safetensors' },
       } } }) })
       const normalized = legacyOverrides.body.settings.modelOverrides ?? {}
@@ -552,8 +554,8 @@ routesMaybe('(d) app-relative io defaults through the real settings pipeline + (
       ok(normalized.h3image?.videoVae === 'explicit-workbench-video-vae.safetensors', 'h3image: an explicit videoVae pick wins over the legacy vae value')
       ok(!('vae' in (normalized.h3image ?? {})), 'h3image: the consumed legacy vae key never persists')
       ok(normalized.music3?.audioVae === 'legacy-dav.safetensors', 'music3: the legacy vae pick lands on audioVae (the family one decoder is audio-class)')
-      ok(normalized.acestep?.audioVae === 'legacy-ace-audio-vae.safetensors', 'acestep: the legacy vae pick lands on audioVae')
-      ok(normalized.acestep?.imageVae === 'not-a-real-pick.safetensors', 'acestep: an imageVae pick persists shape-wise — the family gate lives renderer-side (refused as unexposed at consult)')
+      ok(normalized.acestep?.audioVae === undefined, 'acestep (removed 2026-09-21): a dead family\'s legacy vae pick DROPS — it never migrates to audioVae')
+      ok(normalized.acestep?.imageVae === 'not-a-real-pick.safetensors', 'acestep (removed): an imageVae pick persists shape-wise — never a crash, and the renderer registry refuses it as an unknown family at consult')
       const reread = (await api('/api/lan/settings')).body.settings.modelOverrides ?? {}
       ok(reread.minimax?.ref2va === 'legacy-merge.safetensors' && !('checkpoint' in (reread.minimax ?? {})), 'the migrated shape is what persists on disk')
       await api('/api/lan/settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings: fresh }) })
