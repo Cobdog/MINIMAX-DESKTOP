@@ -133,7 +133,7 @@ test('(5d) the Windows leg intersects its OS-sensitive set', () => {
 test('(5e) shared test infra fans out honestly', () => {
   eq(resolve(['tests/lib/ports.cjs']).suites, PORT_USERS, 'the port allocator maps to every suite that draws ranges')
   eq(resolve(['scripts/lib/ts-vm.cjs']).suites, VM_SUITES, 'the VM harness maps to every client suite')
-  ok(PORT_USERS.length === 11, 'the port-suite inventory is the declared eleven')
+  ok(PORT_USERS.length === 12, 'the port-suite inventory is the declared twelve (manager-install joined, 0pktw5h)')
 })
 
 test('(5f) infrastructure inputs force the full run + license audit', () => {
