@@ -704,6 +704,113 @@ test('the loosened inference anchors (R-12 / A-B3(c)): substring fallback + size
 })
 
 // ---------------------------------------------------------------------------
+// THE TE DIMENSION-CLASS GUARD (task eyzcev5 — the 2026-09-22 crash class).
+// The loosened anchors above take "best available", and on the maintainer's
+// real instance the 'qwen3vl' substring fallback resolved the 4B-class
+// encoder when the 32B was not visible — the H3 token refiner demands the
+// 32B-class (5120-dim hidden) and the render died 27 s in at
+// preprocess_text_embeds: "mat1 and mat2 shapes cannot be multiplied
+// (171x2560 and 5120x5376)" (the session log; 2560 = the 4B's hidden width,
+// 5120 = the 32B's — the log is its own dim evidence). Failing-without-it:
+// every wrong-class assertion below — the pick resolved, no class-refusal
+// vocabulary existed, and the doomed graph submitted. The fixture is the
+// environment mirror (e2e/mirror/profiles/maintainer-instance.json): the
+// maintainer's instance shape, BOTH TEs visible — the exact trap.
+// ---------------------------------------------------------------------------
+const mirrorProfile = require('../e2e/mirror/profiles/maintainer-instance.json')
+const mirrorFiles = []
+for (const mirrorKind of Object.keys(mirrorProfile.modelListings)) {
+  for (const mirrorName of mirrorProfile.modelListings[mirrorKind]) mirrorFiles.push({ kind: mirrorKind, name: mirrorName, bytes: 0 })
+}
+const TE_32B = 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'
+const TE_4B = 'qwen3vl_4b_minimax_h3_int8.safetensors'
+const selectionGuardModule = load('src/lib/modelSelection.ts')
+const { teDimClassOf, teDimClassRefusal } = selectionGuardModule
+const h3SubmitModule = load('src/lib/h3Submit.ts')
+
+test('the TE dimension-class guard (eyzcev5): the wrong-family encoder refuses at validate with the named reason; the right one proceeds; klein keeps the small class', () => {
+  // (1) AUTO, both visible (the mirror shape): the ladder's official tier
+  //     picks the 32B and the guard passes it — correct picks resolve
+  //     EXACTLY as before (a guard, not a reroute).
+  const bothVisible = inferSelections(mirrorFiles, 'off')
+  assert.equal(bothVisible.textEncoder, TE_32B, 'sanity: with both TEs visible the official tier picks the 32B')
+  assert.equal(teDimClassRefusal('minimax', bothVisible.textEncoder), null, 'the 32B-class pick passes the guard')
+  // (2) AUTO, only the 4B visible (the crash environment): the loosened
+  //     anchor resolves the 4B — the root cause, kept on record — and the
+  //     guard REFUSES it, naming both classes and the artifact to make
+  //     visible instead of what was picked.
+  const fourBOnlyFiles = mirrorFiles.filter((file) => file.name !== TE_32B)
+  const trapped = inferSelections(fourBOnlyFiles, 'off')
+  assert.equal(trapped.textEncoder, TE_4B, 'root cause on record: the substring fallback resolves the 4B when the 32B is invisible')
+  const refusal = teDimClassRefusal('minimax', trapped.textEncoder)
+  assert.ok(refusal, 'the guard refuses the wrong-family pick')
+  assert.ok(refusal.includes('4B-class') && refusal.includes('32B-class'), `the refusal names both classes (got: ${refusal})`)
+  assert.ok(refusal.includes(TE_32B), 'the refusal names the artifact to make visible')
+  // (3) THE VALIDATE RUNG — the crash class dies at validate, never at the
+  //     engine: the shared submit ladder refuses the 4B selection with the
+  //     reason; the 32B selection passes the same ladder untouched.
+  const guardRequest = { mode: 'text', prompt: 'a lone drummer', upscale: { mode: 'off' }, livePreview: { enabled: false, mode: 'standard' }, firstFrame: null, referenceImages: [], referenceVideos: [], referenceAudios: [], timelineGuides: [] }
+  const guardFacts = (textEncoder) => ({ connected: true, modelReady: true, selection: { textEncoder, previewVae: '' }, h3PreviewOverrideNode: undefined })
+  const ladderRefusal = h3SubmitModule.validateH3Render(guardRequest, guardFacts(TE_4B))
+  assert.ok(ladderRefusal && ladderRefusal.includes('32B-class'), `the ladder refuses the 4B-class TE at validate (got: ${ladderRefusal})`)
+  assert.equal(h3SubmitModule.validateH3Render(guardRequest, guardFacts(TE_32B)), null, 'the 32B-class TE passes the same ladder')
+  // (4) THE OVERRIDE SEAM — a conscious pick of the 4B refuses with the same
+  //     reason (the submission refuses; the selection stays on auto); the
+  //     32B pick applies; a name with NO class token applies too (the
+  //     classifier refuses only what the filename itself classifies — the
+  //     engine stays the arbiter for community renames).
+  const seamFourB = resolveModelOverrides('minimax', mirrorFiles, { textEncoder: TE_4B })
+  assert.equal(seamFourB.slots.textEncoder.state, 'refused', 'the conscious 4B pick refuses at the seam')
+  assert.ok(seamFourB.refusals[0].reason.includes('32B-class'), 'the seam refusal carries the class reason')
+  const seam32B = resolveModelOverrides('minimax', mirrorFiles, { textEncoder: TE_32B })
+  assert.equal(seam32B.slots.textEncoder.state, 'applied', 'the 32B pick applies')
+  const unclassifiedFiles = mirrorFiles.concat([{ kind: 'text_encoders', name: 'qwen3vl_community_repack.safetensors', bytes: 0 }])
+  const seamUnclassified = resolveModelOverrides('minimax', unclassifiedFiles, { textEncoder: 'qwen3vl_community_repack.safetensors' })
+  assert.equal(seamUnclassified.slots.textEncoder.state, 'applied', 'no class token in the name → no refusal (the engine stays the arbiter)')
+  const workbenchSeam = resolveModelOverrides('h3image', mirrorFiles, { textEncoder: TE_4B })
+  assert.equal(workbenchSeam.slots.textEncoder.state, 'refused', 'the workbench family shares the 32B-class expectation')
+  // (5) THE KLEIN LANE — the same FILE, a different family, the opposite
+  //     verdict: klein runs on the small Qwen3 companion class (its official
+  //     templates pair 9B↔qwen_3_8b_fp8mixed (4096-dim; this repo's port)
+  //     and 4B↔qwen_3_4b (2560-dim)), so the 4B-class is LEGAL there and the
+  //     32B-class is the wrong-family pick in the reverse direction.
+  assert.equal(teDimClassRefusal('klein', TE_4B), null, 'klein accepts the 4B-class TE')
+  assert.equal(teDimClassRefusal('klein', 'qwen_3_8b_fp8mixed.safetensors'), null, 'klein accepts its own 8B companion')
+  assert.ok(teDimClassRefusal('klein', TE_32B), 'the reverse trap: the 32B-class into klein refuses too')
+  // music3 carries NO expectation row (its TE ladder is fully anchored — the
+  // loosened-anchor crash class cannot fire there); absence = inert.
+  assert.equal(teDimClassRefusal('music3', TE_4B), null, 'no expectation row → no check (music3 inert by data absence)')
+  // (6) THE CLASSIFIER — the filename's own size token, basename truth:
+  //      subpaths classify, quant tokens (int8/fp8) do not false-match.
+  assert.equal(teDimClassOf(`TE/sub/${TE_32B}`), '32b', 'subpathed rows classify by basename')
+  assert.equal(teDimClassOf(TE_4B), '4b')
+  assert.equal(teDimClassOf('qwen_3_8b_fp8mixed.safetensors'), '8b')
+  assert.equal(teDimClassOf('qwen_3_4b.safetensors'), '4b')
+  assert.equal(teDimClassOf('music3_text_encoder_bf16.safetensors'), null, 'no size token → unclassified')
+  assert.equal(teDimClassOf('qwen3vl_community_repack.safetensors'), null, 'community renames stay unclassified')
+  assert.equal(teDimClassOf('minimax_h3_fl2va_pruned_int8_convrot.safetensors'), null, 'quant int8 is not a size-class token')
+  // (7) THE A-DBG JUNCTION — the refusal path is named at decision time
+  //     (one tagged line when enabled, silence when not), so a session log
+  //     answers "why didn't this render start" without guessing.
+  const dbgModule = load('src/lib/dbg.ts')
+  const junctionLines = []
+  const originalLog = console.log
+  console.log = (...args) => { junctionLines.push(args.join(' ')) }
+  try {
+    dbgModule.setDbgEnabled(true)
+    teDimClassRefusal('minimax', TE_4B)
+    teDimClassRefusal('minimax', TE_32B)
+    dbgModule.setDbgEnabled(false)
+    teDimClassRefusal('minimax', TE_4B)
+  } finally {
+    console.log = originalLog
+  }
+  const junction = junctionLines.find((line) => line.includes('[dbg:teclass]'))
+  assert.ok(junction && junction.includes('"verdict":"refuse"') && junction.includes('"class":"4b"'), `the refusal junction is logged with its class (got: ${junctionLines.join(' | ')})`)
+  assert.equal(junctionLines.filter((line) => line.includes('[dbg:teclass]')).length, 1, 'exactly one junction line per refusal, none for the pass or the disabled re-check')
+})
+
+// ---------------------------------------------------------------------------
 // THE REGISTRY-ONLY INVARIANT (Wave 2 R-12 — the wave's named deliverable):
 // NO GRAPH EVER REFERENCES A MODEL ABSENT FROM THE INSTANCE REGISTRY.
 // Asserted across the workflow-population surface — every family's infer →

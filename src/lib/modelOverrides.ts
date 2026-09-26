@@ -68,7 +68,7 @@
 import type { ModelFile, ModelOverrideSlots } from '../types'
 import { dbg } from './dbg'
 import { inferH3ImgSelection, T1_IMAGE_VAE_PATTERN } from './graph/h3image'
-import { inferSelections } from './modelSelection'
+import { inferSelections, teDimClassRefusal } from './modelSelection'
 import { inferMusic3Selection, MUSIC3_DAV_FILENAME } from './music3Workflow'
 
 export type ModelOverrideSlotName = 'checkpoint' | 'fl2va' | 'ref2va' | 'merged' | 'textEncoder' | 'vae' | 'videoVae' | 'audioVae' | 'imageVae'
@@ -351,7 +351,7 @@ export type OverrideResolution = {
 }
 
 /** Which contract check produced a refusal. */
-type SlotRefusal = { check: 'slot' | 'kind' | 'vae'; reason: string }
+type SlotRefusal = { check: 'slot' | 'kind' | 'te-class' | 'vae'; reason: string }
 
 /** Filename markers for the VAE decoder classes (epdvxd4, AC-2). HEURISTICS
  *  WITH KNOWN LIMITS, documented here because no better evidence exists: the
@@ -375,6 +375,15 @@ function slotRefusal(family: ModelFamilyInfo, slot: ModelOverrideSlotName, file:
   const expectedKind = family.slotKinds[slot]
   if (expectedKind && file.kind !== expectedKind) {
     return { check: 'kind', reason: `'${file.name}' is a ${file.kind.replace(/_/g, ' ')} file — the ${SLOT_LABELS[slot].toLowerCase()} slot picks from ${expectedKind.replace(/_/g, ' ')}.` }
+  }
+  // The TE dimension-class gate (eyzcev5): a same-KIND pick can still be a
+  // wrong-FAMILY artifact — the 4B-class qwen3vl the engine happily lists
+  // but the H3 token refiner cannot consume (the 2026-09-22 crash class).
+  // The family-registry expectation does the refusing; the shared message
+  // names what to make visible. Unclassifiable names pass (engine arbiter).
+  if (slot === 'textEncoder') {
+    const teReason = teDimClassRefusal(family.id, file.name)
+    if (teReason) return { check: 'te-class', reason: teReason }
   }
   // The decoder-class gate (epdvxd4): each VAE slot refuses picks whose
   // filename marks them as ANOTHER decoder class — the pick layer's

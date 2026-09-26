@@ -15,6 +15,7 @@
  */
 import { createId } from './createId'
 import { buildMiniMaxWorkflow, frameIndexForSeconds, guideFrameWarning } from './workflow'
+import { teDimClassRefusal } from './modelSelection'
 import { prepareImage } from './imageCrop'
 import { buildRenderManifest } from './manifest'
 import { preflightOrFail } from './preflight'
@@ -178,6 +179,15 @@ export function validateH3Render(request: H3RenderRequest, facts: Pick<H3SubmitF
     return `Model override refused — ${overrideRefusal.slot} (${origin}): ${overrideRefusal.reason}`
   }
   if (!facts.modelReady) return 'One or more required MiniMax H3 model components are missing.'
+  // (eyzcev5) The TE dimension-class rung: the crash class the readiness
+  // chip CANNOT see — a wrong-family TE resolves NON-EMPTY (the loosened
+  // 'qwen3vl' anchor takes best-available), so modelReady stays true and
+  // the doomed graph would submit. The family-registry expectation refuses
+  // it here with the named reason (the maintainer's 2026-09-22 session:
+  // mat1 171x2560 × mat2 5120x5376 at preprocess_text_embeds, 27 s into a
+  // real render). Correct picks pass untouched — a guard, not a reroute.
+  const teClassRefusal = facts.selection?.textEncoder ? teDimClassRefusal('minimax', facts.selection.textEncoder) : null
+  if (teClassRefusal) return `Model resolution refused — textEncoder: ${teClassRefusal}`
   if (request.livePreview.enabled && request.livePreview.mode === 'h3-override' && !facts.h3PreviewOverrideNode) {
     return 'MiniMax H3 animated preview is selected, but its Preview Override node was not detected. Install or enable the custom node, restart ComfyUI, then click the Local engine status to refresh.'
   }
