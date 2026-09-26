@@ -50,7 +50,13 @@ import type { NodePackDefinition } from '../types'
  *    MIT (LICENSE file added upstream at exactly the pinned revision —
  *    commit 40316cf "Add MIT License", 2026-09-17; GitHub API license record
  *    MIT, verified 2026-09-21). Vendor-eligible; user-fetch until a
- *    vendoring increment is wanted (the Larryvrh posture). */
+ *    vendoring increment is wanted (the Larryvrh posture).
+ *  - ComfyUI-MiniMaxH3-PreviewOverride (simsim9-stack, task t6vub9k — the
+ *    maintainer-endorsed preview-decoding path, 2026-09-22): MIT (LICENSE
+ *    file read from the pinned revision d1eb17b during the pack assessment,
+ *    docs/research/preview-override-assessment.md). Vendor-eligible;
+ *    user-fetch until a vendoring increment is wanted (the Larryvrh
+ *    posture). */
 export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
   {
     id: 'vdn-h3',
@@ -272,6 +278,38 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     // app never calls. Not installed on the canonical shared install — the
     // engine-contract fixture records both classes honestly absent.
     instanceNodeClasses: ['MinimaxH3LatentUpscalerNode2D', 'MinimaxH3LatentUpscaler3D'],
+  },
+  // -- The preview-decoding path (task t6vub9k; maintainer ruling 2026-09-22
+  // after their session's preview crash: "We likely need to use that node
+  // for the preview decoding, it's a fairly solid node"). PULLED FORWARD
+  // from the curation sweep's queue — deep-read
+  // docs/research/preview-override-assessment.md. The pack wraps the H3
+  // model with an OUTER_SAMPLE step callback that decodes the video latent
+  // itself (tiny TAEHV/TAESD from vae_approx, channel-checked, Latent2RGB
+  // fallback at every level) and emits the minimax_h3_preview_override WS
+  // event the realtime hub already consumes — the producer the 2026-09-21
+  // registry pass could not locate (§4.2 item 3, now closed). Installed and
+  // running on the maintainer's own instance. STATUS
+  // PROPOSED-PENDING-TEST · ALT: the stock vae_approx file convention
+  // (preview_method 'taesd' + the Kijai taeh3 fetch row — the pack-absent
+  // fallback the app keeps).
+  {
+    id: 'h3-preview-override',
+    name: 'ComfyUI-MiniMaxH3-PreviewOverride',
+    featureGroup: 'H3 video',
+    description: 'simsim9-stack\'s live preview override for MiniMax H3: a single node between the model and the sampler that decodes the H3 video latent itself on every step (a trained 24-channel tiny autoencoder from vae_approx — TAEHV/TAESD only, channel-checked, animated Latent2RGB as the graceful fallback) and streams true-RGB frames over the minimax_h3_preview_override websocket event, suppressing the stock sampler preview while sampling. The maintainer-endorsed answer to the fragile stock preview path (its null-previewer crash class when an arbitrary taeh3* file wins the engine\'s prefix match). Ships its own 39.4 MB taeh3_decoder.safetensors (minivae/ — copy into vae_approx per its README); the Kijai 9.3 MB fetch row serves the same slot when the pack is absent.',
+    repoUrl: 'https://github.com/simsim9-stack/ComfyUI-MiniMaxH3-PreviewOverride',
+    pinnedRevision: 'd1eb17beb5e11856f93eb682e0998b6f232969d1',
+    licenseSpdx: 'MIT',
+    licenseNote: 'MIT (LICENSE file — © 2026 InsanE_GeN — read from the repo at the pinned revision during the 2026-09-22 pack assessment; GitHub API license record MIT). Vendor-eligible; user-fetch until a vendoring increment is wanted (the Larryvrh posture). The shipped decoder weights are a MiniMax-H3 derivative trained by the author for preview purposes — they ride the pack\'s MIT, never vendored by us.',
+    installMode: 'user-fetch',
+    homepage: 'https://github.com/simsim9-stack/ComfyUI-MiniMaxH3-PreviewOverride',
+    // Single class, verified from the pinned revision's own preview_override.py
+    // (define_schema node_id "MiniMaxH3PreviewOverride", category
+    // model/sampling/minimax, is_experimental). This is the class
+    // findH3PreviewOverrideNode's pattern match catches and graph/preview.ts
+    // wires as node '7'; detection is exact-any-match like every row.
+    instanceNodeClasses: ['MiniMaxH3PreviewOverride'],
   },
 ]
 

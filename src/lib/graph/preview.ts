@@ -41,6 +41,6 @@ export const PREVIEW_ENTRY: OptimizationEntry = {
   transform: previewTransform,
   ui: {
     description: 'Streams low-resolution RGB frames from the engine while sampling (taeh3 approximated decode).',
-    installHint: 'Comfy-Org MiniMax H3 support ≥ the preview-override node (MiniMaxH3PreviewOverrideCS on newer engines).',
+    installHint: 'The simsim9-stack MiniMaxH3-PreviewOverride pack (MIT, fetchable from Settings → Node packs) — or a newer ComfyUI core serving MiniMaxH3PreviewOverrideCS.',
   },
 }

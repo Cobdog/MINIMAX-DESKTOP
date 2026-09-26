@@ -542,6 +542,23 @@ test('(p) the shared validation ladder (lib/h3Submit)', () => {
   const badGuide = request({ mode: 'reference', referenceImages: [media('/r.png', 'image')], timelineGuides: [{ file: media('/g.png', 'image'), seconds: 7 }] })
   ok(String(h3Submit.validateH3Render(badGuide, facts)).includes('lands at or beyond'), 'ladder: a guide beyond the duration refuses with the frame warning')
   eq(h3Submit.validateH3Render(request({ prompt: '  ' }), facts), 'Add a prompt before generating.', 'ladder: an empty prompt refuses')
+
+  // (t6vub9k) The A-DBG preview-route resolution (maintainer ruling
+  // 2026-09-22): the PreviewOverride pack owns preview decoding whenever its
+  // node is served AND a taeh3 decoder file exists — for BOTH modes; the
+  // vae_approx file convention (stock engine previews) stays the pack-absent
+  // fallback. The explicit 'h3-override' mode keeps its strict validation
+  // ladder above.
+  const packFacts = { h3PreviewOverrideNode: 'MiniMaxH3PreviewOverride', selection: { previewVae: 'taeh3_decoder.safetensors' } }
+  const bareFacts = { h3PreviewOverrideNode: undefined, selection: { previewVae: '' } }
+  const noDecoderFacts = { h3PreviewOverrideNode: 'MiniMaxH3PreviewOverride', selection: { previewVae: '' } }
+  const live = (mode) => ({ enabled: true, mode })
+  const override = h3Submit.resolvePreviewOverride(live('standard'), packFacts)
+  ok(override && override.nodeType === 'MiniMaxH3PreviewOverride' && override.vaeName === 'taeh3_decoder.safetensors' && override.frames === 50 && override.fps === 12 && override.jpegQuality === 85, 'route: standard mode PREFERS the pack when node + decoder are present')
+  eq(h3Submit.resolvePreviewOverride(live('h3-override'), packFacts), override, 'route: the explicit h3-override mode resolves the same override (unchanged contract)')
+  ok(h3Submit.resolvePreviewOverride(live('standard'), bareFacts) === undefined, 'route: pack absent → the stock vae_approx file convention (no override node)')
+  ok(h3Submit.resolvePreviewOverride(live('standard'), noDecoderFacts) === undefined, 'route: pack present but no decoder file → stock fallback (no override node without a vae_name to wire)')
+  ok(h3Submit.resolvePreviewOverride({ enabled: false, mode: 'standard' }, packFacts) === undefined, 'route: live preview disabled → nothing wired, either path')
 })
 
 test('(q) graph construction per selection (engine-free, L4)', () => {

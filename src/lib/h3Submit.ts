@@ -107,6 +107,31 @@ export type H3SubmitIo = {
   onJobCreated?(jobId: string): void
 }
 
+/** The A-DBG junction on the preview path (maintainer ruling 2026-09-22, after
+ *  their session's preview crash: "We likely need to use that node for the
+ *  preview decoding, it's a fairly solid node"). When the PreviewOverride
+ *  pack's node is served by the engine AND a taeh3 decoder file is present in
+ *  vae_approx, the pack OWNS preview decoding for every live-preview render:
+ *  its OUTER_SAMPLE wrapper decodes the video latent itself (tiny-VAE loaded
+ *  explicitly by name, channel-checked, Latent2RGB fallback at every level)
+ *  and emits the minimax_h3_preview_override stream the realtime hub already
+ *  forwards — the server correspondingly skips the stock preview_method
+ *  'taesd' request for graphs carrying the node (the fragile class: the
+ *  engine's latent_preview constructs a TAEHV previewer from whatever
+ *  arbitrary taeh3* file wins the prefix match). Pack absent (or no decoder
+ *  file) keeps the vae_approx file convention exactly as before. Mode
+ *  'h3-override' stays the strict explicit path (its validation refusals are
+ *  unchanged); mode 'standard' now ROUTES — the pack when present, the stock
+ *  engine previews when not. Pure — VM-harness tested. */
+export function resolvePreviewOverride(
+  livePreview: H3RenderRequest['livePreview'],
+  facts: Pick<H3SubmitFacts, 'h3PreviewOverrideNode'> & { selection: Pick<ModelSelection, 'previewVae'> },
+): { frames: number; fps: number; nodeType: string; vaeName: string; jpegQuality: number } | undefined {
+  if (!livePreview.enabled) return undefined
+  if (!facts.h3PreviewOverrideNode || !facts.selection.previewVae) return undefined
+  return { frames: 50, fps: 12, nodeType: facts.h3PreviewOverrideNode, vaeName: facts.selection.previewVae, jpegQuality: 85 }
+}
+
 /**
  * The validation ladder, same order and same messages as the pre-extraction
  * hook: upscale readiness → prompt → connection → models → preview override →
@@ -235,7 +260,7 @@ export async function submitH3Render(
       upscale: upscale.mode === 'rtx' ? { type: 'rtx', model: request.rtxModel } : upscale.mode === 'lbh2d' || upscale.mode === 'lbh3d' ? { type: upscale.mode, model: upscale.lbhModel } : undefined,
       refImageSize: request.refImageSize,
       sigmaShift: request.sigmaShift,
-      previewOverride: request.livePreview.enabled && request.livePreview.mode === 'h3-override' && facts.h3PreviewOverrideNode ? { frames: 50, fps: 12, nodeType: facts.h3PreviewOverrideNode, vaeName: facts.selection.previewVae, jpegQuality: 85 } : undefined,
+      previewOverride: resolvePreviewOverride(request.livePreview, facts),
       filenamePrefix,
       firstFrame: request.firstFrame?.path,
       lastFrame: request.lastFrame?.path,
@@ -278,8 +303,11 @@ export async function submitH3Render(
     if (request.loraStack?.length) manifest.loraStack = request.loraStack.map((entry) => ({ ...entry }))
     if (request.manifestExtra) Object.assign(manifest, request.manifestExtra)
     // livePreview rides the submission (the server asks the engine for
-    // native sampler previews via extra_data.preview_method); clientId stays
-    // for interface compatibility — the server pins its own session id.
+    // native sampler previews via extra_data.preview_method — EXCEPT when
+    // the graph carries the pack's preview-override node, where the pack's
+    // own minimax_h3_preview_override stream owns previews and the stock
+    // request is deliberately skipped server-side); clientId stays for
+    // interface compatibility — the server pins its own session id.
     const response = await window.minimax.submitPrompt(settings.comfyUrl, graph, facts.clientId, request.livePreview.enabled)
     if (io.cancellationRequests.current.has(localId)) {
       await window.minimax.cancelPrompt(settings.comfyUrl, response.prompt_id)

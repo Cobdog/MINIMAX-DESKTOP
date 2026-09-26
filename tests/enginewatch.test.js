@@ -155,6 +155,15 @@ test('(d) preflight — the graph-vs-object_info diff and the pack-row refusal (
   eq(gapMissing.find((item) => item.className === 'MinimaxH3LatentUpscaler3D').packId, 'lbh-latent-upscaler', 'the LBH 3D upscaler maps to the lbh-latent-upscaler row')
   ok(preflight.preflightRefusal(gapMissing).includes('ComfyUI-H3-Motion-Context'), 'the refusal names the Motion-Context pack row')
 
+  // (t6vub9k) The preview-decoding path's class maps to its pack row — a
+  // render whose preferred preview route finds the pack absent refuses with
+  // the FETCH action for the maintainer-endorsed pack, not the unknown-class
+  // dead end (the row + fetch entry are the F6 remediation affordance).
+  const previewGraph = { '7': { class_type: 'MiniMaxH3PreviewOverride', inputs: {} } }
+  const previewMissing = preflight.preflightGraph(previewGraph, { UNETLoader: {} })
+  eq(previewMissing.find((item) => item.className === 'MiniMaxH3PreviewOverride').packId, 'h3-preview-override', 'the preview-override class maps to the h3-preview-override row')
+  ok(preflight.preflightRefusal(previewMissing).includes('ComfyUI-MiniMaxH3-PreviewOverride'), 'the refusal names the PreviewOverride pack row')
+
   // The refusal: readable, action-mapped, names the class AND the pack.
   const refusal = preflight.preflightRefusal(missing)
   ok(refusal.includes('MiniMaxH3SamplerStandalone'), 'the refusal names the class')
@@ -182,11 +191,12 @@ test('(d) preflight — the graph-vs-object_info diff and the pack-row refusal (
     { className: 'H3ImagePrepare', packId: 'h3-image-studio', stock: false },
     { className: 'MiniMaxH3MotionContext', packId: 'h3-motion-context', stock: false },
     { className: 'MinimaxH3LatentUpscaler3D', packId: 'lbh-latent-upscaler', stock: false },
+    { className: 'MiniMaxH3PreviewOverride', packId: 'h3-preview-override', stock: false },
     { className: 'CreateVideo', stock: true },
     { className: 'MysteryNode', stock: false },
   ]
   const rows = remediation.remediationRows(missingMix)
-  eq(rows.length, 8, 'one row per missing class')
+  eq(rows.length, 9, 'one row per missing class')
   const byClass = Object.fromEntries(rows.map((row) => [row.className, row]))
   ok(byClass.MiniMaxH3HybridLoader.action.kind === 'fetch' && byClass.MiniMaxH3HybridLoader.action.licenseSpdx === 'MIT', 'user-fetch pack row → fetch action carrying the license verdict')
   ok(byClass.MiniMaxH3HybridLoader.action.catalogEntryId === 'pack:h3-hybrid-loader', 'the fetch action targets the catalog entry (the Library deep-link)')
@@ -196,6 +206,8 @@ test('(d) preflight — the graph-vs-object_info diff and the pack-row refusal (
   ok(byClass.MiniMaxH3MotionContext.action.kind === 'fetch' && byClass.MiniMaxH3MotionContext.action.packId === 'h3-motion-context' && byClass.MiniMaxH3MotionContext.action.licenseSpdx === 'GPL-3.0-only', 'a missing Motion-Context class maps to its fetch row with the GPL verdict stated')
   ok(byClass.MiniMaxH3MotionContext.action.catalogEntryId === 'pack:h3-motion-context', 'the Motion-Context fetch action deep-links its catalog entry')
   ok(byClass.MinimaxH3LatentUpscaler3D.action.kind === 'fetch' && byClass.MinimaxH3LatentUpscaler3D.action.packId === 'lbh-latent-upscaler' && byClass.MinimaxH3LatentUpscaler3D.action.licenseSpdx === 'MIT', 'a missing LBH upscaler class maps to its fetch row with the MIT verdict stated')
+  ok(byClass.MiniMaxH3PreviewOverride.action.kind === 'fetch' && byClass.MiniMaxH3PreviewOverride.action.packId === 'h3-preview-override' && byClass.MiniMaxH3PreviewOverride.action.licenseSpdx === 'MIT', 'a missing PreviewOverride class maps to its fetch row with the MIT verdict stated')
+  ok(byClass.MiniMaxH3PreviewOverride.action.catalogEntryId === 'pack:h3-preview-override', 'the PreviewOverride fetch action deep-links its catalog entry (the F6 remediation affordance)')
   ok(byClass.H3ImagePrepare.action.kind === 'fetch' && byClass.H3ImagePrepare.action.licenseSpdx === 'Unlicense', 'the h3-image-studio gate pack rows as a fetch with its Unlicense verdict')
   ok(byClass.ApplyVDNH3.action.kind === 'install' && byClass.ApplyVDNH3.action.packId === 'vdn-h3', 'vendored pack row → install action (no network)')
   ok(byClass.MiniMaxH3LoraFormLoader.action.kind === 'install' && byClass.MiniMaxH3LoraFormLoader.label.includes('no network'), 'first-party pack row → install action stating no network')
