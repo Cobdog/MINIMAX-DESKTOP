@@ -241,7 +241,11 @@ function main() {
       }
       nodes[classType] = entry
     } else if (sourceDerived[classType]) {
-      nodes[classType] = sourceDerived[classType]()
+      // Mixed shapes by design: formAdapterEntry is a builder fn, the fizgig
+      // entries are literal objects — accept both (the v0.37.4 re-capture hit
+      // this when the uninstalled-pack classes fell through to source-derived).
+      const entry = sourceDerived[classType]
+      nodes[classType] = typeof entry === 'function' ? entry() : JSON.parse(JSON.stringify(entry))
     } else {
       absent.push({ class: classType, reason: ABSENT_REASONS[classType] ?? 'not served by this install' })
     }
@@ -251,8 +255,8 @@ function main() {
     __provenance: {
       description: 'REAL ComfyUI node schemas (object_info) for every class our graph builders emit — the engine-contract fixture. Validate emitted graphs against these, never against synthetic stubs (the T=1 lesson, 2026-09-21).',
       capturedFrom: 'GET /object_info, canonical shared install (/home/agent/comfyui) on 127.0.0.1:8189, schema-only --cpu boot, zero prompt submissions, teardown verified',
-      comfyuiRevision: 'a87667f72f5fad094b74b10dc9c9f82faea728ef',
-      comfyuiVersion: '0.34.0',
+      comfyuiRevision: (process.argv.find((a) => a.startsWith('--comfyui-revision=')) ?? '').split('=')[1] || 'a87667f72f5fad094b74b10dc9c9f82faea728ef',
+      comfyuiVersion: (process.argv.find((a) => a.startsWith('--comfyui-version=')) ?? '').split('=')[1] || '0.34.0',
       captureDate,
       rawClassCount: Object.keys(raw).length,
       keptClassCount: Object.keys(nodes).length,

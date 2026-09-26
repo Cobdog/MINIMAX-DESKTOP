@@ -2,12 +2,12 @@
   "__provenance": {
     "description": "REAL ComfyUI node schemas (object_info) for every class our graph builders emit — the engine-contract fixture. Validate emitted graphs against these, never against synthetic stubs (the T=1 lesson, 2026-09-21).",
     "capturedFrom": "GET /object_info, canonical shared install (/home/agent/comfyui) on 127.0.0.1:8189, schema-only --cpu boot, zero prompt submissions, teardown verified",
-    "comfyuiRevision": "a87667f72f5fad094b74b10dc9c9f82faea728ef",
-    "comfyuiVersion": "0.34.0",
-    "captureDate": "2026-09-22",
-    "rawClassCount": 1730,
+    "comfyuiRevision": "8ff6dc38-tag",
+    "comfyuiVersion": "0.37.4",
+    "captureDate": "2026-09-26",
+    "rawClassCount": 1788,
     "keptClassCount": 72,
-    "formAdapterSource": "726d5f80f57c8aec9ce2d2f88edbfac6c2745194",
+    "formAdapterSource": "v0.37.4-tag",
     "h3ImageStudioPackCapture": "astropuzzo/ComfyUI-MiniMax-H3-Image-Studio @ 47dea30d0bf07e7340ef0cc97e8174a15edf55b9 (v23.0.0) cloned into the shared install custom_nodes before this capture (task afvlbk4) — its 5 load-bearing classes (Prepare set + H3ImageDecode) captured REAL from /object_info; the pack's own test suite passed on the venv first (26/26)",
     "fizgigPackCapture": "shootthesound/ComfyUI-Fizgig-H3-Still @ f3252d2b6c94c2e34d71f583d5e1804b683afe06 SOURCE-DERIVED (task 464xfvd, E-FS1): the pack is NOT installed on the shared install — both classes (the whole pack) transcribed from __init__.py INPUT_TYPES + RETURN_TYPES at this pin during the 2026-09-25 assessment. An /object_info capture replaces these entries the day the pack is installed for the bake-off.",
     "normalizations": [
@@ -101,7 +101,8 @@
               "krea2",
               "joyimage",
               "mage",
-              "minimax"
+              "minimax",
+              "yue2"
             ]
           ]
         },
@@ -630,14 +631,6 @@
             "CLIP",
             {}
           ],
-          "vae": [
-            "VAE",
-            {}
-          ],
-          "audio_vae": [
-            "VAE",
-            {}
-          ],
           "prompt": [
             "STRING",
             {
@@ -687,6 +680,18 @@
           ]
         },
         "optional": {
+          "vae": [
+            "VAE",
+            {
+              "tooltip": "Video VAE. Without it reference images/videos only condition the text encoder."
+            }
+          ],
+          "audio_vae": [
+            "VAE",
+            {
+              "tooltip": "Audio VAE. Without it reference audio only conditions the text encoder."
+            }
+          ],
           "ref_images": [
             "COMFY_AUTOGROW_V3",
             {
@@ -772,8 +777,6 @@
       "input_order": {
         "required": [
           "clip",
-          "vae",
-          "audio_vae",
           "prompt",
           "width",
           "height",
@@ -781,6 +784,8 @@
           "ref_image_size"
         ],
         "optional": [
+          "vae",
+          "audio_vae",
           "ref_images",
           "ref_videos",
           "ref_video_audios",
@@ -1718,6 +1723,21 @@
                 "HDR PQ"
               ]
             }
+          ],
+          "codec": [
+            "COMBO",
+            {
+              "tooltip": "Optionally encode the video immediately. None keeps the images in tensor form; Auto uses H.264.",
+              "advanced": true,
+              "default": "none",
+              "multiselect": false,
+              "options": [
+                "none",
+                "auto",
+                "h264",
+                "av1"
+              ]
+            }
           ]
         }
       },
@@ -1729,7 +1749,8 @@
         "optional": [
           "audio",
           "bit_depth",
-          "color_space"
+          "color_space",
+          "codec"
         ]
       },
       "is_input_list": false,
@@ -3432,7 +3453,7 @@
       "output_matchtypes": null,
       "name": "GetImageSize",
       "display_name": "Get Image Size",
-      "description": "Returns width and height of the image, and passes it through unchanged.",
+      "description": "Returns the width, height, and batch size of the image.",
       "python_module": "comfy_extras.nodes_images",
       "category": "image",
       "output_node": false,
@@ -3598,12 +3619,27 @@
               "step": 0.01
             }
           ]
+        },
+        "optional": {
+          "sampling": [
+            [
+              "flow",
+              "img_to_img_velocity"
+            ],
+            {
+              "default": "flow",
+              "advanced": true
+            }
+          ]
         }
       },
       "input_order": {
         "required": [
           "model",
           "shift"
+        ],
+        "optional": [
+          "sampling"
         ]
       },
       "is_input_list": false,

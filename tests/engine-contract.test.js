@@ -69,7 +69,7 @@ function ok(condition, label) {
 // ---------------------------------------------------------------------------
 test('(a) fixture integrity: provenance, coverage lockstep, honest absences', () => {
   const prov = FIXTURE_DATA.__provenance
-  ok(prov && prov.comfyuiRevision === 'a87667f72f5fad094b74b10dc9c9f82faea728ef', 'provenance pins the verified revision a87667f')
+  ok(prov && prov.comfyuiRevision === '8ff6dc38-tag', 'provenance pins the verified revision (v0.37.4 tag; bumped from a87667f at the 2026-09-26 instance bump)')
   ok(typeof prov.captureDate === 'string' && prov.captureDate.length === 10, 'provenance carries the capture date')
   ok(typeof prov.rawClassCount === 'number' && prov.rawClassCount > 1000, `provenance records the raw capture size (${prov.rawClassCount} classes)`)
   ok(Array.isArray(prov.normalizations) && prov.normalizations.length >= 3, 'provenance records the normalization rules')
