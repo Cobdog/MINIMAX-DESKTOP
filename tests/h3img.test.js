@@ -561,6 +561,41 @@ maybe('(i) validation + detection', () => {
   }
 })
 
+// (i2) THE TE DIMENSION-CLASS GUARD at the workbench seam (task eyzcev5 —
+// the 2026-09-22 crash class: a 4B-class qwen3vl resolved for an H3 graph
+// and the render died at preprocess_text_embeds, mat1 171x2560 vs mat2
+// 5120x5376). Failing-without-it: the 4B-only environment below reported
+// every H3 family AVAILABLE (the wrong-class TE is non-empty, so the
+// missing-models gate passed) and the doomed graph submitted. The trap
+// fixture mirrors the maintainer's instance (the environment mirror's 4B
+// name, e2e/mirror/profiles/maintainer-instance.json).
+test('(i2) the TE dimension-class guard (eyzcev5): the workbench families refuse the 4B-class TE with the named reason; klein keeps the small class', () => {
+  const TE_4B_MIRROR = 'qwen3vl_4b_minimax_h3_int8.safetensors'
+  const TE_32B_MIRROR = 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'
+  // The crash environment: the 32B absent, the 4B visible — the ladder's
+  // substring fallback resolves the 4B (the root cause), and every H3
+  // family's detection must REFUSE it by name (unavailable + the reason),
+  // never report available on a non-empty-but-wrong-class pick.
+  const fourBFiles = MODEL_FILES.map((file) => file.name === H3IMG_MODELS.textEncoder ? model(TE_4B_MIRROR, 'text_encoders') : file)
+  const fourBDetections = h3image.detectH3ImgFamilies(HYBRID_INFO, fourBFiles)
+  const fourBDetection = fourBDetections.find((entry) => entry.family.id === 'h3img.generate.packet').detection
+  ok(!fourBDetection.available, 'the 4B-class TE environment: the packet family is NOT available')
+  ok(fourBDetection.missingModels.join('\n').includes('32B-class'), `the unavailability names the class (got: ${fourBDetection.missingModels.join(' | ')})`)
+  ok(fourBDetection.missingModels.join('\n').includes(TE_32B_MIRROR), 'the guidance names the 32B artifact to make visible')
+  // The correct environment is unchanged (available, no class refusal):
+  const healthy = h3image.detectH3ImgFamilies(HYBRID_INFO, MODEL_FILES).find((entry) => entry.family.id === 'h3img.generate.packet').detection
+  ok(healthy.available && !healthy.missingModels.length, 'the 32B environment stays available with zero missing-model guidance')
+  // The klein builder — the same 4B file, the klein lane, the OPPOSITE
+  // verdict: klein's official template trio runs the small Qwen3 companion
+  // (qwen_3_8b_fp8mixed, 4096-dim; the 4B template pairs qwen_3_4b,
+  // 2560-dim), so the 4B-class is legal there and only the 32B-class is the
+  // wrong-family pick in klein's direction (the reverse trap).
+  const kleinRequest = { prompt: 'sharpen the hair', width: 1024, height: 1024, seed: 5, refs: [], loras: [], filenamePrefix: 'refine', source: 'frame.png', refineInstruction: 'sharpen the hair' }
+  const kleinFourB = h3image.buildKleinRefineGraph(kleinRequest, { ...H3IMG_MODELS, klein: { unet: H3IMG_MODELS.klein.unet, textEncoder: TE_4B_MIRROR, vae: H3IMG_MODELS.klein.vae } })
+  ok(Object.values(kleinFourB).some((value) => value.class_type === 'CLIPLoader'), 'the klein lane still accepts the 4B-class TE (family-scoped guard)')
+  assert.throws(() => h3image.buildKleinRefineGraph(kleinRequest, { ...H3IMG_MODELS, klein: { unet: H3IMG_MODELS.klein.unet, textEncoder: TE_32B_MIRROR, vae: H3IMG_MODELS.klein.vae } }), /32B-class/, 'the reverse trap: the 32B-class TE into klein refuses at the builder')
+})
+
 maybe('(j) packet attribution + the stage executor seam — every frame, in order; one free per engine change', async () => {
   {
     const history = {
