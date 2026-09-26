@@ -473,9 +473,14 @@ export function buildCanvasRenderRequest(
     timelineGuides: mode === 'reference' ? settings.timelineGuides : [],
     // F6 (maintainer decision 2026-09-18): canvas renders request native
     // sampler previews — the frames surface on the generating tile. Mode
-    // 'standard' is the engine-side vae_approx decode (taeh3 for H3); the
-    // 'h3-override' graph node remains the separate opt-in animated-preview
-    // path on the old surface.
+    // 'standard' ROUTES (A-DBG, maintainer ruling 2026-09-22): when the
+    // PreviewOverride pack's node is served and a taeh3 decoder is present,
+    // the submit path wires the pack's node into the model chain (its
+    // minimax_h3_preview_override stream owns previews; the server skips
+    // the stock preview_method request for that graph); otherwise this is
+    // the engine-side vae_approx decode (taeh3 for H3) — the pack-absent
+    // fallback. The explicit 'h3-override' mode remains the old surface's
+    // strict opt-in.
     livePreview: { enabled: true, mode: 'standard' },
     ...(chain ? { chain } : {}),
     filenamePrefix: `video/Canvas_H3_${Date.now()}`,

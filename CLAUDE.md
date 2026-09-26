@@ -43,3 +43,13 @@ When about to do X, read the matching file FIRST:
 - **Integrate or extend against an external API** → [docs/devdocs/](docs/devdocs/MANIFEST.md) first; if the capture doesn't exist, creating it is part of the task
 
 Orientation: repo map in [docs/agent/README.md](docs/agent/README.md); state of play in [docs/ROADMAP.md](docs/ROADMAP.md); operational lessons in [docs/LEARNINGS.md](docs/LEARNINGS.md); the full documentation table in the README.
+
+
+## One-time: index state check (self-cleaning — remove when done)
+
+Added 2026-09-21 during the docmunch upgrade. On your first work session in
+this repo: check this repo's jcodemunch/jdocmunch state — index freshness,
+embedding coverage, and (after the summary re-run completes) summary quality —
+and repair anything stale (incremental reindex; embed_repo for missing
+embeddings). Then delete this section; if this file existed only to carry
+this note, delete the file. Only report if something needed repair.

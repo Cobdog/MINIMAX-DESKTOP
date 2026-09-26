@@ -2383,9 +2383,25 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
           // per prompt via extra_data.preview_method (set_preview_method in
           // execution.py) — 'taesd' makes the sampler decode each step's x0
           // through the latent format's vae_approx decoder (taeh3 for H3)
-          // and push the frame at the submitter's socket.
+          // and push the frame at the submitter's socket. The ONE exception
+          // (A-DBG, maintainer ruling 2026-09-22): a graph carrying a
+          // MiniMax-H3 preview-override node previews ITSELF — the pack's
+          // OUTER_SAMPLE wrapper decodes each step through its explicitly
+          // named tiny VAE and emits the minimax_h3_preview_override stream
+          // (the realtime hub's other preview channel). Requesting 'taesd'
+          // anyway would still make latent_preview CONSTRUCT the stock
+          // TAEHV previewer from whatever arbitrary taeh3* file wins the
+          // engine's prefix match — the fragile class that crashed the
+          // maintainer's render — so the stock request is skipped entirely.
+          // The class signature mirrors findH3PreviewOverrideNode
+          // (src/lib/h3Stack.ts): the pack's MiniMaxH3PreviewOverride and
+          // the newer-core MiniMaxH3PreviewOverrideCS both match.
+          const graphSelfPreviews = Object.values(body.prompt as Record<string, unknown>).some(
+            (node) => node && typeof node === 'object' && typeof (node as { class_type?: unknown }).class_type === 'string'
+              && /minimax.*h3.*preview.*override/i.test((node as { class_type: string }).class_type),
+          )
           const requestBody: Record<string, unknown> = { prompt: body.prompt, client_id: clientId }
-          if (body.livePreview === true) requestBody.extra_data = { preview_method: 'taesd' }
+          if (body.livePreview === true && !graphSelfPreviews) requestBody.extra_data = { preview_method: 'taesd' }
           // VRAM hygiene (pre-submit hook): when the router provider has
           // loaded models and unload-on-generate is on (default), unload them
           // BEFORE the graph lands. Bounded to ~2 s so a slow router can never

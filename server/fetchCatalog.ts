@@ -156,6 +156,15 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   // pick finds the classes absent from the live instance.
   nodePackEntry('h3-motion-context'),
   nodePackEntry('lbh-latent-upscaler'),
+  // The preview-decoding path (task t6vub9k, maintainer-endorsed 2026-09-22):
+  // sha-pinned MIT row, single-sourced from ENGINE_NODE_PACKS. This entry is
+  // the F6 remediation affordance — the fetch the preview preference routes
+  // through when the pack is absent (the preflight refusal for the unwired
+  // override class names it, and the pack board lists it). Installs the pack
+  // CODE; its 39.4 MB decoder rides the pack's own minivae/ (the README's
+  // copy into vae_approx) — the catalog's Kijai taeh3 row remains the
+  // fetchable weight for the slot.
+  nodePackEntry('h3-preview-override'),
   // First-party pack (task k271ykk): installs from the studio's own
   // custom-nodes/ payload — the fetch engine short-circuits to a local
   // install and never touches the transport. License + repo stay
