@@ -1,0 +1,30 @@
+{
+  "id": "stock-h3",
+  "label": "Stock H3 stack, no packs",
+  "description": "The official H3 model registry (the e2e H3_REGISTRY_LISTINGS set) on a stock ComfyUI v0.34.0 with NO node packs installed. The Phase-1 blind-walk profile: what a new user with a correctly-provisioned engine but zero packs sees.",
+  "systemStats": {
+    "system": { "comfyui_version": "v0.34.0", "python_version": "3.12.3", "os": "linux" },
+    "devices": [{ "name": "NVIDIA GeForce RTX 4090", "type": "cuda", "index": 0, "vram_total": 25757220864, "vram_free": 24000000000, "torch_version": "2.8.0+cu128" }]
+  },
+  "objectInfoExtras": {},
+  "modelListings": {
+    "diffusion_models": [
+      "H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "H3/ssd/minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "music3_dit_int8.safetensors"
+    ],
+    "text_encoders": [
+      "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "music3_text_encoder_bf16.safetensors"
+    ],
+    "vae": [
+      "minimax_h3_video_vae_fp16.safetensors",
+      "minimax_h3_audio_vae_fp32.safetensors"
+    ],
+    "loras": [
+      "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors"
+    ]
+  },
+  "customNodeDirs": [],
+  "render": { "steps": 10, "stepDelayMs": 420, "outputKind": "video", "emitBinaryPreviews": true }
+}

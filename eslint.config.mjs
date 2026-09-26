@@ -20,6 +20,10 @@ export default tseslint.config(
   // await; same node globals as the .cjs suites. harness.js is the IN-PAGE
   // browser instrument (installed via navigate initScript) — browser globals.
   { files: ['scripts/**/*.mjs'], languageOptions: { globals: { ...globals.node } } },
+  // The environment-mirror fake engine (reality audit 2026-09-25, jf53fb8):
+  // a node .mjs server under e2e/mirror/ — same node globals as the other
+  // harness CLIs.
+  { files: ['e2e/mirror/**/*.mjs'], languageOptions: { globals: { ...globals.node } } },
   { files: ['scripts/perf-profile/harness.js'], languageOptions: { globals: { ...globals.browser } } },
   // Benchmark harness CLI (task cp96zdM): node CLI modules with top-level
   // await; same node globals as the scripts/*.cjs suites.
