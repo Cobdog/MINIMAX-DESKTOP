@@ -56,7 +56,13 @@ import type { NodePackDefinition } from '../types'
  *    file read from the pinned revision d1eb17b during the pack assessment,
  *    docs/research/preview-override-assessment.md). Vendor-eligible;
  *    user-fetch until a vendoring increment is wanted (the Larryvrh
- *    posture). */
+ *    posture).
+ *  - ComfyUI-Fizgig-H3-Still (shootthesound, task 464xfvd — the E-FS1
+ *    challenge arm): MIT (LICENSE file, Copyright 2026 Peter Neill — read
+ *    from the repo at the pinned revision f3252d2 during the 2026-09-25
+ *    assessment, docs/research/fizgig-h3-still-assessment.md).
+ *    Vendor-eligible; user-fetch. NOT adopted — behind the
+ *    experimentalT1Decode flag until the E-FS0/E-FS1 bake-off reports. */
 export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
   {
     id: 'vdn-h3',
@@ -310,6 +316,31 @@ export const ENGINE_NODE_PACKS: NodePackDefinition[] = [
     // findH3PreviewOverrideNode's pattern match catches and graph/preview.ts
     // wires as node '7'; detection is exact-any-match like every row.
     instanceNodeClasses: ['MiniMaxH3PreviewOverride'],
+  },
+  // -- The E-FS1 challenge arm (task 464xfvd; assessment
+  // docs/research/fizgig-h3-still-assessment.md, maintainer ruling
+  // 2026-09-25: "Our T1 method is now obsolete"). STATUS
+  // PROPOSED-PENDING-TEST: the pack rides BEHIND the experimentalT1Decode
+  // settings flag ('image-studio' default = zero behavior change); the
+  // E-FS0/E-FS1 bake-off owns adoption. Removal stays trivial — the
+  // registry row + the builder's flag branch + the fixture entries, nothing
+  // welds (the assessment's own migration sketch).
+  {
+    id: 'fizgig-h3-still',
+    name: 'ComfyUI-Fizgig-H3-Still',
+    featureGroup: 'H3 image',
+    description: "shootthesound's 94-line stills pack for MiniMax H3 (zero dependencies, official weights only): a true one-frame packed AV latent — the trainer's preview path — plus a decode that replicates the lone latent into the 5-latent temporal group the H3 ViT decoder was chunk-trained on and keeps pixel frame 3 (past the causal lead-in). The stock decode's banded/dark lone-token output fixed at the source; challenges the T=1 lane's Mamad8 decode head-on.",
+    repoUrl: 'https://github.com/shootthesound/ComfyUI-Fizgig-H3-Still',
+    pinnedRevision: 'f3252d2b6c94c2e34d71f583d5e1804b683afe06',
+    licenseSpdx: 'MIT',
+    licenseNote: 'MIT (LICENSE file, Copyright 2026 Peter Neill — read from the repo at the pinned revision f3252d2 during the 2026-09-25 assessment; GitHub API license record MIT). Vendor-eligible; user-fetch. NOT adopted: behind the E-FS1 flag only — the row exists so the flag-on path has detection + a fetch affordance; the bake-off decides whether it stays.',
+    installMode: 'user-fetch',
+    homepage: 'https://github.com/shootthesound/ComfyUI-Fizgig-H3-Still',
+    // NODE_CLASS_MAPPINGS read verbatim from __init__.py @ f3252d2 (the
+    // whole pack: 2 classes, category Fizgig). Both classes are exactly
+    // what the flag-on T=1 branch emits; the engine-contract fixture
+    // carries their schemas source-derived at this pin.
+    instanceNodeClasses: ['FizgigH3StillLatent', 'FizgigH3StillDecode'],
   },
 ]
 

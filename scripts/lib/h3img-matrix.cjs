@@ -103,6 +103,20 @@ matrix.push({ name: 'generate-t1', request: base({ family: 'h3img.generate.t1', 
 //    latent slice decoded through the Mamad8 image VAE; one published frame.
 matrix.push({ name: 'generate-sharp-5', request: base({ family: 'h3img.generate.sharp', tier: 5, source: 'source-anchored.png' }), models: H3IMG_MODELS, info: 'studio' })
 
+// 5f-5fs. THE E-FS1 FIZGIG ARMS (task 464xfvd — the Fizgig-H3-Still
+//    challenge, docs/research/fizgig-h3-still-assessment.md): flag-ON
+//    builds only (the flag defaults to 'image-studio', so every entry above
+//    is byte-identical — the zero-default-drift proof). The 'fizgig' info
+//    serves the two Fizgig classes WITHOUT the Image Studio pack: the lane
+//    must not depend on it (stock conditioning kept legal at length 5, the
+//    latent from FizgigH3StillLatent, the decode through
+//    FizgigH3StillDecode + the VIDEO VAE — no Mamad8 loader anywhere).
+//    5f is their T2I example's shape (I2V conditioning); 5fs is the
+//    source-anchored form (REF conditioning + the audio VAE the stock REF
+//    node requires).
+matrix.push({ name: 'generate-t1-fizgig', request: base({ family: 'h3img.generate.t1', tier: 1 }), models: H3IMG_MODELS, info: 'fizgig', options: { t1Latent: 'fizgig', t1Decode: 'fizgig' } })
+matrix.push({ name: 'generate-t1-fizgig-source', request: base({ family: 'h3img.generate.t1', tier: 1, source: 'source-anchored.png' }), models: H3IMG_MODELS, info: 'fizgig', options: { t1Latent: 'fizgig', t1Decode: 'fizgig' } })
+
 // 6. Compose — 3 ordered refs with roles (the merge).
 matrix.push({ name: 'compose-refs-3', request: base({ family: 'h3img.compose.refs', refs: [
   { name: 'identity.png', role: 'subject', transport: 'native' },

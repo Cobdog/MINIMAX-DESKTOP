@@ -165,6 +165,12 @@ export const FETCH_CATALOG: FetchCatalogEntry[] = [
   // copy into vae_approx) — the catalog's Kijai taeh3 row remains the
   // fetchable weight for the slot.
   nodePackEntry('h3-preview-override'),
+  // The E-FS1 challenge arm (task 464xfvd): sha-pinned MIT row,
+  // single-sourced from ENGINE_NODE_PACKS. This entry is the fetch
+  // affordance the experimentalT1Decode='fizgig' refusal names — the flag
+  // is off by default and the bake-off owns adoption; the row exists so
+  // the flag-on path installs honestly.
+  nodePackEntry('fizgig-h3-still'),
   // First-party pack (task k271ykk): installs from the studio's own
   // custom-nodes/ payload — the fetch engine short-circuits to a local
   // install and never touches the transport. License + repo stay

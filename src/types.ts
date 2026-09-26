@@ -400,6 +400,14 @@ export type AppSettings = {
   modelOverrides?: Record<string, ModelOverrideSlots>
   /** Chosen GPU tier — drives community quant/resolution guidance. */
   gpuTier?: '8' | '16' | '24' | 'blackwell'
+  /** The T=1 decode-path experiment flag (E-FS1, task 464xfvd — the
+   *  Fizgig-H3-Still challenge): 'image-studio' (default = the landed lane,
+   *  zero behavior change) or 'fizgig' (stock conditioning kept legal +
+   *  FizgigH3StillLatent + the group-replicate video-VAE decode — no
+   *  Mamad8 loader on that leg). Hand-set until the E-FS0/E-FS1 bake-off
+   *  reports; deliberately no UI yet — the flag is an experiment control,
+   *  not a feature. Read through t1BuildOptionsFromSettings (one seam). */
+  experimentalT1Decode?: 'image-studio' | 'fizgig'
   /** ComfyUI version the bundled graphs were last verified against
    *  (self-recorded on first successful connection). */
   testedComfyVersion?: string

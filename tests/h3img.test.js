@@ -32,11 +32,19 @@
  *      32-px grid, availability gating with install guidance.
  *  (j) PACKET ATTRIBUTION — extractAllOutputFiles collects EVERY frame
  *      output in order (never just the first).
+ *  (k) THE E-FS1 FIZGIG ARM (464xfvd) — the flag-off zero-drift proof
+ *      (default options rebuild the landed goldens byte-identically), the
+ *      flag-on fizgig-form graph (stock conditioning kept legal at length 5,
+ *      FizgigH3StillLatent as the latent source, FizgigH3StillDecode through
+ *      the VIDEO VAE, no Mamad8 loader anywhere), the honest refusal when
+ *      the pack is unserved, the settings-flag resolution, the challenger's
+ *      pinned recipe, the arm table, and the audit's latent-source frame
+ *      count (never the conditioning node's length).
  *
  * Vitest port (task z7ogmig, 2026-09-20) of scripts/test-h3img.cjs:
  * assertion bodies carry over verbatim; the linear probes became one test
  * each (sequential within the file). */
-import { test } from 'vitest'
+import { test, afterAll } from 'vitest'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
@@ -45,9 +53,13 @@ const __dirname = require('node:path').dirname(fileURLToPath(import.meta.url))
 
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
+const os = require('node:os')
 const path = require('node:path')
 const { loadTs } = require('../scripts/lib/ts-vm.cjs')
 const { H3IMG_MATRIX, H3IMG_MODELS, H3IMG_CONTRACT } = require('../scripts/lib/h3img-matrix.cjs')
+const { makeScratchDir, removeAllScratchDirs } = require('./lib/scratch.cjs')
+
+afterAll(async () => { await removeAllScratchDirs() })
 
 const FIXTURE = path.resolve(__dirname, '..', 'scripts', 'fixtures', 'h3img-golden.json')
 
@@ -114,6 +126,21 @@ const STUDIO_INFO = {
   H3ReferenceEditPrepare: node({}),
   H3ImageDecode: node({}),
 }
+// The Fizgig-H3-Still pack served (E-FS1, task 464xfvd): the two classes,
+// deliberately WITHOUT the Image Studio classes — the fizgig lane must not
+// depend on them (its conditioning is the STOCK node kept legal).
+const FIZGIG_INFO = {
+  ...HYBRID_INFO,
+  FizgigH3StillLatent: node({}),
+  FizgigH3StillDecode: node({}),
+}
+// Both packs served — arm C's habitat (the Image Studio latent + the
+// Fizgig decode) and the engine-contract mirror's shape after 464xfvd.
+const FIZGIG_STUDIO_INFO = {
+  ...STUDIO_INFO,
+  FizgigH3StillLatent: node({}),
+  FizgigH3StillDecode: node({}),
+}
 const KLEIN_INFO = {
   ...STOCK_INFO,
   EmptyFlux2LatentImage: node({}),
@@ -123,7 +150,7 @@ const KLEIN_INFO = {
   ImageScaleToTotalPixels: node({}),
   ConditioningZeroOut: node({}),
 }
-const INFO_FOR = { stock: STOCK_INFO, hybrid: HYBRID_INFO, studio: STUDIO_INFO, klein: KLEIN_INFO }
+const INFO_FOR = { stock: STOCK_INFO, hybrid: HYBRID_INFO, studio: STUDIO_INFO, klein: KLEIN_INFO, fizgig: FIZGIG_INFO }
 
 const model = (name, kind) => ({ name, kind, bytes: 1000 })
 const MODEL_FILES = [
@@ -141,7 +168,7 @@ const MODEL_FILES = [
   model('civitai_h3_style.safetensors', 'loras'),
 ]
 
-const buildFor = (entry) => h3image.buildH3ImageGraph(entry.request, entry.models, INFO_FOR[entry.info ?? 'stock'])
+const buildFor = (entry) => h3image.buildH3ImageGraph(entry.request, entry.models, INFO_FOR[entry.info ?? 'stock'], entry.options)
 
 updateMaybe('--update-golden: re-snapshot the h3img fixture from the CURRENT builder', () => {
   const snapshot = {}
@@ -594,6 +621,194 @@ test('(i2) the TE dimension-class guard (eyzcev5): the workbench families refuse
   const kleinFourB = h3image.buildKleinRefineGraph(kleinRequest, { ...H3IMG_MODELS, klein: { unet: H3IMG_MODELS.klein.unet, textEncoder: TE_4B_MIRROR, vae: H3IMG_MODELS.klein.vae } })
   ok(Object.values(kleinFourB).some((value) => value.class_type === 'CLIPLoader'), 'the klein lane still accepts the 4B-class TE (family-scoped guard)')
   assert.throws(() => h3image.buildKleinRefineGraph(kleinRequest, { ...H3IMG_MODELS, klein: { unet: H3IMG_MODELS.klein.unet, textEncoder: TE_32B_MIRROR, vae: H3IMG_MODELS.klein.vae } }), /32B-class/, 'the reverse trap: the 32B-class TE into klein refuses at the builder')
+})
+
+maybe('(k) the E-FS1 Fizgig arm (464xfvd) — the flag, the graph form, the refusal, the recipe, the arm table', () => {
+  const t1Request = (extra = {}) => ({ family: 'h3img.generate.t1', prompt: H3IMG_CONTRACT, width: 1344, height: 768, seed: 90210, tier: 1, refs: [], loras: [], filenamePrefix: 'h3img/test', ...extra })
+  const goldens = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'))
+
+  // k.1 THE ZERO-DEFAULT-DRIFT PROOF: default options (undefined and {})
+  // rebuild the landed T=1 golden BYTE-IDENTICALLY — the flag changes
+  // nothing until it is set. Failing-without-it: a builder that peeked at
+  // the fizgig branch unconditionally would emit FizgigH3Still* classes
+  // here and the golden equality would fail.
+  {
+    const plain = h3image.buildH3ImageGraph(t1Request({ source: 'source-anchored.png' }), H3IMG_MODELS, STUDIO_INFO)
+    const emptyOptions = h3image.buildH3ImageGraph(t1Request({ source: 'source-anchored.png' }), H3IMG_MODELS, STUDIO_INFO, {})
+    eq(canon(plain), goldens['generate-t1'], 'default options rebuild the landed T=1 golden byte-identically')
+    eq(canon(emptyOptions), goldens['generate-t1'], 'empty options {} are the default — the flag reads nothing it was not given')
+    const flagOff = h3image.buildH3ImageGraph(t1Request({ source: 'source-anchored.png' }), H3IMG_MODELS, STUDIO_INFO, h3image.t1BuildOptionsFromSettings({}))
+    eq(canon(flagOff), goldens['generate-t1'], 'the settings flag ABSENT resolves image-studio — the landed lane')
+  }
+
+  // k.2 THE FLAG-ON GRAPH, TEXT-ONLY FORM (their T2I example's shape): the
+  // STOCK conditioning node stays for its conditioning — its latent output
+  // dangles, its length stays LEGAL (5, the floor — never the T=1 tier);
+  // FizgigH3StillLatent is the latent source; FizgigH3StillDecode decodes
+  // through the VIDEO VAE; no Mamad8 loader exists anywhere in the graph.
+  {
+    const graph = h3image.buildH3ImageGraph(t1Request(), H3IMG_MODELS, FIZGIG_INFO, { t1Latent: 'fizgig', t1Decode: 'fizgig' })
+    const conditioning = graph['10']
+    eq(conditioning.class_type, 'MiniMaxH3ImageToVideo', 'text-only fizgig T=1: the STOCK I2V conditioning node (no Prepare class)')
+    eq(conditioning.inputs.length, 5, 'the stock conditioning node stays LEGAL at the length floor 5 — the #15644 floor is sidestepped from the submission side')
+    eq(conditioning.inputs.width, 1344, 'conditioning width rides the request')
+    eq(conditioning.inputs.height, 768, 'conditioning height rides the request')
+    const latent = graph['17']
+    eq(latent.class_type, 'FizgigH3StillLatent', 'FizgigH3StillLatent occupies the fizgig-latent slot (id 17)')
+    eq(latent.inputs, { width: 1344, height: 768, batch_size: 1 }, 'the latent node takes width/height/batch 1 (the packed T=1 zeros)')
+    eq(graph['15'].inputs.latent_image.join('|'), '17|0', "the sampler's latent comes FROM the Fizgig node — the stock node's latent output dangles")
+    eq(graph['12'].inputs.conditioning.join('|'), '10|0', 'the guider conditions through the stock node (slot 0)')
+    const decode = graph['16']
+    eq(decode.class_type, 'FizgigH3StillDecode', 'the decode is FizgigH3StillDecode')
+    eq(decode.inputs.samples.join('|'), '15|0', 'the decode samples the sampler output')
+    eq(decode.inputs.vae.join('|'), '3|0', 'the decode rides node 3 — the VIDEO VAE loader')
+    const loaders = Object.values(graph).filter((value) => value.class_type === 'VAELoader')
+    // The stock-path audio VAE loader (node 4) rides along exactly as the
+    // stock packet fallback carries it — the fizgig lane reuses the stock
+    // emission; neither loader ever names the Mamad8 file.
+    eq(loaders.length, 2, 'two VAE loaders (the video VAE + the stock-path audio VAE node)')
+    ok(loaders.some((value) => value.inputs.vae_name === H3IMG_MODELS.videoVae), 'the video VAE loader is present — the decode rides it')
+    eq(graph['3'].inputs.vae_name, H3IMG_MODELS.videoVae, 'node 3 keeps the VIDEO VAE (never reassigned to the T=1 decoder on this leg)')
+    ok(!Object.values(graph).some((value) => h3image.T1_IMAGE_VAE_PATTERN.test(String(value.inputs?.vae_name ?? ''))), 'no T=1 image VAE anywhere in the fizgig graph')
+    ok(!Object.values(graph).some((value) => value.class_type === 'H3ImageDecode'), 'no Image Studio decode node — the lane does not need the pack')
+    eq(Object.values(graph).filter((value) => value.class_type === 'SaveImage').length, 1, 'exactly one frame published')
+    eq(h3image.h3imgGraphAudit(graph), [], 'the fizgig-form graph passes the audit')
+  }
+
+  // k.3 THE FLAG-ON GRAPH, SOURCE-ANCHORED FORM: the stock REF conditioning
+  // (Picture-1 semantics — a frame-0 keyframe would fill the only output
+  // slot, exactly as the studio lane) with its REQUIRED audio_vae wired, and
+  // the ref loader at the 30x slot.
+  {
+    const graph = h3image.buildH3ImageGraph(t1Request({ source: 'source-anchored.png' }), H3IMG_MODELS, FIZGIG_INFO, { t1Latent: 'fizgig', t1Decode: 'fizgig' })
+    eq(graph['10'].class_type, 'MiniMaxH3ReferenceToVideo', 'source-anchored fizgig T=1: the STOCK REF conditioning node')
+    eq(graph['10'].inputs.length, 5, 'the REF conditioning node stays legal at 5')
+    eq(graph['10'].inputs.audio_vae.join('|'), '4|0', 'the stock REF node\'s REQUIRED audio_vae is wired (node 4)')
+    eq(graph['10'].inputs['ref_images.ref_image_0'].join('|'), '300|0', 'the source rides Picture 1 through the 30x ref loader (id 300 = prefix 30 + slot 0)')
+    eq(graph['17'].inputs.width, 1344, 'the latent node mirrors the request width')
+    const loaders = Object.values(graph).filter((value) => value.class_type === 'VAELoader').map((value) => value.inputs.vae_name)
+    eq(loaders.length, 2, 'two VAE loaders (video decode + the audio VAE the REF node requires)')
+    ok(loaders.every((name) => !h3image.T1_IMAGE_VAE_PATTERN.test(name)), 'neither loader names the Mamad8 VAE')
+    eq(h3image.h3imgGraphAudit(graph), [], 'the source-anchored fizgig graph passes the audit')
+  }
+
+  // k.4 THE HONEST REFUSALS: the fizgig legs refuse when the pack's classes
+  // are unserved (naming the pack + the missing class + the fetch
+  // affordance), and the mixed arm (studio latent + fizgig decode) refuses
+  // on whichever pack is absent — never a doomed graph, never a silent
+  // stock fallback.
+  {
+    assert.throws(
+      () => h3image.buildH3ImageGraph(t1Request(), H3IMG_MODELS, STUDIO_INFO, { t1Latent: 'fizgig', t1Decode: 'fizgig' }),
+      /ComfyUI-Fizgig-H3-Still/,
+      'flag-on with the Fizgig pack unserved refuses naming the pack',
+    )
+    passed += 1
+    console.log('  ok - flag-on with the Fizgig pack unserved refuses naming the pack')
+    {
+      let refusal = ''
+      try {
+        h3image.buildH3ImageGraph(t1Request(), H3IMG_MODELS, STUDIO_INFO, { t1Latent: 'fizgig', t1Decode: 'fizgig' })
+      } catch (error) {
+        refusal = error instanceof Error ? error.message : String(error)
+      }
+      ok(refusal.includes('FizgigH3StillLatent') || refusal.includes('FizgigH3StillDecode'), 'the refusal names the missing class(es)')
+      ok(refusal.includes('Fetch') || refusal.includes('Node packs'), 'the refusal carries the fetch affordance')
+    }
+    assert.throws(
+      () => h3image.buildH3ImageGraph(t1Request(), H3IMG_MODELS, FIZGIG_INFO, { t1Latent: 'image-studio', t1Decode: 'fizgig' }),
+      /Image Studio|#15644/,
+      'arm C (studio latent + fizgig decode) without the Image Studio pack refuses on the studio leg',
+    )
+    passed += 1
+    console.log('  ok - arm C without the Image Studio pack refuses on the studio leg')
+    // Arm C on the full habitat (both packs) BUILDS: the Image Studio
+    // conditioning/latent with the Fizgig decode — the decode-isolated arm.
+    const armC = h3image.buildH3ImageGraph(t1Request(), H3IMG_MODELS, FIZGIG_STUDIO_INFO, { t1Latent: 'image-studio', t1Decode: 'fizgig' })
+    ok(Object.values(armC).some((value) => value.class_type === 'H3TextToImagePrepare'), 'arm C conditions through the pack (their one-frame Prepare)')
+    eq(armC['16'].class_type, 'FizgigH3StillDecode', 'arm C decodes through the Fizgig node')
+    ok(!Object.values(armC).some((value) => h3image.T1_IMAGE_VAE_PATTERN.test(String(value.inputs?.vae_name ?? ''))), 'arm C carries no Mamad8 loader — decode-isolated')
+    eq(h3image.h3imgGraphAudit(armC), [], 'arm C passes the audit')
+  }
+
+  // k.5 The settings-flag resolution (the override seam's read): absent,
+  // null, garbage, and 'image-studio' all resolve the landed lane; only
+  // 'fizgig' selects the challenger.
+  {
+    eq(h3image.t1BuildOptionsFromSettings(undefined), { t1Latent: 'image-studio', t1Decode: 'image-studio' }, 'no settings object → the landed lane')
+    eq(h3image.t1BuildOptionsFromSettings(null), { t1Latent: 'image-studio', t1Decode: 'image-studio' }, 'null settings → the landed lane')
+    eq(h3image.t1BuildOptionsFromSettings({ experimentalT1Decode: 'image-studio' }), { t1Latent: 'image-studio', t1Decode: 'image-studio' }, "'image-studio' → the landed lane")
+    eq(h3image.t1BuildOptionsFromSettings({ experimentalT1Decode: 'nonsense' }), { t1Latent: 'image-studio', t1Decode: 'image-studio' }, 'garbage never selects the experiment')
+    eq(h3image.t1BuildOptionsFromSettings({ experimentalT1Decode: 'fizgig' }), { t1Latent: 'fizgig', t1Decode: 'fizgig' }, "'fizgig' → the challenger, both legs")
+  }
+
+  // k.6 The challenger's pinned recipe (their shipped example workflow
+  // @ f3252d2, verbatim) — arm B2.
+  {
+    eq(h3image.H3IMG_RECIPE_PINS.fizgig.conditioningLength, 5, 'the stock conditioning node pins the legal length floor 5')
+    eq(h3image.H3IMG_RECIPE_PINS.fizgig.recipe, { steps: 20, sampler: 'er_sde', scheduler: 'simple', turboStrength: 0.38, detail: false, sigmaShift: false }, "the challenger's recipe pins, verbatim from h3_still_text_to_image.json @ f3252d2")
+    const graph = h3image.buildH3ImageGraph(t1Request(), H3IMG_MODELS, FIZGIG_INFO, { t1Latent: 'fizgig', t1Decode: 'fizgig', t1Recipe: 'fizgig', t1Base: 'fl2va' })
+    // The form adapter (when its pack is served) is OUR load-time safety and
+    // wraps slot 1 on every lane equally — not a recipe variable; the
+    // strength is what the recipe pins.
+    const loraLoaders = Object.values(graph).filter((value) => value.class_type === 'LoraLoaderModelOnly' || value.class_type === h3image.FORM_ADAPTER_NODE)
+    eq(loraLoaders.length, 1, 'B2: exactly ONE LoRA loader (no detail adapter — their example wires one turbo)')
+    const loader = loraLoaders[0]
+    const strength = loader.class_type === h3image.FORM_ADAPTER_NODE ? loader.inputs.strength : loader.inputs.strength_model
+    eq(strength, 0.38, 'B2: the v4-step-600 turbo rides @0.38 (their widget value)')
+    eq(graph['14'].inputs.steps, 20, 'B2: 20 steps')
+    eq(graph['14'].inputs.scheduler, 'simple', 'B2: the simple scheduler')
+    eq(graph['13'].inputs.sampler_name, 'er_sde', 'B2: er_sde')
+    ok(!Object.values(graph).some((value) => value.class_type === 'MiniMaxH3SigmaShift'), 'B2: no sigma shift node (their example carries none)')
+    const unet = Object.values(graph).find((value) => value.class_type === 'UNETLoader' || value.class_type === 'MiniMaxH3HybridLoader')
+    eq(unet.class_type, 'UNETLoader', 'B2: the plain FL2VA base loader (t1Base fl2va beats the available hybrid — their wiring)')
+    eq(unet.inputs.unet_name, H3IMG_MODELS.fl2va, 'B2: the base names fl2va')
+    eq(h3image.h3imgGraphAudit(graph), [], 'B2 passes the audit')
+  }
+
+  // k.7 The arm table (the assessment's bake-off arms as data) + the
+  // runner entry: four arms from one request, each with its isolation
+  // documented and its graph built — against the environment mirror (the
+  // real-capture fixture) as the contract surface.
+  {
+    eq(h3image.EFS1_ARMS.map((arm) => arm.id), ['A', 'B', 'B2', 'C'], 'the arm table is exactly A/B/B2/C')
+    ok(h3image.EFS1_ARMS.every((arm) => arm.isolates.length > 20), 'every arm documents what it isolates')
+    const mirror = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'fixtures', 'engine-object-info.json'), 'utf8')).nodes
+    const arms = h3image.buildEFS1ArmGraphs(t1Request({ source: 'source-anchored.png' }), H3IMG_MODELS, mirror)
+    eq(arms.length, 4, 'the runner builds all four arms')
+    const byId = Object.fromEntries(arms.map((entry) => [entry.arm.id, entry.graph]))
+    ok(Object.values(byId.A).some((value) => value.class_type === 'H3ImageDecode'), 'arm A decodes through the pack (the incumbent)')
+    ok(Object.values(byId.A).some((value) => h3image.T1_IMAGE_VAE_PATTERN.test(String(value.inputs?.vae_name ?? ''))), 'arm A carries the Mamad8 loader (the incumbent decode)')
+    for (const id of ['B', 'B2', 'C']) {
+      ok(Object.values(byId[id]).some((value) => value.class_type === 'FizgigH3StillDecode'), `arm ${id} decodes through FizgigH3StillDecode`)
+      ok(!Object.values(byId[id]).some((value) => h3image.T1_IMAGE_VAE_PATTERN.test(String(value.inputs?.vae_name ?? ''))), `arm ${id} carries no Mamad8 loader`)
+    }
+    ok(Object.values(byId.B).some((value) => value.class_type === 'MiniMaxH3SigmaShift'), 'arm B keeps OUR recipe (sigma shift stays — machinery is the only variable)')
+    eq(byId.B['14'].inputs.steps, 8, 'arm B keeps OUR 8 steps')
+    // The runner's own contract gate: the committed entry validates every
+    // arm clean against the mirror before it will write anything.
+    const runner = require('../scripts/experiments/efs1-arms.cjs')
+    const outDir = makeScratchDir(path.join(os.tmpdir(), 'mm-efs1-'))
+    const written = runner.writeArms({ request: t1Request({ source: 'source-anchored.png' }), models: H3IMG_MODELS, info: mirror, outDir })
+    eq(written.map((file) => file.arm).sort().join(','), 'A,B,B2,C', 'the runner entry writes all four arm graphs')
+    for (const file of written) {
+      const parsed = JSON.parse(fs.readFileSync(file.path, 'utf8'))
+      ok(parsed.prompt && Object.keys(parsed.prompt).length > 0, `the runner writes a submittable prompt JSON (${file.arm})`)
+    }
+  }
+
+  // k.8 THE AUDIT ALLOWANCE (the assessment's explicit rule): the frame
+  // count keys on the LATENT SOURCE, never the conditioning node's length —
+  // a Fizgig-latent graph publishes exactly one frame, and the stock
+  // conditioning node it carries must stay at a legal length (>= 5).
+  {
+    const good = h3image.buildH3ImageGraph(t1Request(), H3IMG_MODELS, FIZGIG_INFO, { t1Latent: 'fizgig', t1Decode: 'fizgig' })
+    eq(h3image.h3imgGraphAudit(good, { frames: 1 }), [], 'the built fizgig graph at its true frame count: clean')
+    const twoPublishes = { ...good, '701': { class_type: 'ImageFromBatch', inputs: { image: ['16', 0], batch_index: 1, length: 1 } }, '711': { class_type: 'SaveImage', inputs: { images: ['701', 0], filename_prefix: 'x' } } }
+    ok(h3image.h3imgGraphAudit(twoPublishes).some((line) => line.includes('FizgigH3StillLatent')), 'a Fizgig-latent graph publishing two frames is flagged — the T=1 latent is the frame truth')
+    const shortConditioning = { ...good, '10': { ...good['10'], inputs: { ...good['10'].inputs, length: 1 } } }
+    ok(h3image.h3imgGraphAudit(shortConditioning).some((line) => line.includes('length')), 'a Fizgig-latent graph whose stock conditioning carries length < 5 is flagged — never resubmit the illegal length')
+  }
 })
 
 maybe('(j) packet attribution + the stage executor seam — every frame, in order; one free per engine change', async () => {

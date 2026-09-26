@@ -9,7 +9,7 @@
  */
 import { createId } from '../lib/createId'
 import { extractAllOutputFiles } from '../lib/workflow'
-import { buildH3ImageGraph, detectH3ImgFamilies, findH3ImgFamily, inferH3ImgSelection, H3IMG_RECIPE_PINS } from '../lib/graph/h3image'
+import { buildH3ImageGraph, detectH3ImgFamilies, findH3ImgFamily, inferH3ImgSelection, H3IMG_RECIPE_PINS, t1BuildOptionsFromSettings } from '../lib/graph/h3image'
 import { resolveModelOverrides, resolveModels } from '../lib/modelOverrides'
 import { resolveKrea2EditModels } from '../lib/graph/krea2edit'
 import { prepareImage } from '../lib/imageCrop'
@@ -183,6 +183,9 @@ export async function submitWorkbenchGeneration(
       },
       buildH3ImgSelection(facts),
       facts.info,
+      // The E-FS1 flag (464xfvd) rides the same seam the model overrides
+      // do: absent/garbage → the landed Image Studio lane, byte-identically.
+      t1BuildOptionsFromSettings(settings),
     )
     // R-02 preflight (Wave 1): the built graph's class_types diffed against
     // the engine's object_info BEFORE submission — same seam as H3 video.

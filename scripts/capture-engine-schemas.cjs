@@ -84,6 +84,11 @@ const PACK_CLASSES = [
   // the pack's other seven classes duplicate app-side capability and stay
   // out of contract scope.
   'H3ImagePrepare', 'H3TextToImagePrepare', 'H3ImageToImagePrepare', 'H3ReferenceEditPrepare', 'H3ImageDecode',
+  // shootthesound Fizgig-H3-Still (task 464xfvd — the E-FS1 challenge arm,
+  // behind the experimentalT1Decode flag): the pack's entire 2 classes.
+  // NOT installed on the shared install — source-derived from the pinned
+  // repo revision below (the form-adapter pattern).
+  'FizgigH3StillLatent', 'FizgigH3StillDecode',
   // (The four AceStep classes were removed with the engine, 2026-09-21 —
   // nn5ld47; no builder emits them, so they left contract scope. The
   // committed fixture keeps its captured entries until the next
@@ -143,6 +148,55 @@ function formAdapterEntry() {
   }
 }
 
+/** Source-derived schemas for the Fizgig-H3-Still pack (E-FS1, task
+ * 464xfvd), transcribed verbatim from __init__.py INPUT_TYPES +
+ * RETURN_TYPES at the pinned revision f3252d2 (the whole pack is 94 lines,
+ * 2 classes — read in full during the 2026-09-25 assessment,
+ * docs/research/fizgig-h3-still-assessment.md). The pack is NOT installed
+ * on the shared install, so these entries are source-derived like the
+ * form adapter's — honest provenance on each entry. Update them only
+ * alongside a pin bump; the E-FS1 suite owns the behavior. */
+function fizgigEntries() {
+  const sourceDerived = 'shootthesound/ComfyUI-Fizgig-H3-Still @ f3252d2b6c94c2e34d71f583d5e1804b683afe06 __init__.py (not installed on the shared install — INPUT_TYPES transcribed verbatim)'
+  return {
+    FizgigH3StillLatent: {
+      input: {
+        required: {
+          width: ['INT', { default: 768, min: 64, max: 4096, step: 32, tooltip: 'Image width in pixels (multiple of 32).' }],
+          height: ['INT', { default: 1344, min: 64, max: 4096, step: 32, tooltip: 'Image height in pixels (multiple of 32).' }],
+          batch_size: ['INT', { default: 1, min: 1, max: 64 }],
+        },
+      },
+      input_order: { required: ['width', 'height', 'batch_size'] },
+      output: ['LATENT'],
+      output_name: ['LATENT'],
+      output_is_list: [false],
+      name: 'FizgigH3StillLatent',
+      display_name: 'Fizgig H3 Still Latent (single frame)',
+      category: 'Fizgig',
+      output_node: false,
+      __sourceDerived: sourceDerived,
+    },
+    FizgigH3StillDecode: {
+      input: {
+        required: {
+          samples: ['LATENT', {}],
+          vae: ['VAE', {}],
+        },
+      },
+      input_order: { required: ['samples', 'vae'] },
+      output: ['IMAGE'],
+      output_name: ['IMAGE'],
+      output_is_list: [false],
+      name: 'FizgigH3StillDecode',
+      display_name: 'Fizgig H3 Still Decode',
+      category: 'Fizgig',
+      output_node: false,
+      __sourceDerived: sourceDerived,
+    },
+  }
+}
+
 /** Empty one combo's options in place, preserving the serving shape. */
 function emptyCombo(classType, fieldName, spec) {
   if (Array.isArray(spec) && Array.isArray(spec[0])) return [ [], spec[1] ?? {} ]
@@ -174,6 +228,7 @@ function main() {
   const rawPath = path.resolve(argv[0])
   const raw = JSON.parse(fs.readFileSync(rawPath, 'utf8'))
   const wanted = [...new Set([...STOCK_CLASSES, ...PACK_CLASSES])]
+  const sourceDerived = { MiniMaxH3LoraFormLoader: formAdapterEntry, ...fizgigEntries() }
 
   const nodes = {}
   const absent = []
@@ -185,8 +240,8 @@ function main() {
         if (entry.input.optional) entry.input.optional = normalizeInputs(classType, entry.input.optional)
       }
       nodes[classType] = entry
-    } else if (classType === 'MiniMaxH3LoraFormLoader') {
-      nodes[classType] = formAdapterEntry()
+    } else if (sourceDerived[classType]) {
+      nodes[classType] = sourceDerived[classType]()
     } else {
       absent.push({ class: classType, reason: ABSENT_REASONS[classType] ?? 'not served by this install' })
     }
@@ -203,10 +258,12 @@ function main() {
       keptClassCount: Object.keys(nodes).length,
       formAdapterSource,
       ...(nodes.H3ImageDecode !== undefined ? { h3ImageStudioPackCapture: 'astropuzzo/ComfyUI-MiniMax-H3-Image-Studio @ 47dea30d0bf07e7340ef0cc97e8174a15edf55b9 (v23.0.0) cloned into the shared install custom_nodes before this capture (task afvlbk4) — its 5 load-bearing classes (Prepare set + H3ImageDecode) captured REAL from /object_info; the pack\'s own test suite passed on the venv first (26/26)' } : {}),
+      ...(nodes.FizgigH3StillDecode !== undefined ? { fizgigPackCapture: 'shootthesound/ComfyUI-Fizgig-H3-Still @ f3252d2b6c94c2e34d71f583d5e1804b683afe06 SOURCE-DERIVED (task 464xfvd, E-FS1): the pack is NOT installed on the shared install — both classes (the whole pack) transcribed from __init__.py INPUT_TYPES + RETURN_TYPES at this pin during the 2026-09-25 assessment. An /object_info capture replaces these entries the day the pack is installed for the bake-off.' } : {}),
       normalizations: [
         'trimmed to STOCK_GRAPH_CLASSES (src/lib/preflight.ts, lockstep-checked by tests) + the pack/family classes builders can emit',
         'file-listing combos (model folders, input dirs) EMPTIED: options are this box\'s filesystem, not engine truth — the contract validator treats empty options as environment-enumerated and skips membership; non-file enums keep their real captured options',
         'MiniMaxH3LoraFormLoader source-derived from this repo\'s first-party pack (not installed on the shared install); see __sourceDerived on the entry',
+        'FizgigH3StillLatent/FizgigH3StillDecode source-derived from the pack repo at pinned f3252d2 (E-FS1, not installed on the shared install — flag-gated, not adopted); see __sourceDerived on the entries',
         'absent classes recorded with reasons (inert-by-design lanes)',
       ],
       regenerate: 'per the header of scripts/capture-engine-schemas.cjs (runbook-governed CPU-only capture, then this script over the raw JSON)',
@@ -221,4 +278,4 @@ function main() {
 }
 
 if (require.main === module) main()
-module.exports = { STOCK_CLASSES, PACK_CLASSES, FILE_LISTING_FIELDS, formAdapterEntry }
+module.exports = { STOCK_CLASSES, PACK_CLASSES, FILE_LISTING_FIELDS, formAdapterEntry, fizgigEntries }

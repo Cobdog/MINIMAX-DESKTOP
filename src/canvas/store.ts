@@ -91,7 +91,7 @@ import { inferSelections } from '../lib/modelSelection'
 import { submitH3Render, validateH3Render } from '../lib/h3Submit'
 import { submitWorkbenchGeneration, validateWorkbenchRequest } from '../images/submit'
 import { canvasEditHandoff, canvasH3OneFrameRequest, queuedImageEngineRefusal, stashCanvasEditHandoff } from './stillIntent'
-import { buildH3ImageGraph, H3IMG_RECIPE_PINS } from '../lib/graph/h3image'
+import { buildH3ImageGraph, H3IMG_RECIPE_PINS, t1BuildOptionsFromSettings } from '../lib/graph/h3image'
 import { submitMusic3, validateMusic3 } from '../lib/music3Submit'
 import { buildMusic3Workflow, inferMusic3Selection, type Music3GenerationOptions } from '../lib/music3Workflow'
 import { characterReferences, loadCharacterProjects } from '../lib/characterLibrary'
@@ -2530,7 +2530,7 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
             refs: [],
             loras: [],
             filenamePrefix: 'images/H3IMG_plan',
-          }, CANVAS_T1_TEST_SELECTION, facts.info)
+          }, CANVAS_T1_TEST_SELECTION, facts.info, t1BuildOptionsFromSettings(facts.settings))
         } catch (error) {
           buildRefusal = error instanceof Error ? error.message : String(error)
           dbg('family', { verdict: 'plan-build-refused', family: request.settings.family, reason: 'pack-absent' })
