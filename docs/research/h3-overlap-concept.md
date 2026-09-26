@@ -84,6 +84,71 @@ For the drift-envelope, the invariant is also an experimental control: any
 arm that fails it (stale refs, replayed action text, off-grid joints)
 measures the *invariant violation*, not the mitigation.
 
+### 0.2 The prompt timeline — layered, timestamped, embeddings precomputed (maintainer, 2026-09-25)
+
+> "A prompt not just be a box, but timestamped on a timeline… elements
+> present throughout get a large timerange… smaller 'beat'-level prompts…
+> concated together, or layered… prompt context determined by position in
+> real time; precompute the embeddings for the entire chain at every
+> interval we know we are going to sample at and cache them ahead of time —
+> no swapping between text encoder and generation pass; all deterministic."
+
+This is the textual axis of §0.1 made structural — and it lands on shipped
+prior art plus one new systems idea:
+
+- **Chain-level prompt intervals are documented territory, in pieces.**
+  H3's official base guide already timestamps *within* one generation
+  (`[Shot N] At MM:SS.mmm`, strictly increasing cut times) **[DOC]**; FL
+  PromptTimeline schedules prompt sections over video tokens in
+  seconds/frames/beats via *temporal conditioning masks on the native grid*
+  (token-level layering inside a window) **[DOC, ecosystem sweep]**;
+  LongMedia's MultiClip planner + `continuity_policy` split prompt text into
+  durable state vs action-owned-by-timestamps **[DOC, ecosystem sweep]**.
+  The maintainer's formulation unifies these: durable elements get
+  chain-long intervals, beats get narrow ones, and a window's text = the
+  composition of layers active at its position. The two composition modes
+  are complementary, not competing: **concat** (active layers joined into
+  one encode per window — safe, respects the ≤7000-char limit and ordering
+  discipline) vs **token-mask layering** (one window, spans placed at their
+  exact time slices — the FL mechanism, sharper for beats that begin
+  mid-window).
+- **Embedding precompute is the new contribution — and it is feasible
+  today.** The window grid of a chain is known before sampling starts
+  (deterministic: window lengths, strides, joint positions are all decided
+  at graph-compile time), therefore the per-window composed prompts are
+  known too: encode them *all* in one pass, cache the COND tensors, index
+  by window during the sampling loop. The pack's own workflow already
+  caches one static conditioning via SetNode/GetNode across its batch loop
+  — generalizing to a per-window conditioning list is a graph-factory
+  concern we own, not a model capability gap **[DOC]**.
+- **What it buys, concretely:** (a) *determinism* — fixed seeds + cached
+  embeddings + latent-fork carry make a chain re-run bit-stable given
+  unchanged weights, which is exactly the property the locked-chains /
+  regenerate-downstream model needs (re-roll window N; downstream replays
+  identically unless its conditioning or carried latents changed);
+  (b) *bit-identical durable conditioning* — the byte-identical text
+  discipline becomes embedding-identical by construction, closing the
+  prompt-drift axis structurally rather than by discipline; (c) *VRAM and
+  wall-clock* — the Qwen3-VL-32B encoder can unload before the sampling
+  loop instead of swapping against the 33B DiT per window; (d) *cache
+  invalidation is localized* — editing one beat re-encodes only windows
+  whose active-layer composition changed, keyed by composed-text hash
+  (the same hash-bound-binding doctrine as the latent manifest, applied to
+  conditioning).
+- **Honest caveats:** the ≤7000-char prompt ceiling applies per composed
+  window (a dense beat stack plus full durable state can hit it — the
+  compiler must budget layers); ordering discipline survives (ref/Picture
+  numbering is wiring order, not prose order — unchanged); and
+  precompute assumes the sampling schedule is frozen before generation —
+  interactive mid-chain prompt edits re-open only the affected windows'
+  encodes, not the whole pass.
+- **Drift-envelope placement:** this is primarily an *architecture* input
+  (the chain manager's conditioning model) rather than a new arm — but it
+  hardens every arm's textual control: prompt-drift variance across hops
+  goes to zero by construction, so any remaining drift in the arms is
+  attributable to the visual/temporal axes where the mitigation questions
+  actually live.
+
 ## 1. The mechanism, precisely — what the pack actually does
 
 ### 1.1 What it is (and is not)
