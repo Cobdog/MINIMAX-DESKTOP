@@ -69,7 +69,7 @@ import type { ModelFile, ModelOverrideSlots } from '../types'
 import { dbg } from './dbg'
 import { inferH3ImgSelection, T1_IMAGE_VAE_PATTERN } from './graph/h3image'
 import { inferSelections } from './modelSelection'
-import { inferMusic3Selection } from './music3Workflow'
+import { inferMusic3Selection, MUSIC3_DAV_FILENAME } from './music3Workflow'
 
 export type ModelOverrideSlotName = 'checkpoint' | 'fl2va' | 'ref2va' | 'merged' | 'textEncoder' | 'vae' | 'videoVae' | 'audioVae' | 'imageVae'
 
@@ -96,6 +96,11 @@ export type ModelFamilyInfo = {
   slots: readonly ModelOverrideSlotName[]
   /** The registry kind each exposed slot picks from. */
   slotKinds: Partial<Record<ModelOverrideSlotName, ModelFile['kind']>>
+  /** (sweep #5, 68e9k17 — audit F3/M4) What an EMPTY auto-resolution MEANS
+   *  for a slot, per family: "nothing detected" must read as a requirement
+   *  where the file genuinely is a distinct artifact the engine does not
+   *  serve — not as a bug in the detection. */
+  emptyAutoHint?: Partial<Record<ModelOverrideSlotName, string>>
 }
 
 /** The T=1 legality map (task epdvxd4, AC-4): the imageVae slot exists ONLY
@@ -129,7 +134,8 @@ export const MODEL_FAMILIES: readonly ModelFamilyInfo[] = [
     label: 'MiniMax Music 3',
     note: 'The Music 3 song engine: diffusion model, text encoder, and the DAV audio VAE — the family\'s one decoder is audio-class.',
     slots: ['checkpoint', 'textEncoder', 'audioVae'],
-    slotKinds: { checkpoint: 'diffusion_models', textEncoder: 'text_encoders', audioVae: 'vae' }
+    slotKinds: { checkpoint: 'diffusion_models', textEncoder: 'text_encoders', audioVae: 'vae' },
+    emptyAutoHint: { audioVae: `Music 3 needs its own DAV audio VAE (${MUSIC3_DAV_FILENAME}) — the H3 video family's audio VAE is a different decoder and never auto-fills this slot.` }
   },
 ]
 
@@ -148,6 +154,39 @@ export const SLOT_LABELS: Record<ModelOverrideSlotName, string> = {
   videoVae: 'Video VAE',
   audioVae: 'Audio VAE',
   imageVae: 'Image VAE (T=1)',
+}
+
+/** (sweep #8, audit F4 — task 68e9k17) The MODELS section's header-chip
+ *  attribution, as data: per exposed slot, the layer actually in force
+ *  (chain pick > global pick > auto — the same precedence the slot rows
+ *  render), counted. The chip is derived from THIS so it can never
+ *  contradict the rows beneath it; blank/whitespace values are auto (the
+ *  stored convention). */
+export function overrideLayerCounts(slots: readonly ModelOverrideSlotName[], chain?: ModelOverrideSlots, global?: ModelOverrideSlots): { chain: number; global: number } {
+  let chainCount = 0
+  let globalCount = 0
+  for (const slot of slots) {
+    const chainValue = chain?.[slot]
+    if (typeof chainValue === 'string' && chainValue.trim()) {
+      chainCount += 1
+      continue
+    }
+    const globalValue = global?.[slot]
+    if (typeof globalValue === 'string' && globalValue.trim()) globalCount += 1
+  }
+  return { chain: chainCount, global: globalCount }
+}
+
+/** The chip text for those counts: names every layer in force, counts when
+ *  plural (always, when both layers are in force — each needs its number to
+ *  stay unambiguous), and reads 'auto (inferred)' only when NOTHING is
+ *  picked. */
+export function overrideLayerSummary(counts: { chain: number; global: number }): string {
+  const mixed = counts.chain > 0 && counts.global > 0
+  const parts: string[] = []
+  if (counts.chain) parts.push(`chain pick${mixed || counts.chain > 1 ? ` (${counts.chain})` : ''}`)
+  if (counts.global) parts.push(`${mixed ? 'global' : 'global pick'}${mixed || counts.global > 1 ? ` (${counts.global})` : ''}`)
+  return parts.length ? parts.join(' · ') : 'auto (inferred)'
 }
 
 /** How each generic slot lands in the family's concrete selection record.

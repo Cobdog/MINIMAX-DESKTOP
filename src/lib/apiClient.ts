@@ -141,6 +141,21 @@ export function createWebApiClient(): DesktopApi {
       // (best-effort POST /refresh) and drops the server's probe cache.
       return (await apiFetch<{ models: ModelFile[] }>(options?.refresh ? '/api/lan/bootstrap?refresh=1' : '/api/lan/bootstrap')).models as never
     },
+    async lightInventory(settings: AppSettings) {
+      // (sweep #2, 68e9k17) The drift check's light read — models only, no
+      // object_info. Any non-judgeable answer is null (never an empty
+      // inventory: an engine that cannot be asked keeps its current truth).
+      // (Like every service-URL arg on this bridge, the server is
+      // authoritative — the settings argument is accepted and ignored.)
+      void settings
+      try {
+        const body = await apiFetch<{ connected?: boolean; models?: ModelFile[]; servedKinds?: string[] }>('/api/lan/inventory-light')
+        if (body.connected !== true || !Array.isArray(body.models) || !Array.isArray(body.servedKinds)) return null
+        return { models: body.models, servedKinds: body.servedKinds }
+      } catch {
+        return null
+      }
+    },
     async getComfyStatus(url: string) {
       const query = url ? `?url=${encodeURIComponent(url)}` : ''
       return apiFetch(`/api/lan/comfy-status${query}`)

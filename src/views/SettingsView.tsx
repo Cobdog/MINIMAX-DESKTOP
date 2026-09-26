@@ -490,6 +490,7 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
                   </select>
                   <ChevronDown size={15} />
                 </div>
+                {!value && !autoFile && family.emptyAutoHint?.[slot] && <p className="model-override-problem" data-model-override-requirement={slot} role="status">{family.emptyAutoHint[slot]}</p>}
                 {outcome?.state === 'refused' && <p className="model-override-problem" data-model-override-problem role="alert">Refused — {outcome.reason} Clear the pick to render on auto.</p>}
                 {outcome?.state === 'degraded' && <p className="model-override-problem" data-model-override-problem role="status">{outcome.warning}</p>}
                 {outcome?.state === 'applied' && outcome.warning && <p className="model-override-problem" data-model-override-problem role="status">{outcome.warning}</p>}

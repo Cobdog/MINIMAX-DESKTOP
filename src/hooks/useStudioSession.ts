@@ -5,49 +5,54 @@
  *  facade that keeps the boot-load and telemetry effects. Its return shape is
  *  unchanged, so existing destructuring keeps working; components that want
  *  narrow updates select directly from the store. Store actions are stable
- *  references, captured once. */
+ *  references, captured once.
+ *
+ *  (Sweep #2, 68e9k17) The probe CONSEQUENCE flow — transitions, the
+ *  recovery/drift inventory re-sync with refresh semantics, the resync
+ *  bookkeeping — lives in src/lib/engineRecovery.ts (dependency-injected,
+ *  unit- and mirror-tested); this module wires the real bridge + store into
+ *  it and keeps only the loop and the boot effects. */
 import { useCallback, useEffect } from 'react'
 import type { AppSettings, ComfyStatus } from '../types'
 import { onRealtimeStatus, subscribe } from '../lib/useRealtime'
 import { dbg } from '../lib/dbg'
-import { engineTransition, logEngineProbe, nextRecheckDelayMs } from '../lib/engineWatch'
+import { nextRecheckDelayMs } from '../lib/engineWatch'
+import { runEngineCheck as runEngineRecoveryCheck, type EngineProbeSource, type EngineRecoveryDeps } from '../lib/engineRecovery'
 import { useSessionStore } from '../state/sessionStore'
 import type { TelemetrySample } from '../types'
 
-/** One engine probe + its transition bookkeeping (R-01). The source names
- *  who asked: 'boot' (first check — no transition, no re-pull beyond its
- *  own), 'loop' (the re-check cadence), 'visibility' (tab came back),
- *  'manual' (Settings Test-connection / save). object_info + inventory
- *  re-pull ONLY on a disconnect→connect transition (A-8: never per tick —
- *  a loaded instance's full object_info is megabytes). */
-async function runEngineCheck(url: string, source: 'boot' | 'loop' | 'visibility' | 'manual'): Promise<ComfyStatus> {
-  const store = useSessionStore.getState()
-  const wasConnected = source === 'boot' ? undefined : store.status.connected
-  const nextStatus = await window.minimax.getComfyStatus(url)
-  const transition = engineTransition(wasConnected, nextStatus.connected)
-  logEngineProbe(source, url, transition, nextStatus.connected, nextStatus.latencyMs ?? 0)
-  store.setStatus(nextStatus)
-  if (nextStatus.connected) {
-    const shouldPullInfo = transition === 'recovered' || source === 'boot' || source === 'manual'
-    if (shouldPullInfo) {
-      try {
-        store.setInfo(await window.minimax.getObjectInfo(url))
-        store.bumpInfoEpoch()
-        if (transition === 'recovered') {
-          // The restart-watch payload: object_info AND the model inventory
-          // (the instance's own registry listing — R-12) re-pulled together.
-          void window.minimax.scanModels(useSessionStore.getState().settings ?? ({} as AppSettings)).then((found) => {
-            useSessionStore.getState().setModels(found)
-          }).catch(() => undefined)
-        }
-      } catch { store.setInfo({}) }
-    }
-    if (transition === 'recovered') store.markEngineRecovered(Date.now())
-  } else {
-    store.setInfo({})
-    if (transition === 'lost') store.markEngineLost(Date.now())
-  }
-  return nextStatus
+/** The real bridge + store adapter over the shared session store (reads via
+ *  getState() at CALL time so every probe sees the live values; the store's
+ *  action references are stable). */
+const engineRecoveryDeps: EngineRecoveryDeps = {
+  bridge: {
+    getComfyStatus: (url) => window.minimax.getComfyStatus(url),
+    getObjectInfo: (url) => window.minimax.getObjectInfo(url),
+    scanModels: (settings, options) => window.minimax.scanModels(settings, options),
+    lightInventory: (settings) => window.minimax.lightInventory(settings),
+  },
+  store: {
+    status: () => useSessionStore.getState().status,
+    settings: () => useSessionStore.getState().settings,
+    models: () => useSessionStore.getState().models,
+    setStatus: (status) => useSessionStore.getState().setStatus(status),
+    setInfo: (info) => useSessionStore.getState().setInfo(info),
+    bumpInfoEpoch: () => useSessionStore.getState().bumpInfoEpoch(),
+    setModels: (models) => useSessionStore.getState().setModels(models),
+    markEngineLost: (at) => useSessionStore.getState().markEngineLost(at),
+    markEngineRecovered: (at) => useSessionStore.getState().markEngineRecovered(at),
+    markInventoryResync: (record) => useSessionStore.getState().markInventoryResync(record),
+  },
+}
+
+/** One engine probe + its transition bookkeeping (R-01 + sweep #2). The
+ *  source names who asked: 'boot' (first check), 'loop' (the re-check
+ *  cadence), 'visibility' (tab came back), 'manual' (Settings
+ *  Test-connection / save). The consequences — object_info pulls (A-8:
+ *  never per steady tick), the recovery re-sync with refresh, the steady-
+ *  tick light drift check — live in engineRecovery.ts. */
+async function runEngineCheck(url: string, source: EngineProbeSource): Promise<ComfyStatus> {
+  return runEngineRecoveryCheck(engineRecoveryDeps, url, source)
 }
 
 /** The module-singleton loop (two surfaces mount this hook; ONE loop must

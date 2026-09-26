@@ -26,7 +26,7 @@ import { SmartPromptEditor, type SmartPromptEditorHandle } from '../components/S
 import { StructuredPromptEditor } from '../components/StructuredPromptEditor'
 import { PromptLibraryBrowser } from '../components/PromptLibraryBrowser'
 import { detectOptimizations, engineFamilyForChain } from '../lib/graph'
-import { inferredOverrideSlotFile, migrateLegacyModelOverrideSlots, modelFamilyInfo, overridePickOutcome, SLOT_LABELS, type ModelFamilyId, type ModelOverrideSlotName } from '../lib/modelOverrides'
+import { inferredOverrideSlotFile, migrateLegacyModelOverrideSlots, modelFamilyInfo, overrideLayerCounts, overrideLayerSummary, overridePickOutcome, SLOT_LABELS, type ModelFamilyId, type ModelOverrideSlotName } from '../lib/modelOverrides'
 import { guideFrameWarning } from '../lib/workflow'
 import { buildPromptAssistantContext } from '../lib/promptComposer'
 import { composeStructuredPrompt, mergeStructuredDraft, parseFlowRows, parseStructuredPrompt, type StructuredPromptDraft } from '../lib/structuredPrompt'
@@ -337,6 +337,12 @@ export function PropertiesPanel() {
   const models = useSessionStore((state) => state.models)
   const info = useSessionStore((state) => state.info)
   const ollamaModels = useSessionStore((state) => state.ollamaModels)
+  // (sweep #8, audit F5 — task 68e9k17) The global override layer is read
+  // REACTIVELY: a Settings change (a pick set or cleared elsewhere) must
+  // re-render this panel's chip and slot rows with no remount. The old
+  // getState() read captured the value at render time and went stale until
+  // some OTHER state happened to re-render the panel.
+  const modelOverridesByFamily = useSessionStore((state) => state.settings?.modelOverrides)
 
   const chainId = selection.tileIds.length === 1 ? selection.tileIds[0] : null
   const doc = activeProjectId ? documents[activeProjectId] : null
@@ -461,6 +467,8 @@ export function PropertiesPanel() {
   // order: this pick > the global Settings pick > auto (inference).
   const modelFamilyId: ModelFamilyId = engineFamily.modelFamilyId
   const modelFamily = modelFamilyInfo(modelFamilyId)!
+  // The global layer for THIS family, from the reactive subscription above.
+  const globalSlots = modelOverridesByFamily?.[modelFamilyId]
   // Legacy chains may still store a single 'checkpoint' pick — the migrated
   // view keeps it VISIBLE on its new lanes (the resolution seam applies the
   // same migration at submit time).
@@ -773,12 +781,12 @@ export function PropertiesPanel() {
             GLOBAL picks (chain-level slots here would be dead controls on
             that path). */}
         {engineFamily.panel.models && <details className="canvas-properties-models" data-canvas-section="models">
-          <summary>models <span className="canvas-properties-hint">{modelFamily.label} · auto (inferred)</span></summary>
+          <summary>models <span className="canvas-properties-hint" data-canvas-models-summary>{modelFamily.label} · {overrideLayerSummary(overrideLayerCounts(modelFamily.slots, chainSlots, globalSlots))}</span></summary>
           {modelFamily.slots.map((slot) => {
             const value = chainSlots[slot] ?? ''
             const kind = modelFamily.slotKinds[slot] ?? 'diffusion_models'
             const candidates = models.filter((model) => model.kind === kind)
-            const globalPick = useSessionStore.getState().settings?.modelOverrides?.[modelFamilyId]?.[slot]
+            const globalPick = globalSlots?.[slot]
             const autoFile = inferredOverrideSlotFile(modelFamilyId, slot, models)
             // (tmz8vh7): the verdict runs on the EFFECTIVE pick — the chain's
             // own, else the global Settings one. Verdicting only the chain's

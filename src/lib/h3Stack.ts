@@ -2,6 +2,7 @@
 import type { ModelFile, ModelOverrideSlots } from '../types'
 import type { ObjectInfo } from './comfyInfo'
 import { resolveModelOverrides, type ModelOverrideSlotName } from './modelOverrides'
+import { basenameOf } from './modelSelection'
 import { missingCoreNodeClasses, type MissingNodeClass } from './preflight'
 
 export const diagnosticPrompt = 'A woman standing beside a window in soft daylight, natural skin texture, subtle head movement, realistic cinematic photography.'
@@ -32,8 +33,16 @@ export function h3StackReport(models: ModelFile[], overrides?: ModelOverrideSlot
   const resolution = overrides ? resolveModelOverrides('minimax', models, overrides) : null
   const rows = validatedH3Files.map((definition) => {
     const files = models.filter((model) => model.kind === definition.kind)
-    const exact = files.find((model) => model.name.toLowerCase() === definition.expected.toLowerCase())
-    const fallback = files.find((model) => definition.fallback.test(model.name))
+    // BASENAME truth (sweep #1, audit F2/C3 — 2026-09-26): the registry
+    // lists engine-relative SUBPATHS ("H3/ssd/x.safetensors") and the
+    // pickers infer by basename; the report compared the FULL name and its
+    // anchored fallback could never match a subpath'd row, so the
+    // maintainer's fully-provisioned engine read INCOMPLETE. The expected
+    // tokens live in the FILENAME — compare there; the selected row still
+    // carries the registry's full name verbatim (what the graph loaders
+    // accept).
+    const exact = files.find((model) => basenameOf(model.name).toLowerCase() === definition.expected.toLowerCase())
+    const fallback = files.find((model) => definition.fallback.test(basenameOf(model.name)))
     const overrideOutcome = resolution && definition.overrideSlot ? resolution.slots[definition.overrideSlot] : null
     const appliedOverride = overrideOutcome && overrideOutcome.state === 'applied' ? overrideOutcome.file : null
     const selected = appliedOverride ?? exact?.name ?? fallback?.name ?? ''

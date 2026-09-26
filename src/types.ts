@@ -807,6 +807,13 @@ export type DesktopApi = {
   chooseDirectory(initialPath?: string): Promise<string | null>
   chooseMedia(type: MediaKind): Promise<{ path: string; name: string } | null>
   scanModels(settings: AppSettings, options?: { refresh?: boolean }): Promise<ModelFile[]>
+  /** (sweep #2, 68e9k17) The LIGHT models-only listing for the connected-
+   *  tick drift check: the engine's /models routes read directly — no
+   *  object_info, no Ollama, no upscalers (A-8's megabytes stay out of the
+   *  probe cadence). Null when it cannot be judged (engine down, route
+   *  absent, shape unexpected) — the caller treats null as "not judgeable",
+   *  never as an empty inventory. */
+  lightInventory(settings: AppSettings): Promise<{ models: ModelFile[]; servedKinds: string[] } | null>
   getComfyStatus(url: string): Promise<ComfyStatus>
   /** clientId is accepted for interface compatibility but ignored by the
    *  server: submissions carry the server's own stable engine-session id

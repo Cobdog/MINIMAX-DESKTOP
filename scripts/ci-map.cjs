@@ -73,6 +73,7 @@ const SUITES = {
   poserig: { build: null, windows: false, python: false, ffmpeg: false },
   realtime: { build: 'server', windows: false, python: false, ffmpeg: false },
   registry: { build: null, windows: false, python: false, ffmpeg: false },
+  resync: { build: 'full', windows: false, python: false, ffmpeg: false },
   runtime: { build: 'server', windows: true, python: false, ffmpeg: false },
   storage: { build: 'server', windows: false, python: false, ffmpeg: false },
   workflows: { build: null, windows: false, python: false, ffmpeg: false },
@@ -80,13 +81,13 @@ const SUITES = {
 
 /** Every suite that boots dist-server/server/index.js directly (route-level
  *  integration): the honest fan-out for the server seams. */
-const BOOTING = ['datasets', 'documents', 'fetcher', 'filmstrip', 'instance', 'llm', 'manager-install', 'realtime', 'runtime', 'storage']
+const BOOTING = ['datasets', 'documents', 'fetcher', 'filmstrip', 'instance', 'llm', 'manager-install', 'realtime', 'resync', 'runtime', 'storage']
 
 /** Every suite drawing scratch ports through tests/lib/ports.cjs. */
-const PORT_USERS = ['datasets', 'documents', 'engine-process', 'fetcher', 'filmstrip', 'instance', 'launcher', 'llm', 'manager-install', 'realtime', 'runtime', 'storage']
+const PORT_USERS = ['datasets', 'documents', 'engine-process', 'fetcher', 'filmstrip', 'instance', 'launcher', 'llm', 'manager-install', 'realtime', 'resync', 'runtime', 'storage']
 
 /** The suites that load client TS through the VM harness (scripts/lib/ts-vm.cjs). */
-const VM_SUITES = ['camera', 'canvas', 'engine-families', 'enginewatch', 'h3img', 'poserig', 'registry', 'workflows']
+const VM_SUITES = ['camera', 'canvas', 'engine-families', 'enginewatch', 'h3img', 'poserig', 'registry', 'resync', 'workflows']
 
 /** Every vitest suite — the FULL fallback set. */
 const ALL_SUITES = Object.keys(SUITES).sort()
@@ -127,6 +128,12 @@ const RULES = [
     suites: [],
     forceE2e: true,
     reason: 'browser suites own their own verification — run e2e when they change (vision stays main-only).',
+  },
+  {
+    match: ['e2e/mirror/**'],
+    suites: ['resync'],
+    forceE2e: true,
+    reason: 'the environment-mirror fake engine + its profiles are ALSO the resync suite\'s standing engine — a mirror change must run the kill/restart inventory-freshness suite alongside the e2e leg.',
   },
   {
     match: ['start.sh'],
@@ -283,8 +290,18 @@ const RULES = [
   { match: ['src/lib/h3imageContract.ts', 'src/lib/h3imageOps.ts', 'src/lib/h3imageScorer.ts', 'src/lib/h3imageStaging.ts'], suites: ['h3img'], reason: 'H3 image contract/ops/scorer/staging.' },
   {
     match: ['src/lib/engineWatch.ts', 'src/lib/fabricWatch.ts', 'src/lib/dbg.ts', 'src/lib/preflight.ts'],
-    suites: ['enginewatch', 'engine-contract'],
-    reason: 'Wave-1 pure decision modules (jpc96dp: re-check cadence, WS re-probe/resync, the A-DBG tagged logger, submit preflight) — the enginewatch suite drives them through the VM harness; preflight\'s STOCK_GRAPH_CLASSES is coverage-lockstep-checked by the engine-contract fixture.',
+    suites: ['enginewatch', 'engine-contract', 'resync'],
+    reason: 'Wave-1 pure decision modules (jpc96dp: re-check cadence, WS re-probe/resync, the A-DBG tagged logger, submit preflight) — the enginewatch suite drives them through the VM harness; preflight\'s STOCK_GRAPH_CLASSES is coverage-lockstep-checked by the engine-contract fixture; engineWatch\'s resync decisions also execute against the real mirror in resync.',
+  },
+  {
+    match: ['src/lib/engineRecovery.ts'],
+    suites: ['enginewatch', 'resync'],
+    reason: 'the engine-probe consequence flow (sweep #2, 68e9k17): recovery/drift resync with refresh semantics + honest resync bookkeeping — unit-driven in enginewatch (recording harness), mirror-driven in resync (real server + real fake engine over HTTP).',
+  },
+  {
+    match: ['src/lib/h3Stack.ts'],
+    suites: ['workflows', 'enginewatch'],
+    reason: 'the H3 stack report — the workflows suite\'s override-verdict legs plus the enginewatch mirror-shaped basename-truth section (sweep #1, 68e9k17).',
   },
   {
     match: ['src/lib/nodePackRegistry.ts'],
@@ -308,7 +325,7 @@ const RULES = [
   {
     match: [
       'src/lib/imageCrop.ts', 'src/lib/promptPresets.ts', 'src/lib/modelOverrides.ts',
-      'src/lib/h3Stack.ts', 'src/lib/manifest.ts', 'src/lib/music3Workflow.ts',
+      'src/lib/manifest.ts', 'src/lib/music3Workflow.ts',
       'src/lib/jobReducer.ts', 'src/lib/logSanitize.ts', 'src/lib/libraryStorage.ts', 'src/lib/promptContracts.ts',
       'src/lib/promptComposer.ts', 'src/lib/promptPolicies.ts', 'src/lib/dialogPolicy.ts', 'src/lib/promptCorpus.ts',
       'src/lib/promptLibraryStorage.ts', 'src/lib/contactSheet.ts', 'src/lib/failureTaxonomy.ts',

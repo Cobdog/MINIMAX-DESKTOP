@@ -5,6 +5,7 @@
 import { create } from 'zustand'
 import type { AppSettings, ComfyStatus, ExternalEngineFacts, GpuTelemetry, LlmModelsResult, ManagedEngineStatus, ModelFile, OllamaModel } from '../types'
 import type { ObjectInfo } from '../lib/comfyInfo'
+import type { InventoryResyncRecord } from '../lib/engineWatch'
 
 export type SessionState = {
   settings: AppSettings | null
@@ -28,8 +29,11 @@ export type SessionState = {
   /** (Wave 1 R-01) The engine-watch bookkeeping the re-check loop writes:
    *  lostAt/recoveredAt timestamp the connectivity TRANSITIONS (consumers
    *  toast + fail active jobs honestly), infoEpoch counts successful
-   *  object_info pulls (the pack board re-resolves its live chips on each). */
-  engineWatch: { lostAt: number | null; recoveredAt: number | null; infoEpoch: number }
+   *  object_info pulls (the pack board re-resolves its live chips on each).
+   *  resync (sweep #2, 68e9k17) records the LAST inventory re-sync OUTCOME —
+   *  the toast speaks from this record, never from the attempt: an
+   *  inventory that did not land is never claimed as re-synced. */
+  engineWatch: { lostAt: number | null; recoveredAt: number | null; infoEpoch: number; resync: InventoryResyncRecord | null }
   setSettings(settings: AppSettings | null): void
   setModels(models: ModelFile[]): void
   setScanning(scanning: boolean): void
@@ -44,6 +48,7 @@ export type SessionState = {
   markEngineLost(at: number): void
   markEngineRecovered(at: number): void
   bumpInfoEpoch(): void
+  markInventoryResync(record: InventoryResyncRecord): void
 }
 
 export const useSessionStore = create<SessionState>()((set) => ({
@@ -58,7 +63,7 @@ export const useSessionStore = create<SessionState>()((set) => ({
   llm: null,
   engineRuntime: null,
   externalEngine: null,
-  engineWatch: { lostAt: null, recoveredAt: null, infoEpoch: 0 },
+  engineWatch: { lostAt: null, recoveredAt: null, infoEpoch: 0, resync: null },
   setSettings: (settings) => set({ settings }),
   setModels: (models) => set({ models }),
   setScanning: (scanning) => set({ scanning }),
@@ -73,4 +78,5 @@ export const useSessionStore = create<SessionState>()((set) => ({
   markEngineLost: (at) => set((state) => ({ engineWatch: { ...state.engineWatch, lostAt: at, recoveredAt: null } })),
   markEngineRecovered: (at) => set((state) => ({ engineWatch: { ...state.engineWatch, lostAt: null, recoveredAt: at } })),
   bumpInfoEpoch: () => set((state) => ({ engineWatch: { ...state.engineWatch, infoEpoch: state.engineWatch.infoEpoch + 1 } })),
+  markInventoryResync: (record) => set((state) => ({ engineWatch: { ...state.engineWatch, resync: record } })),
 }))

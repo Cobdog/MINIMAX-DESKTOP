@@ -33,6 +33,7 @@ const RANGES = {
   'manager-install': [4520, 40],
   'engine-process': [4560, 40],
   instance: [6520, 40],
+  resync: [6560, 40],
   launcher: [7000, 100],
 }
 
