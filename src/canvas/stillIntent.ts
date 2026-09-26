@@ -86,6 +86,22 @@ export function canvasEditHandoff(intent: string, source: MediaFile): CanvasEdit
   return { path: source.path, name: source.name, intent }
 }
 
+/** The pin-time honesty text (journey sweep #4b, reality audit 2026-09-25
+ *  F8/M5): pinning a workbench frame lands a PLAIN MEDIA OBJECT (usable as
+ *  a reference anywhere) — but its only regeneration lane is the T=1 Fast
+ *  family, and when that lane is unavailable the audit found the dead end
+ *  surfacing only at GENERATE time (a chain that can never render, on the
+ *  exact inventory where the gate is a single missing file). The pin toast
+ *  names the gate WHEN THE PIN LANDS: the pin is a success (never framed as
+ *  a failure), with the regeneration requirement stated beside it. The
+ *  `missing` list is the family detection's own (models first — the Mamad8
+ *  VAE file leads). Pure — the surface passes the detection through. */
+export function pinRegenerationNotice(available: boolean, missing: string[]): string {
+  if (available) return 'The picked frame is pinned on the canvas as a media object — reference it anywhere, or generate on it (the T=1 Fast lane is ready).'
+  const gate = missing.length ? ` It needs: ${missing.join('; ')}.` : ''
+  return `The picked frame is pinned on the canvas as a media object — reference it anywhere. Regenerating it as a still needs the T=1 Fast lane, which this engine does not serve yet.${gate}`
+}
+
 /** Stashes the handoff (full-navigation payload — the surface-switcher
  *  precedent carries it across the page load). */
 export function stashCanvasEditHandoff(handoff: CanvasEditHandoff): void {

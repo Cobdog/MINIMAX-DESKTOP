@@ -214,6 +214,50 @@ export function classifyTurboFamily(filename: string, entries: readonly Optimiza
   return entries.find((entry) => entry.patterns?.some((pattern) => pattern.test(filename)))
 }
 
+/** The truth-table behind the turbo fetch affordance (journey sweep #7,
+ *  reality audit 2026-09-25 F10/C6): R-19's "fetch missing (N)" counted
+ *  every not-installed family and pointed at the Library — but the fetch
+ *  catalog carried ZERO turbo LoRA rows, so the affordance was a promise the
+ *  destination could not fulfill (a new dead end wearing the fix's clothes).
+ *  This plan counts only families a catalog row can actually deliver (the
+ *  row's file basenames matched against the family patterns — the same
+ *  basename rule the pickers use), and hands back an honest note when
+ *  nothing is fetchable. Pure — the surfaces render whatever it says. */
+export type TurboFetchPlan = {
+  fetchable: Array<{ entryId: string; label: string; catalogEntryIds: string[] }>
+  /** The honest affordance text when nothing is fetchable (empty string when
+   *  the fetchable branch applies). */
+  note: string
+}
+
+type CatalogRowLike = { id: string; files?: Array<{ path: string }> }
+
+export function turboFetchPlan(entries: readonly OptimizationEntry[], catalog: readonly CatalogRowLike[]): TurboFetchPlan {
+  const basenameOf = (name: string) => {
+    const clean = name.replace(/\\/g, '/')
+    const slash = clean.lastIndexOf('/')
+    return slash === -1 ? clean : clean.slice(slash + 1)
+  }
+  const fetchable: TurboFetchPlan['fetchable'] = []
+  for (const entry of entries) {
+    if (!entry.patterns) continue
+    const rowIds: string[] = []
+    for (const row of catalog) {
+      const delivers = (row.files ?? []).some((file) => entry.patterns!.some((pattern) => pattern.test(basenameOf(file.path))))
+      if (delivers) rowIds.push(row.id)
+    }
+    if (rowIds.length) fetchable.push({ entryId: entry.id, label: entry.label, catalogEntryIds: rowIds })
+  }
+  if (fetchable.length) return { fetchable, note: '' }
+  // Nothing in the catalog carries the missing families — say so, and where
+  // the truth actually lives (each family's own option note). NEVER "these
+  // are fetchable there" against a catalog without the rows.
+  return {
+    fetchable,
+    note: 'Not fetchable through the library — the model catalog carries no turbo LoRA rows. Each option\'s note names where its weights come from; fetch consent applies only to cataloged items.',
+  }
+}
+
 /** Resolves how a turbo render will load: which family owns the selected LoRA,
  * how many steps the scheduler runs, and whether the dedicated loader/sampler
  * pair replaces the plain nodes. The dedicated path needs the family's declared

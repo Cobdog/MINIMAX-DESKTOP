@@ -25,7 +25,7 @@ import { Captions, Clock3, Dices, LoaderCircle, Play, Sparkles, Square, Star, Vo
 import { SmartPromptEditor, type SmartPromptEditorHandle } from '../components/SmartPromptEditor'
 import { StructuredPromptEditor } from '../components/StructuredPromptEditor'
 import { PromptLibraryBrowser } from '../components/PromptLibraryBrowser'
-import { detectOptimizations, engineFamilyForChain } from '../lib/graph'
+import { detectOptimizations, engineFamilyForChain, turboFetchPlan } from '../lib/graph'
 import { inferredOverrideSlotFile, migrateLegacyModelOverrideSlots, modelFamilyInfo, overrideLayerCounts, overrideLayerSummary, overridePickOutcome, SLOT_LABELS, type ModelFamilyId, type ModelOverrideSlotName } from '../lib/modelOverrides'
 import { guideFrameWarning } from '../lib/workflow'
 import { buildPromptAssistantContext } from '../lib/promptComposer'
@@ -34,7 +34,7 @@ import { useLlmStream } from '../lib/useLlmStream'
 import type { ModelOverrideSlots } from '../types'
 import { useSessionStore } from '../state/sessionStore'
 import { STATUS_LABEL } from './derive'
-import { effectiveMode, MODE_LABEL, readChainSettings, type CanvasChainSettings } from './generation'
+import { effectiveMode, modeLabelFor, readChainSettings, type CanvasChainSettings } from './generation'
 import {
   compileLoraTimeline, DEFAULT_TRANSITION_WINDOW, LORA_COMBINED_COLLAPSE_RISK, LORA_COMBINED_HEALTHY_MAX, LORA_SLOTS,
   newLoraRange, newLoraTimelineDoc, snapRangeBoundary,
@@ -445,6 +445,25 @@ export function PropertiesPanel() {
   )
 
   const turboFamilies = useMemo(() => detectOptimizations(info, models).filter((entry) => entry.entry.kind === 'turbo'), [info, models])
+  // Journey sweep #7 (audit F10/C6): the fetch affordance's truth source.
+  // The catalog is pulled lazily — only when a turbo family is actually
+  // missing — and the plan counts only families its rows can deliver. The
+  // missing-key dep keeps one pull per missing-set (not per render).
+  const turboMissing = useMemo(() => turboFamilies.filter(({ detection }) => !detection.available), [turboFamilies])
+  const turboMissingKey = turboMissing.map(({ entry }) => entry.id).join('|')
+  const [turboCatalogRows, setTurboCatalogRows] = useState<Array<{ id: string; files?: Array<{ path: string }> }> | null>(null)
+  useEffect(() => {
+    if (!turboMissingKey) return
+    let cancelled = false
+    void window.minimax.listFetchCatalog()
+      .then((result) => { if (!cancelled) setTurboCatalogRows(result.entries) })
+      .catch(() => { if (!cancelled) setTurboCatalogRows([]) })
+    return () => { cancelled = true }
+  }, [turboMissingKey])
+  const turboFetchAffordance = useMemo(
+    () => turboFetchPlan(turboMissing.map(({ entry }) => entry), turboCatalogRows ?? []),
+    [turboMissing, turboCatalogRows],
+  )
   // Bindings + validation recompute per render on purpose: validation reads
   // the PERSISTED settings (which lag the draft by the debounce), so the
   // message updates as commits land. Both are cheap single-chain walks.
@@ -611,7 +630,7 @@ export function PropertiesPanel() {
   >
     <header className="canvas-inspector-header">
       <strong>{tile.title}</strong>
-      <span className="canvas-properties-mode" data-canvas-mode={mode}>{MODE_LABEL[mode]}</span>
+      <span className="canvas-properties-mode" data-canvas-mode={mode}>{modeLabelFor(draft)}</span>
       <button type="button" aria-label="Close properties" onClick={() => setInspectorOpen(false)}><X size={13} /></button>
     </header>
     {/* (R-23) The mode RULE at choice time — the mode is derived from what
@@ -762,15 +781,19 @@ export function PropertiesPanel() {
                 <option key={entry.id} value={entry.id}>{entry.label}{detection.available ? '' : ' (not installed)'}</option>
               ))}
             </select>
-            {/* (R-19) "not installed" is never a dead end at the choice
-                point: the fetch affordance opens the Library focused on the
-                turbo LoRA entries (the EndpointMenu precedent). */}
-            {turboFamilies.some(({ detection }) => !detection.available) && (
-              <button type="button" className="canvas-chip" data-canvas-turbo-fetch
-                title="Open the library at the model catalog — the missing turbo LoRAs are fetchable there with consent"
-                onClick={() => useCanvasStore.getState().setLibraryDock(true)}>
-                fetch missing ({turboFamilies.filter(({ detection }) => !detection.available).length})
-              </button>
+            {/* (R-19 → journey sweep #7, audit F10) "not installed" is never
+                a dead end at the choice point — and never a false promise
+                either: the affordance counts only families the fetch catalog
+                can actually deliver (deep-linking their rows), and says the
+                truth when the catalog carries none of them. */}
+            {turboFamilies.some(({ detection }) => !detection.available) && turboCatalogRows !== null && (
+              turboFetchAffordance.fetchable.length > 0
+                ? <button type="button" className="canvas-chip" data-canvas-turbo-fetch
+                    title="Open the library at the model catalog — the cataloged turbo LoRAs fetch there with consent"
+                    onClick={() => useCanvasStore.getState().setLibraryDock(true, turboFetchAffordance.fetchable.flatMap((entry) => entry.catalogEntryIds))}>
+                    fetch missing ({turboFetchAffordance.fetchable.length})
+                  </button>
+                : <p className="canvas-properties-note" data-canvas-turbo-fetch-note role="note">{turboFetchAffordance.note}</p>
             )}
           </div>
         )}
@@ -1063,7 +1086,7 @@ export function PropertiesPanel() {
         {tile.jobId && (tile.status === 'running' || tile.status === 'queued-gpu')
           ? <button type="button" className="canvas-properties-generate" data-canvas-cancel onClick={() => void cancelChainJob(chain.id)}><Square size={12} /> stop</button>
           : <button type="button" className="canvas-properties-generate" data-canvas-generate onClick={() => void generate()} disabled={submitting}>
-            <Play size={12} /> generate · {MODE_LABEL[mode]}
+            <Play size={12} /> generate · {modeLabelFor(draft)}
           </button>}
       </footer>
   </Rnd>

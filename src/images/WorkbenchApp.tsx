@@ -41,7 +41,7 @@ import { H3IMG_RECIPE_PINS, STOCK_SAMPLED_FRAMES, TRANSPORT_FOR_ROLE, findH3ImgF
 import type { H3ImgRefRole } from '../lib/graph/h3image'
 import { mediaForOutput, buildOutputIndex } from '../canvas/generation'
 import { chainSettingsDefaults } from '../canvas/generation'
-import { CANVAS_EDIT_HANDOFF_KEY, handoffPreviewUrl } from '../canvas/stillIntent'
+import { CANVAS_EDIT_HANDOFF_KEY, H3_ONE_FRAME_FAMILY, handoffPreviewUrl, pinRegenerationNotice } from '../canvas/stillIntent'
 import { SurfaceSwitcher } from '../surfaces/SurfaceSwitcher'
 import './workbench.css'
 
@@ -523,13 +523,17 @@ function WorkbenchSurface() {
       const output = await documentsApi.createOutput({ chainId: chain.id, substrates: ['decoded'] })
       await documentsApi.appendTake({ outputId: output.id, artifacts: [framePath], metrics: { kind: 'image', name: `workbench-frame-${effectivePick}.png`, sourcePath: framePath } })
       await useCanvasStore.getState().reloadActiveDocument()
-      useCanvasStore.getState().toast('success', 'The picked frame is pinned on the canvas as a media object — reference it anywhere.')
+      // Journey sweep #4b (audit F8/M5): the regeneration gate is named AT
+      // PIN TIME, not generate time — the T=1 family's own detection drives
+      // the text (models lead, so the Mamad8 VAE file is first).
+      const t1Detection = detectionOf(H3_ONE_FRAME_FAMILY)
+      useCanvasStore.getState().toast('success', pinRegenerationNotice(Boolean(t1Detection?.available), [...(t1Detection?.missingModels ?? []), ...(t1Detection?.missingNodes ?? [])]))
       return output.id
     } catch (error) {
       setNotice(`The frame could not be pinned: ${error instanceof Error ? error.message : String(error)}`)
       return null
     }
-  }, [doc, selectedTake, frames, effectivePick, family])
+  }, [doc, selectedTake, frames, effectivePick, family, detectionOf])
 
   // The start-frame exit: consent-gated, created-never-submitted.
   const [exitPlan, setExitPlan] = useState<'anchor' | 'anchor-plus-refs' | null>(null)
@@ -611,7 +615,7 @@ function WorkbenchSurface() {
                       type="button"
                       className={`iw-family ${settings.family === familyId ? 'active' : ''} ${detection?.available ? '' : 'unavailable'}`}
                       data-iw-family-button={familyId}
-                      title={detection?.available ? entry?.ui.description : (entry?.ui.installHint ?? 'unavailable')}
+                      title={detection?.available ? entry?.ui.description : [detection?.missingModels.join('; '), detection?.missingNodes.join('; '), entry?.ui.installHint].filter(Boolean).join(' — ')}
                       onClick={() => void patchSettings({ family: familyId })}
                     >
                       {entry?.label ?? familyId}
@@ -636,7 +640,7 @@ function WorkbenchSurface() {
                   return url ? <img src={url} alt={`Picked frame ${effectivePick + 1}`} data-iw-preview-image /> : <span className="iw-empty-frame">The picked frame is not resident (evicted or not yet landed).</span>
                 })()}
                 <figcaption data-iw-preview-caption>
-                  {selectedProvenance ? `${selectedProvenance.family} · ${selectedProvenance.profile === 't1' ? 'T=1 fast' : `${selectedProvenance.tier}-frame packet`} · frame {effectivePick + 1}/${selectedProvenance.frames}${selectedProvenance.hybrid ? ' · hybrid' : ''}` : 'take'}
+                  {selectedProvenance ? `${selectedProvenance.family} · ${selectedProvenance.profile === 't1' ? 'T=1 fast' : `${selectedProvenance.tier}-frame packet`} · frame ${effectivePick + 1}/${selectedProvenance.frames}${selectedProvenance.hybrid ? ' · hybrid' : ''}` : 'take'}
                   {selectedProvenance?.scorer && <em className="iw-scorer" data-iw-scorer title={selectedProvenance.scorer.reason}>scorer pick: {selectedProvenance.scorer.bestIndex + 1} — {selectedProvenance.scorer.reason}</em>}
                   {selectedProvenance?.scorer === null && selectedProvenance.frames > 1 && <em className="iw-scorer none" data-iw-scorer-none title="The scorer could not run at landing">unscored — pick by eye</em>}
                 </figcaption>

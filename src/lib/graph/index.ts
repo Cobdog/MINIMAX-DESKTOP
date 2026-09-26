@@ -23,7 +23,7 @@ export { UPSCALE_ENTRIES } from './upscale'
 export { PREVIEW_ENTRY } from './preview'
 // Registry-scoped wrappers classify/resolve against the LIVE registry list,
 // so runtime-registered entries participate with zero factory changes.
-export { optimizationEntries, findOptimization, registerOptimization, detectOptimizations, turboProvenance, classifyTurboFamily, turboLoraPatterns, resolveTurboPlan, upscaleEntryFor } from './registry'
+export { optimizationEntries, findOptimization, registerOptimization, detectOptimizations, turboProvenance, classifyTurboFamily, turboFetchPlan, turboLoraPatterns, resolveTurboPlan, upscaleEntryFor } from './registry'
 // Krea 2 edit families (docs/research/krea2-edit-mode.md): five per-workflow
 // graph builders + availability gating + the recipe-triple audit.
 export {

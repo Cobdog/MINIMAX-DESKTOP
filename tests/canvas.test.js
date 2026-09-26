@@ -386,6 +386,76 @@ test('(l) L4 — selection decides the surface (effectiveMode)', () => {
   eq('imageVae' in vaeRead.modelOverrides, false, 'settings: a non-string imageVae slot drops to auto')
 })
 
+// ---------------------------------------------------------------------------
+// Journey sweep #4 (reality audit 2026-09-25 F6/F8 — task c4fifi5): the
+// image lane's surfaces stop lying. The MODE LABEL is mediaType-aware — an
+// image chain never reads "text → video" (the audit's F8 mislabel), an
+// audio chain never borrows the video vocabulary either.
+// ---------------------------------------------------------------------------
+test('(l2) journey sweep #4c — the mode label is mediaType-aware', () => {
+  const none = { firstFrameOutputId: null, lastFrameOutputId: null, referenceOutputIds: [], referenceCharacterIds: [], referenceLocationIds: [], referenceAssetIds: [] }
+  // Video chains keep the exact legacy vocabulary (no behavior change).
+  eq(generation.modeLabelFor({ ...none, mediaType: 'video' }), 'text → video', 'video chain: text mode keeps the video label')
+  eq(generation.modeLabelFor({ ...none, mediaType: 'video', firstFrameOutputId: 'o1' }), 'image → video', 'video chain: first-frame mode keeps the video label')
+  // The audit's F8 case VERBATIM: a pinned/spawned image chain (no bindings)
+  // must NOT read "text → video".
+  eq(generation.modeLabelFor({ ...none, mediaType: 'image' }), 'text → image', 'image chain: an unbound still reads text → image, never text → video')
+  assert.ok(!generation.modeLabelFor({ ...none, mediaType: 'image' }).includes('video'), 'image chain: the word "video" never appears in an image label')
+  eq(generation.modeLabelFor({ ...none, mediaType: 'image', firstFrameOutputId: 'o1' }), 'source → edit (workbench)', 'image chain: a bound source states the Edit-surface handoff')
+  // Audio chains state their own lane (they used to borrow "text → video").
+  eq(generation.modeLabelFor({ ...none, mediaType: 'audio' }), 'caption → audio', 'audio chain: the label names the audio lane')
+  // Absent mediaType (raw partial settings) tolerates as video (the
+  // readChainSettings default) — never a crash on external data.
+  eq(generation.modeLabelFor(none), 'text → video', 'partial settings tolerate to the video vocabulary')
+})
+
+// ---------------------------------------------------------------------------
+// Journey sweep #4 (audit F8/M5): pinned frames state the regeneration gate
+// AT PIN TIME. The pin itself stays a plain media object; the notice names
+// the Mamad8 T=1 VAE when the regeneration lane is unavailable — never a
+// dead end discovered at generate time only.
+// ---------------------------------------------------------------------------
+test('(l3) journey sweep #4b — the pin-time regeneration notice names the gate', () => {
+  const still = loadTs('src/canvas/stillIntent.ts', { window: { localStorage: { getItem: () => null, setItem: () => undefined } } })
+  const ready = still.pinRegenerationNotice(true, [])
+  assert.ok(ready.includes('pinned'), 'available: the plain pin confirmation')
+  assert.ok(!ready.includes('Mamad8'), 'available: no gate named when the lane is ready')
+  // The maintainer-instance mirror shape: the pack + turbo present, the
+  // Mamad8 T=1 VAE absent — the notice names the missing file.
+  const gated = still.pinRegenerationNotice(false, ['minimax_h3_t1_image_vae_step1597.safetensors'])
+  assert.ok(gated.includes('minimax_h3_t1_image_vae_step1597.safetensors'), 'gated: the exact missing file is named at pin time')
+  assert.ok(gated.includes('pinned'), 'gated: the pin still landed (a media object, not a failure)')
+  assert.ok(gated.toLowerCase().includes('regenerat'), 'gated: the notice says WHAT is gated (regeneration)')
+})
+
+// ---------------------------------------------------------------------------
+// Journey sweep #7 (audit F10/C6): the turbo fetch affordance tells the
+// truth. It counts only families the fetch catalog can actually deliver
+// (deep-linkable ids), and when none are fetchable the plan says so —
+// never a pointer at an empty catalog wearing a fetch promise.
+// ---------------------------------------------------------------------------
+test('(l4) journey sweep #7 — the turbo fetch plan counts only catalog-backed families', () => {
+  const turbo = loadTs('src/lib/graph/turbo.ts')
+  const families = turbo.TURBO_ENTRIES
+  // A catalog that carries one missing family's exact file (the lightx2v
+  // fl2v 8-step row): the plan marks exactly that family fetchable.
+  const carrying = [{ id: 'turbo-lightx2v-fl2v-8-row', files: [{ path: 'loras/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors' }] }]
+  const plan = turbo.turboFetchPlan(families, carrying)
+  eq(plan.fetchable.map((entry) => entry.entryId), ['turbo.lightx2v-fl2v-8'], 'plan: the catalog-backed family is fetchable')
+  eq(plan.fetchable[0].catalogEntryIds, ['turbo-lightx2v-fl2v-8-row'], 'plan: the catalog row id rides for the deep-link')
+  assert.ok(!plan.fetchable.some((entry) => entry.entryId === 'turbo.official-fl2v-8'), 'plan: an INSTALLED family never counts (the caller passes missing only — and detection is upstream)')
+  // Today's real catalog shape (verified 2026-09-25 audit F10): NO turbo
+  // LoRA rows at all — the honest branch.
+  const empty = turbo.turboFetchPlan(families, [])
+  eq(empty.fetchable.length, 0, 'empty catalog: nothing is fetchable')
+  assert.ok(empty.note.length > 0, 'empty catalog: the honest note exists (the affordance renders truth, not a dead link)')
+  assert.ok(!empty.note.toLowerCase().includes('fetchable there'), 'empty catalog: the note never claims the catalog carries the goods')
+  // Subpath'd catalog files still match (the basename rule — the same
+  // family the pickers use).
+  const subpathed = turbo.turboFetchPlan(families, [{ id: 'row-2', files: [{ path: 'H3/turbo/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors' }] }])
+  eq(subpathed.fetchable.map((entry) => entry.entryId), ['turbo.lightx2v-fl2v-8'], 'subpath: the basename match finds the row')
+})
+
 test('(m) fork substrates → input refs (§2 outputRef)', () => {
   const doc = {
     project: { id: 'p1', name: 'P', camera: {}, createdAt: 1, lastActiveAt: 1 },
