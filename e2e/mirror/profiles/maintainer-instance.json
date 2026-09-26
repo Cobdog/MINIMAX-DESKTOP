@@ -1,7 +1,7 @@
 {
   "id": "maintainer-instance",
   "label": "The maintainer's instance (mirrored 2026-09-25)",
-  "description": "THE ENVIRONMENT-MIRROR PROFILE — the fake engine shaped like the maintainer's real ComfyUI, assembled from this session's evidence: fl2va_pruned + qwen3vl_32b (32B TE) present AND a 4B TE also visible (the wrong-pick trap), VAEs under h3image/ subdirs AND at root, packs PreviewOverride / one-node-minimax-h3 / h3-multishot / lora-manager / VHS present, the taeh3 preview files in vae_approx. Foreign pack classes (one-node, multishot, lora-manager, VHS) are deliberately NOT in the studio's own registry — the mirror exists to test how the surfaces behave with them present. Class names for the foreign packs are approximations; detection behavior (key-presence, registry mapping) is what is under test.",
+  "description": "THE ENVIRONMENT-MIRROR PROFILE — the fake engine shaped like the maintainer's real ComfyUI, assembled from this session's evidence: fl2va_pruned + the maintainer's 32B TE (qwen3vl_32b_int8_convrot — the int8/convrot quant shape their engine actually serves, NOT the official nvfp4 name; the pickers resolve it by the loosened 'qwen3vl' anchor — TE name updated 2026-09-26 per the stack-report ruling) present AND a 4B TE also visible (the wrong-pick trap), VAEs under h3image/ subdirs AND at root, packs PreviewOverride / one-node-minimax-h3 / h3-multishot / lora-manager / VHS present, the taeh3 preview files in vae_approx. Foreign pack classes (one-node, multishot, lora-manager, VHS) are deliberately NOT in the studio's own registry — the mirror exists to test how the surfaces behave with them present. Class names for the foreign packs are approximations; detection behavior (key-presence, registry mapping) is what is under test.",
   "systemStats": {
     "system": { "comfyui_version": "v0.34.0", "python_version": "3.12.3", "os": "linux" },
     "devices": [{ "name": "NVIDIA GeForce RTX 4090", "type": "cuda", "index": 0, "vram_total": 25757220864, "vram_free": 23000000000, "torch_version": "2.8.0+cu128" }]
@@ -9,7 +9,7 @@
   "objectInfoExtras": {
     "MiniMaxH3PreviewOverride": { "input": { "required": { "vae_name": [["taeh3_alpha.safetensors", "taeh3_alpha_fp8.safetensors"], {}], "enabled": [["true", "false"], { "default": "true" }] } } },
     "MiniMaxH3PreviewOverrideCS": { "input": { "required": { "vae_name": [["taeh3_alpha.safetensors", "taeh3_alpha_fp8.safetensors"], {}] } } },
-    "MiniMaxH3OneNode": { "input": { "required": { "model_name": [["H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors", "H3/ssd/minimax_h3_ref2va_pruned_int8_convrot.safetensors"], {}], "clip_name": [["qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors", "qwen3vl_4b_minimax_h3_int8.safetensors"], {}], "vae_name": [["h3image/minimax_h3_image_vae_fp16.safetensors", "minimax_h3_video_vae_fp16.safetensors"], {}], "prompt": ["STRING", { "default": "", "multiline": true }], "length": ["INT", { "default": 129, "min": 5, "max": 1997 }], "width": ["INT", { "default": 1344, "min": 256, "max": 2048 }], "height": ["INT", { "default": 768, "min": 256, "max": 2048 }] } } },
+    "MiniMaxH3OneNode": { "input": { "required": { "model_name": [["H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors", "H3/ssd/minimax_h3_ref2va_pruned_int8_convrot.safetensors"], {}], "clip_name": [["qwen3vl_32b_int8_convrot.safetensors", "qwen3vl_4b_minimax_h3_int8.safetensors"], {}], "vae_name": [["h3image/minimax_h3_image_vae_fp16.safetensors", "minimax_h3_video_vae_fp16.safetensors"], {}], "prompt": ["STRING", { "default": "", "multiline": true }], "length": ["INT", { "default": 129, "min": 5, "max": 1997 }], "width": ["INT", { "default": 1344, "min": 256, "max": 2048 }], "height": ["INT", { "default": 768, "min": 256, "max": 2048 }] } } },
     "MiniMaxH3MultishotSampler": { "input": { "required": { "shots": ["INT", { "default": 3, "min": 1, "max": 8 }], "reference_filter": [["all", "per_shot", "anchor_first"], {}] } } },
     "MiniMaxH3MultishotRefSelect": { "input": { "required": { "mode": [["sequential", "spread"], {}] } } },
     "LoraManagerList": { "input": { "required": { "root": ["STRING", { "default": "" }] } } },
@@ -24,7 +24,7 @@
       "music3_dit_int8.safetensors"
     ],
     "text_encoders": [
-      "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "qwen3vl_32b_int8_convrot.safetensors",
       "qwen3vl_4b_minimax_h3_int8.safetensors",
       "music3_text_encoder_bf16.safetensors"
     ],

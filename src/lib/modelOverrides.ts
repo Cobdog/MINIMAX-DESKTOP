@@ -328,7 +328,7 @@ export function mergeModelOverrides(chain?: ModelOverrideSlots, global?: ModelOv
 
 export type OverrideSlotOutcome =
   | { slot: ModelOverrideSlotName; state: 'auto' }
-  | { slot: ModelOverrideSlotName; state: 'applied'; file: string; warning?: string }
+  | { slot: ModelOverrideSlotName; state: 'applied'; file: string; layer?: 'chain' | 'global'; warning?: string }
   | { slot: ModelOverrideSlotName; state: 'degraded'; file: string; warning: string }
   | { slot: ModelOverrideSlotName; state: 'refused'; file: string; reason: string; layer?: 'chain' | 'global' }
   /** (Wave 1 R-06, ruling D3) A MIGRATED legacy pick that refuses: the pick
@@ -488,7 +488,7 @@ export function resolveModelOverrides(familyId: string, files: ModelFile[], over
       dbg('override', { slot, verdict: 'refused', family: familyId, file: scanned.name, check: refusal.check, layer: layer ?? 'migration/global' })
       continue
     }
-    resolution.slots[slot] = { slot, state: 'applied', file: scanned.name }
+    resolution.slots[slot] = { slot, state: 'applied', file: scanned.name, ...(layer ? { layer } : {}) }
     resolution.applied[slot] = scanned.name
     dbg('override', { slot, verdict: 'applied', family: familyId, file: scanned.name, layer: layer ?? 'unknown-layer' })
   }
@@ -542,9 +542,12 @@ export function applyModelOverrides<T extends Record<string, unknown>>(familyId:
 
 /** THE SEAM: one call from any surface — inferred selection in, resolved
  *  selection + honest resolution out. `inferred` is the family's own
- *  inference output (untouched; every family keeps its ladder). */
-export function resolveModels<T extends Record<string, unknown>>(familyId: ModelFamilyId, inferred: T, files: ModelFile[], overrides?: ModelOverrideSlots): { selection: T; resolution: OverrideResolution } {
-  const resolution = resolveModelOverrides(familyId, files, overrides)
+ *  inference output (untouched; every family keeps its ladder). `layers`
+ *  (same contract as resolveModelOverrides) rides through so surfaces that
+ *  render PROVENANCE — the stack report naming which layer produced each
+ *  row — get it from the one resolution, never a second derivation. */
+export function resolveModels<T extends Record<string, unknown>>(familyId: ModelFamilyId, inferred: T, files: ModelFile[], overrides?: ModelOverrideSlots, layers?: { chain?: ModelOverrideSlots; global?: ModelOverrideSlots }): { selection: T; resolution: OverrideResolution } {
+  const resolution = resolveModelOverrides(familyId, files, overrides, layers)
   return { selection: applyModelOverrides(familyId, inferred, resolution), resolution }
 }
 
