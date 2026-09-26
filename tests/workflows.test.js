@@ -1545,6 +1545,67 @@ test('Wave 1 R-03: ComfyUI failure shapes — classifyFailure(sanitize(<real sha
 })
 
 // ---------------------------------------------------------------------------
+// Journey sweep #6 (reality audit 2026-09-25 F11/C2 — task c4fifi5): the
+// literal `[redacted]` token NEVER reaches a user-facing message. The
+// Wave-1 bar was "never STARTS the message" (audit C's soup); the blind
+// walk still caught `Graph validation failed — node sampler:
+// MiniMaxH3ImageToVideo [redacted] value_smaller_than_min [redacted] 17
+// [redacted] 5` — the sanitizer's mid-message markers leaking through the
+// structural join. The bar extends to the whole validation surface: grep-
+// grade, on every return path of structuralPromptError.
+// ---------------------------------------------------------------------------
+test('Journey sweep #6: no [redacted] marker ever reaches a user-facing validation message', () => {
+  const { structuralPromptError } = load('src/lib/promptError.ts')
+
+  // Fixture M — the environment mirror's validation body (e2e/mirror/
+  // fakeEngineServer.mjs failMode 'validation'), VERBATIM — the shape the
+  // audit's F11 toast actually rendered from.
+  const mirrorValidationBody = JSON.stringify({
+    error: 'Prompt outputs failed validation',
+    node_errors: {
+      sampler: {
+        errors: [{
+          type: 'value_smaller_than_min',
+          message: 'Value 1 in field: length is smaller than the minimum of 5',
+          details: '17 >= 5',
+          extra_info: { input_name: ['length', 1], message: 'Value 1 in field: length is smaller than the minimum of 5' },
+        }],
+        class_type: 'MiniMaxH3ImageToVideo',
+        dependent_outputs: [],
+        errors_by_input: { length: 0 },
+      },
+    },
+  })
+  const mirrorReduced = structuralPromptError(mirrorValidationBody)
+  assert.ok(mirrorReduced.indexOf('[redacted]') === -1, `the mirror's validation body reduces without a single [redacted] marker (got: ${mirrorReduced})`)
+  for (const token of ['Graph validation failed', 'MiniMaxH3ImageToVideo', 'value_smaller_than_min', '17', '5']) {
+    assert.ok(mirrorReduced.includes(token), `the structural signal survives: ${token} (got: ${mirrorReduced})`)
+  }
+
+  // Fixture A (missing node class) through the same bar + the taxonomy still
+  // classifies the de-redacted output.
+  const missingNodeBody = JSON.stringify({
+    error: {
+      type: 'missing_node_type',
+      message: "Node 'MiniMaxH3SamplerStandalone' not found. The custom node may not be installed.",
+      details: "Node ID '#15'",
+      extra_info: { node_id: '15', class_type: 'MiniMaxH3SamplerStandalone' },
+    },
+    node_errors: {},
+  })
+  const { classifyFailure } = load('src/lib/failureTaxonomy.ts')
+  const missingReduced = structuralPromptError(missingNodeBody)
+  assert.ok(missingReduced.indexOf('[redacted]') === -1, `the missing-node body carries no marker (got: ${missingReduced})`)
+  assert.equal(classifyFailure(missingReduced).id, 'node-missing', 'de-redaction does not break node-missing classification')
+
+  // Whole-text fallback (non-JSON garbage): sanitized AND de-redacted — the
+  // user words still never surface, and neither does the marker.
+  const garbageReduced = structuralPromptError('the windswept qzxveldra auroras refused the prompt at node 7')
+  assert.ok(garbageReduced.indexOf('[redacted]') === -1, `the whole-text path carries no marker (got: ${garbageReduced})`)
+  assert.ok(garbageReduced.toLowerCase().indexOf('qzxveldra') === -1 && garbageReduced.toLowerCase().indexOf('auroras') === -1, 'user prose still never survives')
+})
+
+// ---------------------------------------------------------------------------
 // Wave 1 R-06 (audit B P1-1 remainder + ruling D3): refusals name the LAYER
 // the pick lives on, and a refusing MIGRATED legacy pick auto-clears with a
 // warning instead of wedging every render in the family.

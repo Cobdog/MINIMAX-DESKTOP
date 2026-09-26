@@ -12,9 +12,9 @@
  *     multi-lock; Phase 3 lands the ops the Phase-2 stub promised).
  */
 import { useState } from 'react'
-import { ChevronUp, CircleDot, GitFork, Layers, Lock, LockOpen, Pause, Play, Plus } from 'lucide-react'
+import { ChevronUp, CircleDot, FileVideo, GitFork, ImagePlus, Layers, Lock, LockOpen, Pause, Play, Plus } from 'lucide-react'
 import { collectOutputRefs, STATUS_LABEL } from './derive'
-import { effectiveMode, MODE_LABEL, readChainSettings } from './generation'
+import { modeLabelFor, readChainSettings } from './generation'
 import { opKindsFor } from './ops'
 import { useCanvasStore } from './store'
 
@@ -38,12 +38,16 @@ export function BottomBar() {
   const context: 'empty' | 'media' | 'chain' | 'multi' = selectedTiles.length === 0 ? 'empty' : selectedTiles.length === 1 ? (primary?.kind === 'media' && primary.canonical ? 'media' : 'chain') : 'multi'
 
   // The bar prompt spawn (R-20: only when objects exist — the launcher owns
-  // the empty canvas).
+  // the empty canvas). Journey sweep #4a (reality audit 2026-09-25 F6): the
+  // bar carries the LANE TOGGLE the hero has — post-first-chain spawns were
+  // video-only, leaving the image lane unreachable once the launcher was
+  // gone. The lane persists across spawns (the hero's chips semantics).
   const [barPrompt, setBarPrompt] = useState('')
+  const [barLane, setBarLane] = useState<'video' | 'image'>('video')
   const submit = async (text: string) => {
     const trimmed = text.trim()
     if (!trimmed) return
-    await submitPrompt(trimmed, 'video')
+    await submitPrompt(trimmed, barLane)
   }
 
   // Transport (media context): the tile's own preview element is the player —
@@ -120,7 +124,16 @@ export function BottomBar() {
             (one canonical home per engine). */}
         {tiles.length === 0
           ? <><span className="canvas-bar-title">canvas</span><span className="canvas-bar-hint" data-canvas-bar-hint>Describe a shot in the prompt bar above — or press <kbd>/</kbd></span></>
-          : <><span className="canvas-bar-title">generate</span><input className="canvas-bar-prompt" data-canvas-bar-prompt value={barPrompt} placeholder="Describe a shot — Enter spawns it at the bar" onChange={(event) => setBarPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); const text = barPrompt; setBarPrompt(''); void submit(text) } } } /></>}
+          : <>
+            <span className="canvas-bar-title">generate</span>
+            {/* #4a: the lane toggle — same vocabulary as the hero's chips
+                (R-23: each states its EFFECT), one kbd gesture apart. */}
+            <span className="canvas-bar-lane" data-canvas-bar-lane={barLane} role="radiogroup" aria-label="Spawn lane">
+              <button type="button" role="radio" aria-checked={barLane === 'video'} className={`canvas-chip ${barLane === 'video' ? 'active' : ''}`} data-canvas-bar-lane-toggle="video" title="Spawn a VIDEO chain — the derived mode follows what you later bind" onClick={() => setBarLane('video')}><FileVideo size={12} /> video</button>
+              <button type="button" role="radio" aria-checked={barLane === 'image'} className={`canvas-chip ${barLane === 'image' ? 'active' : ''}`} data-canvas-bar-lane-toggle="image" title="Spawn an IMAGE chain — a still per take (the workbench's families)" onClick={() => setBarLane('image')}><ImagePlus size={12} /> image</button>
+            </span>
+            <input className="canvas-bar-prompt" data-canvas-bar-prompt value={barPrompt} placeholder={`Describe a ${barLane === 'image' ? 'still' : 'shot'} — Enter spawns it at the bar`} onChange={(event) => setBarPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); const text = barPrompt; setBarPrompt(''); void submit(text) } } } />
+          </>}
         <button
           type="button"
           className={`canvas-bar-engine ${engine.connected ? (engine.modelReady ? 'online' : 'degraded') : ''}`}
@@ -136,7 +149,7 @@ export function BottomBar() {
     {context === 'chain' && primary && (
       <>
         <span className="canvas-bar-title" title={primary.prompt}>{primary.title}</span>
-        <span className="canvas-bar-mode" data-canvas-bar-mode>{MODE_LABEL[effectiveMode(readChainSettings(primaryChain?.settings ?? {}))]}</span>
+        <span className="canvas-bar-mode" data-canvas-bar-mode>{modeLabelFor(readChainSettings(primaryChain?.settings ?? {}))}</span>
         <span className="canvas-bar-state"><span className="canvas-tile-ring" data-status={primary.status} /> {STATUS_LABEL[primary.status]}</span>
         <span className="canvas-bar-identity" data-canvas-bar-identity>
           <CircleDot size={11} />

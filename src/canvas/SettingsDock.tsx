@@ -33,6 +33,7 @@ import { SettingsView } from '../views/SettingsView'
 import { useSessionStore } from '../state/sessionStore'
 import { CanvasSessionContext } from './sessionContext'
 import { dockDefaultGeometry } from './dockGeometry'
+import { WIZARD_REOPEN_EVENT } from './FirstRunNotice'
 import { useCanvasStore } from './store'
 
 export function SettingsDock() {
@@ -142,6 +143,14 @@ export function SettingsDock() {
           onCheck={() => void checkConnection(settings.comfyUrl)}
           onRunDiagnostics={() => void runDiagnosticsNow()}
           onOpenLibrary={(focusEntryIds) => setLibraryDock(true, focusEntryIds)}
+          onReopenWizard={() => {
+            // Journey sweep #9: the wizard's on-demand way back in — the
+            // same reopen signal the FirstRunNotice's Resume CTA fires. The
+            // dock closes so the wizard owns the moment (one journey at a
+            // time, the R-16 presenting rule).
+            setSettingsDock(false)
+            window.dispatchEvent(new CustomEvent(WIZARD_REOPEN_EVENT))
+          }}
         />
       </ErrorBoundary>
     </div>

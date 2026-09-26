@@ -128,7 +128,24 @@ export function resolvePreviewOverride(
   facts: Pick<H3SubmitFacts, 'h3PreviewOverrideNode'> & { selection: Pick<ModelSelection, 'previewVae'> },
 ): { frames: number; fps: number; nodeType: string; vaeName: string; jpegQuality: number } | undefined {
   if (!livePreview.enabled) return undefined
-  if (!facts.h3PreviewOverrideNode || !facts.selection.previewVae) return undefined
+  // (A-DBG, journey sweep #3 — audit M6/C7's RCA): the routing junction is
+  // named at decision time. The audit observed "the pack never engaged on
+  // the mirror" — the RCA (verified against e2e/mirror, 2026-09-26) is that
+  // this resolver is CORRECT when the live facts are honest: it needs BOTH
+  // the pack's node class (object_info) AND a preview decoder the REGISTRY
+  // lists (selection.previewVae — a model-registry inference over vae_approx).
+  // The audit's walk rode a stale registry window, where previewVae resolved
+  // empty and the pack silently didn't engage. The junction below makes that
+  // silent drop visible in the debug transcript instead.
+  if (!facts.h3PreviewOverrideNode) {
+    dbg('route', { verdict: 'preview-stock', reason: 'pack-node-absent', previewVae: facts.selection.previewVae || '' })
+    return undefined
+  }
+  if (!facts.selection.previewVae) {
+    dbg('route', { verdict: 'preview-stock', reason: 'decoder-absent-from-registry', packNode: facts.h3PreviewOverrideNode })
+    return undefined
+  }
+  dbg('route', { verdict: 'preview-pack', node: facts.h3PreviewOverrideNode, vaeName: facts.selection.previewVae })
   return { frames: 50, fps: 12, nodeType: facts.h3PreviewOverrideNode, vaeName: facts.selection.previewVae, jpegQuality: 85 }
 }
 

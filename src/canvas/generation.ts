@@ -268,6 +268,20 @@ export const MODE_LABEL: Record<GenerationMode, string> = {
   reference: 'reference → video',
 }
 
+/** The user-facing mode label, mediaType-aware (journey sweep #4c, reality
+ *  audit 2026-09-25 F8): MODE_LABEL speaks the VIDEO vocabulary only — an
+ *  image chain read "text → video" (the audit's mislabel: a still lane
+ *  labeled as a video lane, on the bar, the panel header, and the generate
+ *  button), and audio chains borrowed it too. The label states the lane the
+ *  object actually renders in; partial settings tolerate to video (the
+ *  readChainSettings default). */
+export function modeLabelFor(settings: Partial<Pick<CanvasChainSettings, 'mediaType'>> & Parameters<typeof effectiveMode>[0]): string {
+  const mode = effectiveMode(settings)
+  if (settings.mediaType === 'image') return mode === 'image' ? 'source → edit (workbench)' : 'text → image'
+  if (settings.mediaType === 'audio') return 'caption → audio'
+  return MODE_LABEL[mode]
+}
+
 // ---- output refs → renderable media -------------------------------------------
 
 export type OutputIndexEntry = { chain: DocumentChain; outputId: string; take: DocumentTake | null }

@@ -44,7 +44,7 @@ function PathCheckNote({ path }: { path: string }) {
     : <><AlertCircle size={13} /> {detail || 'Path check failed.'}</>}</p>
 }
 
-export function SettingsView({ settings, setSettings, info, infoEpoch = 0, models, h3Report, scanning, status, checking, diagnosticRunning, ollamaModels, onRefreshOllama, onScan, onCheck, onRunDiagnostics, onOpenLibrary }: { settings: AppSettings; setSettings(value: AppSettings): void; info: ObjectInfo; infoEpoch?: number; models: ModelFile[]; h3Report: ReturnType<typeof h3StackReport>; scanning: boolean; status: ComfyStatus; checking: boolean; diagnosticRunning: boolean; ollamaModels: OllamaModel[]; onRefreshOllama(): void; onScan(): void; onCheck(): void; onRunDiagnostics(): void; onOpenLibrary(focusEntryIds?: string[]): void }) {
+export function SettingsView({ settings, setSettings, info, infoEpoch = 0, models, h3Report, scanning, status, checking, diagnosticRunning, ollamaModels, onRefreshOllama, onScan, onCheck, onRunDiagnostics, onOpenLibrary, onReopenWizard }: { settings: AppSettings; setSettings(value: AppSettings): void; info: ObjectInfo; infoEpoch?: number; models: ModelFile[]; h3Report: ReturnType<typeof h3StackReport>; scanning: boolean; status: ComfyStatus; checking: boolean; diagnosticRunning: boolean; ollamaModels: OllamaModel[]; onRefreshOllama(): void; onScan(): void; onCheck(): void; onRunDiagnostics(): void; onOpenLibrary(focusEntryIds?: string[]): void; onReopenWizard?(): void }) {
   const pathRows: Array<{ kind: ModelKind; label: string; note: string }> = [
     { kind: 'diffusion_models', label: 'Diffusion models', note: 'FL2VA and Ref2VA checkpoints' },
     { kind: 'text_encoders', label: 'Text encoders', note: 'Qwen3-VL MiniMax encoder' },
@@ -289,7 +289,16 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
         acknowledgment the test ran or why it failed. Render the reason with
         the address that was tried. */}
     {!status.connected && status.error && <div className="llm-test-result fail" role="status" data-comfy-status-error><AlertCircle size={14} /><span>Could not reach {settings.comfyUrl} — {status.error}</span></div>}
-    {status.connected && status.stats?.devices?.[0] && <div className="device-strip"><Gauge size={17} /><span><strong>{status.stats.devices[0].name ?? 'Compute device'}</strong><small>{status.stats.devices[0].vram_total ? `${formatBytes(status.stats.devices[0].vram_total)} VRAM · ${formatBytes(status.stats.devices[0].vram_free ?? 0)} free` : 'ComfyUI device detected'}</small></span></div>}</section>
+    {status.connected && status.stats?.devices?.[0] && <div className="device-strip"><Gauge size={17} /><span><strong>{status.stats.devices[0].name ?? 'Compute device'}</strong><small>{status.stats.devices[0].vram_total ? `${formatBytes(status.stats.devices[0].vram_total)} VRAM · ${formatBytes(status.stats.devices[0].vram_free ?? 0)} free` : 'ComfyUI device detected'}</small></span></div>}
+    {/* Journey sweep #9 (reality audit 2026-09-25 F1/C5): the setup wizard's
+        way back in. The wizard opens on the fresh-home journey and stays
+        resumable — this row makes it reachable ON DEMAND for the user whose
+        engine was already connected (the shape the audit walked: the old
+        registry-emptiness guard meant steps 2-4 never ran). */}
+    {onReopenWizard && <div className="settings-note" data-settings-wizard-row>
+      <span>The four-step setup walk (engine → models → packs → first prompt) is one click away.</span>
+      <button type="button" className="secondary-button" data-settings-reopen-wizard onClick={onReopenWizard}>Reopen the setup wizard</button>
+    </div>}</section>
     <section className="settings-section managed-engine-section" aria-label="Managed engine">
       <div className="settings-heading">
         <div><ServerCog size={19} /><span><strong>Managed engine</strong><small>The studio launches and supervises its own ComfyUI from a checkout you nominate. External mode keeps the connection above.</small></span></div>
