@@ -120,3 +120,97 @@ Re-run this register: **(1)** after any major research landing (a new assessment
 - Corrected in-pass: `docs/devdocs/comfyui-api/index.md` (version-drift addendum incl. the YuE2 minimum), `docs/research/qwen-image-2.1-assessment.md` (v0.37.0 trigger fired), `docs/devdocs/MANIFEST.md` (last-verified bump for the comfyui-api row).
 - Relayed, not patched (owned file): the YuE2 v0.36.0 minimum — `docs/research/yue2-3b-assessment.md` is in-flight-owned; the devdocs addendum carries the fact with a pointer.
 - No corrections found in: ui-systems-design-language, shibui-fonts-icons, node-pack-registry, h3-image-studio-pack, crossview-warp, remediation-plan, ROADMAP, LEARNINGS (their claims verified as recorded).
+
+---
+
+# Pass 2 (2026-09-26) — the 09-25/26 landings + the Viggle gate lesson
+
+> Round 2 of the same directive (`6a857386`). Scope: the 2026-09-25/26 research landings — [viggle-assessment.md](../research/viggle-assessment.md), [h3-v2v-reanchor.md](../research/h3-v2v-reanchor.md), [h3-overlap-concept.md](../research/h3-overlap-concept.md) (+ its Addendum 3), [fizgig-h3-still-assessment.md](../research/fizgig-h3-still-assessment.md), the [reality-audit-2026-09-25.md](reality-audit-2026-09-25.md) environment-mirror — plus the institutional lesson from the Viggle gate. Method unchanged: primary sources only — the shared install `/home/agent/comfyui` (read-only code reads), the HF API (file lists + sizes via `?blobs=true`), GitHub API/raw at pinned AND current revisions, the docs.comfy.org changelog; no GPU, no engine, no installs. Same verdict vocabulary as pass 1.
+
+## P2.0 Headline
+
+**15 rows: 13 VERIFIED, 0 CORRECTED, 1 UNVERIFIABLE-BY-NATURE restated honestly (Fizgig's dB number — status unchanged), 1 ecosystem gap found UNDER a still-true claim** (sparse attention: the weights claim holds today, but ComfyUI core shipped H3-specific block-sparse kernels five days before the transitions doc compiled — dated addendum landed). Every load-bearing claim in the week's landings verifies against primary sources, most line-exact or byte-exact. The pass's structural output is the **ecosystem-scan rule** (§P2.6, the Viggle gate lesson institutionalized), and its spot-application found the same miss-shape twice more under still-true claims (the sparse-attention node; the VideoX-Fun motion).
+
+## P2.1 The Viggle gate, re-verified TODAY (2026-09-26)
+
+| ID | Claim (viggle-assessment §1) | Verdict | Evidence (fetched 2026-09-26) |
+|---|---|---|---|
+| P2-1 | drbaph quants exist at the stated repo/sizes: int8_convrot **47.03 GB**, pruned-int8 **21.03 GB**, r64 LoRA **0.94 GB**, `fixed_embed_fwd_anyframe` present | **VERIFIED — byte-exact** | HF API `drbaph/Viggle-Animate-ComfyUI?blobs=true`: 47.03 / 21.03 / 0.94 GB (+ 3.77 GB full-rank LoRA); `text_cond/fixed_embed_fwd_anyframe.safetensors` present; repo lastModified still **2026-09-07** (nothing moved since the 09-25 read); 76.3k downloads (noise per doctrine). Also present: a 66.28 GB bf16 conversion — there at read time, unitemized then; no recorded claim affected |
+| P2-2 | The official Viggle repo ships bf16 only (no official quant) | **VERIFIED** | `Viggle/Viggle-Animate` file tree: 14 transformer shards (~66 GB class) + 2.67 GB LoRA; zero quantized transformer files |
+| P2-3 | Animate v2 status: "training a substantially better model right now" — no v2 release | **VERIFIED — card unchanged** | Repo sha still `9cd946f` (lastMod 2026-09-18); README line 247 verbatim today |
+| P2-4 | Meridian's geometry dependency is FAIR-NC (any commercial posture gated on a VGGT-Omega replacement) | **VERIFIED** | `facebookresearch/vggt-omega` LICENSE re-fetched: "FAIR Noncommercial Research License v1"; `Viggle/Meridian` sha still `9c57d46` (lastMod 09-19) |
+
+## P2.2 The V2V re-anchor three (h3-v2v-reanchor.md, verified against the shared-install code)
+
+| ID | Claim | Verdict | Evidence |
+|---|---|---|---|
+| P2-5 | **Silent truncation**: the reference video is truncated to target length (`frames = frames[:frame_count]`, cited at `nodes_minimax_h3.py:323-324`) | **VERIFIED — line-exact** | `comfy_extras/nodes_minimax_h3.py:323-324` verbatim at v0.34.0. The surrounding half verifies too: <5 frames raises; then `while n % 17 != 5: n -= 1` snaps DOWN to the 17k+5 grid — the doc's "silently truncates … then snaps down" sequence is exactly the code's order |
+| P2-6 | The **5–15 s envelope** (target tooltip "trained range is ~124-362"; ref-video tooltip "2-15s") | **VERIFIED — line-exact** | `:264` length tooltip "(124 = ~5s, trained range is ~124-362)"; `:273` ref_video tooltip "Reference video frames at 24 fps (2-15s)" |
+| P2-7 | **`visual_cond_noise_aug` is the real, unexposed conditioning-strength dial** (default 0.999; `<1.0` mixes seeded noise into the never-denoised cond rows) | **VERIFIED** | `comfy/ldm/minimax/model.py:32` `VISUAL_COND_TIMESTEP = 0.999`; `_cond_video_rows` reads `payload.get("visual_cond_noise_aug", …)` at `:528`, mixes `aug*r + (1-aug)*noise` when `< 1.0` (the cited 525-538 span is the function). Payload-settable ⇒ surfaceable by the graph factory, as the doc claims. Note the unnamed twin: `audio_cond_noise_aug` / `AUDIO_COND_TIMESTEP = 1.0` (`:33`, `:542`) — a second free dial for the O-soft/audio arms |
+
+## P2.3 The overlap corrections chain (h3-overlap-concept.md + Addendum 3)
+
+| ID | Claim | Verdict | Evidence |
+|---|---|---|---|
+| P2-8 | The **90 f window is a VRAM choice, not an architecture limit** (pack source documented to 643 frames; 12 GB at ~0.5 MP; window configurable; nothing in the model privileges 90) | **VERIFIED** | README at pinned `e2f2bc6` — **still HEAD, zero new commits**: §Tested Configuration lists 12 GB VRAM · 90-frame processing windows · 8-frame overlap · 82-frame source batches · portrait+landscape · "Videos up to 643 frames" · "**Approximately 0.5-megapixel processing resolution**" (the other "~1-megapixel" string in the README is the OPTIONAL final output after upscaling — no conflict with "0.5 MP processing"). "Configurable processing-window size" = the configurability half |
+| P2-9 | **Audio grid hostility**: `audio_steps = frames × 5/3`, whole only for frames ≡ 0 (mod 3); 8 f → 13.33 (off-grid, the tick condition); 39 f → 65 (phase-exact) | **VERIFIED — code constants** | `nodes_minimax_h3.py:32-33` `FPS = 24`, `AUDIO_LATENT_FPS = 40`; `temporal_shape` `:49` returns `round(duration × 40)` = frames×5/3 exactly; integer iff 3 divides frames |
+| P2-10 | **Addendum 3 stands** (the workflow's 0.59 is `target_megapixels`, not ref-strength; the ostris node has no strength input at all) | **VERIFIED — still current** | `ostris/ComfyUI-AIToolkit-MiniMaxH3` is still a single Initial commit (`4bf42cd`, 2026-08-20); schema at HEAD: `video / target_megapixels 0.01–4.0 (default 0.258) / max_length` — no strength input; 0.59 is a legal megapixel value |
+
+## P2.4 The Fizgig-H3-Still headline number
+
+| ID | Claim | Verdict | Evidence |
+|---|---|---|---|
+| P2-11 | Round-trip **29.99 vs 16.96 dB** (group-replicate vs lone token), recorded as "precisely cited, script not shipped — not independently runnable" | **UNVERIFIABLE — status honestly UNCHANGED: author-cited-unverifiable** | Trainer `shootthesound/Fizgig` at HEAD (pushed 2026-09-25T23:06Z): still **no `tests/`, no diag script** (289-file tree scanned 2026-09-26). The PACK moved — 3 commits 2026-09-26T00:24–00:30Z (`c6a1d69` an 8 MP no-Turbo example workflow + sample still; `54eaa31`/`10d5171` README recommended-sizes + decode wording; registry version still 1.0.0) — **demo artifacts, not measurement artifacts**. Dated addendum landed in the assessment; E-FS0 remains the settling test |
+
+## P2.5 The environment mirror's fidelity
+
+| ID | Claim | Verdict | Evidence |
+|---|---|---|---|
+| P2-12 | `e2e/mirror/profiles/maintainer-instance.json` shapes like the maintainer's real instance (evidence spanning the 09-22 PreviewOverride exam + 4B-TE crash log through the 09-25 assembly session: five foreign packs, subpath'd models, the 4B-trap TE, taeh3 previews) | **VERIFIED as of its 09-25 assembly — now UNVERIFIED-SINCE-09-25, gaps named** | No direct observation of 8188 since 09-25 (policy — never probed). Post-assembly evidence all CONSISTENT with the profile: the 09-26 DAV finding ("their engine serves no DAV at all" = the profile's VAE listing) and the 09-26 TE-dimension doc (the 4B-trap file present = the profile's TE listing). Standing gaps (mostly the registry addendum §11's own caveats): their lora-manager revision unrecorded (our `77109b3c` pin is the Kreatine vendor copy); one-node byte-identity unconfirmed (AIFSH-fork identification); the five-dir pack inventory is session evidence, not an `ls` (§11.7's UNEXAMINED-NEXT list is the likely residue); foreign class names in the profile are approximations (real multishot names `H3MultishotSampler` et al.); `comfyui_version: v0.34.0` is OUR floor, not their truth (their instance runs master — pass 1 A-5). Dated refresh note landed in the reality audit; the JSON itself untouched (test fixture; docs-only pass) |
+
+## P2.6 The ecosystem-scan rule (the Viggle gate lesson, institutionalized)
+
+**The lesson:** our 09-14 "no int8 convrot shipped" record was 8 days stale in the wrong direction — drbaph shipped 09-05, and we read the model card but never scanned the ecosystem. This pass's spot-application found the same miss-shape twice more (§P2.7's sparse-attention and VideoX-Fun rows): claims that stayed formally true while the ecosystem moved under them.
+
+**THE RULE:**
+
+> Any claim of the form **"X is not available / none shipped / not yet in Y / no community Z"** is only recordable **with an ecosystem-scope check attached**, and re-verifies on every curation pass. Minimum check scope: **(1)** community quant/conversion repos — the HF orgs of the family's known converters (drbaph, Kijai, Abiray-class) plus an HF search on the model name; **(2)** the ComfyUI surface — the docs.comfy.org changelog since the last check + the ComfyUI-Manager index; **(3)** the upstream repo's own file tree **and open PRs** (a half-shipped state is recorded as "closer", not ignored); **(4)** the top pack authors' recent releases for the family. Every negative claim carries its check's **sources + date** — "checked where" is part of the claim's provenance. **Re-verify triggers:** every assumption-register pass, every registry quarterly re-run, and before any decision that consumes the claim as a gate.
+
+**Placement:** (a) **landed** — the node-pack-registry §10 recurrence table (the negative-availability trigger row, added 2026-09-26) and this register's recurrence practice (amended §P2.9); (b) **proposed for the maintainer to ratify** — a one-paragraph addendum to directive `6a857386` on epic 4lphxv8 carrying the rule text above, so the discipline is pinned where the ratify charter lives.
+
+**Scope note:** the rule covers AVAILABILITY claims ("none shipped"), not UNMEASURED-CELL claims ("nobody has published X measurement") — the latter are re-settled by our own test suites (the E-series/VG-series arms), not by ecosystem scans.
+
+## P2.7 The live "not available" claims re-checked TODAY (the spot-application table)
+
+Sweep patterns: `none shipped · not yet · no community · gated on · not available · unreleased · not released · not in · no quant · nobody has`.
+
+| Claim (doc) | Ecosystem check 2026-09-26 | Verdict |
+|---|---|---|
+| Viggle gate "no int8 convrot shipped" → corrected 09-25 (viggle-assessment) | drbaph repo unchanged since 09-07; files byte-verified (P2-1) | **VERIFIED open** |
+| `Saganaki22/ComfyUI-Viggle-Animate-H3` 404 (viggle-assessment §1) | GitHub repo + API: still 404 today | **VERIFIED still-true** |
+| MiniMax sparse-attention **weights** "not yet released" (h3-transitions §5, compiled 09-14) | HF `MiniMaxAI/MiniMax-H3` unchanged since 08-13 — no sparse files; zero changelog mentions through v0.37.2 — **the weights claim holds**. But core shipped **`BlockSparseAttention`** (`comfy_extras/nodes_sparse_attention.py`) in **v0.35.0, tagged 09-09 — five days BEFORE the doc compiled**: block-sparse attention on `comfy_kitchen` kernels (Sol-Attn adaptive threshold, SLA-style top-k, FastVideo VSA) with an **H3-specific chunked-qkv block-patch path** (the file imports `MiniMaxH3Model`; changelog: "Model Sparse Attention node for comfy-kitchen sparse backends"). Absent at our v0.34.0 pin, present v0.35.0→master | **Weights: VERIFIED. Framing: GAP → dated addendum landed in h3-transitions** — training-free sparse attention for H3 is in core today; the long-sequence compute lever does not wait on MiniMax's weights |
+| "Full technical report promised but not yet published" (h3-transitions §5) | No report in the repo; none surfaced in this pass's searches | **VERIFIED still-true** |
+| "VDN is not core, and there is no PR making it core" (speed-quality §1.x, checked through v0.35.1) | docs.comfy.org changelog through **v0.37.2 (09-23)**: zero VDN mentions | **VERIFIED — window extended to v0.37.2** |
+| "GLM 5.3 Flash = not yet in llama.cpp (issue #27922)" (video-dataset-prep-tools §) | llama.cpp master `llama-arch.cpp`: chatglm / glm4 / glm4moe / glm-dsa — **no glm5next**; PR #27773 "add GLM-5.3-Flash (GLM5-Next) support" (opened 08-26) **open and unmerged**, with open CUDA-bug issues filed against that branch; #27922 still open | **VERIFIED still-true, precision note**: an implementation exists as an unmerged third-party PR — record "closer than not-yet", not flipped |
+| Fizgig diag script not public (fizgig-h3-still §2) | P2-11 | **VERIFIED still-true** |
+| VideoX-Fun "the trainer has no quantized-weight training path; training rides the bf16 full checkpoint" (ap10k §1.2) | `scripts/minimax_h3/README_TRAIN.md` at HEAD `67e3b4b` (09-24): bf16 mixed precision only; the qfloat8 modes are inference-side | **VERIFIED still-true at HEAD** — but the repo moved past the doc's pin (`968f0e2`, 09-04): commit `2beb171` (09-22) "Support new Control for Minimax-H3". **Recheck trigger:** re-verify the AP-10K hot-start and verdict before that build dispatches |
+
+## P2.8 Corrections landed this pass (dated addenda, never silent)
+
+- `docs/research/h3-transitions-and-latent-continuity.md` — addendum: sparse-attention weights still unreleased (verified 09-26) + the core `BlockSparseAttention` node the 09-14 compile missed.
+- `docs/research/fizgig-h3-still-assessment.md` — addendum: the 09-26 commits (demo artifacts only), the dB number's status restated.
+- `docs/audit/reality-audit-2026-09-25.md` — the mirror profile's dated refresh note (evidence vintage, UNVERIFIED-SINCE gaps, refresh procedure).
+- `docs/research/node-pack-registry.md` — §10 recurrence table: the negative-availability / ecosystem-scope trigger row.
+
+No claim in the week's landings was CORRECTED — every addendum above adds ecosystem context or currency, it does not reverse a recorded claim.
+
+## P2.9 Recurrence amendment
+
+Amending pass 1's §4 recurrence (append-only, the original text stands above): every re-run of this register additionally re-verifies all recorded **negative-availability claims** per the ecosystem-scan rule (§P2.6), with the checks' sources and dates recorded in the pass section.
+
+### Pass 2 record (2026-09-26)
+
+- Swept: the five 09-25/26 landings' load-bearing claims + the live "not available" claims across `docs/research` (the §P2.7 patterns).
+- 15 rows: 13 VERIFIED, 0 CORRECTED, 1 UNVERIFIABLE-BY-NATURE (restated), 1 framing gap (addendum landed).
+- Structural output: the ecosystem-scan rule — landed in two homes (this register, node-pack-registry §10), proposed as an addendum to directive `6a857386` for the maintainer to ratify.
+- Flux task: tx0omjr.

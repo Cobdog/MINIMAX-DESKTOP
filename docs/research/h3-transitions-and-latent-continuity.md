@@ -268,3 +268,17 @@ independent confirmation of the pinned-row hazard (rejects Spectrum/skip-step
 for chains: "they alter conditioned rows"). Evidence quality: thin (3★, 4
 commits, one confounded user test) — mechanisms well-engineered, claims to be
 harness-verified not trusted.
+
+---
+
+## ADDENDUM 2026-09-26 — sparse attention: the weights claim holds; the compute lever shipped anyway (ratify-and-verify pass 2)
+
+Re-verified 2026-09-26: MiniMax's sparse-attention **weights remain unreleased** — HF `MiniMaxAI/MiniMax-H3` unchanged since 2026-08-13 (no sparse-attention files), zero mentions in the ComfyUI changelog through v0.37.2. §5's "Sparse attention weights not yet released" row stands.
+
+But the ecosystem-scan check (the Viggle-gate rule, assumption-register pass 2 §P2.6) found what this doc's 09-14 compile missed: **ComfyUI core shipped `BlockSparseAttention` (`comfy_extras/nodes_sparse_attention.py`) in v0.35.0, tagged 2026-09-09 — five days before this doc**. Block-sparse attention over `comfy_kitchen` kernels (Sol-Attn adaptive threshold, SLA-style top-k, FastVideo VSA), with a **MiniMax-H3-specific path** — the file's own docstring: "MiniMax-H3 gets the chunked qkv producer through block patches" (it imports `comfy.ldm.minimax.model.MiniMaxH3Model`; changelog line: "Model Sparse Attention node for comfy-kitchen sparse backends"). Verified absent at our v0.34.0 pin (raw fetch 404 at the tag), present v0.35.0 → master.
+
+Consequences:
+
+1. **Training-free sparse attention for H3 exists in core TODAY** — not in our shared install (which predates it), present on the maintainer's master-class instance.
+2. The §5 framing ("affects long-sequence future") implicitly waited on MiniMax's weights — but a compute-side mitigation for exactly the long-sequence / long-reference cost profiled elsewhere (h3-v2v-reanchor §2.2's "+~56 % packed tokens, quadratic attention"; h3-overlap-concept's packed-sequence VRAM line) **already shipped**. Evaluate `BlockSparseAttention` — and its interaction with VDN's own sparse path — at the next instance bump, before treating the unreleased weights as the only path.
+3. Same miss-class as the Viggle gate: the claim was scoped correctly, the scan was scoped narrowly.
