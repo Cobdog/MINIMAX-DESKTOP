@@ -42,6 +42,20 @@
  * while T=1/fast-sharp REFUSE (the stock length:1 path is dead — no code
  * path submits it anymore; the engine-contract divergence h3img.t1-length-1
  * retired with it).
+ *
+ * THE E-FS1 FIZGIG ARM (task 464xfvd, behind a flag — the Fizgig-H3-Still
+ * challenge, docs/research/fizgig-h3-still-assessment.md): the settings
+ * flag `experimentalT1Decode` ('image-studio' default = zero behavior
+ * change) can select 'fizgig', routing the T=1 leg through the 94-line
+ * pack's two classes — the STOCK conditioning node stays in the graph for
+ * its conditioning (latent output dangling, length widget legal at 5 — the
+ * #15644 floor sidestepped from the submission side), FizgigH3StillLatent
+ * builds the T=1 packed latent, and FizgigH3StillDecode replicates it into
+ * a 5-latent temporal group decoded through the VIDEO VAE keeping pixel
+ * frame 3 — no Mamad8 loader anywhere on that leg. Classes unserved → the
+ * honest refusal naming the pack. The E-FS0/E-FS1 bake-off owns the
+ * verdict; until it reports, the Image Studio path is the default and the
+ * flag is never set by the app.
  */
 import type { ObjectInfo } from '../comfyInfo'
 import type { ModelFile } from '../../types'
@@ -80,6 +94,11 @@ export const H3IMG = {
   scheduler: '14',
   sampler: '15',
   decode: '16',
+  /** The Fizgig-H3-Still latent builder (E-FS1): occupies 17 — outside the
+   *  1-16 still-pipeline base because it REPLACES the latent half of node
+   *  10's role, not a decode/publish slot. Only emitted on the flag-on
+   *  fizgig T=1 path. */
+  fizgigLatent: '17',
   firstFrameLoader: '20',
   refImageLoaderPrefix: '30',
   frameSelectPrefix: '70',
@@ -165,6 +184,31 @@ export function h3ImageStudioPackPresent(info: ObjectInfo | undefined): boolean 
   return H3_IMAGE_STUDIO_PREPARE_NODES.some((nodeClass) => infoHas(info, nodeClass))
 }
 
+/** The Fizgig-H3-Still pack's two classes (shootthesound
+ * ComfyUI-Fizgig-H3-Still, MIT, registry row 'fizgig-h3-still' — pinned
+ * f3252d2, the whole pack is 94 lines). THE E-FS1 CHALLENGE ARM
+ * (docs/research/fizgig-h3-still-assessment.md; maintainer ruling
+ * 2026-09-25 "Our T1 method is now obsolete" — PROPOSED-PENDING-TEST):
+ * FizgigH3StillLatent builds the true T=1 packed AV latent (video
+ * [B,24,1,even(H/16),even(W/16)] + audio [B,32,2,2], zeros) while the
+ * STOCK conditioning node stays in the graph for its conditioning — its
+ * latent output dangles and its length widget stays legal, sidestepping
+ * the #15644 floor from the submission side. FizgigH3StillDecode
+ * replicates the lone latent into the 5-latent temporal group the H3 ViT
+ * decoder was chunk-trained on, decodes it through the VIDEO VAE
+ * (spatially tiled), and keeps pixel frame 3 (past the decoder's causal
+ * lead-in — the trainer-measured 29.99 dB round-trip vs the lone token's
+ * 16.96). Detection is all-match: the lane needs BOTH classes, and when
+ * either is unserved the flag-on build refuses honestly naming the pack. */
+export const FIZGIG_H3_STILL_NODES = ['FizgigH3StillLatent', 'FizgigH3StillDecode'] as const
+export const FIZGIG_H3_STILL_PACK_NAME = 'ComfyUI-Fizgig-H3-Still'
+
+/** True when the engine serves BOTH Fizgig classes (all-match — the lane
+ *  is useless with only one half). */
+export function fizgigH3StillPackPresent(info: ObjectInfo | undefined): boolean {
+  return FIZGIG_H3_STILL_NODES.every((nodeClass) => infoHas(info, nodeClass))
+}
+
 // ---------------------------------------------------------------------------
 // Research-pinned recipe constants (the single source — tests enforce these)
 // ---------------------------------------------------------------------------
@@ -204,6 +248,18 @@ export const H3IMG_RECIPE_PINS = {
     defaultContextTier: 5,
     latentIndex: 0,
     spatialDecode: 'native',
+  },
+  /** The Fizgig-H3-Still arm pins (E-FS1, 464xfvd): the stock conditioning
+   *  node kept LEGAL at the length floor (their shipped T2I example's
+   *  widget — the latent node is what makes the render T=1), and the
+   *  challenger's shipped recipe for arm B2, verbatim from their
+   *  example_workflows/h3_still_text_to_image.json @ f3252d2: er_sde /
+   *  simple, 20 steps, the v4-step-600-EMA turbo @0.38, no detail adapter,
+   *  no sigma shift, the plain fl2va base. Arm B keeps OUR t1 pins — the
+   *  machinery is the only variable. */
+  fizgig: {
+    conditioningLength: 5,
+    recipe: { steps: 20, sampler: 'er_sde', scheduler: 'simple', turboStrength: 0.38, detail: false, sigmaShift: false },
   },
   /** Packet default operating point on the hybrid profile: the official
    * sampler pair, full steps (turbo is the T=1 lane's acceleration). */
@@ -821,6 +877,43 @@ export function detectH3ImgFamilies(info: ObjectInfo | undefined, files: ModelFi
 
 type Inputs = Record<string, string | number | boolean | [string, number]>
 
+/** Which machinery a T=1 leg rides (the E-FS1 experiment axis). */
+export type H3ImgT1Machinery = 'image-studio' | 'fizgig'
+
+/** Per-build machinery overrides (task 464xfvd). Every field optional and
+ *  undefined = the landed behavior, byte-identically — the E-FS1 flag and
+ *  the experiment runner are the only callers that set these today; no
+ *  surface of the app passes them by default. */
+export type H3ImgBuildOptions = {
+  /** The T=1 latent source: the Image Studio pack's Prepare latent (the
+   *  landed lane) or FizgigH3StillLatent with the stock conditioning node
+   *  kept in the graph for its conditioning (its latent output dangles,
+   *  its length stays legal at the floor). */
+  t1Latent?: H3ImgT1Machinery
+  /** The T=1 decode: Mamad8 through the pack's H3ImageDecode (the landed
+   *  lane) or FizgigH3StillDecode (the group-replicate video-VAE decode
+   *  keeping frame 3 — no Mamad8 loader on that leg). */
+  t1Decode?: H3ImgT1Machinery
+  /** The challenger's shipped recipe (arm B2): turbo @0.38, no detail
+   *  adapter, 20 steps, the simple scheduler, no sigma shift. */
+  t1Recipe?: 'ours' | 'fizgig'
+  /** The plain-FL2VA base even under reference conditioning (their
+   *  edit-lane wiring — the stock conditioning node does not require
+   *  Ref2VA weights; the hybrid/merged lanes are skipped when set). */
+  t1Base?: 'auto' | 'fl2va'
+}
+
+/** The settings-level experiment flag (AppSettings.experimentalT1Decode)
+ *  resolved into build options — the seam the override-reading surfaces
+ *  (the submit ladder, the canvas plan probe) call so the flag reaches the
+ *  builder from exactly one place. Anything but 'fizgig' — absent, null,
+ *  garbage — resolves the landed Image Studio lane; the default behavior
+ *  never moves. */
+export function t1BuildOptionsFromSettings(settings?: { experimentalT1Decode?: 'image-studio' | 'fizgig' } | null): Pick<H3ImgBuildOptions, 't1Latent' | 't1Decode'> {
+  const path: H3ImgT1Machinery = settings?.experimentalT1Decode === 'fizgig' ? 'fizgig' : 'image-studio'
+  return { t1Latent: path, t1Decode: path }
+}
+
 /** The ids of the per-frame publish pairs (ImageFromBatch + SaveImage). */
 export function framePublishIds(count: number): Array<{ select: string; save: string }> {
   const ids: Array<{ select: string; save: string }> = []
@@ -887,7 +980,7 @@ function validateRequest(family: H3ImgFamily, request: H3ImgRequest): number {
  * delegate to their own engines (Krea 2 via buildKrea2Graph; klein via the
  * official-template port).
  */
-export function buildH3ImageGraph(request: H3ImgRequest, selection: H3ImgModelSelection, info?: ObjectInfo): Record<string, { class_type: string; inputs: Inputs }> {
+export function buildH3ImageGraph(request: H3ImgRequest, selection: H3ImgModelSelection, info?: ObjectInfo, options?: H3ImgBuildOptions): Record<string, { class_type: string; inputs: Inputs }> {
   const family = findH3ImgFamily(request.family)
   if (!family) throw new Error(`Unknown H3 image family '${request.family}'.`)
   const tier = validateRequest(family, request)
@@ -899,7 +992,7 @@ export function buildH3ImageGraph(request: H3ImgRequest, selection: H3ImgModelSe
   if (family.id === 'h3img.exit.anchor') {
     throw new Error('The exit is an app-side handoff: it seeds a video chain (first-frame anchor + optional guide machinery) through the canvas chain settings — there is no engine graph to build here.')
   }
-  return buildH3StillPipeline(request, family, selection, tier, info)
+  return buildH3StillPipeline(request, family, selection, tier, info, options)
 }
 
 function buildH3StillPipeline(
@@ -908,6 +1001,7 @@ function buildH3StillPipeline(
   selection: H3ImgModelSelection,
   tier: number,
   info?: ObjectInfo,
+  options?: H3ImgBuildOptions,
 ): Record<string, { class_type: string; inputs: Inputs }> {
   const graph: Record<string, { class_type: string; inputs: Inputs }> = {}
   const isT1 = family.profile === 't1'
@@ -915,26 +1009,51 @@ function buildH3StillPipeline(
   const useRefs = request.refs.length > 0 || family.kind === 'compose' || (isT1 && Boolean(request.source))
   const hybridAvailable = Boolean(info && (info as Record<string, unknown>)[HYBRID_LOADER_NODE] !== undefined) && Boolean(selection.fl2va && selection.ref2va)
 
+  // --- the E-FS1 machinery flags (464xfvd): which T=1 leg rides which
+  // machinery. Undefined everywhere = the landed lane, byte-identically.
+  const useFizgigLatent = isT1 && options?.t1Latent === 'fizgig'
+  const useFizgigDecode = isT1 && options?.t1Decode === 'fizgig'
+  const useFizgigRecipe = isT1 && options?.t1Recipe === 'fizgig'
+  const forceFl2va = isT1 && options?.t1Base === 'fl2va'
+  // Arm B/B2 take the fizgig latent (stock conditioning); arm C keeps the
+  // studio latent and swaps only the decode — so the studio pack is needed
+  // by every T=1 form EXCEPT the full-fizgig latent.
+  const studioNeededByT1 = isT1 && (!useFizgigLatent || !useFizgigDecode)
+
   // --- the pack branch (afvlbk4): WHICH conditioning path this graph takes --
   // The T=1 and fast-sharp profiles are studio-conditioned, full stop — the
   // stock length:1 submission is dead (issue #15644 refuses it at validation;
-  // no code path emits it). Packet tiers take the pack's exact latent ladder
-  // when served (5/9/13 hit t=2/3/4 exactly — no 22-frame snap); tier 39 and
-  // the pack-absent fallback stay on stock nodes, where 5/39 are native grid
+  // no code path emits it). The E-FS1 fizgig latent is the ONE exception:
+  // it reaches for the STOCK conditioning node on purpose (kept legal at
+  // length 5, its latent output dangling — the Fizgig nodes own the latent
+  // and the decode). Packet tiers take the pack's exact latent ladder when
+  // served (5/9/13 hit t=2/3/4 exactly — no 22-frame snap); tier 39 and the
+  // pack-absent fallback stay on stock nodes, where 5/39 are native grid
   // points and 9/13 are honestly labeled as the snap.
   const studioPack = h3ImageStudioPackPresent(info)
-  if ((isT1 || isSharp) && !studioPack) {
+  if ((isSharp || studioNeededByT1) && !studioPack) {
     throw new Error(
       `${family.label} renders through the H3 Image Studio pack's conditioning — its Prepare classes (${H3_IMAGE_STUDIO_PREPARE_NODES[0]}…) are not served by this engine. Stock nodes refuse this profile's single-frame latent at validation (ComfyUI issue #15644), so without the pack there is no legal graph: fetch ComfyUI-MiniMax-H3-Image-Studio from Settings → Node packs, then reconnect. Never a submit-then-server-400.`,
     )
   }
+  // The honest fizgig refusal (E-FS1): both classes or no lane — never a
+  // silent stock fallback (the silent-degradation seam the assessment
+  // flags: a decode node missing while the latent node is present would
+  // "succeed" into exactly the artifact the pack exists to fix).
+  if ((useFizgigLatent || useFizgigDecode) && !fizgigH3StillPackPresent(info)) {
+    const missing = FIZGIG_H3_STILL_NODES.filter((nodeClass) => !infoHas(info, nodeClass))
+    throw new Error(
+      `${family.label} is set to the experimental Fizgig T=1 decode path (experimentalT1Decode), but the ${FIZGIG_H3_STILL_PACK_NAME} pack's classes (${missing.join(', ')}) are not served by this engine. Fetch ${FIZGIG_H3_STILL_PACK_NAME} from Settings → Node packs, or clear the experimentalT1Decode setting to return to the Image Studio path. Never a silent stock decode — the lone-token decode is the banded artifact this path exists to avoid.`,
+    )
+  }
   const studioPackets = family.profile === 'packet' && studioPack && H3_IMAGE_STUDIO_FRAME_PRESETS[tier] !== undefined
-  const studioPath = isT1 || isSharp || studioPackets
+  const studioPath = (isT1 && !useFizgigLatent) || isSharp || studioPackets
   dbg('family', {
     verdict: 'conditioning-path',
     family: family.id,
     path: studioPath ? 'image-studio-pack' : 'stock',
     because: { studioPack, profile: family.profile, tier, note: studioPackets ? 'exact pack ladder' : (!studioPath ? 'stock fallback / native grid' : 'pack-conditioned lane') },
+    ...(isT1 ? { t1Machinery: { latent: useFizgigLatent ? 'fizgig' : 'image-studio', decode: useFizgigDecode ? 'fizgig' : 'image-studio', recipe: useFizgigRecipe ? 'fizgig' : 'ours' } } : {}),
     ...(studioPath ? { framePreset: H3_IMAGE_STUDIO_FRAME_PRESETS[tier] } : {}),
   })
 
@@ -946,10 +1065,10 @@ function buildH3StillPipeline(
   // an already-merged file is a wasted second mmap. Unset (the default):
   // this branch is inert and the hybrid/stock logic below is unchanged.
   let modelLink: [string, number]
-  if (selection.merged) {
+  if (selection.merged && !forceFl2va) {
     graph[H3IMG.unet] = { class_type: 'UNETLoader', inputs: { unet_name: selection.merged, weight_dtype: 'default' } }
     modelLink = [H3IMG.unet, 0]
-  } else if (hybridAvailable) {
+  } else if (hybridAvailable && !forceFl2va) {
     graph[H3IMG.unet] = {
       class_type: HYBRID_LOADER_NODE,
       inputs: {
@@ -966,8 +1085,12 @@ function buildH3StillPipeline(
     }
     modelLink = [H3IMG.unet, 0]
   } else {
-    const unetName = useRefs ? selection.ref2va : selection.fl2va
-    if (!unetName) throw new Error(useRefs ? 'The Ref2VA checkpoint is missing (reference conditioning needs it, or install the hybrid loader to merge both).' : 'The FL2VA checkpoint is missing.')
+    // The E-FS1 fl2va base (arm B2, their edit-lane wiring): the STOCK
+    // conditioning node does not require Ref2VA weights, so the plain
+    // FL2VA loader is legal even under reference conditioning when the
+    // experiment explicitly asks for it.
+    const unetName = useRefs && !forceFl2va ? selection.ref2va : selection.fl2va
+    if (!unetName) throw new Error(useRefs && !forceFl2va ? 'The Ref2VA checkpoint is missing (reference conditioning needs it, or install the hybrid loader to merge both).' : 'The FL2VA checkpoint is missing.')
     graph[H3IMG.unet] = { class_type: 'UNETLoader', inputs: { unet_name: unetName, weight_dtype: 'default' } }
     modelLink = [H3IMG.unet, 0]
   }
@@ -991,11 +1114,13 @@ function buildH3StillPipeline(
   // packet families expose the two slots as dials. Slot 1 rides the
   // first-party form adapter when its pack is installed — always first,
   // cross-form safety (a mismatched-form LoRA through the stock loader is a
-  // shape error).
+  // shape error). The challenger's recipe (E-FS1 arm B2) swaps the strength
+  // and drops the detail adapter — the pins carry both, verbatim-sourced.
+  const t1Pins = useFizgigRecipe ? H3IMG_RECIPE_PINS.fizgig.recipe : H3IMG_RECIPE_PINS.t1
   const loras: H3ImgLoraSlot[] = isT1 || isSharp
     ? [
-        ...(selection.turboLora ? [{ name: selection.turboLora, strength: H3IMG_RECIPE_PINS.t1.turboStrength }] : []),
-        ...(selection.detailAdapterLora ? [{ name: selection.detailAdapterLora, strength: H3IMG_RECIPE_PINS.t1.detailAdapterStrength }] : []),
+        ...(selection.turboLora ? [{ name: selection.turboLora, strength: t1Pins.turboStrength }] : []),
+        ...(useFizgigRecipe ? [] : selection.detailAdapterLora ? [{ name: selection.detailAdapterLora, strength: H3IMG_RECIPE_PINS.t1.detailAdapterStrength }] : []),
       ]
     : request.loras.filter((lora) => lora.name)
   const formAdapterAvailable = Boolean(info && (info as Record<string, unknown>)[FORM_ADAPTER_NODE] !== undefined)
@@ -1018,7 +1143,9 @@ function buildH3StillPipeline(
   // Sigma shifts: the T=1 recipe pins 12/3. The turbo 8-step operating point
   // carries the same shifts (astropuzzo's stack); non-turbo packets run the
   // official unshifted path, matching the video factory's base behavior.
-  if (isT1 || isSharp || (loras.length > 0 && loras.some((lora) => lora.name === selection.turboLora && lora.strength === H3IMG_RECIPE_PINS.t1.turboStrength))) {
+  // The challenger's shipped recipe carries NO shift node (their example
+  // workflow @ f3252d2) — the recipe pin, not a judgment call.
+  if (!useFizgigRecipe && (isT1 || isSharp || (loras.length > 0 && loras.some((lora) => lora.name === selection.turboLora && lora.strength === H3IMG_RECIPE_PINS.t1.turboStrength)))) {
     graph[H3IMG.sigmaShift] = {
       class_type: 'MiniMaxH3SigmaShift',
       inputs: { model: modelLink, shift_video: H3IMG_RECIPE_PINS.t1.shiftVideo, shift_audio: H3IMG_RECIPE_PINS.t1.shiftAudio },
@@ -1045,13 +1172,18 @@ function buildH3StillPipeline(
   if (studioPath) {
     buildStudioPrepare(graph, request, tier, pictureNames, loadPicture)
   } else {
+    // The E-FS1 fizgig T=1 exception: this stock conditioning node is here
+    // for its CONDITIONING only — the #15644 length floor is honored
+    // (length 5, the pin from their shipped example), and the T=1-ness
+    // lives in FizgigH3StillLatent below, whose output feeds the sampler
+    // while this node's latent output dangles by design.
     const conditioningInputs: Inputs = {
       clip: [H3IMG.clip, 0],
       vae: [H3IMG.videoVae, 0],
       prompt: request.prompt,
       width: request.width,
       height: request.height,
-      length: tier,
+      length: isT1 ? H3IMG_RECIPE_PINS.fizgig.conditioningLength : tier,
     }
     if (useRefs) {
       // All slots ride the native ref_images path on stock; per-ref semantic
@@ -1069,19 +1201,27 @@ function buildH3StillPipeline(
     }
   }
 
+  // The Fizgig latent source (E-FS1): the packed T=1 zeros (video + audio
+  // rows) at the request's canvas — the node clamps the latent grid to the
+  // DiT's even 2×2 patchification itself. This node's output, never the
+  // conditioning node's, is what the sampler denoises.
+  if (useFizgigLatent) {
+    graph[H3IMG.fizgigLatent] = { class_type: 'FizgigH3StillLatent', inputs: { width: request.width, height: request.height, batch_size: 1 } }
+  }
+
   // --- sampler -------------------------------------------------------------
   graph[H3IMG.noise] = { class_type: 'RandomNoise', inputs: { noise_seed: request.seed } }
   graph[H3IMG.guider] = { class_type: 'BasicGuider', inputs: { model: modelLink, conditioning: [H3IMG.conditioning, 0] } }
-  const sampler = isT1 || isSharp ? H3IMG_RECIPE_PINS.t1.sampler : H3IMG_RECIPE_PINS.packet.sampler
-  const scheduler = isT1 || isSharp ? H3IMG_RECIPE_PINS.t1.scheduler : H3IMG_RECIPE_PINS.packet.scheduler
+  const sampler = isT1 || isSharp ? t1Pins.sampler : H3IMG_RECIPE_PINS.packet.sampler
+  const scheduler = isT1 || isSharp ? t1Pins.scheduler : H3IMG_RECIPE_PINS.packet.scheduler
   graph[H3IMG.samplerSelect] = { class_type: 'KSamplerSelect', inputs: { sampler_name: sampler } }
   graph[H3IMG.scheduler] = {
     class_type: 'BasicScheduler',
-    inputs: { model: modelLink, scheduler, steps: isT1 || isSharp ? H3IMG_RECIPE_PINS.t1.steps : (request.steps ?? H3IMG_RECIPE_PINS.packet.steps), denoise: 1 },
+    inputs: { model: modelLink, scheduler, steps: isT1 || isSharp ? t1Pins.steps : (request.steps ?? H3IMG_RECIPE_PINS.packet.steps), denoise: 1 },
   }
   graph[H3IMG.sampler] = {
     class_type: 'SamplerCustomAdvanced',
-    inputs: { noise: [H3IMG.noise, 0], guider: [H3IMG.guider, 0], sampler: [H3IMG.samplerSelect, 0], sigmas: [H3IMG.scheduler, 0], latent_image: [H3IMG.conditioning, 1] },
+    inputs: { noise: [H3IMG.noise, 0], guider: [H3IMG.guider, 0], sampler: [H3IMG.samplerSelect, 0], sigmas: [H3IMG.scheduler, 0], latent_image: useFizgigLatent ? [H3IMG.fizgigLatent, 0] : [H3IMG.conditioning, 1] },
   }
 
   // --- decode + per-frame publish ------------------------------------------
@@ -1093,7 +1233,7 @@ function buildH3StillPipeline(
   // a multi-frame DECODE can never pick the T1 decoder, and the T1 loader
   // nodes are only emitted on these paths.
   const publishFrames = isT1 || isSharp ? 1 : tier
-  if (isT1) {
+  if (isT1 && !useFizgigDecode) {
     if (!selection.t1ImageVae) {
       throw new Error('The T=1 Fast profile needs the Mamad8 T=1 image VAE (minimax_h3_t1_image_vae_step1597.safetensors) — it was not found in the model scan.')
     }
@@ -1101,7 +1241,15 @@ function buildH3StillPipeline(
     graph[H3IMG.videoVae] = { class_type: 'VAELoader', inputs: { vae_name: selection.t1ImageVae } }
   }
   if (isSharp) assertNoT1ImageVaeInVideoGraph(selection.t1ImageVae, 1)
-  if (studioPath) {
+  if (useFizgigDecode) {
+    // The Fizgig decode (E-FS1): the lone sampled latent replicated into a
+    // complete 5-latent temporal group, decoded through the VIDEO VAE
+    // (node 3, untouched — no Mamad8 loader on this leg), keeping pixel
+    // frame 3. Works on either latent source: the Fizgig latent (arm B/B2)
+    // or the Image Studio Prepare latent (arm C — the decode-isolated arm).
+    graph[H3IMG.decode] = { class_type: 'FizgigH3StillDecode', inputs: { samples: [H3IMG.sampler, 0], vae: [H3IMG.videoVae, 0] } }
+    dbg('family', { verdict: 'decode-choice', family: family.id, mode: 'fizgig-group', vae: selection.videoVae, publishes: publishFrames })
+  } else if (studioPath) {
     // The pack's exact/slice decode. Temporal mode (the default in the
     // pack's own API graphs) decodes the requested frame profile — the
     // exact 9/13 the stock grid snaps to 22, and the single frame of T=1.
@@ -1272,6 +1420,44 @@ export function buildKleinRefineGraph(request: H3ImgRequest, selection: H3ImgMod
 }
 
 // ---------------------------------------------------------------------------
+// The E-FS1 bake-off arms (task 464xfvd — the Fizgig-H3-Still challenge,
+// docs/research/fizgig-h3-still-assessment.md §5): experiment DATA, not a
+// feature surface. scripts/experiments/efs1-arms.cjs is the runner entry;
+// the GPU-window session submits the arms per the 8189 runbook.
+// ---------------------------------------------------------------------------
+
+export type EFS1ArmId = 'A' | 'B' | 'B2' | 'C'
+
+export type EFS1Arm = {
+  id: EFS1ArmId
+  label: string
+  /** What the arm isolates (the assessment's arm table, verbatim intent). */
+  isolates: string
+  options: H3ImgBuildOptions
+}
+
+export const EFS1_ARMS: readonly EFS1Arm[] = [
+  { id: 'A', label: 'incumbent', isolates: 'our T=1 Fast as landed: Image Studio Prepare latent (t=1), hybrid b25-49 + turbo @0.75 + detail adapter @0.5, 8 steps, er_sde/sgm_uniform, Mamad8 decode', options: {} },
+  { id: 'B', label: 'swap-isolated', isolates: 'the SAME model+recipe as A; latent + decode via the Fizgig nodes (stock conditioning kept legal at 5) — single variable: the machinery', options: { t1Latent: 'fizgig', t1Decode: 'fizgig' } },
+  { id: 'B2', label: 'challenger-full', isolates: "Fizgig's shipped recipe verbatim: plain fl2va + v4-step-600 turbo @0.38, 20 steps, er_sde/simple, no detail adapter, no sigma shift + the Fizgig nodes", options: { t1Latent: 'fizgig', t1Decode: 'fizgig', t1Recipe: 'fizgig', t1Base: 'fl2va' } },
+  { id: 'C', label: 'decode-isolated', isolates: "A's latent/conditioning with the Fizgig decode instead of Mamad8 — the cleanest single test of 'is the Mamad8 image VAE obsolete'", options: { t1Latent: 'image-studio', t1Decode: 'fizgig' } },
+]
+
+/** Builds every arm's graph from ONE request (matched seeds — the tranche
+ *  discipline). An arm whose needs the engine does not serve THROWS with
+ *  the builder's honest refusal — the runner surfaces it; arms are never
+ *  silently dropped. Arm B2 additionally expects the caller to pass the
+ *  v4-step-600 turbo as selection.turboLora (the inference ladder targets
+ *  the 8-step family by design). */
+export function buildEFS1ArmGraphs(
+  request: H3ImgRequest,
+  selection: H3ImgModelSelection,
+  info: ObjectInfo | undefined,
+): Array<{ arm: EFS1Arm; graph: Record<string, { class_type: string; inputs: Inputs }> }> {
+  return EFS1_ARMS.map((arm) => ({ arm, graph: buildH3ImageGraph(request, selection, info, arm.options) }))
+}
+
+// ---------------------------------------------------------------------------
 // Audit — the correctness rules as executable checks
 // ---------------------------------------------------------------------------
 
@@ -1311,6 +1497,21 @@ export function h3imgGraphAudit(graph: Record<string, { class_type: string; inpu
   if (loraLoaders > H3IMG_RECIPE_PINS.lora.slots) violations.push(`${loraLoaders} LoRA loaders exceed the 2-slot family budget.`)
   const saves = classes.filter((cls) => cls === 'SaveImage').length
   if (options.frames !== undefined && saves !== options.frames) violations.push(`expected ${options.frames} per-frame SaveImage publishes, found ${saves}.`)
+  // The Fizgig T=1 allowance (E-FS1, the assessment's explicit rule): the
+  // frame count keys on the LATENT SOURCE, never the conditioning node's
+  // length — a graph whose latent comes from FizgigH3StillLatent publishes
+  // exactly ONE frame (the node is T=1-hardcoded), and the stock
+  // conditioning node it carries stays at a legal length (>= 5; its latent
+  // output dangles by design, so its length must never be mistaken for the
+  // render's frame count — nor resubmitted below the floor).
+  if (classes.includes('FizgigH3StillLatent')) {
+    if (frames !== 1) violations.push(`a FizgigH3StillLatent graph publishes ${frames} frames — the latent source is T=1-hardcoded; the frame count keys on it, never on the conditioning node's length.`)
+    for (const [id, node] of nodes) {
+      if (node.class_type !== 'MiniMaxH3ImageToVideo' && node.class_type !== 'MiniMaxH3ReferenceToVideo') continue
+      const length = Number(node.inputs.length)
+      if (Number.isFinite(length) && length < 5) violations.push(`node ${id} (${node.class_type}) carries length ${length} in a Fizgig-latent graph — the stock conditioning node stays at the legal floor (5); the dead length:1 submission must never return.`)
+    }
+  }
   return violations
 }
 

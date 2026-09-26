@@ -150,6 +150,59 @@ test('(a) fixture integrity: provenance, coverage lockstep, honest absences', ()
   )
   passed += 1
   console.log('  ok - the Prepare wrappers return (conditioning, latent) at slots 0/1 — the sampler wiring contract')
+
+  // The Fizgig-H3-Still pack's source-derived schemas (E-FS1, 464xfvd): the
+  // two classes are NOT installed on the shared install — their entries are
+  // transcribed from the pack's own __init__.py at the pinned revision
+  // f3252d2 (the form-adapter pattern), provenance-recorded as such. The
+  // schemas ARE the pack's truth: the latent node's 32-px width/height
+  // ladder to 4096, and the decode's bare samples+vae pair.
+  ok(typeof prov.fizgigPackCapture === 'string' && prov.fizgigPackCapture.includes('f3252d2'),
+    'provenance records the Fizgig capture (source-derived from the pack repo @ f3252d2 — honestly NOT an /object_info capture)')
+  const fizgigWidth = REAL_INFO.FizgigH3StillLatent.input.required.width
+  assert.deepEqual(
+    JSON.parse(JSON.stringify([fizgigWidth[0], fizgigWidth[1].min, fizgigWidth[1].max, fizgigWidth[1].step, fizgigWidth[1].default])),
+    JSON.parse(JSON.stringify(['INT', 64, 4096, 32, 768])),
+    'FizgigH3StillLatent.width is the real transcribed schema (INT 64..4096 step 32, default 768)',
+  )
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(Object.keys(REAL_INFO.FizgigH3StillDecode.input.required))),
+    JSON.parse(JSON.stringify(['samples', 'vae'])),
+    'FizgigH3StillDecode requires exactly samples + vae (their INPUT_TYPES, verbatim)',
+  )
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(REAL_INFO.FizgigH3StillDecode.output)),
+    JSON.parse(JSON.stringify(['IMAGE'])),
+    'FizgigH3StillDecode returns IMAGE (the per-frame publish wiring contract)',
+  )
+  passed += 1
+  console.log('  ok - the Fizgig classes are served with their real transcribed schemas')
+})
+
+test('(c-464xfvd) the E-FS1 fizgig arms: contract-clean against the mirror, legal lengths everywhere', () => {
+  // The Fizgig challenge arms (A/B/B2/C) + the flag-on matrix forms,
+  // validated against the REAL captured schemas — the graph the engine's
+  // own gate would accept. THE LOAD-BEARING SEAM: the stock conditioning
+  // node rides length 5 (>= the min-5 floor — value_smaller_than_min can
+  // never fire), the latent node's width/height sit on the 32-px ladder,
+  // and FizgigH3StillDecode's sockets are typed LATENT/VAE exactly as
+  // wired.
+  const baseRequest = { family: 'h3img.generate.t1', prompt: 'a finished still', width: 1344, height: 768, seed: 1, tier: 1, refs: [], loras: [], filenamePrefix: 'contract/efs1' }
+  const models = { fl2va: 'fl2va.safetensors', ref2va: 'ref2va.safetensors', textEncoder: 'qwen.safetensors', videoVae: 'video-vae.safetensors', audioVae: 'audio-vae.safetensors', t1ImageVae: 't1-image-vae.safetensors', turboLora: 'turbo.safetensors', detailAdapterLora: 'detail.safetensors', krea2: null, klein: { unet: '', textEncoder: '', vae: '' } }
+  for (const { arm, graph } of h3image.buildEFS1ArmGraphs(baseRequest, models, REAL_INFO)) {
+    ok(contract.validateGraphAgainstSchemas(graph, REAL_INFO).length === 0, `E-FS1 arm ${arm.id} validates CLEAN against the real schemas`)
+    for (const node of Object.values(graph)) {
+      if (node.class_type !== 'MiniMaxH3ImageToVideo' && node.class_type !== 'MiniMaxH3ReferenceToVideo') continue
+      ok(node.inputs.length >= 5, `arm ${arm.id}: the stock conditioning node's length ${node.inputs.length} stays legal (>= 5)`)
+    }
+  }
+  // The matrix's flag-on forms too (I2V text-only + the source-anchored REF
+  // form — the REF node's REQUIRED audio_vae is wired, its schema honored).
+  for (const entry of H3IMG_MATRIX) {
+    if (entry.options === undefined) continue
+    const graph = h3image.buildH3ImageGraph(entry.request, entry.models, REAL_INFO, entry.options)
+    ok(contract.validateGraphAgainstSchemas(graph, REAL_INFO).length === 0, `the flag-on matrix form ${entry.name} validates CLEAN against the real schemas`)
+  }
 })
 
 test('(c-affvlbk4) the pack-conditioned lanes: real-capability proofs against the captured pack schemas', () => {
@@ -291,7 +344,7 @@ function buildCorpus() {
   // engine: hybrid loader + form adapter + klein nodes + the H3 Image
   // Studio pack all served — the pack-conditioned lanes' native habitat).
   for (const entry of H3IMG_MATRIX) {
-    corpus.push([`h3img:${entry.name}`, h3image.buildH3ImageGraph(entry.request, entry.models, REAL_INFO)])
+    corpus.push([`h3img:${entry.name}`, h3image.buildH3ImageGraph(entry.request, entry.models, REAL_INFO, entry.options)])
   }
   // The PACK-ABSENT stock fallback (afvlbk4): the same matrix against the
   // fixture MINUS the Image Studio classes — packets keep the stock

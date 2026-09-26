@@ -156,6 +156,11 @@ const RULES = [
     reason: 'h3img golden machinery + fixture.',
   },
   {
+    match: ['scripts/experiments/**'],
+    suites: ['h3img'],
+    reason: 'experiment arm runners (the E-FS1 entry loads the h3image builder + engine-contract mirror through the VM harness; exercised by the h3img suite).',
+  },
+  {
     match: ['src/lib/engineContract.ts', 'src/lib/engineSemantics.ts', 'scripts/fixtures/engine-object-info.json', 'scripts/capture-engine-schemas.cjs'],
     suites: ['engine-contract'],
     reason: 'the engine-contract layer (8dga2dy): real captured object_info schemas + the execution.py validator mirror + the semantic-rules ledger — every builder graph validated against the engine\'s actual gate.',

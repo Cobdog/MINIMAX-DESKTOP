@@ -6,13 +6,15 @@
     "comfyuiVersion": "0.34.0",
     "captureDate": "2026-09-22",
     "rawClassCount": 1730,
-    "keptClassCount": 70,
+    "keptClassCount": 72,
     "formAdapterSource": "726d5f80f57c8aec9ce2d2f88edbfac6c2745194",
     "h3ImageStudioPackCapture": "astropuzzo/ComfyUI-MiniMax-H3-Image-Studio @ 47dea30d0bf07e7340ef0cc97e8174a15edf55b9 (v23.0.0) cloned into the shared install custom_nodes before this capture (task afvlbk4) — its 5 load-bearing classes (Prepare set + H3ImageDecode) captured REAL from /object_info; the pack's own test suite passed on the venv first (26/26)",
+    "fizgigPackCapture": "shootthesound/ComfyUI-Fizgig-H3-Still @ f3252d2b6c94c2e34d71f583d5e1804b683afe06 SOURCE-DERIVED (task 464xfvd, E-FS1): the pack is NOT installed on the shared install — both classes (the whole pack) transcribed from __init__.py INPUT_TYPES + RETURN_TYPES at this pin during the 2026-09-25 assessment. An /object_info capture replaces these entries the day the pack is installed for the bake-off.",
     "normalizations": [
       "trimmed to STOCK_GRAPH_CLASSES (src/lib/preflight.ts, lockstep-checked by tests) + the pack/family classes builders can emit",
       "file-listing combos (model folders, input dirs) EMPTIED: options are this box's filesystem, not engine truth — the contract validator treats empty options as environment-enumerated and skips membership; non-file enums keep their real captured options",
       "MiniMaxH3LoraFormLoader source-derived from this repo's first-party pack (not installed on the shared install); see __sourceDerived on the entry",
+      "FizgigH3StillLatent/FizgigH3StillDecode source-derived from the pack repo at pinned f3252d2 (E-FS1, not installed on the shared install — flag-gated, not adopted); see __sourceDerived on the entries",
       "absent classes recorded with reasons (inert-by-design lanes)"
     ],
     "regenerate": "per the header of scripts/capture-engine-schemas.cjs (runbook-governed CPU-only capture, then this script over the raw JSON)"
@@ -5833,6 +5835,95 @@
         "Preferred zero-based still index for the first batch item. Connect it to Single Image Output."
       ],
       "search_aliases": []
+    },
+    "FizgigH3StillLatent": {
+      "input": {
+        "required": {
+          "width": [
+            "INT",
+            {
+              "default": 768,
+              "min": 64,
+              "max": 4096,
+              "step": 32,
+              "tooltip": "Image width in pixels (multiple of 32)."
+            }
+          ],
+          "height": [
+            "INT",
+            {
+              "default": 1344,
+              "min": 64,
+              "max": 4096,
+              "step": 32,
+              "tooltip": "Image height in pixels (multiple of 32)."
+            }
+          ],
+          "batch_size": [
+            "INT",
+            {
+              "default": 1,
+              "min": 1,
+              "max": 64
+            }
+          ]
+        }
+      },
+      "input_order": {
+        "required": [
+          "width",
+          "height",
+          "batch_size"
+        ]
+      },
+      "output": [
+        "LATENT"
+      ],
+      "output_name": [
+        "LATENT"
+      ],
+      "output_is_list": [
+        false
+      ],
+      "name": "FizgigH3StillLatent",
+      "display_name": "Fizgig H3 Still Latent (single frame)",
+      "category": "Fizgig",
+      "output_node": false,
+      "__sourceDerived": "shootthesound/ComfyUI-Fizgig-H3-Still @ f3252d2b6c94c2e34d71f583d5e1804b683afe06 __init__.py (not installed on the shared install — INPUT_TYPES transcribed verbatim)"
+    },
+    "FizgigH3StillDecode": {
+      "input": {
+        "required": {
+          "samples": [
+            "LATENT",
+            {}
+          ],
+          "vae": [
+            "VAE",
+            {}
+          ]
+        }
+      },
+      "input_order": {
+        "required": [
+          "samples",
+          "vae"
+        ]
+      },
+      "output": [
+        "IMAGE"
+      ],
+      "output_name": [
+        "IMAGE"
+      ],
+      "output_is_list": [
+        false
+      ],
+      "name": "FizgigH3StillDecode",
+      "display_name": "Fizgig H3 Still Decode",
+      "category": "Fizgig",
+      "output_node": false,
+      "__sourceDerived": "shootthesound/ComfyUI-Fizgig-H3-Still @ f3252d2b6c94c2e34d71f583d5e1804b683afe06 __init__.py (not installed on the shared install — INPUT_TYPES transcribed verbatim)"
     }
   },
   "absent": [
