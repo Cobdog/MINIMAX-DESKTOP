@@ -323,7 +323,81 @@ test('(a2) stack report — the subpath\'d mirror registry reports all-present (
   ]
   const renamedReport = stack.h3StackReport(renamed)
   eq(renamedReport.rows[0].selected, 'H3/ssd/minimax_h3_fl2va_repack_fp8.safetensors', 'a renamed quant still resolves by basename')
-  eq(renamedReport.rows[0].validated, false, 'a renamed quant does not validate as the official file (honest verdict)')
+  eq(renamedReport.rows[0].isCanonical, false, 'a renamed quant is not the canonical artifact (honest display hint, never a gate)')
+})
+
+// (a4) The parallel-table root cause, reworked (maintainer ruling 2026-09-26:
+// "the auto inferred models are there, the H3 Engine Stack reports are
+// incorrect"). PR #52's basename fix addressed the COMPARISON; the deeper
+// divergence was the parallel expectation table itself — its anchored
+// fallback regexes demanded tokens the real inference ladders never require,
+// so the maintainer's int8_convrot-shaped TE (no _minimax_h3_ infix) resolved
+// in every picker while the report's own regex rejected it: present models
+// read MISSING while the UI showed them inferred. The report now DERIVES from
+// the same resolution the graphs use (inferSelections + the override seam),
+// the canonical names survive as display guidance only, and the empty/refused
+// states say WHY — the mirror profile's TE was updated to the maintainer's
+// real name shape the same day.
+test('(a4) stack report — derived from the resolution the graphs use: the maintainer\'s int8_convrot TE resolves (the parallel-table rework)', () => {
+  const stack = loadTs('src/lib/h3Stack.ts')
+  const servingInfo = { MiniMaxH3ImageToVideo: {}, MiniMaxH3ReferenceToVideo: {}, KSamplerSelect: {}, SamplerCustomAdvanced: {} }
+
+  // The maintainer's real TE (ruling 2026-09-26): int8_convrot-shaped, NOT
+  // the official nvfp4 artifact, no _minimax_h3_ infix. The pickers resolve
+  // it (the 'qwen3vl' fallback needle + the 32B dimension class passes the
+  // guard); the report must say the same thing.
+  const maintainerModels = [
+    { name: 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors', kind: 'diffusion_models', bytes: 0 },
+    { name: 'qwen3vl_32b_int8_convrot.safetensors', kind: 'text_encoders', bytes: 0 },
+    { name: 'minimax_h3_video_vae_fp16.safetensors', kind: 'vae', bytes: 0 },
+    { name: 'minimax_h3_audio_vae_fp32.safetensors', kind: 'vae', bytes: 0 },
+    { name: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', kind: 'loras', bytes: 0 },
+  ]
+  const report = stack.h3StackReport(maintainerModels, undefined, servingInfo)
+  const byLabel = {}
+  for (const row of report.rows) byLabel[row.label] = row
+  eq(byLabel['Text encoder'].selected, 'qwen3vl_32b_int8_convrot.safetensors', 'the int8_convrot TE RESOLVES — the report states what the graph will load')
+  eq(byLabel['Text encoder'].present, true, 'presence truth: the resolved name is the registry row verbatim')
+  eq(byLabel['Text encoder'].source, 'inferred', 'the source layer is named: the ladder inferred it')
+  eq(byLabel['Text encoder'].isCanonical, false, 'the canonical expectation reads as a display hint, not a verdict')
+  eq(byLabel['Text encoder'].canonical, 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', 'the canonical hint names the official artifact (guidance only)')
+  eq(byLabel.FL2VA.source, 'inferred', 'the base slots name their layer too')
+  eq(report.validated, false, 'the display verdict stays honest: this is not the exact official stack')
+  eq(report.ready, true, 'every slot resolves + present, nothing refused, nodes served — READY (generation works)')
+
+  // FOUND BUT REFUSED, distinguished from NOT FOUND: with only a 4B-class TE
+  // visible, the ladder's best-available resolves it NON-EMPTY and the TE
+  // dimension guard (eyzcev5 — the submit validate rung's own check) refuses
+  // with the class error. The row must narrate the refusal, not "missing".
+  const fourBOnly = [
+    { name: 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors', kind: 'diffusion_models', bytes: 0 },
+    { name: 'qwen3vl_4b_minimax_h3_int8.safetensors', kind: 'text_encoders', bytes: 0 },
+    { name: 'minimax_h3_video_vae_fp16.safetensors', kind: 'vae', bytes: 0 },
+    { name: 'minimax_h3_audio_vae_fp32.safetensors', kind: 'vae', bytes: 0 },
+    { name: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', kind: 'loras', bytes: 0 },
+  ]
+  const refusedReport = stack.h3StackReport(fourBOnly, undefined, servingInfo)
+  const refusedByLabel = {}
+  for (const row of refusedReport.rows) refusedByLabel[row.label] = row
+  eq(refusedByLabel['Text encoder'].selected, 'qwen3vl_4b_minimax_h3_int8.safetensors', 'best-available resolves the 4B (non-empty — the crash class the old readiness could not see)')
+  ok(refusedByLabel['Text encoder'].refusal && refusedByLabel['Text encoder'].refusal.includes('4B'), 'the row narrates the refusal with the dimension-class reason')
+  eq(refusedReport.ready, false, 'a found-but-refused slot blocks readiness (the submission would refuse)')
+
+  // THE HONEST EMPTY STATE: a slot with no resolution names WHAT SHAPE OF
+  // NAME TO MAKE VISIBLE (inference-shaped guidance), never
+  // missing-because-unlisted.
+  const noVae = [
+    { name: 'H3/ssd/minimax_h3_fl2va_pruned_int8_convrot.safetensors', kind: 'diffusion_models', bytes: 0 },
+    { name: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', kind: 'text_encoders', bytes: 0 },
+    { name: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors', kind: 'loras', bytes: 0 },
+  ]
+  const emptyReport = stack.h3StackReport(noVae, undefined, servingInfo)
+  const emptyByLabel = {}
+  for (const row of emptyReport.rows) emptyByLabel[row.label] = row
+  eq(emptyByLabel['Video VAE'].selected, '', 'nothing resolves: the honest empty state')
+  eq(emptyByLabel['Video VAE'].present, false)
+  ok(emptyByLabel['Video VAE'].makeVisible && emptyByLabel['Video VAE'].makeVisible.includes('video_vae'), 'the empty state carries inference-shaped guidance (what naming to make visible)')
+  eq(emptyReport.ready, false, 'an unresolved slot blocks readiness — the wording is guidance, not the gate')
 })
 
 // (a3) The truth-surface sweep #2 decisions (audit M1 / C1, task 68e9k17):

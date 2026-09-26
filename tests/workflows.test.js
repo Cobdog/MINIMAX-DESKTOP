@@ -256,17 +256,33 @@ test('model overrides take 1 (euxwdva): consulted picks, auto-unchanged, precede
   assert.equal(overrideManifest.models.diffusion.name, mergeName, 'the manifest carries the chosen checkpoint')
   assert.equal(overrideManifest.models.textEncoder.name, 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors', 'the manifest carries the auto slots too')
 
-  // 9. The STACK REPORT validates the resolved pick: the override row shows the
-  //    user's file, flagged; rows without picks are untouched.
+  // 9. The STACK REPORT derives from the SAME resolution the graphs use
+  //    (the parallel-table rework, maintainer ruling 2026-09-26): the
+  //    override row shows the user's pick WITH its source layer; rows
+  //    without picks are untouched; a refused pick narrates the reason and
+  //    blocks readiness (submission would refuse).
   const plainReport = h3StackModule.h3StackReport(overrideScan)
   assert.equal(plainReport.rows[0].selected, 'minimax_h3_fl2va_pruned_int8_convrot.safetensors')
-  assert.equal(plainReport.rows[0].override, false)
-  const overrideReport = h3StackModule.h3StackReport(overrideScan, { checkpoint: mergeName })
+  assert.equal(plainReport.rows[0].source, 'inferred', 'no pick: the row names the ladder as its source')
+  assert.equal(plainReport.rows[0].present, true, 'the registry lists the resolved name verbatim')
+  const overrideReport = h3StackModule.h3StackReport(overrideScan, { fl2va: mergeName })
   assert.equal(overrideReport.rows[0].selected, mergeName, 'the FL2VA row shows the user pick')
-  assert.equal(overrideReport.rows[0].override, true)
-  assert.equal(overrideReport.rows[0].validated, false, 'a community merge reads Custom, honestly')
+  assert.equal(overrideReport.rows[0].source, 'override', 'an applied pick names the override layer as its source')
+  assert.equal(overrideReport.rows[0].layer, 'global', 'the Settings-level pick reads as the global layer')
+  assert.equal(overrideReport.rows[0].isCanonical, false, 'a community merge is honestly not the canonical artifact (display hint)')
   assert.equal(overrideReport.validated, false)
-  assert.equal(overrideReport.rows[1].override, false, 'the text-encoder row is untouched by a checkpoint pick')
+  assert.equal(overrideReport.rows[1].source, 'inferred', 'the text-encoder row is untouched by an fl2va pick')
+  // The legacy checkpoint pick migrates onto the lanes and flows through the
+  // same report resolution (migration is fill-if-unset — no conscious layer).
+  const legacyReport = h3StackModule.h3StackReport(overrideScan, { checkpoint: mergeName })
+  assert.equal(legacyReport.rows[0].selected, mergeName, 'the migrated legacy pick reaches the row')
+  assert.equal(legacyReport.rows[0].source, 'override')
+  // FOUND BUT REFUSED: the T=1 image VAE picked onto videoVae — the registry
+  // serves it, the family contract refuses it (the decoder-class gate).
+  const refusedReport = h3StackModule.h3StackReport(overrideScan, { videoVae: 'minimax_h3_t1_image_vae_step1597.safetensors' })
+  assert.ok(refusedReport.rows[2].refusal && refusedReport.rows[2].refusal.includes('Mamad8'), 'the refused row carries the refusal machinery\'s reason')
+  assert.equal(refusedReport.ready, false, 'a refused pick blocks readiness — the submission would refuse')
+  assert.equal(refusedReport.rows[2].source, 'inferred', 'the graph-side selection falls back to inference; the refusal is the row\'s verdict')
 
   // 10. The single-pick outcome helper agrees with resolution (one validation
   //     path for the pickers and the ladder) and the auto label helper reports
@@ -722,18 +738,25 @@ const mirrorFiles = []
 for (const mirrorKind of Object.keys(mirrorProfile.modelListings)) {
   for (const mirrorName of mirrorProfile.modelListings[mirrorKind]) mirrorFiles.push({ kind: mirrorKind, name: mirrorName, bytes: 0 })
 }
-const TE_32B = 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'
+// The mirror's 32B TE is the maintainer's REAL name shape (2026-09-26
+// stack-report ruling): the int8_convrot quant their engine serves, resolved
+// by the loose 'qwen3vl' anchor + size-class ranking — never the official
+// tier. The CANONICAL official artifact is what the guard's refusal tells
+// you to make visible (family-registry data, modelSelection.ts).
+const TE_32B = 'qwen3vl_32b_int8_convrot.safetensors'
+const TE_32B_CANONICAL = 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'
 const TE_4B = 'qwen3vl_4b_minimax_h3_int8.safetensors'
 const selectionGuardModule = load('src/lib/modelSelection.ts')
 const { teDimClassOf, teDimClassRefusal } = selectionGuardModule
 const h3SubmitModule = load('src/lib/h3Submit.ts')
 
 test('the TE dimension-class guard (eyzcev5): the wrong-family encoder refuses at validate with the named reason; the right one proceeds; klein keeps the small class', () => {
-  // (1) AUTO, both visible (the mirror shape): the ladder's official tier
-  //     picks the 32B and the guard passes it — correct picks resolve
-  //     EXACTLY as before (a guard, not a reroute).
+  // (1) AUTO, both visible (the mirror shape): the loose tier's size-class
+  //     ranking picks the 32B (the maintainer's int8_convrot name outranks
+  //     the 4B — int8+convrot tokens over int8 alone) and the guard passes
+  //     it — correct picks resolve EXACTLY as before (a guard, not a reroute).
   const bothVisible = inferSelections(mirrorFiles, 'off')
-  assert.equal(bothVisible.textEncoder, TE_32B, 'sanity: with both TEs visible the official tier picks the 32B')
+  assert.equal(bothVisible.textEncoder, TE_32B, 'sanity: with both TEs visible the size-class ranking picks the 32B')
   assert.equal(teDimClassRefusal('minimax', bothVisible.textEncoder), null, 'the 32B-class pick passes the guard')
   // (2) AUTO, only the 4B visible (the crash environment): the loosened
   //     anchor resolves the 4B — the root cause, kept on record — and the
@@ -745,7 +768,7 @@ test('the TE dimension-class guard (eyzcev5): the wrong-family encoder refuses a
   const refusal = teDimClassRefusal('minimax', trapped.textEncoder)
   assert.ok(refusal, 'the guard refuses the wrong-family pick')
   assert.ok(refusal.includes('4B-class') && refusal.includes('32B-class'), `the refusal names both classes (got: ${refusal})`)
-  assert.ok(refusal.includes(TE_32B), 'the refusal names the artifact to make visible')
+  assert.ok(refusal.includes(TE_32B_CANONICAL), 'the refusal names the canonical artifact to make visible')
   // (3) THE VALIDATE RUNG — the crash class dies at validate, never at the
   //     engine: the shared submit ladder refuses the 4B selection with the
   //     reason; the 32B selection passes the same ladder untouched.

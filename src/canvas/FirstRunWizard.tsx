@@ -248,14 +248,16 @@ function RegistryStep(props: { models: ReturnType<typeof useSessionStore.getStat
       : <ul className="canvas-wizard-models" data-wizard-model-kinds>
         {counts.map(([kind, count]) => <li key={kind} data-wizard-model-kind={kind}><strong>{kind.replace(/_/g, ' ')}</strong><span>{count}</span></li>)}
       </ul>}
-    {stack && <p className={`canvas-wizard-${stack.validated ? 'ok' : stack.ready ? 'warn' : 'warn'}`} data-wizard-stack={stack.validated ? 'validated' : stack.ready ? 'custom' : 'incomplete'}>
+    {stack && <p className={`canvas-wizard-${stack.validated || stack.ready ? 'ok' : 'warn'}`} data-wizard-stack={stack.validated ? 'validated' : stack.ready ? 'custom' : 'incomplete'}>
       {stack.validated
         ? <><Check size={13} /> The validated official H3 stack is complete.</>
         : stack.nodes.missing.length > 0
           ? `The engine does not serve the studio's core render nodes (${stack.nodes.missing.map((item) => item.className).join(', ')}) — weights cannot fix this. Update ComfyUI (or install the missing node packs), restart the engine, then refresh.`
           : stack.ready
-            ? 'Custom stack detected — generation works; output may differ from the validated set.'
-            : 'The H3 stack is incomplete — video renders will refuse with the missing list until the weights land where the engine reads them.'}
+            ? 'Custom stack detected — every component the graphs load is present; output may differ from the validated set.'
+            : stack.rows.some((row) => row.refusal)
+              ? 'A component was found but refused (wrong class) — the row names the reason. Clear or fix the pick in Settings → Model overrides.'
+              : 'The H3 stack is incomplete — make the missing components visible to the engine (any name shape the pickers recognize resolves), then refresh.'}
     </p>}
     <div className="canvas-wizard-row">
       <button type="button" className="canvas-chip" data-wizard-refresh onClick={onRefresh} disabled={scanning}>

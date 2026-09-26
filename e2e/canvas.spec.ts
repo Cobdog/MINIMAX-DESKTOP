@@ -2470,11 +2470,13 @@ test('model overrides surface in Settings and the chain properties panel (both s
     // name-invisible to inference — that is the override layer's reason).
     await expect(familyBlock.locator('[data-model-override-slot="merged"] select option').first()).toContainText('nothing detected')
     // The merge is a pickable option; picking it flips the stack report's
-    // FL2VA row to the user's file with the Override verdict.
+    // FL2VA row to the user's file with the source-layer verdict (a pick
+    // made here in Settings is the global layer — the row names whose
+    // choice it shows, per the derived-report rework 2026-09-26).
     await checkpointSelect.selectOption(mergeName)
     const fl2vaRow = dock.locator('.h3-stack-list > div').first()
     await expect(fl2vaRow.locator('small')).toContainText(mergeName)
-    await expect(fl2vaRow.locator('em')).toHaveText('Override')
+    await expect(fl2vaRow.locator('em')).toHaveText('Global pick')
     // (The ltx23 family's scan-anchored slot rows were removed with LTX —
     // Phase 0, 2026-09-20.)
     // The workbench is the ONLY family with the image VAE row (the T=1
