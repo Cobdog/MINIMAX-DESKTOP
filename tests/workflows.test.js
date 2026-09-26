@@ -24,7 +24,7 @@ function load(path) {
 const workflowModule = load('src/lib/workflow.ts')
 const { frameCount, buildMiniMaxWorkflow, extractOutputUrl, extractOutputFile, outputFileFromUrl, OFFICIAL_H3_SAMPLER, OFFICIAL_H3_SCHEDULER } = workflowModule
 const { inferSelections } = load('src/lib/modelSelection.ts')
-const { cropRect, fitWholeCharacter } = load('src/lib/imageCrop.ts')
+const { cropRect, fitWholeCharacter, referenceScale, referenceRegion } = load('src/lib/imageCrop.ts')
 const { promptPresets, searchPromptPresets } = load('src/lib/promptPresets.ts')
 
 test('graph-building basics: crop fit, prompt presets, frameCount ladder, cropRect containment', () => {
@@ -45,6 +45,62 @@ test('graph-building basics: crop fit, prompt presets, frameCount ladder, cropRe
       assert.ok(Math.abs(r.w / r.h - width / height) < 0.0001)
     }
   }
+})
+
+// ---------------------------------------------------------------------------
+// REFERENCE PREP — the maintainer's ruling (2026-09-26, directive 1e363ec0
+// item 5): "scaled longest side to the selected resolution. Never cropped."
+// The pure math the reference upload path rides: longest edge to the target,
+// aspect preserved EXACTLY (within integer rounding), zero crop, zero pad.
+// The old path ran references through prepareImage(file, W, H) — a
+// cover-crop/letterbox into the OUTPUT ratio that destroyed reference
+// content the conditioning node was designed to take unconstrained.
+// ---------------------------------------------------------------------------
+test('reference prep: longest-side scaling, aspect preserved, never cropped', () => {
+  // THE RULING'S CASE VERBATIM: a 2:1 portrait reference at a 16:9
+  // resolution (1344x768 → target longest side 1344) → 672x1344.
+  const portrait = referenceScale(1000, 2000, 1344)
+  assert.equal(portrait.width, 672)
+  assert.equal(portrait.height, 1344)
+  assert.ok(Math.abs(portrait.width / portrait.height - 1000 / 2000) < 0.001, 'portrait: aspect preserved')
+  // The landscape mirror.
+  const landscape = referenceScale(2000, 1000, 1344)
+  assert.equal(landscape.width, 1344)
+  assert.equal(landscape.height, 672)
+  // A square ref keeps both edges at the target.
+  const square = referenceScale(2000, 2000, 1344)
+  assert.equal(square.width, 1344)
+  assert.equal(square.height, 1344)
+  // UP-scaling rides the same rule — the target is a length, not a ceiling.
+  const upscaled = referenceScale(500, 250, 1344)
+  assert.equal(upscaled.width, 1344)
+  assert.equal(upscaled.height, 672)
+  // Aspect is preserved EXACTLY across shapes — never snapped to a target
+  // ratio (the crop/letterbox the ruling retires).
+  for (const [sw, sh] of [[3840, 2160], [2160, 3840], [1234, 777], [640, 480], [480, 640], [1024, 1024]]) {
+    const target = referenceScale(sw, sh, 1344)
+    assert.equal(Math.max(target.width, target.height), 1344, `${sw}x${sh}: longest side matched`)
+    assert.ok(Math.abs(target.width / target.height - sw / sh) < 0.01, `${sw}x${sh}: aspect preserved (got ${target.width}x${target.height})`)
+  }
+  // The 9:16 resolution picks its own longest side (768x1344 → 1344).
+  assert.equal(referenceScale(1000, 2000, Math.max(768, 1344)).height, 1344)
+  // Degenerate targets tolerate — never NaN, never zero.
+  const fallback = referenceScale(1000, 2000, Number.NaN)
+  assert.equal(Math.max(fallback.width, fallback.height), 2000, 'a NaN target keeps the source size')
+  // A stored crop's zoom/pan selects an aspect-PRESERVING region (never a
+  // fit): zoom 1 = the whole extent; zoom 2 halves both edges about the
+  // focal point.
+  const whole = referenceRegion(1000, 2000, { x: 0.5, y: 0.5, zoom: 1, fit: 'crop' })
+  assert.equal(whole.x, 0)
+  assert.equal(whole.y, 0)
+  assert.equal(whole.w, 1000)
+  assert.equal(whole.h, 2000)
+  const zoomed = referenceRegion(1000, 2000, { x: 0.5, y: 0.5, zoom: 2, fit: 'contain' })
+  assert.equal(zoomed.w, 500)
+  assert.equal(zoomed.h, 1000)
+  assert.equal(zoomed.x, 250)
+  assert.equal(zoomed.y, 500)
+  assert.ok(Math.abs(zoomed.w / zoomed.h - 1000 / 2000) < 0.0001, 'region: the image ratio, not a target ratio')
 })
 
 const models = { fl2va: 'fl2va', ref2va: 'ref2va', textEncoder: 'clip', videoVae: 'video', audioVae: 'audio', fl2vLora: 'fl-lora', ref2vLora: 'ref-lora' }

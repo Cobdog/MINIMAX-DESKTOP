@@ -16,7 +16,7 @@
 import { createId } from './createId'
 import { buildMiniMaxWorkflow, frameIndexForSeconds, guideFrameWarning } from './workflow'
 import { teDimClassRefusal } from './modelSelection'
-import { prepareImage } from './imageCrop'
+import { prepareImage, prepareReferenceImage } from './imageCrop'
 import { buildRenderManifest } from './manifest'
 import { preflightOrFail } from './preflight'
 import { dbg } from './dbg'
@@ -260,11 +260,28 @@ export async function submitH3Render(
     const upload = async (file: MediaFile, fitToOutput = false) => file.kind === 'image' && (fitToOutput || Boolean(file.crop))
       ? window.minimax.uploadImageData(settings.comfyUrl, await prepareImage(file, request.width, request.height))
       : window.minimax.uploadInput(settings.comfyUrl, file.path)
+    // REFERENCE PREP (maintainer ruling 2026-09-26, directive 1e363ec0 item
+    // 5): reference pictures NEVER ride the output-fit path — the longest
+    // edge scales to the selected resolution's longest side, aspect
+    // preserved, cropping forbidden. The conditioning node takes
+    // unconstrained IMAGE refs and scales them itself (ref_image_size
+    // 'match'/'max'), so the cover-crop the output-fit path applies destroyed
+    // reference content for nothing. First/last frames and timeline guides
+    // stay output-fit: they anchor literal frames of the OUTPUT video.
+    const targetLongestSide = Math.max(request.width, request.height)
+    const uploadReference = async (file: MediaFile) => {
+      if (file.kind !== 'image') return window.minimax.uploadInput(settings.comfyUrl, file.path)
+      const data = await prepareReferenceImage(file, targetLongestSide)
+      // (A-DBG) The ruled scaling decision, per reference: what the engine
+      // receives and why (region = a user zoom window, never a fit).
+      dbg('prep.reference', { name: file.name, targetLongestSide, cropped: Boolean(file.crop), bytes: data.length })
+      return window.minimax.uploadImageData(settings.comfyUrl, data)
+    }
     const guides = request.mode === 'reference' ? request.timelineGuides : []
     const [first, last, images, videos, audios, guideUploads] = await Promise.all([
       request.firstFrame && (request.mode === 'image' || request.mode === 'frames') ? upload(request.firstFrame, true) : undefined,
       request.lastFrame && request.mode === 'frames' ? upload(request.lastFrame, true) : undefined,
-      Promise.all(request.mode === 'reference' ? request.referenceImages.map((file) => upload(file)) : []),
+      Promise.all(request.mode === 'reference' ? request.referenceImages.map((file) => uploadReference(file)) : []),
       Promise.all(request.mode === 'reference' ? request.referenceVideos.map((file) => upload(file)) : []),
       Promise.all(request.mode === 'reference' ? request.referenceAudios.map((file) => upload(file)) : []),
       Promise.all(guides.map(({ file }) => upload(file))),

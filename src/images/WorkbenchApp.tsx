@@ -28,6 +28,7 @@ import { CanvasSessionContext } from '../canvas/sessionContext'
 import { useJobsStore } from '../state/jobsStore'
 import { useCanvasStore, engineBridge } from '../canvas/store'
 import { documentsApi } from '../canvas/api'
+import { allSupportedResolutions, ratioKeyOf } from '../lib/aspectResolutions'
 import type { DocumentChain, DocumentTake } from '../canvas/derive'
 import type { MediaFile } from '../types'
 import { submitWorkbenchGeneration, workbenchAvailability } from './submit'
@@ -823,7 +824,7 @@ function WorkbenchSurface() {
             <label className="iw-resolution" data-iw-resolution>
               <span>Resolution</span>
               <select value={settings.resolution} onChange={(event) => void patchSettings({ resolution: event.target.value })}>
-                {['1344x768', '768x1344', '768x768'].map((value) => <option key={value} value={value}>{value}</option>)}
+                {[...new Set([settings.resolution, ...allSupportedResolutions()])].map((value) => <option key={value} value={value}>{`${ratioKeyOf(value)} · ${value}`}</option>)}
               </select>
             </label>
             <label className="iw-seed" data-iw-seed>

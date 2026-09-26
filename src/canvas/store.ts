@@ -356,6 +356,18 @@ type CanvasActions = {
    *  write through documentsApi directly — the image workbench — refresh
    *  through this instead of reaching into store internals). */
   reloadActiveDocument(): Promise<void>
+  /** The trash front door (ruling 2026-09-26): tombstones a scene (chain)
+   *  and refreshes every loaded document that held it. Returns the store's
+   *  row count — 0 means it was already gone (the caller reports honestly,
+   *  never assumes success). */
+  deleteScene(chainId: string): Promise<number>
+  /** Restores a tombstoned scene whole; refreshes its project's document
+   *  when loaded. Same honest-count contract as deleteScene. */
+  restoreScene(chainId: string, projectId: string): Promise<number>
+  /** The explicit destructive act (§3) — tombstoned documents/chains/assets
+   *  hard-deleted server-side. The UI double-confirms; this returns the
+   *  store's per-kind counts for the receipt toast. */
+  emptyTrash(): Promise<Record<string, number> | null>
   closeProject(id: string): Promise<void>
   createCanvas(name?: string): Promise<string | null>
   /** The launcher's prompt submit: spawn the seed chain, then REAL submit. */
@@ -1351,6 +1363,63 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         void landCompletions()
       }
       void get().refreshProjects()
+    },
+
+    deleteScene: async (chainId) => {
+      try {
+        const deleted = await documentsApi.deleteChain(chainId)
+        // (A-DBG) The trash junction: what left the canvas and why it can
+        // come back (the trash owns the undo window, the GC owns the delete).
+        dbg('trash', { action: 'tombstone', chainId, deleted })
+        if (!deleted) return 0
+        // The selection must not point at a tile that no longer exists.
+        if (get().selection.tileIds.includes(chainId)) set({ selection: { tileIds: [] } })
+        // Refresh every LOADED document that held the chain — the index
+        // lists chains across canvases, not just the active one.
+        for (const document of Object.values(get().documents)) {
+          if (!document.chains.some((chain) => chain.id === chainId)) continue
+          const refreshed = await loadDocument(document.project.id)
+          if (refreshed && document.project.id === get().activeProjectId) {
+            recomputeTiles()
+            void landCompletions()
+          }
+        }
+        return deleted
+      } catch (error) {
+        get().toast('error', `Could not trash this scene: ${error instanceof Error ? error.message : String(error)}`)
+        return 0
+      }
+    },
+
+    restoreScene: async (chainId, projectId) => {
+      try {
+        const restored = await documentsApi.restoreChain(chainId)
+        dbg('trash', { action: 'restore', chainId, restored })
+        if (!restored) return 0
+        if (get().documents[projectId]) {
+          const refreshed = await loadDocument(projectId)
+          if (refreshed && projectId === get().activeProjectId) {
+            recomputeTiles()
+            void landCompletions()
+          }
+        }
+        return restored
+      } catch (error) {
+        get().toast('error', `Could not restore this scene: ${error instanceof Error ? error.message : String(error)}`)
+        return 0
+      }
+    },
+
+    emptyTrash: async () => {
+      try {
+        const emptied = await documentsApi.emptyTrash()
+        const counts = emptied ?? {}
+        dbg('trash', { action: 'empty', counts })
+        return counts
+      } catch (error) {
+        get().toast('error', `Could not empty the trash: ${error instanceof Error ? error.message : String(error)}`)
+        return null
+      }
     },
 
     closeProject: async (id) => {

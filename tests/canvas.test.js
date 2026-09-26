@@ -51,6 +51,7 @@ function close(a, b, tol, label) {
 
 const cameraMod = loadTs('src/canvas/camera.ts')
 const derive = loadTs('src/canvas/derive.ts')
+const aspect = loadTs('src/lib/aspectResolutions.ts')
 
 test('(a) camera store discipline', () => {
   const store = cameraMod.createCamera({ x: 10, y: 20, k: 1 })
@@ -384,6 +385,65 @@ test('(l) L4 — selection decides the surface (effectiveMode)', () => {
   eq(vaeRead.modelOverrides.videoVae, 'v-pick.safetensors', 'settings: the videoVae slot trims through')
   eq(vaeRead.modelOverrides.audioVae, 'a-pick.safetensors', 'settings: the audioVae slot survives')
   eq('imageVae' in vaeRead.modelOverrides, false, 'settings: a non-string imageVae slot drops to auto')
+})
+
+// ---------------------------------------------------------------------------
+// AR-FIRST RESOLUTION PICKING (maintainer ruling 2026-09-26, directive
+// 1e363ec0 item 4): each aspect ratio carries its supported/optimal list,
+// DERIVED from the model's grid constraints (32-px grid; native 768px short
+// edge; the 768x1344 pixel-area cap — docs/library's source-of-truth
+// capture). The optimal picks must land the OFFICIAL trio for the shipped
+// ratios and pull ultra-wide down to the cap honestly.
+// ---------------------------------------------------------------------------
+test('(l1a) AR-first resolutions — derivation, optimals, cap honesty, sanitize', () => {
+  // THE OFFICIAL TRIO lands exactly (the measured envelope):
+  eq(aspect.optimalResolutionFor('16:9'), '1344x768', '16:9 optimal is the official native canvas')
+  eq(aspect.optimalResolutionFor('9:16'), '768x1344', '9:16 optimal mirrors it')
+  eq(aspect.optimalResolutionFor('1:1'), '768x768', '1:1 optimal is the official square')
+  // The extended ratios derive on the same constraints:
+  eq(aspect.optimalResolutionFor('4:3'), '1024x768', '4:3 optimal: 768 short edge, on-grid long edge')
+  eq(aspect.optimalResolutionFor('3:4'), '768x1024', '3:4 optimal mirrors 4:3')
+  // 21:9 at a 768 short edge is 1792x768 — OVER the 1,032,192 px cap; the
+  // honest optimal steps the short edge down until the cap holds.
+  eq(aspect.optimalResolutionFor('21:9'), '1504x640', '21:9 optimal respects the area cap (never a silent over-cap 1792x768)')
+  eq(aspect.optimalResolutionFor('free'), null, 'free has no ratio to optimize')
+  // EVERY listed value: on the 32 grid, short edge ≤ 768, area ≤ cap, and
+  // exactly one optimal per ratio.
+  for (const ratio of aspect.ASPECT_RATIOS) {
+    const list = aspect.resolutionsForRatio(ratio.id)
+    ok(list.length >= 1, `${ratio.id}: a supported list exists`)
+    eq(list.filter((option) => option.optimal).length, 1, `${ratio.id}: exactly one optimal pick marked`)
+    for (const option of list) {
+      const dims = aspect.parseResolution(option.value)
+      ok(dims !== null, `${ratio.id} ${option.value}: parses`)
+      const width = dims.width, height = dims.height
+      ok(width % 32 === 0 && height % 32 === 0, `${ratio.id} ${option.value}: both dims on the 32 grid`)
+      ok(Math.min(width, height) <= 768, `${ratio.id} ${option.value}: short edge within the native 768`)
+      ok(width * height <= 1032192, `${ratio.id} ${option.value}: area at/below the 768x1344 cap`)
+      // Ratio honesty: the listed ratio holds within grid-rounding drift.
+      ok(Math.abs(width / height - ratio.w / ratio.h) < 0.06, `${ratio.id} ${option.value}: ratio holds within grid drift`)
+    }
+  }
+  // The ladder includes the turbo fast rung the Settings presets use.
+  ok(aspect.resolutionsForRatio('16:9').some((option) => option.value === '864x480'), '16:9 ladder: the 864x480 turbo fast rung derives too')
+  // Ratio attribution + free:
+  eq(aspect.ratioKeyOf('1344x768'), '16:9', 'attribution: the official landscape is 16:9')
+  eq(aspect.ratioKeyOf('608x352'), 'free', 'attribution: the legacy preview rung (floor-snapped) is free — kept, never rewritten')
+  eq(aspect.ratioKeyOf('999x999'), 'free', 'attribution: unknown values are free')
+  // Renderability (the sanitize gate): on-grid WxH passes, everything else
+  // falls back — the fixed trio gate would have silently rewritten every
+  // ratio pick the panel now offers.
+  ok(aspect.isRenderableResolution('1344x768') && aspect.isRenderableResolution('864x480') && aspect.isRenderableResolution('1504x640'), 'renderable: on-grid values pass')
+  ok(!aspect.isRenderableResolution('1000x700') && !aspect.isRenderableResolution('1344') && !aspect.isRenderableResolution(''), 'renderable: off-grid/malformed values refuse')
+  // The tolerant settings read KEEPS a previously-unlistable on-grid value
+  // (the old gate dropped 864x480 to the default — silent rewrite).
+  const fastRead = generation.readChainSettings({ resolution: '864x480' })
+  eq(fastRead.resolution, '864x480', 'settings: an on-grid stored resolution survives the read (the AR-first sanitize)')
+  ok(generation.readChainSettings({ resolution: '1000x700' }).resolution === '1344x768', 'settings: off-grid values still fall back to the default')
+  // The snap helper for the free inputs:
+  eq(aspect.snapResolutionDim(999), 992, 'snap: to the nearest grid multiple')
+  eq(aspect.snapResolutionDim(1), 32, 'snap: never below the widget floor')
+  eq(aspect.snapResolutionDim(999999), 16384, 'snap: never above the widget ceiling')
 })
 
 // ---------------------------------------------------------------------------

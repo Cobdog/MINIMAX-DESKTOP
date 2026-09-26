@@ -113,6 +113,29 @@ export const documentsApi = {
   updateChain: (input: { id: string; settings?: Record<string, unknown>; inputSpec?: Record<string, unknown>; lockState?: 'locked' | 'unlocked'; hopCount?: number; driftMetrics?: Record<string, unknown> | null; stale?: boolean }) =>
     post<{ chain: DocumentChain }>('/api/lan/documents/chains/update', input),
 
+  // ---- the trash front door (maintainer ruling 2026-09-26, directive -----
+  // 1e363ec0 item 1): the store ALWAYS had full trash semantics — tombstone
+  // chains, restore, the explicit empty-trash GC. These are its client ends.
+
+  /** Tombstones a chain (a scene): it leaves its canvas until restored; the
+   *  trash owns the undo window. Returns the row count (0 = already gone). */
+  deleteChain: async (id: string) =>
+    (await post<{ deleted: number }>('/api/lan/documents/chains/delete', { id })).deleted,
+
+  /** Restores a tombstoned chain whole — never piecemeal (the store's rule). */
+  restoreChain: async (id: string) =>
+    (await post<{ restored: number }>('/api/lan/documents/chains/restore', { id })).restored,
+
+  /** Trashed chains, newest-first (optionally scoped to one project). */
+  listTrashedChains: async (projectId?: string): Promise<DocumentChain[]> =>
+    (await call<{ chains: DocumentChain[] }>(`/api/lan/documents/chains?trash=1${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''}`)).chains ?? [],
+
+  /** The one destructive act (§3): hard-deletes every tombstoned document,
+   *  chain and asset. Double-gated — the caller confirms, then the server
+   *  re-checks the explicit confirm token. */
+  emptyTrash: async () =>
+    (await post<{ emptied: Record<string, number> }>('/api/lan/documents/trash/empty', { confirm: 'empty-trash' })).emptied,
+
   createOutput: async (input: { chainId: string; substrates?: string[] }) =>
     (await post<{ output: { id: string } }>('/api/lan/documents/outputs', input)).output,
 

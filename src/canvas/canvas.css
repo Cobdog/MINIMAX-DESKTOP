@@ -489,6 +489,20 @@ details.canvas-properties-disclosure[open] > summary::after { content: '−'; }
 .canvas-index-li { position: relative; display: flex; align-items: stretch; }
 .canvas-index-li .canvas-index-row { flex: 1; min-width: 0; }
 .canvas-index-li.cursor .canvas-index-row { background: var(--surface-3); }
+/* The trash front door (ruling 2026-09-26): the chip + the trash view sit in
+   the index overlay's own vocabulary — the datasets manager's pattern, the
+   canvas's materials. */
+.canvas-chip.danger { border-color: color-mix(in srgb, var(--danger) 46%, transparent); color: var(--danger); }
+.canvas-chip.danger:hover:not(:disabled) { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.canvas-chip.danger:disabled { opacity: .4; cursor: default; }
+.canvas-index-trash { display: flex; flex-direction: column; min-height: 0; }
+.canvas-index-trash-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.canvas-index-trash-head strong { color: var(--muted); font-size: var(--text-sm); font-weight: 500; }
+.canvas-index-trash .canvas-index-row { display: flex; flex: 1; min-width: 0; align-items: center; gap: 8px; padding: 7px 10px; background: transparent; }
+.canvas-index-trash .canvas-index-row .canvas-index-row-note { margin-left: auto; }
+.canvas-properties-free-res { display: inline-flex; align-items: center; gap: 4px; }
+.canvas-properties-free-res input { width: 64px; padding: 3px 5px; border: 1px solid var(--line-strong); border-radius: 6px; background: transparent; color: var(--text); font-size: var(--text-sm); }
+.canvas-properties-free-res span { color: var(--muted-2); }
 .canvas-properties { grid-template-rows: auto minmax(0, 1fr) auto; }
 .canvas-properties-submit { position: sticky; bottom: 0; padding: 8px 10px; border-top: 1px solid var(--line); background: var(--surface); }
 

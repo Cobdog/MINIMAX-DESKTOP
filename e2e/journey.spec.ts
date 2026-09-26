@@ -243,3 +243,132 @@ async function resetSession(page: Page) {
     if (stale.length) await page.request.post('/api/lan/jobs', { data: { jobs: stale } })
   }
 }
+
+/** THE REFERENCE-PREP RULING (maintainer 2026-09-26, directive 1e363ec0
+ *  item 5): "scaled longest side to the selected resolution. Never
+ *  cropped." Proven at WIRING truth on the environment mirror: a 1:2
+ *  portrait reference bound to a 1344x768 (16:9) render must reach the
+ *  engine as a 672x1344 PNG — longest side matched, aspect preserved, zero
+ *  crop. The old path cover-cropped it into the output ratio (1344x768),
+ *  destroying half the reference; the conditioning node takes unconstrained
+ *  IMAGE refs and scales them itself, so the true aspect is what it wants.
+ *  The proof reads the PNG the engine ACTUALLY received (IHDR of the
+ *  uploaded bytes served back from the mirror's /view). */
+test('reference prep on the mirror: longest side to the resolution, aspect preserved, never cropped', async ({ page, request }) => {
+  test.setTimeout(240_000)
+  const problems: string[] = []
+  page.on('pageerror', (error) => problems.push(`pageerror: ${error.message}`))
+
+  const holder = http.createServer(() => undefined)
+  const mirrorPort = await new Promise<number>((resolve) => holder.listen(0, '127.0.0.1', () => resolve((holder.address() as AddressInfo).port)))
+  await new Promise<void>((resolve) => holder.close(() => resolve()))
+  const mirror: ChildProcess = spawn('node', [path.join(process.cwd(), 'e2e/mirror/fakeEngineServer.mjs'), '--port', String(mirrorPort), '--profile', MIRROR_PROFILE], { stdio: ['ignore', 'pipe', 'pipe'] })
+  let mirrorLog = ''
+  mirror.stdout?.on('data', (chunk: Buffer) => { mirrorLog += chunk.toString() })
+  mirror.stderr?.on('data', (chunk: Buffer) => { mirrorLog += chunk.toString() })
+  try {
+    await expect.poll(async () => {
+      try { await mirrorJson(mirrorPort, '/system_stats'); return true } catch { return false }
+    }, { timeout: 15_000 }).toBe(true)
+    const originalSettings = ((await (await request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
+    await request.post('/api/lan/settings', { data: { settings: {
+      ...originalSettings,
+      comfyUrl: `http://127.0.0.1:${mirrorPort}`,
+      engine: { ...(originalSettings.engine as Record<string, unknown>), mode: 'external' },
+    } } })
+    await resetSession(page)
+
+    await page.goto('/?canvas=1')
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    await expect(page.locator('[data-canvas-engine]')).toHaveAttribute('data-engine-connected', 'true', { timeout: 20_000 })
+    // The render chain (16:9 default → 1344x768; longest side 1344).
+    await page.locator('[data-canvas-prompt]').fill('a tall glass tower over a frozen lake, reference study')
+    await page.locator('[data-canvas-submit]').click()
+    await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 15_000 })
+    // Drop a 1:2 PORTRAIT reference (500x1000).
+    await page.evaluate(() => {
+      const canvas = document.createElement('canvas')
+      canvas.width = 500
+      canvas.height = 1000
+      const context = canvas.getContext('2d')!
+      context.fillStyle = '#2b3a55'
+      context.fillRect(0, 0, 500, 1000)
+      context.fillStyle = '#e8b04b'
+      context.fillRect(120, 300, 260, 400)
+      const dataUrl = canvas.toDataURL('image/png')
+      const binary = atob(dataUrl.split(',')[1])
+      const bytes = new Uint8Array(binary.length)
+      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+      const transfer = new DataTransfer()
+      transfer.items.add(new File([bytes], 'portrait-reference.png', { type: 'image/png' }))
+      document.querySelector('[data-canvas-root]')!.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true }))
+    })
+    await expect(page.locator('[data-canvas-tile]')).toHaveCount(2, { timeout: 15_000 })
+    // Bind it as the render's reference (the drop + documents-API write).
+    const document = await (await page.evaluate(async () => {
+      const session = await (await fetch('/api/lan/documents/session')).json() as { session: { activeProject: string | null } }
+      const response = await fetch(`/api/lan/documents/project?id=${encodeURIComponent(session.session.activeProject!)}`)
+      return (await response.json()) as {
+        chains: Array<{ id: string; kind: string; settings: Record<string, unknown>; outputs: Array<{ id: string }> }>
+      }
+    }))
+    const renderChain = document.chains.find((chain) => chain.kind === 'generation')!
+    const mediaChain = document.chains.find((chain) => chain.kind === 'media')!
+    await page.request.post('/api/lan/documents/chains/update', { data: { id: renderChain.id, settings: { ...renderChain.settings, referenceOutputIds: [mediaChain.outputs[0]!.id] } } })
+    await page.reload()
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    await page.locator(`[data-canvas-tile="${renderChain.id}"]`).click()
+    await expect(page.locator('[data-canvas-properties]')).toBeVisible({ timeout: 10_000 })
+
+    // Generate: the reference-mode render uploads the PREPARED reference,
+    // then submits the graph naming it.
+    await page.locator('[data-canvas-generate]').click()
+
+    type GraphNode = { class_type?: string; inputs?: Record<string, unknown> }
+    const findReferenceGraph = async () => {
+      const history = (await mirrorJson(mirrorPort, '/history')) as Record<string, MirrorHistoryEntry>
+      for (const entry of Object.values(history)) {
+        const graph = (entry.prompt?.[0] ?? {}) as Record<string, GraphNode>
+        if (Object.values(graph).some((node) => node.class_type === 'MiniMaxH3ReferenceToVideo')) return graph
+      }
+      return null
+    }
+    await expect.poll(() => findReferenceGraph().then((graph) => graph !== null), { timeout: 30_000 }).toBe(true)
+    const referenceGraph = (await findReferenceGraph())!
+    const conditioning = Object.values(referenceGraph).find((node) => node.class_type === 'MiniMaxH3ReferenceToVideo')!
+    // The output latent stays the selected 16:9 resolution.
+    expect(conditioning.inputs?.width).toBe(1344)
+    expect(conditioning.inputs?.height).toBe(768)
+    // The reference slot names the uploaded file; fetch its bytes back.
+    const refLink = conditioning.inputs?.['ref_images.ref_image_0'] as [string, number]
+    expect(Array.isArray(refLink)).toBe(true)
+    const loadImage = referenceGraph[refLink[0]]
+    const uploadedName = String((loadImage.inputs as { image?: unknown } | undefined)?.image ?? '').split('/').pop() as string
+    expect(uploadedName.endsWith('.png')).toBe(true)
+    const view = await fetch(`http://127.0.0.1:${mirrorPort}/view?filename=${encodeURIComponent(uploadedName)}`)
+    expect(view.status).toBe(200)
+    const png = new Uint8Array(await view.arrayBuffer())
+    // PNG IHDR: width/height are big-endian uint32 at bytes 16 and 20.
+    const readUint32 = (offset: number) => (png[offset]! * 2 ** 24) + (png[offset + 1]! * 2 ** 16) + (png[offset + 2]! * 2 ** 8) + png[offset + 3]!
+    const width = readUint32(16)
+    const height = readUint32(20)
+    // THE RULING, on the bytes the engine received: 1:2 portrait at a 16:9
+    // resolution → 672x1344 — longest side matched to 1344, aspect exactly
+    // preserved, ZERO crop (the old path delivered a cropped 1344x768).
+    expect({ width, height }).toEqual({ width: 672, height: 1344 })
+    expect(Math.abs(width / height - 500 / 1000)).toBeLessThan(0.01)
+
+    expect(problems, `page errors: ${problems.join(' | ')}`).toEqual([])
+
+    await request.post('/api/lan/settings', { data: { settings: originalSettings } })
+    await resetSession(page)
+  } finally {
+    mirror.kill('SIGINT')
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => { mirror.kill('SIGKILL'); resolve() }, 5_000)
+      mirror.once('exit', () => { clearTimeout(timer); resolve() })
+    })
+  }
+  expect(mirror.exitCode !== null || mirror.signalCode !== null).toBe(true)
+  expect(mirrorLog).not.toContain('EADDRINUSE')
+})
