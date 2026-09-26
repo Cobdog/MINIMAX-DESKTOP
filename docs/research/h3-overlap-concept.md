@@ -53,6 +53,37 @@ The maintainer's one-line architecture, made concrete by everything below:
   (third-party pixel carry at every seam = per-window re-encode, decode
   variance at every joint, audio permanently out of band).
 
+### 0.1 The window-context invariant (maintainer, 2026-09-25)
+
+> "The window always gets the right visual, textual, and temporal context."
+
+This is the contract every window composition must satisfy — seam windows
+included; a seam is a first-class window, not an afterthought stitch. What
+"right" means per axis, on our stack:
+
+- **Visual** — carried joint flanks as *latents* via the fork (never
+  re-encoded), the identity payload (refs/RefMods) re-attached per window in
+  correct wiring order, and the joint strip sourced from the previous
+  generation's own tail. The pack gets visual context by pixel re-encode of
+  a fixed source — legitimate for restyling, wrong for chains whose visual
+  state is the evolving generation itself.
+- **Textual** — the durable-state/action split (ecosystem sweep §3.12):
+  identity/style/world text carried *verbatim* across windows; action text
+  owned by the window's own timestamps and never replayed; seam windows get
+  a blended or authored transition prompt. "Right" means *non-contradictory*
+  composition — prompt contradictions render as unions (both contents
+  appear), so naive concatenation of two windows' prompts is a defect, not a
+  shortcut.
+- **Temporal** — grid-valid window lengths (5+17g frames), joint widths on
+  the audio phase grid (≡ 0 mod 3; 39 = phase-exact), AddGuide pins at the
+  window's true frame indices, and the chain-manager records supplying
+  upstream-locked / downstream-planned position so a window knows where it
+  sits in the take.
+
+For the drift-envelope, the invariant is also an experimental control: any
+arm that fails it (stale refs, replayed action text, off-grid joints)
+measures the *invariant violation*, not the mitigation.
+
 ## 1. The mechanism, precisely — what the pack actually does
 
 ### 1.1 What it is (and is not)
