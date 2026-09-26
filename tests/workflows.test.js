@@ -1912,3 +1912,94 @@ test('shared poll kernel (P1-1/P1-7 family): tolerance, deadline, cancellation +
   }
   console.log('PASS: official H3 workflows, model preference, duration/crop, previews, post-processing, output selection, job poll reduction, quota-safe library persistence, poll-loop kernel (tolerance/deadline/cancel), the official MiniMax prompt contracts, the segmented-inference prompt discipline, the H3 no-dialogue emission, the local prompt library storage, multiframe AddGuide chaining, the trust layer, the LBH latent upscaler presets, Motion-Context latent chaining, MiniMax Music 3, ContactSheet character sheets, graph-family versioning + looseness presets, the pure error sanitizer, the failure taxonomy, the diagnostic report, the LLM prompt composer, and the model-override layer (both takes). (LTX-2.5, LTX-2.3, and Z-Image suites removed — Phase 0, 2026-09-20.)')
 })
+
+// ---------------------------------------------------------------------------
+// The truth-surface sweep (task 68e9k17, 2026-09-26).
+// ---------------------------------------------------------------------------
+
+// #5 — Music 3's audio-VAE ladder, loosened the way the H3 family's is: the
+// exact official artifact first, then the music3-DAV family, then the bare
+// 'dav' needle (a renamed quant / repack / subpath still auto-resolves). The
+// RECORDED DECISION: the H3 video family's audio VAE
+// (minimax_h3_audio_vae_fp32.safetensors) deliberately does NOT resolve here
+// — researched 2026-09-26 against the two official repos: Comfy-Org/
+// MiniMax-Music-3 ships vae/minimax_music3_dav.safetensors (216,696,128
+// bytes) while Comfy-Org/MiniMax-H3 ships vae/minimax_h3_audio_vae_fp32.
+// safetensors (605,254,808 bytes) — distinct artifacts for distinct decoder
+// families. Auto-wiring the H3 file into Music 3's VAEDecodeAudioTiled would
+// ship a wrong-decoder graph (the never-a-doomed-graph doctrine); the
+// explicit escape hatch stays the manual pick, where the engine is the
+// final arbiter. Failing-without-it: the bare-needle and the official-exact
+// tier variants below resolve to '' on the /music3.*dav/i-only ladder.
+test('sweep #5: the music3 audio-VAE ladder — official DAV anchor + the loosened dav needle; the H3 audio VAE never auto-resolves', () => {
+  const music3Module = load('src/lib/music3Workflow.ts')
+  const cases = [
+    { name: 'minimax_music3_dav.safetensors', note: 'the official artifact (exact tier)' },
+    { name: 'Music3/vae/minimax_music3_dav.safetensors', note: 'the official artifact under a subpath (basename truth)' },
+    { name: 'minimax_music3_dav_fp16.safetensors', note: 'a re-quantized DAV (family tier)' },
+    { name: 'music3_dav.safetensors', note: 'the maintainer-style short rename' },
+    { name: 'dav.safetensors', note: 'a bare rename — the loosened needle' },
+  ]
+  for (const entry of cases) {
+    const scan = [{ kind: 'vae', name: entry.name, bytes: 0 }]
+    const selection = music3Module.inferMusic3Selection(scan)
+    assert.equal(selection.vae, entry.name, `the DAV variant resolves: ${entry.note}`)
+  }
+
+  // The official-exact tier WINS over looser matches in one listing.
+  const mixed = [
+    { kind: 'vae', name: 'dav.safetensors', bytes: 0 },
+    { kind: 'vae', name: 'minimax_music3_dav.safetensors', bytes: 0 },
+  ]
+  assert.equal(music3Module.inferMusic3Selection(mixed).vae, 'minimax_music3_dav.safetensors', 'the official name outranks a bare dav')
+
+  // THE EXCLUSION (the recorded choice): the maintainer's actual mirror
+  // listing — H3 audio VAE present, NO DAV anywhere — honestly resolves
+  // NOTHING for Music 3's VAE. That is a requirement to surface, not a file
+  // to infer; the H3 audio VAE is a different decoder family.
+  const mirrorVae = [
+    { kind: 'vae', name: 'h3image/minimax_h3_image_vae_fp16.safetensors', bytes: 0 },
+    { kind: 'vae', name: 'h3image/minimax_h3_image_vae_fp8_e4m3.safetensors', bytes: 0 },
+    { kind: 'vae', name: 'minimax_h3_video_vae_fp16.safetensors', bytes: 0 },
+    { kind: 'vae', name: 'minimax_h3_audio_vae_fp32.safetensors', bytes: 0 },
+  ]
+  assert.equal(music3Module.inferMusic3Selection(mirrorVae).vae, '', 'the H3 audio VAE never auto-resolves as Music 3\'s DAV (distinct artifact — wrong-decoder doctrine)')
+
+  // The requirement is nameable: the module exports the official filename so
+  // surfaces can say WHAT is missing instead of a bare "nothing detected".
+  assert.equal(music3Module.MUSIC3_DAV_FILENAME, 'minimax_music3_dav.safetensors', 'the official DAV filename is exported for honest empty-state copy')
+})
+
+// #8 — the MODELS section attribution counts: the pure derivation behind the
+// chain panel's header chip. The chip must reflect the layers actually in
+// force (chain pick > global pick > auto, per slot) and never contradict the
+// slot rows beneath it. Failing-without-it: no such derivation exists — the
+// chip is hardcoded "auto (inferred)" (audit F4) and the panel reads the
+// global layer non-reactively (audit F5).
+test('sweep #8: override layer counts — the chip attribution derivation (chain > global > auto, per slot)', () => {
+  const counts = overridesModule.overrideLayerCounts
+  assert.equal(typeof counts, 'function', 'the derivation exists (modelOverrides.ts)')
+
+  // Nothing set: all auto. (JSON compare — cross-realm objects from the VM
+  // harness fail deepEqual on prototype grounds; the testing doc's rule.)
+  assert.equal(JSON.stringify(counts(['fl2va', 'ref2va', 'textEncoder'], {}, {})), JSON.stringify({ chain: 0, global: 0 }), 'no picks anywhere → all auto')
+
+  // A global pick in force: the chip must attribute it (audit F4's lie).
+  assert.equal(JSON.stringify(counts(['fl2va', 'ref2va'], {}, { fl2va: 'g.safetensors' })), JSON.stringify({ chain: 0, global: 1 }), 'a global pick counts as global')
+
+  // A chain pick beats the global on its slot; the untouched global still counts.
+  assert.equal(JSON.stringify(counts(['fl2va', 'ref2va'], { fl2va: 'c.safetensors' }, { fl2va: 'g.safetensors', ref2va: 'g2.safetensors' })), JSON.stringify({ chain: 1, global: 1 }), 'chain beats global per slot; both layers count where in force')
+
+  // Whitespace-only values are auto (the stored convention).
+  assert.equal(JSON.stringify(counts(['fl2va'], { fl2va: '   ' }, { fl2va: '' })), JSON.stringify({ chain: 0, global: 0 }), 'blank picks are auto')
+
+  // The summary text the chip renders (never contradicts its own rows).
+  const summary = overridesModule.overrideLayerSummary
+  assert.equal(typeof summary, 'function', 'the summary formatter exists')
+  assert.equal(summary({ chain: 0, global: 0 }), 'auto (inferred)', 'no picks → the auto summary')
+  assert.equal(summary({ chain: 0, global: 1 }), 'global pick', 'one global → the global summary')
+  assert.equal(summary({ chain: 0, global: 2 }), 'global pick (2)', 'two globals → counted')
+  assert.equal(summary({ chain: 1, global: 0 }), 'chain pick', 'a chain pick is named')
+  assert.equal(summary({ chain: 1, global: 2 }), 'chain pick (1) · global (2)', 'mixed layers are BOTH named — no row contradicted')
+})
+

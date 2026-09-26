@@ -113,6 +113,10 @@ const state = {
   stepDelayMs: profile.render?.stepDelayMs ?? 350,
   outputKind: profile.render?.outputKind ?? 'video', // video | image
   emitBinaryPreviews: profile.render?.emitBinaryPreviews ?? true,
+  // POST /refresh hit count (truth-surface sweep #2, 68e9k17): the mirror
+  // counts engine-side folder re-scan asks so tests can PROVE a client
+  // re-pull carried refresh semantics (read it via GET /__control).
+  refreshHits: 0,
 }
 const control = (req, res, url) => {
   if (url.pathname === '/__control' && req.method === 'GET') {
@@ -360,7 +364,10 @@ async function handle(req, res) {
       return json(res, 200, {})
     }
     if (url.pathname === '/free' && req.method === 'POST') return json(res, 200, {})
-    if (url.pathname === '/refresh' && req.method === 'POST') return json(res, 200, {})
+    if (url.pathname === '/refresh' && req.method === 'POST') {
+      state.refreshHits += 1
+      return json(res, 200, {})
+    }
 
     res.writeHead(404, { 'content-type': 'application/json' })
     res.end(JSON.stringify({ error: `fake engine has no ${url.pathname}` }))

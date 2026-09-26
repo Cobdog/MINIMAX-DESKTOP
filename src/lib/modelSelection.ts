@@ -6,8 +6,11 @@ import { turboLoraPatterns } from './graph'
  *  the inference anchors speak family tokens that live in the FILENAME.
  *  Every ladder regex is therefore tested against the basename — the
  *  registry row's full name is returned verbatim (exactly what the graph
- *  loader accepts). (Wave 2 R-12: anchors re-targeted at registry subpaths.) */
-function basenameOf(name: string) {
+ *  loader accepts). (Wave 2 R-12: anchors re-targeted at registry subpaths.)
+ *  Exported (sweep #1, 68e9k17): every registry-reading surface resolves
+ *  files by basename through this ONE helper — the stack report included —
+ *  so no surface can drift back to full-name compares. */
+export function basenameOf(name: string) {
   const clean = name.replace(/\\/g, '/')
   const slash = clean.lastIndexOf('/')
   return slash === -1 ? clean : clean.slice(slash + 1)

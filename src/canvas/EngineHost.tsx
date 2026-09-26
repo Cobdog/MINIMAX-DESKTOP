@@ -17,6 +17,7 @@ import { useEffect, type ReactNode } from 'react'
 import { useStudioSession } from '../hooks/useStudioSession'
 import { useGenerationQueue } from '../hooks/useGenerationQueue'
 import { useLivePreview } from '../lib/useLivePreview'
+import { engineResyncedNotice, engineResyncFailedNotice, inventoryDriftNotice } from '../lib/engineWatch'
 import { resolveModels } from '../lib/modelOverrides'
 import { inferSelections } from '../lib/modelSelection'
 import { submitH3DiagnosticPair } from '../lib/h3Diagnostics'
@@ -47,12 +48,17 @@ export function CanvasEngineHost({ children }: { children?: ReactNode }) {
   // Mirror the honest engine facts into the canvas store (radar chip, bar,
   // menus) — model readiness follows the base H3 selection, with global
   // model overrides consulted (euxwdva: a valid pick IS the selection).
-  // (R-01) The re-check loop's TRANSITIONS toast here: recovered = the
-  // external restart-watch landed ("the app noticed by itself"); lost = the
-  // honest early warning that renders will fail until the engine is back.
+  // (R-01) The re-check loop's TRANSITIONS toasts live here. (Sweep #2,
+  // 68e9k17 — audit M1) The recovered toast now speaks from the RESYNC
+  // RECORD — the engine-connection arc and the inventory re-sync are
+  // SEPARATE truths: the record lands only after the fresh listing actually
+  // did (or names the failure), so "model inventory re-synced" is never
+  // claimed for a pull that has not happened. A DRIFT resync (the registry
+  // changed with connectivity never dropping — the invisible restart) gets
+  // its own wording. Lost stays the honest early warning.
   useEffect(() => {
     let lastLostAt: number | null = null
-    let lastRecoveredAt: number | null = null
+    let lastResyncAt: number | null = null
     const unsubscribe = useSessionStore.subscribe((state) => {
       const selection = resolveModels('minimax', inferSelections(state.models, 'off'), state.models, state.settings?.modelOverrides?.minimax).selection
       const ready = Boolean(state.status.connected && selection.fl2va && selection.ref2va && selection.textEncoder && selection.videoVae && selection.audioVae)
@@ -60,9 +66,18 @@ export function CanvasEngineHost({ children }: { children?: ReactNode }) {
       if (current.connected !== state.status.connected || current.modelReady !== ready) {
         useCanvasStore.getState().setEngineFacts({ connected: state.status.connected, modelReady: ready })
       }
-      if (state.engineWatch.recoveredAt !== null && state.engineWatch.recoveredAt !== lastRecoveredAt) {
-        lastRecoveredAt = state.engineWatch.recoveredAt
-        useCanvasStore.getState().toast('success', 'Engine connected — node registry and model inventory re-synced.')
+      const resync = state.engineWatch.resync
+      if (resync && resync.at !== lastResyncAt) {
+        lastResyncAt = resync.at
+        if (resync.cause === 'recovery') {
+          useCanvasStore.getState().toast(resync.ok ? 'success' : 'error', resync.ok ? engineResyncedNotice(resync.files) : engineResyncFailedNotice())
+        } else if (resync.ok) {
+          useCanvasStore.getState().toast('success', inventoryDriftNotice(resync.files))
+        }
+        // A FAILED drift check changes nothing the user had — the old
+        // inventory stays the working truth; the next tick retries. Silent
+        // by design (a transient read failure is not toast-worthy), but the
+        // record is in the store for diagnostics.
       } else if (state.engineWatch.lostAt !== null && state.engineWatch.lostAt !== lastLostAt) {
         lastLostAt = state.engineWatch.lostAt
         useCanvasStore.getState().toast('error', 'Engine connection lost — active renders will report the failure shortly.')

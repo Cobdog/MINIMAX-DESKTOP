@@ -29,15 +29,37 @@ export type Music3GenerationOptions = {
 
 export const MUSIC3_REQUIRED_NODES = ['MiniMaxMusic3TextEncode', 'EmptyMiniMaxMusic3LatentAudio', 'ConditioningZeroOut', 'VAEDecodeAudioTiled', 'SaveAudioAdvanced', 'KSampler'] as const
 
+/** The OFFICIAL Music 3 audio-VAE artifact (researched 2026-09-26 against
+ *  Comfy-Org/MiniMax-Music-3 on Hugging Face: vae/minimax_music3_dav.safetensors,
+ *  216,696,128 bytes). Exported so the surfaces' empty-state copy can name
+ *  WHAT is missing instead of a bare "nothing detected" (audit F3/M4:
+ *  "nothing detected" read as a bug when it is a requirement). */
+export const MUSIC3_DAV_FILENAME = 'minimax_music3_dav.safetensors'
+
 /** Prefers the INT8 diffusion build (the low-VRAM recommendation) and falls
  *  back to fp16 when only that is installed. Resolves registry rows through
  *  the shared inference engine (Wave 2): basename anchors + size-class
- *  ranking, so subpathed and renamed Music 3 files resolve too. */
+ *  ranking, so subpathed and renamed Music 3 files resolve too.
+ *
+ *  The audio-VAE ladder (sweep #5, task 68e9k17 — the RECORDED DECISION):
+ *  loosened the way the H3 family's audio-VAE ladder is — the exact
+ *  official artifact first, then the music3-DAV family, then the bare
+ *  'dav' needle (a renamed quant, a repack, a subpath still auto-resolves).
+ *  The H3 video family's audio VAE (minimax_h3_audio_vae_fp32.safetensors)
+ *  deliberately does NOT resolve here: the two official artifacts are
+ *  DISTINCT (MiniMax-Music-3's DAV is 216,696,128 bytes; MiniMax-H3's audio
+ *  VAE is 605,254,808 bytes — different repos, different decoder families),
+ *  so auto-wiring the H3 file into Music 3's VAEDecodeAudioTiled would ship
+ *  a wrong-decoder graph (the never-a-doomed-graph doctrine). The 'dav'
+ *  needle cannot substring-match it. The explicit escape hatch stays the
+ *  manual pick, where the engine is the final arbiter; an engine serving
+ *  only the H3 audio VAE honestly reads "nothing detected" — a requirement
+ *  to surface (MUSIC3_DAV_FILENAME), not a file to infer. */
 export function inferMusic3Selection(models: ModelFile[]): Music3ModelSelection {
   return {
     diffusion: findRegistryModel(models, 'diffusion_models', [/music3.*int8|music3_dit_int8/i, /music3/i]),
     textEncoder: findRegistryModel(models, 'text_encoders', [/music3.*text_encoder/i]),
-    vae: findRegistryModel(models, 'vae', [/music3.*dav/i]),
+    vae: findRegistryModel(models, 'vae', [/^minimax_music3_dav\.safetensors$/i, /music3.*dav/i], 'dav'),
   }
 }
 

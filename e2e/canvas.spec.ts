@@ -2505,13 +2505,37 @@ test('model overrides surface in Settings and the chain properties panel (both s
     await expect(modelsSection).toHaveAttribute('open', '')
     const chainSelect = modelsSection.locator('[data-canvas-model-override-select="fl2va"]')
     await expect(chainSelect.locator('option').first()).toContainText(/auto/) // the global pick shows as what auto resolves to now
+    // (sweep #8, 68e9k17 — audit F4) The section's header chip attributes the
+    // layers actually in force. With the global FL2VA pick saved and NO chain
+    // pick yet, "auto (inferred)" would contradict the slot row directly
+    // beneath it (`auto — global: <merge>`).
+    const modelsChip = modelsSection.locator('[data-canvas-models-summary]')
+    await expect(modelsChip).toContainText('global pick')
+    await expect(modelsChip).not.toContainText('auto (inferred)')
     await chainSelect.selectOption(mergeName)
+    // The chain pick now leads — the chip names the strongest layer in force.
+    await expect(modelsChip).toContainText('chain pick')
     // The debounced commit persists the pick on the chain's own settings.
     await expect.poll(async () => {
       const document = await activeDocument(page)
       const chain = document.chains.find((entry) => entry.kind === 'generation')
       return ((chain?.settings as Record<string, unknown>)?.modelOverrides as Record<string, string> | undefined)?.fl2va ?? null
     }, { timeout: 15_000 }).toBe(mergeName)
+    // (audit F5 — sweep #8) Stale layer attribution after a settings change:
+    // the panel reads the global layer REACTIVELY, so clearing the global
+    // pick through the app's own Settings UI updates THIS panel with no
+    // remount — the slot's auto option drops its "global:" attribution and
+    // the chip (with the chain pick still set) keeps naming the chain layer
+    // alone. (The clear goes through the APP — a direct server-side POST
+    // bypasses the session store by design; the audit's flow was the UI.)
+    await page.locator('[data-canvas-settings-button]').click()
+    await expect(dock).toBeVisible()
+    await dock.locator('[data-model-override-family="minimax"] [data-model-override-slot="fl2va"] select').selectOption('')
+    await dock.locator('button.primary-button', { hasText: 'Save settings' }).click()
+    await page.locator('[data-canvas-settings-close]').click()
+    await expect.poll(async () => chainSelect.locator('option').first().textContent(), { timeout: 10_000 }).not.toContain('global:')
+    await expect(modelsChip).toContainText('chain pick')
+    await expect(modelsChip).not.toContainText('global')
     expect(problems.filter((entry) => !environmental(entry))).toEqual([])
   } finally {
     await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
@@ -2609,6 +2633,78 @@ test('an instance-listed subpathed checkpoint pick applies and the graph carries
     expect(graph.prompt['1'].class_type).toBe('UNETLoader')
     expect(graph.prompt['1'].inputs.unet_name).toBe(instanceFl2va)
     expect(graph.prompt['2'].inputs.clip_name).toBe('qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors')
+    expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+  } finally {
+    await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)
+    await resetSession(page).catch(() => undefined)
+    await new Promise<void>((resolve) => engine.close(() => resolve()))
+  }
+})
+
+// (sweep #2, 68e9k17 — audit M1/C1) The invisible restart: the engine's
+// model listing changes while every probe sees it connected (the fake-engine
+// class of restart completes between the 15 s probes — the audit's own
+// mirror walk hit exactly this). The studio must notice ANYWAY: the
+// connected-tick drift check re-syncs the inventory, the toast tells the
+// truth about what happened, and the pickers offer the engine's NEW files
+// without a manual Settings refresh. Failing-without-it: nothing re-pulls
+// on a steady tick — the pickers keep the old registry until a manual
+// refresh (the audit's M1, the "stale-registry lie").
+test('an invisible engine restart re-syncs the model inventory — the drift toast and the pickers tell the truth (fake engine)', async ({ page, request }) => {
+  const problems = await trackErrors(page)
+  const http = await import('node:http')
+
+  // A MUTABLE listing set: flipping it mid-session simulates a restart that
+  // completes between probes (connectivity never drops; the registry
+  // changes). The new inventory adds the 4B trap encoder and a subpath'd
+  // extra VAE — the audit's mirror shape.
+  const listings: Record<string, string[]> = {
+    diffusion_models: [...H3_REGISTRY_LISTINGS.diffusion_models],
+    text_encoders: [...H3_REGISTRY_LISTINGS.text_encoders],
+    vae: [...H3_REGISTRY_LISTINGS.vae],
+    loras: [...H3_REGISTRY_LISTINGS.loras],
+  }
+  const engine = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://engine.local')
+    if (url.pathname === '/system_stats') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ system: {}, devices: [] }))
+      return
+    }
+    if (serveObjectInfo(url, stockObjectInfo(), res)) return
+    if (serveModelRegistry(url, listings, res)) return
+    res.writeHead(404)
+    res.end()
+  })
+  const enginePort = await new Promise<number>((resolve) => engine.listen(0, '127.0.0.1', () => resolve((engine.address() as { port: number }).port)))
+
+  const originalSettings = ((await (await request.get('/api/lan/settings')).json()) as { settings: Record<string, unknown> }).settings
+  try {
+    await request.post('/api/lan/settings', { data: { settings: {
+      ...originalSettings,
+      comfyUrl: `http://127.0.0.1:${enginePort}`,
+    } } })
+    await resetSession(page)
+    await page.goto('/?canvas=1')
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+    await expect(page.locator('[data-canvas-engine]')).toHaveAttribute('data-engine-connected', 'true', { timeout: 15_000 })
+
+    // The pre-change registry: the 4B encoder is NOT offered.
+    await page.locator('[data-canvas-settings-button]').click()
+    const dock = page.locator('[data-canvas-settings-dock]')
+    await expect(dock).toBeVisible()
+    const teRow = dock.locator('[data-model-override-family="minimax"] [data-model-override-slot="textEncoder"] select')
+    const te4bOptions = teRow.locator('option').filter({ hasText: 'qwen3vl_4b_minimax_h3_int8.safetensors' })
+    await expect(te4bOptions).toHaveCount(0, { timeout: 15_000 })
+
+    // The invisible change — connectivity never drops.
+    listings.text_encoders.push('qwen3vl_4b_minimax_h3_int8.safetensors')
+    listings.vae.push('H3/vaes/minimax_h3_video_vae_fp16.safetensors')
+
+    // Within one connected probe cadence (15 s) + the resync, the toast
+    // tells the truth and the pickers carry the NEW registry.
+    await expect(page.locator('[data-canvas-toast="success"]', { hasText: 'Model inventory re-synced' })).toBeVisible({ timeout: 25_000 })
+    await expect(te4bOptions).toHaveCount(1, { timeout: 10_000 })
     expect(problems.filter((entry) => !environmental(entry))).toEqual([])
   } finally {
     await request.post('/api/lan/settings', { data: { settings: originalSettings } }).catch(() => undefined)

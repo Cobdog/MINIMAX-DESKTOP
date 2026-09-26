@@ -21,7 +21,7 @@ import { networkInterfaces, tmpdir } from 'node:os'
 import { Readable } from 'node:stream'
 import WebSocket from 'ws'
 import { FILMSTRIP_CELL_WIDTH, FILMSTRIP_FPS, filmstripLayout } from '../src/media/filmstripLayout'
-import type { AppSettings, GpuTelemetry, LanStatus, ModelKind } from '../src/types'
+import type { AppSettings, GpuTelemetry, LanStatus, ModelFile, ModelKind } from '../src/types'
 import { failureRef, logEvent, logFailure } from './logger'
 import { sanitizeEngineLogLine, sanitizeErrorMessage } from './logSanitize'
 import { structuralPromptError } from '../src/lib/promptError'
@@ -979,6 +979,29 @@ export function createStudioServer(paths: StudioServerPaths) {
     return inventory
   }
 
+  /** (Sweep #2, 68e9k17 — audit M1) The LIGHT inventory for the connected-
+   *  tick drift check: the engine's /models routes ONLY — no object_info (a
+   *  loaded instance's payload is megabytes; A-8 keeps it off the cadence),
+   *  no fallback enums (an instance without the /models routes answers
+   *  servedKinds: [], which the client reads as "not judgeable" — the
+   *  transition path still re-syncs there). Returns the rows plus the kinds
+   *  whose listings the engine actually answered, so a folder that EMPTIED
+   *  reads as drift, not as silence. Throws when the engine is down — the
+   *  route answers connected:false and the client treats that as null. */
+  async function lightInventoryFor(settings: AppSettings): Promise<{ models: ModelFile[]; servedKinds: string[] }> {
+    const folders = parseModelsEndpointList(await comfyFetch(settings.comfyUrl, '/models')) ?? []
+    const names: Record<string, string[]> = {}
+    const servedKinds: string[] = []
+    await Promise.all(INVENTORY_MODEL_KINDS.filter((kind) => folders.includes(kind)).map(async (kind) => {
+      const body = await comfyFetch(settings.comfyUrl, `/models/${kind}`).catch(() => null)
+      const listed = parseModelsEndpointList(body)
+      if (listed === null) return // the folder route did not answer a list: not judgeable
+      names[kind] = listed
+      servedKinds.push(kind)
+    }))
+    return { models: registryInventoryFiles(names as Record<ModelKind, string[]>), servedKinds }
+  }
+
   /** Live instance verdict for every registry pack: TARGETED per-class
    *  object_info asks through the TTL-cached probe (Wave 2, A-8 — a full
    *  /object_info pull per board refresh was megabytes). Any-match on the
@@ -1616,6 +1639,25 @@ function resolveDatasetFolder(raw: string, settings: AppSettings, defaultName: s
         if (url.pathname === '/api/lan/jobs' && request.method === 'GET') {
           if (!studioRepo) return sendJson(response, 503, { error: 'The studio database is unavailable; job history cannot be read.' })
           return sendJson(response, 200, { jobs: studioRepo.listJobs(100) })
+        }
+        // (Sweep #2, 68e9k17 — audit M1/C1) The LIGHT inventory read for the
+        // engine loop's connected-tick drift check: the /models routes only,
+        // never object_info — the invisible restart (an engine that came
+        // back BETWEEN two probes changed its registry with connectivity
+        // never dropping) is caught within one cadence for the cost of a few
+        // tiny GETs. An engine that cannot be asked answers connected:false;
+        // the client treats that as "not judgeable", never as an empty
+        // inventory.
+        if (url.pathname === '/api/lan/inventory-light' && request.method === 'GET') {
+          try {
+            await comfyFetch(settings.comfyUrl, '/system_stats')
+            const light = await lightInventoryFor(settings)
+            logEvent({ kind: 'inventory.registry', connected: true, light: true, files: light.models.length })
+            return sendJson(response, 200, { connected: true, models: light.models, servedKinds: light.servedKinds })
+          } catch (error) {
+            logEvent({ kind: 'inventory.registry', connected: false, light: true })
+            return sendJson(response, 200, { connected: false, error: error instanceof Error ? error.message : String(error) })
+          }
         }
         if (url.pathname === '/api/lan/jobs' && request.method === 'POST') {
           if (!studioRepo) return sendJson(response, 503, { error: 'The studio database is unavailable; job history cannot be saved.' })
