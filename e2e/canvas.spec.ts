@@ -841,6 +841,147 @@ test('the summonable index searches and navigates to the region (⌘K)', async (
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
+// ---------------------------------------------------------------------------
+// THE TRASH FRONT DOOR (maintainer ruling 2026-09-26, directive 1e363ec0
+// item 1 — "no way to delete old scenes, the graphs just accumulate"): the
+// store always had full trash semantics; this is the UI reaching them. The
+// datasets manager's pattern: delete → trashed state visible → restore or
+// empty; NO hard delete from the UI (the GC owns that).
+// ---------------------------------------------------------------------------
+test('scene deletion reaches the UI: trash, restore, and the one explicit empty', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  // Two scenes accumulate (the maintainer's exact lived friction).
+  await page.locator('[data-canvas-prompt]').fill('the lighthouse keeper counts ships')
+  await page.locator('[data-canvas-submit]').click()
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+  // The spawn selected the new tile — deselect so the bar's empty context
+  // (its prompt entry) shows (the journey walk's pattern).
+  await page.keyboard.press('Escape')
+  await expect(page.locator('[data-canvas-bar-prompt]')).toBeVisible({ timeout: 10_000 })
+  await page.locator('[data-canvas-bar-prompt]').fill('a freight train through falling snow')
+  await page.keyboard.press('Enter')
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(2, { timeout: 10_000 })
+  const document0 = await activeDocument(page)
+  expect(document0.chains.length).toBe(2)
+  const victim = document0.chains.find((chain) => chain.settings.prompt === 'a freight train through falling snow')!
+
+  // ⌘K lists both scenes, each carrying the trash action.
+  await page.keyboard.press('ControlOrMeta+k')
+  await expect(page.locator('[data-canvas-index]')).toBeVisible()
+  await expect(page.locator('[data-canvas-index-row="object"]')).toHaveCount(2)
+  const deletes = page.locator('[data-canvas-index-delete]')
+  await expect(deletes).toHaveCount(2)
+  // The delete states its blast radius and tombstones (undo-able).
+  page.once('dialog', (dialog) => {
+    expect(dialog.message()).toContain('Trash this scene')
+    void dialog.accept()
+  })
+  await deletes.last().click()
+  await expect(page.locator('[data-canvas-index-row="object"]')).toHaveCount(1, { timeout: 10_000 })
+
+  // It left the live document (tombstoned server-side, not hard-deleted).
+  const document1 = await activeDocument(page)
+  expect(document1.chains.map((chain) => chain.id)).not.toContain(victim.id)
+  const trashedListed = await (await page.request.get('/api/lan/documents/chains?trash=1')).json() as { chains: Array<{ id: string }> }
+  expect(trashedListed.chains.map((chain) => chain.id)).toContain(victim.id)
+
+  // The trash view shows it; restore returns it whole.
+  await page.locator('[data-canvas-index-trash]').click()
+  await expect(page.locator('[data-canvas-index-trash-view]')).toBeVisible()
+  await expect(page.locator('[data-canvas-index-trash-row]').first()).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('[data-canvas-index-trash-row]')).toHaveCount(1)
+  await page.locator('[data-canvas-index-restore]').click()
+  await expect(page.locator('[data-canvas-index-trash-row]')).toHaveCount(0, { timeout: 10_000 })
+  await page.locator('[data-canvas-index-trash]').click() // back to the live index
+  await expect(page.locator('[data-canvas-index-row="object"]')).toHaveCount(2, { timeout: 10_000 })
+  const document2 = await activeDocument(page)
+  expect(document2.chains.map((chain) => chain.id)).toContain(victim.id)
+
+  // The one explicit destructive act: trash again, then empty (double-gated
+  // — the UI confirm, then the server's own confirm token).
+  page.once('dialog', (dialog) => { void dialog.accept() })
+  await page.locator('[data-canvas-index-delete]').last().click()
+  await expect(page.locator('[data-canvas-index-row="object"]')).toHaveCount(1, { timeout: 10_000 })
+  await page.locator('[data-canvas-index-trash]').click()
+  await expect(page.locator('[data-canvas-index-trash-row]')).toHaveCount(1, { timeout: 10_000 })
+  page.once('dialog', (dialog) => {
+    expect(dialog.message()).toContain('one real delete')
+    void dialog.accept()
+  })
+  await page.locator('[data-canvas-index-empty]').click()
+  await expect(page.locator('[data-canvas-index-trash-row]')).toHaveCount(0, { timeout: 10_000 })
+  await expect(page.locator('[data-canvas-index-empty]')).toBeDisabled()
+  const emptied = await (await page.request.get('/api/lan/documents/chains?trash=1')).json() as { chains: Array<{ id: string }> }
+  expect(emptied.chains.map((chain) => chain.id)).not.toContain(victim.id)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
+// ---------------------------------------------------------------------------
+// AR-FIRST RESOLUTION PICKING (ruling 2026-09-26, item 4): the ratio drives
+// the list; the OPTIMAL pick lands per the measured envelope; free keeps
+// arbitrary on-grid WxH. The selection composes into the existing
+// resolution plumbing (the stored chain setting is what the graph reads).
+// ---------------------------------------------------------------------------
+test('AR-first resolution picking: ratio drives the list, optimal marked, free snaps to the grid', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await page.locator('[data-canvas-prompt]').fill('aspect ratio probe shot')
+  await page.locator('[data-canvas-submit]').click()
+  await expect(page.locator('[data-canvas-tile]')).toHaveCount(1, { timeout: 10_000 })
+  const panel = page.locator('[data-canvas-properties]')
+  await expect(panel).toBeVisible()
+
+  // The spawned chain starts at the official native canvas (16:9).
+  const ratio = panel.locator('[data-canvas-aspect]')
+  const resolution = panel.locator('[data-canvas-resolution]')
+  await expect(ratio).toHaveValue('16:9')
+  await expect(resolution).toHaveValue('1344x768')
+
+  // Each ratio carries its supported list; the OPTIMAL pick is marked.
+  await ratio.selectOption('9:16')
+  await expect(resolution).toHaveValue('768x1344')
+  await ratio.selectOption('21:9')
+  await expect(resolution).toHaveValue('1504x640')
+  await expect(resolution.locator('option:checked')).toContainText('optimal')
+  // The supported list is the ratio's own (every option's area respects the
+  // native cap — smaller rungs, never over).
+  const options = await resolution.locator('option').allTextContents()
+  for (const text of options) {
+    const match = /(\d+) × (\d+)/.exec(text)!
+    expect(Number(match[1]) * Number(match[2])).toBeLessThanOrEqual(768 * 1344)
+  }
+  expect(options.some((text) => text.includes('optimal'))).toBe(true)
+  await ratio.selectOption('4:3')
+  await expect(resolution).toHaveValue('1024x768')
+
+  // A smaller rung composes into the same plumbing.
+  await resolution.selectOption('992x736')
+  await expect(resolution).toHaveValue('992x736')
+  await ratio.selectOption('1:1')
+  await expect(resolution).toHaveValue('768x768')
+
+  // Free: arbitrary on-grid WxH, snapped to the 32 grid on commit.
+  await ratio.selectOption('free')
+  const freeWidth = panel.locator('[data-canvas-resolution-w]')
+  const freeHeight = panel.locator('[data-canvas-resolution-h]')
+  await expect(freeWidth).toBeVisible()
+  await expect(freeWidth).toHaveValue('768')
+  await freeWidth.fill('1000')
+  await freeHeight.click() // blur commits the snap
+  await expect(freeWidth).toHaveValue('992')
+  await page.waitForTimeout(1_000) // the debounced commit lands
+
+  const document = await activeDocument(page)
+  const chain = document.chains.find((entry) => entry.kind === 'generation')!
+  expect(chain.settings.resolution).toBe('992x768')
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
 test('session + camera autosave restore through the documents API', async ({ page }) => {
   const problems = await trackErrors(page)
   await resetSession(page)
