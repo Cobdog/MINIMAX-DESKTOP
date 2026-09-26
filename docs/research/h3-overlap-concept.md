@@ -538,3 +538,18 @@ toggle on O-soft, cost ~0.
 11. VidPanos: Generative Panoramic Videos from Casual Panning Videos (2024) — via pan-stitch doc (captured there) — https://arxiv.org/abs/2410.12455
 12. SDEdit: Guided Image Synthesis and Editing with Stochastic Differential Equations (Meng et al., ICLR 2022) — partial re-noise + re-denoise = projection toward the prior — https://arxiv.org/abs/2108.01073
 13. RePaint: Inpainting using Denoising Diffusion Probabilistic Models (Song et al., CVPR 2022) — resampling cycles for masked-region/flank harmony — https://arxiv.org/abs/2201.09865
+
+## ADDENDUM 3 — correction: the pack's "0.59" is target_megapixels, not ref-strength (2026-09-25, v2v re-anchor research)
+
+Direct dissection of the pinned workflow JSON (`e2f2bc6`, 2026-09-25)
+shows `AIToolkitMiniMaxH3RefVideo`'s widgets are **`[target_megapixels=0.59,
+max_length=0]`** — 0.59 is the megapixel bucket (res-768 class, consistent
+with the README's "~0.5 MP processing"), and the node has **no strength
+input at all** (schema: `video / target_megapixels 0.01–4.0 / max_length
+0–3600`). §1.2's "ref-strength 0.59" reading and §2.2's "the pack's 0.59
+choice" attribution are **withdrawn**. The soft-joint *dial* itself survives
+with corrected provenance: the native `visual_cond_noise_aug` payload key
+(default 0.999; `< 1.0` mixes seeded noise into never-denoised cond rows,
+`comfy/ldm/minimax/model.py:525-538`) is the mechanism an O-soft joint
+would actually turn. Full analysis and the R-arm family built on it:
+`docs/research/h3-v2v-reanchor.md` (§2.3, §3).

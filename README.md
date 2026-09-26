@@ -325,6 +325,7 @@ record with the restore map lives at
 | [docs/research/h3-sampler-shaping-and-motion-control.md](docs/research/h3-sampler-shaping-and-motion-control.md) | Sampler/sigma/guidance recipe, adherence levers, movement-director lineage, E-MD1 |
 | [docs/research/speed-quality-and-imagegen-paths.md](docs/research/speed-quality-and-imagegen-paths.md) | Speed/quality levers (VDN vs turbo, TE caching), memory choreography, Krea 2 / Klein image paths |
 | [docs/research/h3-instruction-based-editing.md](docs/research/h3-instruction-based-editing.md) | H3 as instruction-based editor: arena rank, adaln-hybrid gap, T=1/frame-packet, model division of labor |
+| [docs/research/h3-v2v-reanchor.md](docs/research/h3-v2v-reanchor.md) | V2V re-anchor of degraded chains: length premise verified per-pass-qualified, per-axis inheritance, refs-alongside lane, the R1/R2/R3 drift-envelope arms |
 | [docs/research/h3-lora-form-compatibility.md](docs/research/h3-lora-form-compatibility.md) | Full-width↔pruned LoRA form compatibility: mechanism, math, load-time patch architecture |
 | [docs/research/fun-control-input-surface.md](docs/research/fun-control-input-surface.md) | Fun Control wire format, DWPose render spec, extraction matrix, IK-rig architecture, E-FC1 verdict |
 | [docs/research/krea2-edit-mode.md](docs/research/krea2-edit-mode.md) | Krea 2 edit mode: instruction editing, masked refine, preservation ladder (E-K1) |
