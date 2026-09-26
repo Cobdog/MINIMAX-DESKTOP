@@ -50,6 +50,9 @@ export type DocumentChain = {
   driftMetrics: Record<string, unknown> | null
   stale: boolean
   createdAt: number
+  /** Trash listings carry it; live listings leave it undefined (the same
+   *  convention as the asset rows). */
+  deletedAt?: number
   outputs: DocumentOutput[]
   ops: DocumentOp[]
   /** §2 identity payload (present once the panel or a fork writes one). */
