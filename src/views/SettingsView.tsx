@@ -12,6 +12,7 @@ import { detectKrea2EditFamilies, detectOptimizations, KREA2_RECIPE_PINS } from 
 import type { h3StackReport } from '../lib/h3Stack'
 import { SelectField, NumberField } from '../components/form'
 import { formatBytes } from '../lib/format'
+import { allSupportedResolutions, ratioKeyOf } from '../lib/aspectResolutions'
 import type { DoctorReport } from '../lib/doctor'
 import { PACKS_CHANGED_EVENT } from '../components/LibraryDock'
 import { useSessionStore } from '../state/sessionStore'
@@ -465,7 +466,7 @@ export function SettingsView({ settings, setSettings, info, infoEpoch = 0, model
         <button type="button" onClick={() => applyPreset('preview')}><strong>Preview</strong><small>864 × 480 · official Turbo 8</small></button>
       </div>
       <div className="generation-defaults-grid">
-        <SelectField label="Default resolution" value={defaults.resolution} onChange={(resolution) => updateDefaults({ resolution })} options={['608x352', '864x480', '1056x608', '1344x768', '768x1344', '768x768'].map((value) => [value, value.replace('x', ' × ')])} />
+        <SelectField label="Default resolution" value={defaults.resolution} onChange={(resolution) => updateDefaults({ resolution })} options={[...new Set([defaults.resolution, ...allSupportedResolutions()])].map((value) => [value, `${ratioKeyOf(value)} · ${value.replace('x', ' × ')}`])} />
         <NumberField label="Default duration (seconds)" value={defaults.duration} min={2} max={15} step={0.5} onChange={(duration) => updateDefaults({ duration })} />
         <SelectField label="Default quality" value={defaults.turbo === '4' ? '8' : defaults.turbo} onChange={(turbo) => updateDefaults({ turbo: turbo as 'off' | '8', ...(turbo === 'off' ? { steps: 30 } : {}) })} options={[["off", 'Native quality · 30 steps'], ["8", 'Official Turbo 8']]} />
         <NumberField label="Full-quality steps" value={defaults.steps} min={16} max={30} onChange={(steps) => updateDefaults({ steps })} />

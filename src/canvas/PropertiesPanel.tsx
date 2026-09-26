@@ -28,6 +28,7 @@ import { PromptLibraryBrowser } from '../components/PromptLibraryBrowser'
 import { detectOptimizations, engineFamilyForChain, turboFetchPlan } from '../lib/graph'
 import { inferredOverrideSlotFile, migrateLegacyModelOverrideSlots, modelFamilyInfo, overrideLayerCounts, overrideLayerSummary, overridePickOutcome, SLOT_LABELS, type ModelFamilyId, type ModelOverrideSlotName } from '../lib/modelOverrides'
 import { guideFrameWarning } from '../lib/workflow'
+import { ASPECT_RATIOS, optimalResolutionFor, parseResolution, ratioKeyOf, resolutionsForRatio, snapResolutionDim } from '../lib/aspectResolutions'
 import { buildPromptAssistantContext } from '../lib/promptComposer'
 import { composeStructuredPrompt, mergeStructuredDraft, parseFlowRows, parseStructuredPrompt, type StructuredPromptDraft } from '../lib/structuredPrompt'
 import { useLlmStream } from '../lib/useLlmStream'
@@ -44,7 +45,10 @@ import { GAP_KINDS, GAP_LABEL, type PlanGapKind } from './plan'
 import { useCanvasStore } from './store'
 import type { DocumentChain } from './derive'
 
-const RESOLUTIONS = ['1344x768', '768x1344', '768x768']
+/** AR-first resolution picking (ruling 2026-09-26): the ratio drives the
+ *  list; every option is derived from the model's grid constraints with the
+ *  OPTIMAL pick marked per the measured envelope. */
+
 const TIERS: Array<{ value: CanvasChainSettings['turbo']; label: string; note: string }> = [
   { value: 'off', label: 'Quality', note: 'full-step native' },
   { value: '4', label: 'Fast · 4-step', note: 'turbo LoRA' },
@@ -61,6 +65,40 @@ function useDebouncedCommit<T>(value: T, skip: boolean, commit: (value: T) => vo
     const timer = window.setTimeout(() => commitRef.current(value), delay)
     return () => window.clearTimeout(timer)
   }, [value, skip, delay])
+}
+
+/** The free-ratio resolution inputs (AR-first picking): raw typing is kept
+ *  local; the value commits SNAPPED to the 32 grid on blur/Enter — never
+ *  mid-keystroke (an on-change snap would rewrite the field while typing). */
+function FreeResolutionInput(props: { value: string; onCommit(resolution: string): void }) {
+  const parsed = parseResolution(props.value)
+  const [draft, setDraft] = useState(`${parsed?.width ?? 1344}x${parsed?.height ?? 768}`)
+  const [focused, setFocused] = useState(false)
+  useEffect(() => { if (!focused) setDraft(`${parsed?.width ?? 1344}x${parsed?.height ?? 768}`) }, [props.value, focused, parsed?.width, parsed?.height])
+  const commit = () => {
+    const [rawWidth, rawHeight] = draft.split('x').map(Number)
+    const next = `${snapResolutionDim(rawWidth)}x${snapResolutionDim(rawHeight)}`
+    setDraft(next)
+    if (next !== props.value) props.onCommit(next)
+  }
+  const split = (side: 'w' | 'h', raw: string) => {
+    const [width, height] = draft.split('x')
+    setDraft(side === 'w' ? `${raw}x${height ?? ''}` : `${width ?? ''}x${raw}`)
+  }
+  const [width, height] = draft.split('x')
+  return <span className="canvas-properties-free-res" data-canvas-resolution-free>
+    <input data-canvas-resolution-w type="number" min={32} max={16384} step={32} aria-label="width (32px grid)" value={width ?? ''}
+      onFocus={() => setFocused(true)}
+      onChange={(event) => split('w', event.target.value)}
+      onBlur={() => { setFocused(false); commit() }}
+      onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commit() } }} />
+    <span aria-hidden>×</span>
+    <input data-canvas-resolution-h type="number" min={32} max={16384} step={32} aria-label="height (32px grid)" value={height ?? ''}
+      onFocus={() => setFocused(true)}
+      onChange={(event) => split('h', event.target.value)}
+      onBlur={() => { setFocused(false); commit() }}
+      onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commit() } }} />
+  </span>
 }
 
 // ---- the LoRA timeline section (7twfk6o; surface decision 2026-09-19: a
@@ -350,6 +388,11 @@ export function PropertiesPanel() {
   const tile = chainId ? tiles.find((entry) => entry.id === chainId) ?? null : null
 
   const [draft, setDraft] = useState<CanvasChainSettings | null>(null)
+  // AR-first picking: 'free' is an EDIT MODE, not a derived state — the
+  // ratio select's value derives from the resolution, so choosing free
+  // (which keeps the current dims) must hold locally until a ratio is
+  // picked again or the chain switches.
+  const [freeRatio, setFreeRatio] = useState(false)
   const [subjectText, setSubjectText] = useState('')
   const [strength, setStrength] = useState(1)
   const [submitting, setSubmitting] = useState(false)
@@ -389,6 +432,7 @@ export function PropertiesPanel() {
     if (chainSwitched || settingsChanged) {
       knownRef.current = { chainId: chain.id, settings: serverSettings, subjectText: incomingSubject, strength: incomingStrength }
       setDraft(settings)
+      setFreeRatio(false)
       setSubjectText(incomingSubject)
       setStrength(incomingStrength)
     } else if (known && (known.subjectText !== incomingSubject || Math.abs(known.strength - incomingStrength) > 1e-9) && known.subjectText === subjectText) {
@@ -838,11 +882,28 @@ export function PropertiesPanel() {
               <input id="canvas-duration" data-canvas-duration type="number" min={2} max={15} step={1} value={draft.duration} onChange={(event) => patch({ duration: Math.max(2, Math.min(15, Number(event.target.value) || 6)) })} />
             </>)}
             {engineFamily.panel.resolution && (<>
-              <label htmlFor="canvas-resolution">size</label>
-              <select id="canvas-resolution" data-canvas-resolution value={draft.resolution} onChange={(event) => patch({ resolution: event.target.value })}>
-                {RESOLUTIONS.map((resolution) => <option key={resolution} value={resolution}>{resolution.replace('x', ' × ')}</option>)}
+              <label htmlFor="canvas-aspect">ratio</label>
+              <select id="canvas-aspect" data-canvas-aspect value={freeRatio ? 'free' : ratioKeyOf(draft.resolution)} onChange={(event) => {
+                const next = event.target.value as ReturnType<typeof ratioKeyOf>
+                setFreeRatio(next === 'free')
+                // Switching ratio lands on ITS optimal pick (the natural
+                // gesture: pick the shape, the measured best size follows,
+                // then adjust within the ratio's supported list). Free keeps
+                // the current dims — the inputs take over from there.
+                const optimal = optimalResolutionFor(next)
+                if (optimal) patch({ resolution: optimal })
+              }}>
+                {ASPECT_RATIOS.map((ratio) => <option key={ratio.id} value={ratio.id}>{ratio.label}</option>)}
+                <option value="free">free</option>
               </select>
             </>)}
+            {engineFamily.panel.resolution && (freeRatio || ratioKeyOf(draft.resolution) === 'free' ? (
+              <FreeResolutionInput value={draft.resolution} onCommit={(resolution) => patch({ resolution })} />
+            ) : (
+              <select id="canvas-resolution" data-canvas-resolution value={draft.resolution} onChange={(event) => patch({ resolution: event.target.value })}>
+                {resolutionsForRatio(ratioKeyOf(draft.resolution)).map((option) => <option key={option.value} value={option.value}>{option.value.replace('x', ' × ')}{option.optimal ? ' — optimal' : ''}</option>)}
+              </select>
+            ))}
           </div>
         )}
         {engineFamily.panel.seed && (

@@ -339,6 +339,7 @@ const RULES = [
     suites: ['workflows'],
     reason: 'the workflows suite\'s module list (loaded through the VM harness).',
   },
+  { match: ['src/lib/aspectResolutions.ts'], suites: ['canvas', 'workflows'], reason: 'AR-first resolution derivation — loaded by the canvas suite (generation sanitize + panel) and the workflows suite (the imageCrop reference-prep ruling block).' },
   {
     match: [
       'src/lib/accessoryLibrary.ts', 'src/lib/apiClient.ts', 'src/lib/characterLibrary.ts', 'src/lib/comfyInfo.ts',

@@ -19,6 +19,7 @@ import { allocateWorkspaceReferences } from '../lib/promptComposer'
 import { characterReferences } from '../lib/characterLibrary'
 import { locationReferences } from '../lib/locationLibrary'
 import { composeH3Prompt, resolveRenderReferenceImages } from '../lib/promptPolicies'
+import { isRenderableResolution } from '../lib/aspectResolutions'
 import { readStructuredDraft, type StructuredPromptDraft } from '../lib/structuredPrompt'
 import type { H3RenderRequest } from '../lib/h3Submit'
 import type { DocumentChain, DocumentTake } from './derive'
@@ -112,7 +113,10 @@ export type CanvasChainSettings = {
   modelOverrides: ModelOverrideSlots
 }
 
-const RESOLUTIONS = ['1344x768', '768x1344', '768x768']
+/** Resolution validity is DERIVED (the AR-first ruling, 2026-09-26): any
+ *  on-grid WxH the stock nodes accept is storable — the fixed trio gate
+ *  would silently rewrite every ratio pick the new panel offers. */
+
 
 /** The image intent's engine selection (34afx79) — DERIVED from the
  *  engine-family registry (A-3, Wave 3 rung 1) so the two-slot table and
@@ -135,7 +139,7 @@ export function chainSettingsDefaults(settings?: AppSettings | null): CanvasChai
     imageEngine: 'h3-1f',
     audio: { engine: 'music3', caption: '', lyrics: '', duration: 60, seed: Math.floor(Math.random() * 1_000_000_000) },
     duration: defaults?.duration ?? 6,
-    resolution: defaults?.resolution && RESOLUTIONS.includes(defaults.resolution) ? defaults.resolution : '1344x768',
+    resolution: defaults?.resolution && isRenderableResolution(defaults.resolution) ? defaults.resolution : '1344x768',
     turbo: defaults?.turbo ?? 'off',
     turboFamily: '',
     turboLoader: 'auto',
@@ -213,7 +217,7 @@ export function readChainSettings(raw: Record<string, unknown>, settings?: AppSe
     imageEngine: raw.imageEngine === 'krea2' ? 'krea2' : 'h3-1f',
     audio,
     duration: Math.max(2, Math.min(15, num(raw.duration, base.duration))),
-    resolution: RESOLUTIONS.includes(str(raw.resolution, '')) ? str(raw.resolution, base.resolution) : base.resolution,
+    resolution: isRenderableResolution(str(raw.resolution, '')) ? str(raw.resolution, base.resolution) : base.resolution,
     turbo,
     turboFamily: str(raw.turboFamily, base.turboFamily),
     turboLoader: raw.turboLoader === 'plain' ? 'plain' : 'auto',
