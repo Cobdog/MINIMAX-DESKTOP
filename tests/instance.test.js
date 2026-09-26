@@ -282,6 +282,17 @@ maybe('(c) live pack detection from object_info', () => {
     ok(Boolean(lbh) && lbh.licenseSpdx === 'MIT' && lbh.installMode === 'user-fetch', 'GAP-2: the LBH upscaler row records MIT at user-fetch')
     ok(lbh.pinnedRevision === '40316cf008b2fd8663263270669eb4da23f89d2c', 'GAP-2: pinned at the revision whose commit added the upstream MIT LICENSE (2026-09-17)')
     ok(JSON.stringify(lbh.instanceNodeClasses) === JSON.stringify(['MinimaxH3LatentUpscalerNode2D', 'MinimaxH3LatentUpscaler3D']), 'GAP-2: the row carries exactly the two classes upscale.ts emits')
+
+    // The preview-decoding path row (t6vub9k — maintainer-endorsed 2026-09-22,
+    // pulled forward from the curation sweep's queue): MIT at user-fetch,
+    // pinned at the exact revision the assessment read
+    // (docs/research/preview-override-assessment.md), detecting the single
+    // class graph/preview.ts wires as node '7'.
+    const previewOverride = ENGINE_NODE_PACKS.find((entry) => entry.id === 'h3-preview-override')
+    ok(Boolean(previewOverride) && previewOverride.licenseSpdx === 'MIT' && previewOverride.installMode === 'user-fetch', 'preview-override: the row records MIT at user-fetch (the Larryvrh posture)')
+    ok(previewOverride.pinnedRevision === 'd1eb17beb5e11856f93eb682e0998b6f232969d1', 'preview-override: pinned at the assessed revision (immutable sha)')
+    ok(JSON.stringify(previewOverride.instanceNodeClasses) === JSON.stringify(['MiniMaxH3PreviewOverride']), 'preview-override: the row carries exactly the one class the preview entry emits')
+    ok(nodePackInstanceState(previewOverride, ['MiniMaxH3PreviewOverride']) === 'active' && nodePackInstanceState(previewOverride, ['KSamplerSelect']) === 'absent', 'preview-override: the row detects its own class on the instance')
   }
 })
 

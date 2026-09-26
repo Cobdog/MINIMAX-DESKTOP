@@ -527,6 +527,29 @@ test('(g) F6 live progress: stable server-side clientId + native-preview wiring 
   assert.equal(enginePromptRequests[1].client_id, hubId, 'the second submission still carries the hub id')
   assert.equal(enginePromptRequests[1].extra_data, undefined, 'no preview request when livePreview is absent')
 
+  // (t6vub9k — A-DBG, maintainer ruling 2026-09-22) A graph carrying the
+  // PreviewOverride pack's node previews ITSELF: the pack's OUTER_SAMPLE
+  // wrapper emits the minimax_h3_preview_override stream, so livePreview
+  // must NOT also request the stock preview_method 'taesd' — that
+  // construction is exactly the fragile class (latent_preview builds a
+  // TAEHV previewer from whatever arbitrary taeh3* file wins the engine's
+  // prefix match; the wrong-sized file crashed the maintainer's render).
+  await fetch(`http://127.0.0.1:${f6Port}/api/lan/prompt`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      prompt: {
+        '1': { class_type: 'UNETLoader', inputs: {} },
+        '7': { class_type: 'MiniMaxH3PreviewOverride', inputs: { vae_name: 'taeh3_decoder.safetensors' } },
+      },
+      livePreview: true,
+    }),
+  })
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  assert.equal(enginePromptRequests.length, 3)
+  assert.equal(enginePromptRequests[2].client_id, hubId, 'the pack-graph submission still carries the hub id')
+  assert.equal(enginePromptRequests[2].extra_data, undefined, 'a self-previewing pack graph gets NO stock preview_method request (the pack owns previews)')
+
   // Stability across an upstream reconnect: a changed comfyUrl (same engine,
   // trailing-slash spelling) invalidates the shared upstream; the reconnect
   // must register the SAME id — a fresh id would orphan in-flight prompts.
