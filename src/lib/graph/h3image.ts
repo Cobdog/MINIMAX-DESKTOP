@@ -59,7 +59,7 @@
  */
 import type { ObjectInfo } from '../comfyInfo'
 import type { ModelFile } from '../../types'
-import { findRegistryModel } from '../modelSelection'
+import { findRegistryModel, teDimClassRefusal } from '../modelSelection'
 import { dbg } from '../dbg'
 import type { Krea2ModelSelection } from './krea2edit'
 import { buildKrea2Graph, findKrea2EditFamily } from './krea2edit'
@@ -549,6 +549,15 @@ function baseDetect(info: ObjectInfo | undefined, files: ModelFile[], needs: { r
       ? `Hybrid profile upgrade: install the ${HYBRID_LOADER_NODE} node pack (Settings → Fetchable items) for the b25-49 runtime merge — stock runs with the first-frame-or-refs limitation.`
       : 'The hybrid loader is installed but a stock checkpoint is missing — the hybrid profile needs both fl2va and ref2va.')
   }
+  // (eyzcev5) The TE dimension-class guard: a wrong-class resolved TE is
+  // NON-EMPTY, so the missing-models gate below would pass it — this arm
+  // refuses it by name first (the 4B-into-H3 crash class; the shared
+  // message names the 32B artifact to make visible). Correct picks and
+  // unclassifiable community renames stay with the engine as arbiter.
+  if (selection.textEncoder) {
+    const teRefusal = teDimClassRefusal('h3image', selection.textEncoder)
+    if (teRefusal) missingModels.push(teRefusal)
+  }
   if (!selection.textEncoder || !selection.videoVae || !selection.audioVae) missingModels.push('the MiniMax H3 text encoder + video/audio VAEs (Settings → Fetchable items, or place them in the model roots)')
   if (needs.ref2va && !selection.ref2va) missingModels.push('the MiniMax H3 Ref2VA checkpoint (reference conditioning)')
   if (needs.t1 && !selection.t1ImageVae) missingModels.push('the Mamad8 T=1 image VAE (minimax_h3_t1_image_vae_step1597.safetensors) — the Fast profile decodes single frames through it')
@@ -782,6 +791,13 @@ export const H3IMG_FAMILIES: H3ImgFamily[] = [
         if (!selection.klein?.unet) missingModels.push('the Flux.2 klein 9B checkpoint (distilled, fp8 — the official edit template\'s operating point)')
         if (!selection.klein?.textEncoder) missingModels.push('the klein text encoder (qwen_3_8b_fp8mixed)')
         if (!selection.klein?.vae) missingModels.push('the klein VAE (full_encoder_small_decoder)')
+      }
+      // (eyzcev5) klein's own TE class expectation — the small-Qwen3
+      // companion (the 4B/8B class): the 32B-class H3 encoder into klein is
+      // the reverse-direction wrong-family pick, refused by name here too.
+      if (selection.klein?.textEncoder) {
+        const kleinTeRefusal = teDimClassRefusal('klein', selection.klein.textEncoder)
+        if (kleinTeRefusal) missingModels.push(kleinTeRefusal)
       }
       const missingNodes: string[] = []
       for (const nodeClass of ['EmptyFlux2LatentImage', 'Flux2Scheduler']) {
@@ -1386,6 +1402,12 @@ function buildKrea2RefineGraph(request: H3ImgRequest, selection: H3ImgModelSelec
 export function buildKleinRefineGraph(request: H3ImgRequest, selection: H3ImgModelSelection): Record<string, { class_type: string; inputs: Inputs }> {
   const klein = selection.klein
   if (!kleinResolved(klein) || !klein) throw new Error('The klein refine engine needs its trio (Flux.2 klein 9B distilled fp8 + qwen_3_8b_fp8mixed + full_encoder_small_decoder) — not resolved by the model scan.')
+  // (eyzcev5) The TE dimension-class guard at the last line before the
+  // graph: klein consumes the small-Qwen3 companion class; the 32B-class
+  // H3 encoder here is the reverse trap and refuses by name (the family
+  // expectation lives in modelSelection.ts's FAMILY_TE_DIM_CLASS).
+  const kleinTeRefusal = teDimClassRefusal('klein', klein.textEncoder)
+  if (kleinTeRefusal) throw new Error(`The klein refine engine refuses its text encoder — ${kleinTeRefusal}`)
   if (!request.source) throw new Error('klein refine needs the picked frame as its source image.')
   const k = H3IMG.klein
   const graph: Record<string, { class_type: string; inputs: Inputs }> = {

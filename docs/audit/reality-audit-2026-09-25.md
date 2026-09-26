@@ -10,6 +10,8 @@
 node e2e/mirror/fakeEngineServer.mjs --port <port> --profile e2e/mirror/profiles/maintainer-instance.json
 ```
 
+> **Mirror fidelity note (2026-09-26, ratify-and-verify pass 2).** The profile's evidence base spans 2026-09-22 (the PreviewOverride exam; the 4B-TE crash log) through the 2026-09-25 session that assembled it (the five foreign pack dirs from crash traces + reports; the subpath'd inventory). **No direct observation of the maintainer's instance since 09-25** (8188 never probed, per policy). Post-assembly evidence is consistent so far — the 09-26 DAV finding (their engine serves no DAV at all = the profile's VAE listing) and the TE-dimension doc's 4B-trap premise both match it. Standing **UNVERIFIED-SINCE-09-25** gaps: their lora-manager revision (unrecorded; our `77109b3c` pin is the Kreatine vendor copy); one-node's byte-identity (identified as the AIFSH fork, not confirmed against their checkout); the five-dir pack inventory is session evidence, not an `ls` (the registry addendum §11.7 UNEXAMINED-NEXT list is the likely residue if their instance carries more); foreign class names in `objectInfoExtras` are approximations (real multishot names: `H3MultishotSampler` et al.); `comfyui_version: v0.34.0` is OUR floor, not their truth (their instance runs master). **Refresh procedure:** at the next maintainer-shared log/report, diff the pack dirs + model listing against the profile, reconcile §11's pins, bump the description's date — until then, every instance-shaped conclusion reads "as of 09-25".
+
 ---
 
 ## 1. Phase 1 — the blind walk (stock H3 engine)

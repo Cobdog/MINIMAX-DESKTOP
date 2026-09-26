@@ -93,3 +93,11 @@
 - **ComfyUI-Fizgig-H3-Still** (shootthesound, MIT, `f3252d2`, 2026-09-25): examined this pass — verdict **ADJUST**; PROPOSED-PENDING-TEST as the T=1 challenge arm (E-FS0/E-FS1); alt-ladder position: decode-port-only hybrid if C wins alone. Fresh-release doctrine applied (metrics dropped, repo hours old).
 - **astropuzzo Image Studio v23.0.0** — still latest (re-verified via API 2026-09-25); the 2026-09-21 assessment remains current; its 4-class adoption stays load-bearing for packets/sharp regardless of this outcome.
 - **shootthesound author file** — now three public artifacts: the Fizgig trainer (Apache-2.0, measurement-heavy), ComfyUI-H3Studio (NO-LICENSE, watch), and this pack (MIT, real file). The trainer's `single_frame_mode="group"` decode is the third independently-useful mechanism harvested from that codebase (after the block-role map and quant calibration).
+
+---
+
+## ADDENDUM 2026-09-26 — the repo moved (demo artifacts, not measurements); the dB number's status unchanged (ratify-and-verify pass 2)
+
+Three commits since this assessment's pinned `f3252d2` (2026-09-26T00:24–00:30Z): `c6a1d69` (an **8 MP no-Turbo example workflow** + sample still, metadata stripped — README: 3872×2176, 50 steps, `er_sde`), `54eaa31` + `10d5171` (README: recommended sizes; decode tooltip wording; the single-frame VAE now named precisely `minimax_h3_t1_image_vae_step1597_int8_convrot.safetensors`). Registry version still **1.0.0**; the trainer (`shootthesound/Fizgig`, pushed 2026-09-25T23:06Z) still ships **no `tests/` and no diag script** (289-file tree at HEAD, checked 2026-09-26).
+
+**Verdict impact: none.** §2's classification of the 29.99 vs 16.96 dB round-trip as precisely-cited-but-not-independently-runnable **stands** — the new artifacts are demo/validation-adjacent (one sample still, one workflow), not the measurement. E-FS0 (replicate the round-trip through OUR staged video VAE, CPU-able) remains the settling test, and now also covers the README's new "recommended sizes" claim.

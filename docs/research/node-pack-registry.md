@@ -258,6 +258,7 @@ Join rules: `packs[].packId` must resolve in `ENGINE_NODE_PACKS` (the install ma
 | **New-family arrival** | one `FamilyEntry` (§8) + the §0 row schema for every pack it brings; the builders-vs-registry diff test extends |
 | **Quarterly** | full pass: ecosystem freshness (the sweep's method), license/pin re-verification, superseded rows closed |
 | **Symptom** (a pack misbehaving against its captured contract; an engine version bump; a validation refusal) | the row's `recheckOn` fires; devdocs captures re-verified first, then the affected rows |
+| **Negative-availability claim** (any "none shipped / not available / not yet in X / no community Z" recorded in our docs) — *added 2026-09-26, the Viggle-gate lesson* | the claim's **ecosystem-scope check** re-runs and its evidence line updates: community quant/conversion repos (the family's known converter orgs + an HF model-name search), the docs.comfy.org changelog delta + the ComfyUI-Manager index, the upstream repo's file tree **and open PRs** (half-shipped = "closer", recorded as such), top pack authors' releases — sources + date recorded beside the claim. Canonical rule text: assumption-register pass 2 §P2.6 |
 
 Every re-run updates `lastVerified`, closes what died, and **appends to the examined ledger** — the registry is the memory of what we have already looked at.
 

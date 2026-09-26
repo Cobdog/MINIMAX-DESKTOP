@@ -603,6 +603,12 @@ test('(p) the shared validation ladder (lib/h3Submit)', () => {
   eq(h3Submit.validateH3Render(request(), facts), null, 'ladder: a healthy t2v request passes')
   eq(h3Submit.validateH3Render(request(), { ...facts, connected: false }), 'Start ComfyUI and verify the server connection in Settings.', 'ladder: offline refuses with the honest message')
   eq(h3Submit.validateH3Render(request(), { ...facts, modelReady: false }), 'One or more required MiniMax H3 model components are missing.', 'ladder: missing models refuses')
+  // (eyzcev5) The TE dimension-class rung: a wrong-class resolved TE is
+  // non-empty (so modelReady stays true) — the ladder itself must refuse it
+  // with the named reason; the 32B-class passes the same rung.
+  const fourBTe = h3Submit.validateH3Render(request(), { ...facts, selection: { previewVae: '', textEncoder: 'qwen3vl_4b_minimax_h3_int8.safetensors' } })
+  ok(fourBTe && fourBTe.includes('32B-class'), `ladder: the 4B-class TE refuses at validate (got: ${fourBTe})`)
+  eq(h3Submit.validateH3Render(request(), { ...facts, selection: { previewVae: '', textEncoder: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors' } }), null, 'ladder: the 32B-class TE passes')
   eq(h3Submit.validateH3Render(request({ mode: 'image' }), facts), 'Choose a first frame for this mode.', 'ladder: i2v without a first frame refuses')
   eq(h3Submit.validateH3Render(request({ mode: 'frames' }), facts), 'Choose a first frame for this mode.', 'ladder: frames without any frame refuses first')
   eq(h3Submit.validateH3Render(request({ mode: 'frames', firstFrame: media('/a.png', 'image') }), facts), 'Choose a last frame for first-and-last-frame generation.', 'ladder: frames without the LAST frame refuses')
