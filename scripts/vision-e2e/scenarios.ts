@@ -94,6 +94,30 @@ const SHELL_CONTEXT = [
   'Dimmed/disabled controls and small muted sub-labels are the app\'s intentional dense design language, NOT contrast defects — only flag text that is genuinely unreadable against its immediate background.',
 ].join(' ')
 
+/** Centers the first canvas tile at camera k through the probe's real
+ *  store→rAF pipeline (1gpydky) and settles before the capture loop shoots.
+ *  DOM truth first (the zoom readout carries the exact %), then a wait that
+ *  covers the rAF apply, the gesture-scoped promotion drop, and Chromium's
+ *  re-raster at the new scale. */
+function driveCameraToK(k: number) {
+  return async (page: Page) => {
+    await page.evaluate((target) => {
+      const viewport = document.querySelector('[data-canvas-viewport]')!.getBoundingClientRect()
+      const tile = document.querySelector('[data-canvas-tile]') as HTMLElement | null
+      if (!tile) throw new Error('high-zoom sweep: no tile on the canvas')
+      const cx = tile.offsetLeft + tile.offsetWidth / 2
+      const cy = tile.offsetTop + tile.offsetHeight / 2
+      ;(window as unknown as { __canvasDriveCameraTo(target: { x: number; y: number; k: number }): void }).__canvasDriveCameraTo({
+        x: viewport.left + viewport.width / 2 - cx * target,
+        y: viewport.top + viewport.height / 2 - cy * target,
+        k: target,
+      })
+    }, k)
+    await expect(page.locator('[data-canvas-zoom]')).toHaveText(`${Math.round(k * 100)}%`)
+    await page.waitForTimeout(700)
+  }
+}
+
 export const SCENARIOS: VisionScenario[] = [
   {
     // QOL wave (rrxlw2r) — the shared surface switcher: registry-driven nav
@@ -1704,6 +1728,124 @@ export const SCENARIOS: VisionScenario[] = [
           'Each visible header reads its title with its × close button; bodies show settings sections and the diagnostics report respectively.',
           'Blessings: docks overlapping each other\'s bodies is intended (floating panels); the newest dock rendering fully in front is intended (raise-on-open).',
           'Defects to flag: two docks at IDENTICAL positions, a header band (or its ×) completely hidden behind another dock, a dock off-screen, only one dock present when two were opened.',
+        ].join(' '),
+      },
+    ],
+  },
+
+  {
+    // High-zoom fidelity (1gpydky) — the max-zoom tile-blur regression
+    // capture. One dropped-PNG tile, centered at each camera extreme (min
+    // 0.18 / 0.5 / 1 / 2 / max 4) through the probe's real store→rAF
+    // pipeline. The CONTRACT is CHROME crispness: title/meta/op-chip text
+    // and tile borders must render pixel-crisp at every band, worst at k=4.
+    // The poster image MAY soften (its source resolution is the limit) —
+    // media softness is blessed in every rubric below, text softness never
+    // is. Comparative anchor for the judge: tile text must look as sharp as
+    // the TITLEBAR text, which never zooms.
+    id: 'canvas-high-zoom-sweep',
+    label: 'Canvas high-zoom fidelity sweep — tile chrome crispness across the k bands',
+    run: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } })
+      await page.goto('/?canvas=1&probe=canvas')
+      await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+      // A real decodable 512x288 PNG with fine structure — a 1px checker
+      // field, a concentric-ring grating, drawn glyphs — so when the camera
+      // upscales it the MEDIA visibly softens while the CHROME (DOM text,
+      // borders, chips) stays judgeable as crisp-or-blurry.
+      await page.evaluate(() => {
+        const canvas = document.createElement('canvas')
+        canvas.width = 512
+        canvas.height = 288
+        const context = canvas.getContext('2d')!
+        context.fillStyle = '#20303f'
+        context.fillRect(0, 0, 512, 288)
+        for (let y = 0; y < 144; y += 1) {
+          for (let x = 0; x < 256; x += 1) {
+            context.fillStyle = (x + y) % 2 ? '#3d5a70' : '#20303f'
+            context.fillRect(x, y, 1, 1)
+          }
+        }
+        context.strokeStyle = '#e8b04b'
+        context.lineWidth = 2
+        for (let r = 6; r < 136; r += 5) {
+          context.beginPath()
+          context.arc(384, 144, r, 0, Math.PI * 2)
+          context.stroke()
+        }
+        context.fillStyle = '#f2f6fa'
+        context.font = 'bold 46px monospace'
+        context.fillText('PROBE 4X', 20, 208)
+        const binary = atob(canvas.toDataURL('image/png').split(',')[1])
+        const bytes = new Uint8Array(binary.length)
+        for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+        const transfer = new DataTransfer()
+        transfer.items.add(new File([bytes], 'vision-zoom-probe.png', { type: 'image/png' }))
+        document.querySelector('[data-canvas-root]')!.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true }))
+      })
+      await expect(page.locator('[data-canvas-tile]').first()).toBeVisible({ timeout: 10_000 })
+      await page.waitForTimeout(600) // landing layout settle
+    },
+    after: async (page) => {
+      await page.request.post('/api/lan/documents/session', { data: { openProjects: [], activeProject: null } }).catch(() => undefined)
+    },
+    checkpoints: [
+      {
+        id: 'zoom-sweep-min-018',
+        label: 'k=0.18 (camera minimum, far band) — the whole tile in shot',
+        drive: driveCameraToK(0.18),
+        rubric: [
+          'Context: the dark-theme canvas studio at 1920x1080; ONE media tile sits CENTERED on the dotted-grid canvas, small (its card roughly 55-75px wide) because the camera is at its minimum zoom. The zoom readout pill bottom-right of the canvas reads "18%".',
+          'The tile card reads as a rounded rectangle with a visible border; its 16:9 poster shows the dropped probe image scaled down — a dark left half, golden concentric rings right-of-center, faint pale glyphs; moiré or shimmer on the downscaled checker pattern is EXPECTED at this size and is not a defect.',
+          'The far band HIDES tile text by design — absence of a title/meta/chips on this small tile is CORRECT, not missing chrome.',
+          'Blessings: dot-grid dots tiny but evenly spaced; the bottom bar and titlebar render at normal crispness (they never zoom).',
+          'Defects to flag: no tile visible at the center, a tile with NO border discernible against the grid, the readout showing any other percent.',
+        ].join(' '),
+      },
+      {
+        id: 'zoom-sweep-mid-050',
+        label: 'k=0.5 (mid band) — poster + header + meta visible',
+        drive: driveCameraToK(0.5),
+        rubric: [
+          'Context: same studio, the centered tile now roughly 160px wide; zoom readout reads "50%". The mid band shows the poster PLUS the header row: a short title and an uppercase meta line below the poster, and a small "no ops" chip.',
+          'The poster (checker field left, golden rings right, pale "PROBE 4X" glyphs) is recognizable; the title and meta line are small but SHARP — glyph edges defined, no haze; small-by-design is fine, blurry is not.',
+          'Blessings: dense small muted text is the design language; media moiré on the checker at fractional scale is expected.',
+          'Defects to flag: title/meta text smeared or double-edged (ghosted), the tile clipped off-center, readout not reading 50%.',
+        ].join(' '),
+      },
+      {
+        id: 'zoom-sweep-unity-100',
+        label: 'k=1 (unity, near band) — full chrome, the reference crispness',
+        drive: driveCameraToK(1),
+        rubric: [
+          'Context: same studio, the centered tile at natural size (~320px card); zoom readout reads "100%". The near band shows FULL chrome: poster, title, uppercase meta line, "no ops" chip, a dashed "latents" strip, take chips, and the head/tail endpoint dots at the tile flanks.',
+          'Every text row and chip renders crisp — sharp glyph edges, crisp 1px borders — matching the sharpness of the titlebar text above (which never zooms).',
+          'Blessings: dense small muted text is the design language; the poster is shown near its native resolution so it should also read crisp here.',
+          'Defects to flag: any text row smeared/ghosted, chip borders doubled or fuzzy, readout not reading 100%.',
+        ].join(' '),
+      },
+      {
+        id: 'zoom-sweep-double-200',
+        label: 'k=2 (near band) — chrome must stay crisp while media begins to soften',
+        drive: driveCameraToK(2),
+        rubric: [
+          'Context: same studio, the centered tile now ~640px wide (it may span past the viewport center comfortably); zoom readout reads "200%". Full near-band chrome as at unity.',
+          'THE CONTRACT: the title, meta line, op chip, latent strip, and take chips must render PIXEL-CRISP — as sharp as the titlebar text. The 1px tile border must read as a clean hairline.',
+          'The poster is now upscaled 2x from its 512px source: the checker field and golden rings MAY look visibly softer than the chrome — that is the blessed media-resolution trade, NOT a defect. Judge text and borders, not the photo.',
+          'Blessings: dot-grid dots larger and possibly aliased at the fractional world scale — fine.',
+          'Defects to flag: ANY smeared/ghosted/fuzzy TEXT or chip border on the tile (each must be titlebar-sharp), readout not reading 200%.',
+        ].join(' '),
+      },
+      {
+        id: 'zoom-sweep-max-400',
+        label: 'k=4 (camera maximum) — the crispness gate this scenario exists for',
+        drive: driveCameraToK(4),
+        rubric: [
+          'Context: same studio, camera at its maximum zoom (readout reads "400%"); the centered tile is blown up to ~1280px wide — the card dominates the frame, its interior chrome large on screen.',
+          'THE CONTRACT (the defect this checkpoint exists to catch): the tile CHROME — title text, uppercase meta line, "no ops" chip, dashed latents strip, take chips, and the tile border — must be PIXEL-CRISP: glyphs with sharply defined edges, no blur halo, no ghosting, no smudge; a direct comparison with the TITLEBAR text (which never zooms and is always crisp) must show equal sharpness. The 1px card border must read as one clean hairline.',
+          'The poster is upscaled ~4x from a 512px source: the checker field and ring grating WILL look soft/painterly — explicitly BLESSED (source resolution is the limit; the trade is documented in docs/research/canvas-highzoom-fidelity.md). Media softness is never a defect here.',
+          'Blessings: the dot grid at 4x renders as large crisp dots; the zoom controls cluster and readout (bottom-right) stay screen-space crisp.',
+          'Defects to flag: blurry, hazy, doubled, or smeared TEXT anywhere on the tile; a fuzzy/thickened border that is not a clean hairline; readout not reading 400%.',
         ].join(' '),
       },
     ],
