@@ -12,7 +12,7 @@ import { extractAllOutputFiles } from '../lib/workflow'
 import { buildH3ImageGraph, detectH3ImgFamilies, findH3ImgFamily, inferH3ImgSelection, H3IMG_RECIPE_PINS, t1BuildOptionsFromSettings } from '../lib/graph/h3image'
 import { resolveModelOverrides, resolveModels } from '../lib/modelOverrides'
 import { resolveKrea2EditModels } from '../lib/graph/krea2edit'
-import { prepareImage } from '../lib/imageCrop'
+import { prepareImage, prepareReferenceImage } from '../lib/imageCrop'
 import { preflightOrFail } from '../lib/preflight'
 import { dbg } from '../lib/dbg'
 import type { ObjectInfo } from '../lib/comfyInfo'
@@ -152,7 +152,15 @@ export async function submitWorkbenchGeneration(
     const upload = async (file: MediaFile, fitToOutput = false) => file.kind === 'image' && (fitToOutput || Boolean(file.crop))
       ? window.minimax.uploadImageData(settings.comfyUrl, await prepareImage(file, width, height))
       : window.minimax.uploadInput(settings.comfyUrl, file.path)
-    const refUploads = await Promise.all(request.refs.map((ref) => upload(ref.media)))
+    // REFERENCE PREP (maintainer ruling 2026-09-26, directive 1e363ec0 item
+    // 5): the workbench's reference pictures take the longest-side scale —
+    // never the output-fit crop. The anchored SOURCE and refine frames stay
+    // output-fit (they are Picture 1 of the output canvas — the pack
+    // assessment's "source fitting stays prepareImage's" contract).
+    const uploadReference = async (file: MediaFile) => file.kind === 'image'
+      ? window.minimax.uploadImageData(settings.comfyUrl, await prepareReferenceImage(file, Math.max(width, height)))
+      : window.minimax.uploadInput(settings.comfyUrl, file.path)
+    const refUploads = await Promise.all(request.refs.map((ref) => uploadReference(ref.media)))
     const sourceUpload = request.source ? await upload(request.source, true) : undefined
     const refineFrameUpload = request.refine ? await upload(request.refine.frame, true) : undefined
     if (io.cancellationRequests?.current.has(localId)) throw new Error('Generation cancelled before submission.')
