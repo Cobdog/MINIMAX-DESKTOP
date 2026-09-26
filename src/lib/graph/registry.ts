@@ -17,7 +17,7 @@
 import type { ObjectInfo } from '../comfyInfo'
 import type { ModelFile } from '../../types'
 import type { DetectionResult, OptimizationEntry, TurboLoaderChoice, TurboPlan } from './types'
-import { GENERIC_TURBO_ENTRY, TURBO_ENTRIES, classifyTurboFamily as classifyInModule, larryvrhTurboPackPresent, resolveTurboPlan as resolveInModule, turboLoraPatterns as patternsInModule } from './turbo'
+import { GENERIC_TURBO_ENTRY, TURBO_ENTRIES, classifyTurboFamily as classifyInModule, larryvrhTurboPackPresent, resolveTurboPlan as resolveInModule, turboFetchPlan, turboLoraPatterns as patternsInModule } from './turbo'
 import { UPSCALE_ENTRIES, upscaleEntryFor } from './upscale'
 import { PREVIEW_ENTRY } from './preview'
 
@@ -95,5 +95,5 @@ export function resolveTurboPlan(input: {
   return resolveInModule(input, entries)
 }
 
-export { larryvrhTurboPackPresent, upscaleEntryFor }
+export { larryvrhTurboPackPresent, turboFetchPlan, upscaleEntryFor }
 export type { TurboLoaderChoice, TurboPlan }

@@ -263,6 +263,9 @@ details.canvas-properties-disclosure[open] > summary::after { content: '−'; }
 .canvas-bar-title { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; overflow: hidden; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .canvas-bar-prompt { flex: 1; min-width: 220px; max-width: 640px; padding: 7px 11px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); color: var(--text); font-size: var(--text-md); }
 .canvas-bar-prompt:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+/* Journey sweep #4a (audit F6): the footer bar's lane toggle — the same
+   chip vocabulary the hero's launcher carries, kept inline in the bar. */
+.canvas-bar-lane { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .canvas-bar-engine { display: inline-flex; align-items: center; gap: 7px; margin-left: auto; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted-2); font-size: var(--text-sm); white-space: nowrap; }
 .canvas-bar-engine .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-2); }
 .canvas-bar-engine.online { color: var(--color-status-ok); }

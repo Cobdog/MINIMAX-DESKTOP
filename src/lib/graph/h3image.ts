@@ -562,7 +562,7 @@ export const H3IMG_FAMILIES: H3ImgFamily[] = [
     ui: {
       description: 'The Fast profile: one latent frame through the Mamad8 T=1 image VAE on the hybrid b25-49 checkpoint, FL2VA turbo 8-step @0.75 + detail adapter @0.5, er_sde/sgm_uniform, shifts 12/3. Seconds-class drafts; auto-labeled "fast, structurally soft". Renders through the H3 Image Studio pack\'s conditioning (legal single-frame latents — stock nodes refuse them server-side, issue #15644).',
       warning: 'The T=1 VAE reconstructs from a single temporal latent — outputs can stay soft and lose fine text, thin contours, hair, foliage. It is pinned to this profile and can never appear in a video graph (factory-enforced). Refine is always opt-in: a one-tap affordance follows every T=1 output.',
-      installHint: 'Needs the MiniMax H3 Image Studio pack (user-fetch from Settings → Node packs — its conditioning makes single-frame latents legal; stock engines refuse length<5 at validation), the Mamad8 T=1 image VAE (minimax_h3_t1_image_vae_step1597.safetensors), an FL2VA turbo LoRA, and ideally the hybrid loader.',
+      installHint: 'Needs the Mamad8 T=1 image VAE (minimax_h3_t1_image_vae_step1597.safetensors), an FL2VA turbo LoRA, ideally the hybrid loader, and the MiniMax H3 Image Studio pack (user-fetch from Settings → Node packs — its conditioning makes single-frame latents legal; stock engines refuse length<5 at validation).',
       promptGuidance: 'Scene-style prompt, as Generate. With a source image the T=1 path auto-switches to Picture-1 reference conditioning (a frame-0 keyframe would fill the only output slot).',
     },
   },

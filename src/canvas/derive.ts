@@ -234,6 +234,10 @@ function takeMediaKind(take: DocumentTake | null): 'image' | 'video' | 'audio' |
 }
 
 function titleFor(document: CanvasDocument, chain: DocumentChain, index: number): string {
+  // (Journey sweep note, 2026-09-26: `settings.name` is the INGEST filename
+  // convention (both ingest paths store file.name there), and the media-tile
+  // naming contract is kind + ordinal — surfacing it as a title was tried and
+  // reverted; a display-name field would have to be its own seam.)
   const mediaKind = chainMediaKind(chain)
   if (mediaKind) return `${mediaKind} ${index + 1}`
   const prompt = chainPrompt(chain)

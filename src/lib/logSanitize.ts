@@ -132,6 +132,20 @@ export function sanitizeErrorMessage(message: string): string {
   return parts.join(' ').replace(/\s+/g, ' ').trim().slice(0, MAX_SANITIZED_LENGTH)
 }
 
+/** The USER-FACING variant (journey sweep #6, reality audit 2026-09-25
+ *  F11/C2): sanitized AND de-redacted. The Wave-1 bar is that the literal
+ *  `[redacted]` token never reaches a user — logs keep their markers (they
+ *  are the redaction evidence: "something was dropped here"), but messages
+ *  composed for toasts and failed-job cards strip the markers and tidy the
+ *  spacing. The surviving technical fragments are unchanged; only the
+ *  dropped-content markers leave. */
+export function sanitizeForUser(message: string): string {
+  return sanitizeErrorMessage(message)
+    .replace(new RegExp(`\\s*${REDACTED.replace(/[[\]]/g, '\\$&')}\\s*`, 'g'), ' ')
+    .replace(/ {2,}/g, ' ')
+    .trim()
+}
+
 /** Engine LOG line scrub (security hardening 1): the managed engine's stdout
  *  surfaces through /api/lan/engine/status and the fabric engine channel,
  *  and tracebacks there can echo input values. Same reducer as

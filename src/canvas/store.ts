@@ -57,7 +57,7 @@ import {
   forkInputSpec,
   latentPathFor,
   mediaForOutput,
-  MODE_LABEL,
+  modeLabelFor,
   motionContextFolder,
   MOTION_CONTEXT_NODES,
   planCanvasGraph,
@@ -1809,7 +1809,7 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()((set, get) =
         }
         if (action.kind === 'set-first-frame') {
           await get().setChainSettings(chainId, { firstFrameOutputId: sourceOutput, lastFrameOutputId: null, referenceOutputIds: [] })
-          get().toast('success', `First frame set — ${MODE_LABEL[effectiveMode(readChainSettings(doc.chains.find((entry) => entry.id === chainId)!.settings))]} ready.`)
+          get().toast('success', `First frame set — ${modeLabelFor(readChainSettings(doc.chains.find((entry) => entry.id === chainId)!.settings))} ready.`)
         } else if (action.kind === 'set-last-frame') {
           await get().setChainSettings(chainId, { lastFrameOutputId: sourceOutput })
           get().toast('success', 'Last frame set — first + last frame mode ready once a first frame is chosen.')

@@ -112,12 +112,18 @@ export function FirstRunWizard() {
   // whether the instance actually serves the H3 core node classes.
   const stack = useMemo(() => (settings ? h3StackReport(models, settings.modelOverrides?.minimax, engineInfo) : null), [models, settings, engineInfo])
 
-  // Show when the registry is empty (the notice's own facts) and the wizard
-  // was neither completed nor skipped. The scan-settled latch never flashes
-  // pre-scan.
+  // Show while the journey is neither completed nor skipped (journey sweep
+  // #9, reality audit 2026-09-25 F1/C5): the OLD guard keyed visibility on
+  // registry EMPTINESS (`models.length > 0`), so the wizard vanished the
+  // instant the engine connected — steps 2-4 were unreachable for exactly
+  // the connected-at-boot user (the maintainer's shape), and "resumable"
+  // (R-16) was false in every connected path. Visibility is now keyed on
+  // wizard COMPLETION; the way back in is Settings → Setup (the reopen
+  // resets done/skipped exactly like the notice's Resume CTA). The
+  // scan-settled latch never flashes pre-scan.
   // The session machinery (scan/check callbacks) rides the canvas session
   // context — the wizard lives on the canvas route where EngineHost provides
-  if (!context || !sawScan || scanning || models.length > 0 || state.done || state.skipped || !settings) return null
+  if (!context || !sawScan || scanning || state.done || state.skipped || !settings) return null
   const { scanModels, checkConnection } = context.session
 
   const close = () => patch({ done: true })
