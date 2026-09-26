@@ -705,6 +705,52 @@ test('pan and zoom render ZERO React frames (the transient discipline)', async (
   expect(problems.filter((entry) => !environmental(entry))).toEqual([])
 })
 
+test('zoom settle drops the world promotion — the high-k crispness contract (1gpydky)', async ({ page }) => {
+  const problems = await trackErrors(page)
+  await resetSession(page)
+  await page.goto('/?canvas=1&probe=canvas')
+  await expect(page.locator('[data-canvas-root]')).toHaveAttribute('data-phase', 'ready')
+  await page.locator('[data-canvas-prompt]').fill('crispness probe shot')
+  await page.locator('[data-canvas-submit]').click()
+  await expect(page.locator('[data-canvas-tile]').first()).toBeVisible({ timeout: 10_000 })
+  await page.waitForTimeout(800) // fly-to flight + settle: already demoted
+
+  const world = page.locator('[data-canvas-world]')
+  const canary = page.locator('[data-canvas-renders]')
+  // IDLE: no promotion — Chromium rasterizes the world at the CURRENT scale
+  // (a permanently promoted world GPU-scales one stale raster instead:
+  // the whole-tile blur at max zoom this task fixes).
+  expect(await world.evaluate((element) => element.style.willChange)).toBe('')
+
+  // WHILE the camera moves (synthetic drive through the real store→rAF
+  // pipeline) the promotion is ON: pan/zoom stays a compositor operation.
+  await page.evaluate(() => (window as unknown as { __canvasDriveCamera(count: number): unknown }).__canvasDriveCamera(30))
+  await page.waitForTimeout(60) // the rAF applier lands on the next frame
+  expect(await world.evaluate((element) => element.style.willChange)).toBe('transform')
+  // The promote→demote lifecycle must not cost a React render either.
+  const rendersBefore = await canary.evaluate((element) => Number(element.dataset.canvasRenders))
+  await page.waitForTimeout(450) // > the 200ms settle
+  expect(await world.evaluate((element) => element.style.willChange)).toBe('')
+  expect(await canary.evaluate((element) => Number(element.dataset.canvasRenders))).toBe(rendersBefore)
+
+  // A REAL wheel gesture re-promotes on motion, demotes on settle — and the
+  // transform actually changed (the state that must re-raster crisp). Zooming
+  // OUT keeps the camera inside the mid band, so the strict zero-render
+  // assertion below measures the lifecycle alone, not a band swap.
+  const viewport = page.locator('[data-canvas-viewport]')
+  const box = await viewport.boundingBox()
+  const before = await currentTransform(page)
+  await page.mouse.move(box!.x + 960, box!.y + 540)
+  await page.mouse.wheel(0, 240)
+  await page.waitForTimeout(60)
+  expect(await world.evaluate((element) => element.style.willChange)).toBe('transform')
+  expect(await currentTransform(page)).not.toBe(before)
+  await page.waitForTimeout(450)
+  expect(await world.evaluate((element) => element.style.willChange)).toBe('')
+  expect(await canary.evaluate((element) => Number(element.dataset.canvasRenders))).toBe(rendersBefore)
+  expect(problems.filter((entry) => !environmental(entry))).toEqual([])
+})
+
 test('radar zooms to attention on failure (contract a: durable on the object)', async ({ page }) => {
   const problems = await trackErrors(page)
   await resetSession(page)

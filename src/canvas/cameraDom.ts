@@ -30,22 +30,48 @@ export type CameraAttachment = {
   appliedCount(): number
 }
 
+/** How long after the LAST applied transform the world's layer promotion is
+ *  dropped (1gpydky). Chromium re-rasters a composited layer when its
+ *  transform scale changes ONLY when the layer does not carry
+ *  `will-change: transform` (Chrome Developers, "Rasterization & will-change:
+ *  transform") — a permanently promoted world rasterizes once and is then
+ *  GPU-scaled, which read as whole-tile blur at k>~1.5 (worst at the 4×
+ *  camera max). Promotion is therefore GESTURE-SCOPED: on while the camera
+ *  moves (pan/zoom stays a pure compositor operation), dropped shortly after
+ *  motion settles so the world re-rasters at the settled scale — chrome and
+ *  text render pixel-crisp at every k. The cost is one re-raster of the
+ *  mounted (culled) set per gesture end, the same repaint class as a
+ *  band-swap render; per-GESTURE churn, never per-frame. */
+const PROMOTION_SETTLE_MS = 200
+
 export function attachCamera(viewport: HTMLElement, world: HTMLElement, store: CameraStore): CameraAttachment {
   const selection = select(viewport)
   let behavior: ZoomBehavior<HTMLElement, unknown> | null = null
   let scheduled = false
   let pending: CameraState | null = null
   let applied = 0
+  let settleTimer = 0
+
+  const promote = () => {
+    if (world.style.willChange !== 'transform') world.style.willChange = 'transform'
+  }
+  const demote = () => {
+    settleTimer = 0
+    world.style.willChange = ''
+  }
+  const scheduleDemote = () => {
+    window.clearTimeout(settleTimer)
+    settleTimer = window.setTimeout(demote, PROMOTION_SETTLE_MS)
+  }
 
   const apply = () => {
     scheduled = false
     const next = pending
     if (!next) return
     pending = null
-    // will-change stays on for the element's life: the transform is the
-    // hot path (60fps), and a one-time layer promotion beats per-frame
-    // promotion churn during pan/zoom.
+    promote()
     world.style.transform = `translate(${next.x}px, ${next.y}px) scale(${next.k})`
+    scheduleDemote()
     applied += 1
   }
 
@@ -83,6 +109,8 @@ export function attachCamera(viewport: HTMLElement, world: HTMLElement, store: C
 
   const detach = () => {
     unsubscribe()
+    window.clearTimeout(settleTimer)
+    settleTimer = 0
     if (behavior) selection.on('.zoom', null)
     behavior = null
   }
@@ -99,6 +127,14 @@ export function attachCamera(viewport: HTMLElement, world: HTMLElement, store: C
       return { appliedBefore, appliedAfter: applied, pending: pending !== null }
     }
     Object.defineProperty(window, '__canvasDriveCamera', { configurable: true, value: drive })
+    // One explicit camera set through the same pipeline (1gpydky): the
+    // high-zoom vision sweep needs deterministic k bands (0.18…4) with the
+    // tile centered, which the translate-only drive above cannot express.
+    const driveTo = (target: { x: number; y: number; k: number }) => {
+      store.set(target)
+      return { pending: pending !== null }
+    }
+    Object.defineProperty(window, '__canvasDriveCameraTo', { configurable: true, value: driveTo })
   }
 
   return { detach, flyTo, jumpTo, appliedCount: () => applied }

@@ -40,7 +40,13 @@
   radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--text) 7%, transparent) 1px, transparent 1px) 0 0 / 34px 34px,
   var(--color-surface-abyss); touch-action: none; }
 .canvas-viewport:active { cursor: grabbing; }
-.canvas-world { position: absolute; top: 0; left: 0; width: 0; height: 0; transform-origin: 0 0; will-change: transform; }
+/* No `will-change: transform` here (1gpydky): a permanently promoted world
+   rasterizes once and then GPU-scales — whole-tile blur at high k. The rAF
+   applier in cameraDom.ts promotes the world ONLY while the camera moves and
+   drops the promotion ~200ms after the last applied transform, so Chromium
+   re-rasters at the settled scale and chrome/text stay pixel-crisp at max
+   zoom. */
+.canvas-world { position: absolute; top: 0; left: 0; width: 0; height: 0; transform-origin: 0 0; }
 .canvas-edges { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
 .canvas-edge { fill: none; stroke: color-mix(in srgb, var(--accent) 55%, transparent); stroke-width: 2; marker-end: url("#canvas-edge-arrow"); }
 .canvas-edge-arrow-head { fill: color-mix(in srgb, var(--accent) 55%, transparent); }
